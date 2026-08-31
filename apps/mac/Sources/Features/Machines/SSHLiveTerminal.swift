@@ -46,6 +46,51 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// discarded: it exists for a substring search a few bytes long and never
     /// leaves this object.
     @ObservationIgnored private var recentOutput: [UInt8] = []
+    /// What has been typed on this line since the last Return, as far as this
+    /// side can tell. Kept only to ask the host what to offer for it, and
+    /// dropped the moment a control key says the shell is now editing the
+    /// line in a way that cannot be followed from here.
+    @ObservationIgnored private var typedLine = ""
+    /// Where the far end says the session is sitting, when it says so at all.
+    /// A server that emits OSC 7 gets relative paths completed; one that does
+    /// not gets absolute and `~` paths, and silence for the rest.
+    @ObservationIgnored private var remoteDirectory: String?
+    @ObservationIgnored private var suggestTask: Task<Void, Never>?
+    /// Which request the answers being waited for belong to. An answer for an
+    /// older one is thrown away rather than shown under a line that has moved
+    /// on.
+    @ObservationIgnored private var suggestGeneration = 0
+    /// What the host is offering for the line as it stands.
+    private(set) var suggestions: [SSHSuggestion] = []
+    /// The line the rows on screen answer. Typing does not clear them, so
+    /// what a row replaces is measured from here rather than from the row.
+    @ObservationIgnored private var suggestionsFragment = ""
+    /// A line somebody pressed Escape on. Nothing is offered for it again
+    /// until they change it into something else, because a palette that came
+    /// straight back would be an answer to a question they just closed.
+    @ObservationIgnored private var dismissedLine: String?
+    /// Which row the keyboard is on, and `nil` while nobody has stepped into
+    /// the list. That difference is the whole of the key handling: until it
+    /// is set, Tab, Return and Up still belong to the shell.
+    private(set) var highlighted: Int?
+    /// A saved command chosen from the palette that needs its placeholders
+    /// filled before it can be typed. The screen showing this session asks.
+    var snippetToFill: SSHSuggestion?
+    /// How much of the line that command replaces, measured when it was
+    /// chosen rather than when the sheet is answered.
+    @ObservationIgnored private(set) var pendingReplacement = 0
+    #if os(macOS)
+    @ObservationIgnored private lazy var palette = SSHPaletteLayer { [weak self] event in
+        self?.claimForPalette(event) ?? false
+    }
+    #else
+    /// Where the palette goes, in the terminal's own coordinates. The phone
+    /// and iPad draw it as an overlay on the screen, because the emulator
+    /// there is a scroll view and a subview of one would scroll with the
+    /// buffer.
+    private(set) var paletteAnchor: CGPoint?
+    private(set) var paletteLineHeight: CGFloat = 0
+    #endif
 
     /// The handle, under the name the Bridge calls it. Kept so the call sites
     /// read as what they are rather than as `id` doing double duty.
@@ -138,6 +183,10 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                     // there is no frame in which the line is missing.
                     let rest = reconcilePredictions(with: chunk.data)
                     if !rest.isEmpty { view.feed(byteArray: rest) }
+                    // The prompt may have moved down a line, or the shell may
+                    // have redrawn it. The palette belongs beside the cursor,
+                    // so it follows rather than being left where it was.
+                    if !suggestions.isEmpty { placePalette() }
                 }
                 if chunk.closed {
                     closed = true
@@ -151,6 +200,263 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
             }
         }
     }
+
+    // MARK: - What to offer
+
+    /// Follow the line being typed, so the host can be asked about it.
+    ///
+    /// Printable characters extend it and backspace shortens it. Anything
+    /// else, a Return, an arrow, a paste, a chord, means the shell is now
+    /// editing this line somewhere only it can see, so the record is dropped
+    /// rather than kept and wrong. Nothing here is stored or sent anywhere:
+    /// it lives for as long as the line does.
+    private func noteTyped(_ bytes: [UInt8]) {
+        guard bytes.count == 1, let byte = bytes.first else {
+            forgetLine()
+            return
+        }
+        switch byte {
+        case 0x20...0x7e:
+            typedLine.append(Character(UnicodeScalar(byte)))
+        case 0x7f, 0x08:
+            if typedLine.isEmpty {
+                forgetLine()
+                return
+            }
+            typedLine.removeLast()
+        default:
+            forgetLine()
+            return
+        }
+        refreshSuggestions()
+    }
+
+    /// This line is no longer one this side can follow.
+    private func forgetLine() {
+        typedLine = ""
+        dismissedLine = nil
+        closePalette()
+    }
+
+    /// Whether a palette may be shown at all right now.
+    ///
+    /// The strongest of these is `lineEchoes`: a palette only ever appears on
+    /// a line the far end has been seen echoing, which is the same test that
+    /// keeps a password from being drawn. A prompt with echo off never
+    /// confirms, so nothing is ever offered beside one, and nothing typed
+    /// into one is ever sent anywhere to be matched against.
+    private var suggestionsWelcome: Bool {
+        guard !closed, lineEchoes, !lineSilent else { return false }
+        guard let terminal = terminalView?.getTerminal() else { return false }
+        // A full-screen program owns every cell, and the palette would be
+        // drawn over somebody's editor.
+        return !terminal.isCurrentBufferAlternate
+    }
+
+    /// Ask the host what to offer, once the typing pauses.
+    ///
+    /// Debounced, because this runs on every keystroke, and generation-
+    /// stamped, because an answer that arrives after the line has changed is
+    /// an answer to a question nobody is asking any more. A host that says it
+    /// is still fetching a directory is asked again shortly, so a listing
+    /// that lands during a pause still reaches the screen.
+    private func refreshSuggestions() {
+        suggestTask?.cancel()
+        suggestGeneration += 1
+        let generation = suggestGeneration
+        guard !closed, typedLine.count >= 2 else {
+            closePalette()
+            return
+        }
+        if let dismissedLine, typedLine.hasPrefix(dismissedLine) {
+            closePalette()
+            return
+        }
+        let fragment = typedLine
+        let directory = remoteDirectory
+        let handle = handle
+        suggestTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(Self.suggestDelayMs))
+            for _ in 0..<Self.suggestAttempts {
+                guard !Task.isCancelled, let self, self.suggestGeneration == generation else {
+                    return
+                }
+                guard self.suggestionsWelcome, self.typedLine == fragment else {
+                    self.closePalette()
+                    return
+                }
+                let answer = try? await Bridge.suggestSSHSession(
+                    id: handle, fragment: fragment, directory: directory
+                )
+                guard !Task.isCancelled, self.suggestGeneration == generation else { return }
+                guard let answer, answer.fragment == fragment else { return }
+                self.show(answer.rows)
+                guard answer.pending else { return }
+                try? await Task.sleep(for: .milliseconds(Self.suggestRetryMs))
+            }
+        }
+    }
+
+    /// Put a fresh set of rows on screen.
+    ///
+    /// The keyboard's place in the list is kept when the rows are the same
+    /// ones, and dropped when they are not: a highlight that stayed on index
+    /// two while the list changed underneath would insert something nobody
+    /// chose.
+    private func show(_ rows: [SSHSuggestion]) {
+        let same = rows.map(\.id) == suggestions.map(\.id)
+        suggestions = rows
+        suggestionsFragment = typedLine
+        if !same || rows.isEmpty { highlighted = nil }
+        placePalette()
+    }
+
+    private func closePalette() {
+        suggestTask?.cancel()
+        suggestTask = nil
+        suggestions = []
+        highlighted = nil
+        #if os(macOS)
+        palette.hide()
+        #else
+        paletteAnchor = nil
+        #endif
+    }
+
+    /// Where the cursor is on screen, in the terminal's own coordinates with
+    /// the origin at its top-left, and how tall one line is.
+    ///
+    /// The cell size comes from the emulator in device pixels, so it is
+    /// divided by the same scale factor SwiftTerm multiplied by. Missing
+    /// either means the view is not on a screen yet, and the palette waits.
+    private var cursorAnchor: (point: CGPoint, lineHeight: CGFloat)? {
+        guard let terminalView else { return nil }
+        let terminal = terminalView.getTerminal()
+        guard let cell = terminalView.cellSizeInPixels(source: terminal) else { return nil }
+        #if os(macOS)
+        let scale = terminalView.window?.backingScaleFactor ?? 1
+        #else
+        let scale = terminalView.window?.contentScaleFactor ?? 1
+        #endif
+        guard scale > 0, cell.width > 0, cell.height > 0 else { return nil }
+        let width = CGFloat(cell.width) / scale
+        let height = CGFloat(cell.height) / scale
+        let cursor = terminal.getCursorLocation()
+        return (CGPoint(x: CGFloat(cursor.x) * width, y: CGFloat(cursor.y) * height), height)
+    }
+
+    private func placePalette() {
+        guard !suggestions.isEmpty, let anchor = cursorAnchor else {
+            #if os(macOS)
+            palette.hide()
+            #else
+            paletteAnchor = nil
+            #endif
+            return
+        }
+        #if os(macOS)
+        guard let terminalView else { return }
+        palette.show(
+            SSHSuggestionPanel(session: self),
+            in: terminalView,
+            cursor: anchor.point,
+            lineHeight: anchor.lineHeight
+        )
+        #else
+        paletteAnchor = anchor.point
+        paletteLineHeight = anchor.lineHeight
+        #endif
+    }
+
+    /// Choose a row.
+    ///
+    /// A saved command with placeholders in it goes through the fill-in sheet
+    /// first, because the values are hostnames, ticket numbers and passwords,
+    /// and none of those belong in a saved record.
+    func accept(_ row: SSHSuggestion) {
+        guard alive, let count = replacement(for: row) else {
+            closePalette()
+            return
+        }
+        if row.isSnippet, !row.variables.isEmpty {
+            pendingReplacement = count
+            snippetToFill = row
+            closePalette()
+            return
+        }
+        insert(row.insert, replacing: count)
+    }
+
+    /// How much of the line a row stands in for, now rather than when it was
+    /// offered.
+    ///
+    /// The rows stay up for the fraction of a second between a keystroke and
+    /// the host's next answer, and in that moment they are one or two
+    /// characters behind the line. A row chosen then should still finish the
+    /// word: whatever was typed since is part of what it replaces. A line
+    /// that has changed some other way is not one these rows can answer.
+    private func replacement(for row: SSHSuggestion) -> Int? {
+        guard typedLine.hasPrefix(suggestionsFragment) else { return nil }
+        let since = typedLine.count - suggestionsFragment.count
+        let count = row.replace + since
+        return count <= typedLine.count ? count : nil
+    }
+
+    /// Type text at the prompt in place of what it stands in for.
+    ///
+    /// No Return. A completion is somebody's line being finished for them,
+    /// not a command being run for them, and the difference is the whole
+    /// reason this is safe to offer.
+    func insert(_ text: String, replacing count: Int) {
+        guard alive, count <= typedLine.count else { return }
+        // Our own guesses come off the screen before anything is sent: the
+        // far end is about to echo the deletions and then the new text, and a
+        // guess left standing would be rubbed out at the wrong column.
+        withdrawPredictions()
+        var bytes = [UInt8](repeating: 0x7f, count: count)
+        bytes.append(contentsOf: Array(text.utf8))
+        typedLine = String(typedLine.dropLast(count)) + text
+        closePalette()
+        let handle = handle
+        Task { try? await Bridge.writeSSHSession(id: handle, data: bytes) }
+    }
+
+    /// Move the keyboard's place in the list, or leave it.
+    func step(_ direction: Int) {
+        guard !suggestions.isEmpty else { return }
+        guard let current = highlighted else {
+            if direction > 0 { highlighted = 0 }
+            placePalette()
+            return
+        }
+        let next = current + direction
+        highlighted = next < 0 ? nil : min(next, suggestions.count - 1)
+        placePalette()
+    }
+
+    /// Type whichever row the keyboard is on.
+    func acceptHighlighted() {
+        guard let index = highlighted, index < suggestions.count else { return }
+        accept(suggestions[index])
+    }
+
+    /// Put the palette away without changing the line.
+    ///
+    /// For this line, not for this moment: it stays away while the line only
+    /// grows, and comes back when the line becomes a different one.
+    func dismissSuggestions() {
+        dismissedLine = typedLine
+        closePalette()
+    }
+
+    /// How long the typing has to pause before the host is asked.
+    private static let suggestDelayMs = 140
+    /// How long to wait before asking again while a listing is still coming.
+    private static let suggestRetryMs = 220
+    /// How many times one pause will ask. Two waits is long enough for a
+    /// directory on a slow link and short enough that a server which never
+    /// answers costs nothing.
+    private static let suggestAttempts = 3
 
     // MARK: - Local echo
 
@@ -181,6 +487,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// **Every guess is taken back before the far end's output is drawn.**
     /// See `withdrawPredictions`.
     private func predict(_ bytes: [UInt8]) {
+        noteTyped(bytes)
         guard bytes.count == 1, let byte = bytes.first else {
             // A paste, a chord, or a multi-byte key. Whatever comes back is
             // not going to be a letter appearing at the cursor.
@@ -362,6 +669,52 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         return terminal.getCursorLocation().x + 2 < terminal.cols
     }
 
+    #if os(macOS)
+    /// The palette's four keys, taken only while it has something to offer.
+    ///
+    /// The rule that keeps this out of the way is that the palette has no
+    /// place in the list until somebody puts it there. Up is the shell's
+    /// history until then, Tab is the shell's own completion, and Return runs
+    /// the line. One press of Down steps into the palette, and from that
+    /// point the four keys are its own until Escape, an insertion, or the
+    /// next thing typed.
+    private func claimForPalette(_ event: NSEvent) -> Bool {
+        guard !suggestions.isEmpty else { return false }
+        // A chord is somebody reaching for the shell or the app, not for a
+        // row. Caps lock is left in because it says nothing about intent.
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.isSubset(of: [.function, .numericPad, .capsLock]) else { return false }
+        switch event.keyCode {
+        case Self.keyDown:
+            step(1)
+            return true
+        case Self.keyUp:
+            // Above the first row is the shell's history again, so the first
+            // Up on an unstepped palette is not ours to take.
+            guard highlighted != nil else { return false }
+            step(-1)
+            return true
+        case Self.keyTab, Self.keyReturn, Self.keyEnter:
+            guard highlighted != nil else { return false }
+            acceptHighlighted()
+            return true
+        case Self.keyEscape:
+            dismissSuggestions()
+            return true
+        default:
+            return false
+        }
+    }
+
+    // Virtual key codes, which are the same whatever the keyboard layout is.
+    private static let keyReturn: UInt16 = 36
+    private static let keyTab: UInt16 = 48
+    private static let keyEscape: UInt16 = 53
+    private static let keyEnter: UInt16 = 76
+    private static let keyUp: UInt16 = 126
+    private static let keyDown: UInt16 = 125
+    #endif
+
     /// Rub out the cell to the left of the cursor.
     private static let eraseCell: [UInt8] = [0x08, 0x20, 0x08]
 
@@ -418,6 +771,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         pollTask?.cancel()
         pollTask = nil
         forgetPredictions()
+        forgetLine()
         let handle = handle
         Task { await Bridge.closeSSHSession(id: handle) }
     }
@@ -432,6 +786,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     func detachPoll() {
         pollTask?.cancel()
         pollTask = nil
+        closePalette()
     }
 
     /// Keep the terminal and its scrollback, but stop treating it as live.
@@ -445,6 +800,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         pollTask?.cancel()
         pollTask = nil
         forgetPredictions()
+        forgetLine()
         closed = true
         if let error { self.error = error }
     }
@@ -467,14 +823,43 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
             // Dropped rather than withdrawn. A resize reflows the line and
             // then the far end repaints it, so the backspaces that would undo
             // a guess no longer land where the guess was drawn. Letting the
-            // repaint be the correction is the only safe answer.
+            // repaint be the correction is the only safe answer. The palette
+            // goes with them: it was placed against a cursor that has moved.
             self?.forgetPredictions()
+            self?.forgetLine()
             try? await Bridge.resizeSSHSession(id: handle, rows: newRows, cols: newCols)
         }
     }
 
     nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
-    nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    /// The server saying where the session now is, via OSC 7.
+    ///
+    /// The one honest source for completing a relative path: the exec channel
+    /// a listing runs on starts in the home directory, not in the shell's, so
+    /// without this a relative word could only be completed against the wrong
+    /// place. Servers that do not emit it get absolute and `~` paths and
+    /// nothing else, which is the quiet answer rather than the wrong one.
+    nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+        let path = SSHLiveTerminal.directoryPath(fromOSC7: directory)
+        Task { @MainActor [weak self] in self?.remoteDirectory = path }
+    }
+
+    /// The path out of a `file://host/path` the far end sent, or nothing.
+    ///
+    /// Anything that is not a plain absolute path is dropped. This string
+    /// comes from the server and is only ever used as the argument to a
+    /// quoted `ls`, but a value that is not a path is not one worth carrying
+    /// that far.
+    nonisolated static func directoryPath(fromOSC7 value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        if value.hasPrefix("file://") {
+            guard let url = URL(string: value), url.isFileURL, !url.path.isEmpty else {
+                return nil
+            }
+            return url.path
+        }
+        return value.hasPrefix("/") ? value : nil
+    }
     nonisolated func scrolled(source: TerminalView, position: Double) {}
     nonisolated func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
     nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
@@ -558,7 +943,13 @@ struct SSHLiveTerminalScreen: View {
             .padding(Theme.Space.s)
             if siblings.count > 1 { tabs }
             ThemeRule()
+            #if os(macOS)
             SSHNativeTerminal(session: session)
+            #else
+            SSHNativeTerminal(session: session)
+                .overlay(alignment: .topLeading) { SSHPaletteOverlay(session: session) }
+                .paletteSnippetSheet(session)
+            #endif
             #if !os(macOS)
             // The same bar the agent terminals have. A phone keyboard has no
             // Esc, no Ctrl, no arrows and no back-tab, and an SSH session
@@ -581,6 +972,7 @@ struct SSHLiveTerminalScreen: View {
                 session.sendBytes(SSHSnippet.bytesToRun(command))
             }
         }
+
         .confirmationDialog("End this session?", isPresented: $confirmingClose, titleVisibility: .visible) {
             Button("End session", role: .destructive) {
                 let doomed = session
@@ -683,6 +1075,10 @@ struct SSHLiveTerminalScreen: View {
 struct SSHSnippetRunSheet: View {
     @Environment(\.dismiss) private var dismiss
     let snippet: SSHSnippet
+    /// What the button says, because the same sheet fills in a command that
+    /// is about to run and one that is only being typed at the prompt.
+    var action: String = "Run it"
+    var icon: ActionIcon = .run
     let onFilled: (String) -> Void
 
     @State private var values: [String: String] = [:]
@@ -729,7 +1125,7 @@ struct SSHSnippetRunSheet: View {
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()
-            Button("Run it", .run) {
+            Button(action, icon) {
                 onFilled(filled)
                 dismiss()
             }

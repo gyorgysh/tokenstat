@@ -309,6 +309,40 @@ struct SSHSessionRead: Codable, Sendable, Hashable {
     var error: String?
 }
 
+/// One thing the host offers while somebody types in an SSH session.
+///
+/// Either a name the server reported in a directory or a command the person
+/// saved. Nothing here is sent to the shell by being shown: `insert` is typed
+/// only when a row is chosen.
+struct SSHSuggestion: Codable, Sendable, Hashable, Identifiable {
+    /// `directory`, `file` or `snippet`.
+    var kind: String
+    var title: String
+    var detail: String
+    /// What to type once `replace` characters have been rubbed out.
+    var insert: String
+    /// How many characters at the end of the typed line this stands in for.
+    var replace: Int
+    /// `{{placeholder}}` names, asked for before a snippet is inserted.
+    var variables: [String] = []
+
+    /// The kind and what it types. Two rows that would type the same thing
+    /// never both arrive, so this is unique within one answer.
+    var id: String { "\(kind)\u{1}\(insert)" }
+
+    var isSnippet: Bool { kind == "snippet" }
+    var isDirectory: Bool { kind == "directory" }
+}
+
+struct SSHSuggestions: Codable, Sendable, Hashable {
+    /// The line the host was asked about. An answer for a line the person has
+    /// already moved past is dropped rather than shown.
+    var fragment: String
+    var rows: [SSHSuggestion]
+    /// A directory listing is on its way. Ask again shortly.
+    var pending: Bool
+}
+
 struct SSHKeyMaterial: Codable, Sendable, Hashable {
     var algorithm: String
     var publicKey: String

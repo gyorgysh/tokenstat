@@ -2731,6 +2731,25 @@ extension Bridge {
         )
     }
 
+    /// What to offer for a half-typed command line.
+    ///
+    /// The fragment is read by the host to find the last word and dropped when
+    /// the call returns. It never leaves the machine: SSH sessions are local
+    /// only, and the host refuses this call from a remote peer like every
+    /// other one in the family.
+    static func suggestSSHSession(
+        id: String,
+        fragment: String,
+        directory: String?
+    ) async throws -> SSHSuggestions {
+        var params: [String: Any] = ["id": id, "fragment": fragment]
+        if let directory { params["directory"] = directory }
+        return try await background(
+            "ssh.session.suggest", params, patience: Patience.interactive,
+            as: SSHSuggestions.self
+        )
+    }
+
     static func closeSSHSession(id: String) async {
         struct Closed: Codable, Sendable { var closed: Bool }
         _ = try? await background("ssh.session.close", ["id": id], as: Closed.self)

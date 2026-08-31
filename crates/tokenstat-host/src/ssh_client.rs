@@ -2,7 +2,7 @@
 
 //! Interactive SSH sessions shared by desktop and mobile clients.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -14,6 +14,27 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 const MAX_BUFFER: usize = 4 * 1024 * 1024;
+
+/// How much of a directory listing is read before the rest is dropped.
+///
+/// A directory can hold a million names and a palette shows six. Reading is
+/// stopped rather than the answer trimmed afterwards, so a server with an
+/// enormous directory costs a few kilobytes here and not a few megabytes.
+const LIST_BYTES: usize = 64 * 1024;
+
+/// How many names are kept out of one listing.
+const LIST_ENTRIES: usize = 2_000;
+
+/// How long a listing may take before it is abandoned.
+const LIST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a listing stays usable. Short, because a person who has just made
+/// a directory expects to be able to complete it.
+const LIST_FRESH_MS: i64 = 5_000;
+
+/// How long a failure is remembered. Longer, so a server with no `ls`, or a
+/// directory nobody may read, is asked once rather than on every keystroke.
+const LIST_FAILED_MS: i64 = 30_000;
 
 #[derive(Clone)]
 struct HostKeyCheck {
@@ -54,6 +75,13 @@ struct Output {
 struct LiveSession {
     commands: mpsc::UnboundedSender<Command>,
     output: Arc<Mutex<Output>>,
+    /// The authenticated connection, shared with the task that runs the
+    /// shell. Completion opens its own short-lived channel on it rather than
+    /// typing into the person's shell: asking the server what is in a
+    /// directory must never disturb the line they are in the middle of.
+    handle: Arc<client::Handle<HostKeyCheck>>,
+    /// What the far end last said was in a directory, per directory.
+    directories: Arc<Mutex<DirCache>>,
     /// What the client called this, and which saved record it came from.
     ///
     /// Carried so `ssh.session.list` can answer with something a person
@@ -61,6 +89,33 @@ struct LiveSession {
     /// hostname and a username, and a list of four `root@10.0.0.4` rows is a
     /// list nobody can use.
     meta: SessionMeta,
+}
+
+/// Recently listed directories, and the ones being listed right now.
+#[derive(Default)]
+struct DirCache {
+    listed: HashMap<String, Listed>,
+    /// One request per directory at a time. Typing five characters quickly
+    /// asks about the same directory five times, and four of those are work
+    /// nobody is waiting for.
+    inflight: HashSet<String>,
+}
+
+struct Listed {
+    entries: Vec<crate::ssh_suggest::Entry>,
+    at_ms: i64,
+    ok: bool,
+}
+
+impl Listed {
+    fn fresh(&self, now: i64) -> bool {
+        let life = if self.ok {
+            LIST_FRESH_MS
+        } else {
+            LIST_FAILED_MS
+        };
+        now.saturating_sub(self.at_ms) < life
+    }
 }
 
 #[derive(Clone)]
@@ -162,6 +217,23 @@ struct SessionParams {
     cols: u32,
 }
 
+/// What somebody has typed so far, and where the session is sitting.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SuggestParams {
+    id: String,
+    /// The command line as typed since the last Return. Never stored, never
+    /// logged, and never sent anywhere: it is read to find the last word and
+    /// dropped when this call returns.
+    #[serde(default)]
+    fragment: String,
+    /// The session's working directory, when the server has said what it is.
+    /// Without one a relative word has no meaning this side could give it, so
+    /// nothing is offered for it.
+    #[serde(default)]
+    directory: Option<String>,
+}
+
 fn default_port() -> u16 {
     22
 }
@@ -260,6 +332,45 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         }
         "ssh.session.write" => command(params, |p| Command::Write(p.data)),
         "ssh.session.resize" => command(params, |p| Command::Resize(p.cols.max(1), p.rows.max(1))),
+        // What to offer somebody part-way through a command. Two sources,
+        // both of them things the person already has: commands they saved,
+        // and the names the server itself reports in one directory.
+        //
+        // It never blocks. A directory that is not already known is asked for
+        // in the background and the answer says `pending`, so the palette can
+        // show the snippets it does have now and pick the names up on the
+        // next keystroke rather than freezing the line for a round trip.
+        "ssh.session.suggest" => {
+            let p: SuggestParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            if p.fragment.len() > 4096 {
+                return Ok(json!({"fragment": "", "rows": [], "pending": false}));
+            }
+            let (handle, directories, host_id) = {
+                let guard = sessions().lock().map_err(|e| e.to_string())?;
+                let live = guard.get(&p.id).ok_or("SSH session no longer exists")?;
+                (
+                    Arc::clone(&live.handle),
+                    Arc::clone(&live.directories),
+                    live.meta.host_id.clone(),
+                )
+            };
+            let token = crate::ssh_suggest::last_token(&p.fragment);
+            let query = crate::ssh_suggest::path_query(&token, p.directory.as_deref());
+            let mut entries = Vec::new();
+            let mut pending = false;
+            if let Some(query) = &query {
+                match remembered(&directories, &query.dir)? {
+                    Some(known) => entries = known,
+                    None => pending = start_listing(handle, directories, query.dir.clone()),
+                }
+            }
+            let snippets = crate::ssh_records::snippets_for(host_id.as_deref())?;
+            let rows =
+                crate::ssh_suggest::rank(&p.fragment, &token, query.as_ref(), &entries, &snippets);
+            // The fragment comes back so a client can throw away an answer
+            // that arrived after the person typed something else.
+            Ok(json!({"fragment": p.fragment, "rows": rows, "pending": pending}))
+        }
         "ssh.session.close" => {
             let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
             if let Some(live) = sessions().lock().map_err(|e| e.to_string())?.remove(&p.id) {
@@ -284,6 +395,117 @@ where
         .send(make(p))
         .map_err(|_| "SSH session is closed".to_string())?;
     Ok(json!({"accepted": true}))
+}
+
+/// What is already known about a directory, if it is still worth trusting.
+fn remembered(
+    cache: &Mutex<DirCache>,
+    dir: &str,
+) -> Result<Option<Vec<crate::ssh_suggest::Entry>>, String> {
+    let now = now_ms();
+    let guard = cache.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .listed
+        .get(dir)
+        .filter(|listed| listed.fresh(now))
+        .map(|listed| listed.entries.clone()))
+}
+
+/// Ask the server what is in one directory, in the background.
+///
+/// Answers `true` when something is now on its way, which is the client's cue
+/// to ask again shortly. A directory already being listed answers `true`
+/// without asking twice, and a path that cannot be written as a safe command
+/// answers `false` so nothing is ever waited for.
+fn start_listing(
+    handle: Arc<client::Handle<HostKeyCheck>>,
+    cache: Arc<Mutex<DirCache>>,
+    dir: String,
+) -> bool {
+    let Some(command) = crate::ssh_suggest::list_command(&dir) else {
+        return false;
+    };
+    {
+        let Ok(mut guard) = cache.lock() else {
+            return false;
+        };
+        if !guard.inflight.insert(dir.clone()) {
+            return true;
+        }
+    }
+    let Ok(runtime) = runtime() else {
+        return false;
+    };
+    runtime.spawn(async move {
+        let listed = tokio::time::timeout(LIST_TIMEOUT, list_directory(&handle, command)).await;
+        let entries = match listed {
+            Ok(Ok(entries)) => Some(entries),
+            // A server with no `ls`, a directory nobody may read, or one that
+            // took too long. Remembered as a failure so it is not asked again
+            // on the next keystroke.
+            Ok(Err(_)) | Err(_) => None,
+        };
+        if let Ok(mut guard) = cache.lock() {
+            guard.inflight.remove(&dir);
+            guard.listed.insert(
+                dir,
+                Listed {
+                    ok: entries.is_some(),
+                    entries: entries.unwrap_or_default(),
+                    at_ms: now_ms(),
+                },
+            );
+            // The cache follows one person moving around a server, not a
+            // crawl of it. Anything older than a failure's lifetime is gone.
+            let now = now_ms();
+            guard.listed.retain(|_, listed| {
+                now.saturating_sub(listed.at_ms) < LIST_FRESH_MS.max(LIST_FAILED_MS)
+            });
+        }
+    });
+    true
+}
+
+/// Run one bounded `ls` on its own channel and read what it printed.
+///
+/// Its own channel on the connection that is already open, so the interactive
+/// shell never sees it: no line is typed into the person's prompt, no history
+/// entry is made, and nothing on the server changes. Reading stops at
+/// `LIST_BYTES` whatever the far end is still sending.
+async fn list_directory(
+    handle: &client::Handle<HostKeyCheck>,
+    command: String,
+) -> Result<Vec<crate::ssh_suggest::Entry>, String> {
+    let mut channel = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| e.to_string())?;
+    channel
+        .exec(true, command.into_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut out: Vec<u8> = Vec::new();
+    while let Some(message) = channel.wait().await {
+        match message {
+            ChannelMsg::Data { data } => {
+                let room = LIST_BYTES.saturating_sub(out.len());
+                out.extend_from_slice(&data[..room.min(data.len())]);
+                if out.len() >= LIST_BYTES {
+                    break;
+                }
+            }
+            // `ls` complaining about a directory that is not there. The
+            // listing is simply empty; the message is not shown to anybody.
+            ChannelMsg::ExtendedData { .. } => {}
+            ChannelMsg::Eof | ChannelMsg::Close => break,
+            _ => {}
+        }
+    }
+    let _ = channel.close().await;
+    Ok(crate::ssh_suggest::parse_listing(
+        &String::from_utf8_lossy(&out),
+        LIST_ENTRIES,
+    ))
 }
 
 async fn connect(
@@ -450,6 +672,8 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
         closed: false,
         error: None,
     }));
+    let handle = Arc::new(handle);
+    let task_handle = Arc::clone(&handle);
     let task_output = Arc::clone(&output);
     runtime()?.spawn(async move {
         loop {
@@ -466,7 +690,9 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
                 }
             }
         }
-        let _ = handle.disconnect(Disconnect::ByApplication, "closed", "en").await;
+        let _ = task_handle
+            .disconnect(Disconnect::ByApplication, "closed", "en")
+            .await;
         task_output.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
         if let Ok(mut map) = sessions().lock() {
             map.remove(&id);
@@ -475,6 +701,8 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
     Ok(LiveSession {
         commands: tx,
         output,
+        handle,
+        directories: Arc::new(Mutex::new(DirCache::default())),
         meta,
     })
 }
@@ -582,6 +810,52 @@ mod tests {
         assert!(parsed.auth.is_none());
         assert_eq!(parsed.rows, 24);
         assert_eq!(parsed.cols, 80);
+    }
+
+    #[test]
+    fn a_listing_is_trusted_briefly_and_a_failure_for_longer() {
+        let at = 1_000_000i64;
+        let ok = Listed {
+            entries: vec![],
+            at_ms: at,
+            ok: true,
+        };
+        let failed = Listed {
+            entries: vec![],
+            at_ms: at,
+            ok: false,
+        };
+        assert!(ok.fresh(at + LIST_FRESH_MS - 1));
+        assert!(
+            !ok.fresh(at + LIST_FRESH_MS),
+            "a directory somebody has just added to is asked about again"
+        );
+        assert!(
+            failed.fresh(at + LIST_FRESH_MS),
+            "a server with no ls is not asked again on the next keystroke"
+        );
+        assert!(!failed.fresh(at + LIST_FAILED_MS));
+    }
+
+    #[test]
+    fn suggesting_for_a_session_that_is_gone_says_so() {
+        let refused = call(
+            "ssh.session.suggest",
+            r#"{"id":"ssh_nothing","fragment":"cd /o"}"#,
+        )
+        .expect("handled here")
+        .expect_err("no such session");
+        assert!(refused.contains("no longer exists"), "{refused}");
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_ask_what_is_on_a_server() {
+        crate::request_context::with_remote_peer("phone", || {
+            let refused = call("ssh.session.suggest", r#"{"id":"ssh_x","fragment":"cd /"}"#)
+                .unwrap()
+                .expect_err("must refuse");
+            assert!(refused.contains("local-only"), "{refused}");
+        });
     }
 
     #[test]

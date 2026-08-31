@@ -81,6 +81,7 @@ struct SSHTerminalPane: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(TerminalPalette.surface)
+                .modifier(PaletteSnippetSheet(session: active))
             }
         }
         .background(Theme.background)
@@ -220,6 +221,21 @@ struct SSHTerminalPane: View {
         guard let snippetTarget else { return }
         sessions.select(snippetTarget)
         snippetTarget.sendBytes(SSHSnippet.bytesToRun(command))
+    }
+}
+
+/// The fill-in sheet for a saved command the palette chose, on whichever
+/// session is in front. Written as a modifier because the session in front
+/// can be nil and a `sheet(item:)` needs something to bind to.
+private struct PaletteSnippetSheet: ViewModifier {
+    let session: SSHLiveTerminal?
+
+    func body(content: Content) -> some View {
+        if let session {
+            content.paletteSnippetSheet(session)
+        } else {
+            content
+        }
     }
 }
 

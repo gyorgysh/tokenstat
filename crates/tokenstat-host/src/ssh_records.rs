@@ -295,6 +295,37 @@ impl SaveFlags {
     }
 }
 
+/// Saved commands, in the order a palette should consider them.
+///
+/// The ones saved against this server lead, because somebody scoped them on
+/// purpose, and a snippet scoped to a different server is not in the list at
+/// all: a command written for the database server has no business being
+/// offered while somebody types on the web server.
+pub(crate) fn snippets_for(
+    host_id: Option<&str>,
+) -> Result<Vec<crate::ssh_suggest::Snippet>, String> {
+    let _guard = lock().lock().map_err(|e| e.to_string())?;
+    let store = load_from(&path()?)?;
+    let mut out: Vec<crate::ssh_suggest::Snippet> = Vec::new();
+    for snippet in &store.snippets {
+        let scoped = match host_id {
+            Some(id) => snippet.host_ids.iter().any(|held| held == id),
+            None => false,
+        };
+        if !scoped && !snippet.host_ids.is_empty() {
+            continue;
+        }
+        out.push(crate::ssh_suggest::Snippet {
+            title: snippet.title.clone(),
+            command: snippet.command.clone(),
+            tags: snippet.tags.clone(),
+            variables: snippet.variables.clone(),
+            scoped,
+        });
+    }
+    Ok(out)
+}
+
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("ssh.host.")
         && !method.starts_with("ssh.key.")

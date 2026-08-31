@@ -102,6 +102,7 @@ pub mod session;
 mod session_meter;
 pub mod ssh_client;
 pub mod ssh_records;
+pub(crate) mod ssh_suggest;
 #[cfg(feature = "local-host")]
 mod sync_scheduler;
 pub mod workspace_policy;

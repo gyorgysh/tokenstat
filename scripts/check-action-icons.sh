@@ -151,6 +151,11 @@ ALLOWED = [
     # typed as ActionIcon, so the compiler already enforces what this script
     # checks; it just cannot read a glyph it is handed rather than told.
     ("Features/Machines/SSHVaultView.swift", "Button(button, icon, action: perform)"),
+    # The snippet fill-in sheet's one action. The glyph is the `icon`
+    # parameter, typed as ActionIcon, so the compiler already enforces what
+    # this script checks; it just cannot read a glyph handed in rather than
+    # spelled at the call site. Same shape as the vault screen's row above.
+    ("Features/Machines/SSHLiveTerminal.swift", "Button(action, icon) {"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
     ("Design/Theme.swift", "Button(title) { action() }"),
     ("Design/Theme.swift", "selection = option.value"),
