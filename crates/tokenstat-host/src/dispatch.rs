@@ -1718,12 +1718,11 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             Ok(store.personas(&p.workspace_id.ok_or("chat.personas needs a workspaceId")?)?)
         }
         "chat.personaSave" => {
-            let mut persona = p.persona.ok_or("chat.personaSave needs persona")?;
-            if persona.id.is_empty() {
-                if let Some(workspace_id) = p.workspace_id.filter(|id| !id.is_empty()) {
-                    persona.workspace_id = Some(workspace_id);
-                }
-            }
+            // Scope is part of the persona itself. `workspaceId` beside it is
+            // only the route to the host that owns the folder. Treating that
+            // route as a fallback scope made a new persona with an explicit
+            // null workspace ("Every folder") local to the current folder.
+            let persona = p.persona.ok_or("chat.personaSave needs persona")?;
             serde_json::to_value(store.save_persona(persona)?).envelope()
         }
         "chat.personaDefault" => serde_json::to_value(

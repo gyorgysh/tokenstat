@@ -772,9 +772,9 @@ impl Store {
     ///
     /// One short turn on an installed agent, run to completion here rather
     /// than streamed, because a wizard step needs its answer in one press and
-    /// there is nothing worth watching. Bypass, in a temporary directory, and
-    /// with a hard cap: this is a text transform, it has no business touching
-    /// anybody's project and no business running for a minute.
+    /// there is nothing worth watching. Read-only/plan mode, in a temporary
+    /// directory, and with a hard cap: this is a text transform, it has no
+    /// business changing anybody's project or running for a minute.
     ///
     /// **The result is a draft in a form, never a saved persona.** Generated
     /// text goes into fields the person can edit and has to press Save on.
@@ -791,11 +791,9 @@ impl Store {
         if backend.trim().is_empty() || backend == "sh" {
             return Err("pick an agent to write the draft".into());
         }
-        let argv = crate::automations::agent_command(
+        let argv = crate::automations::persona_draft_command(
             backend,
             &draft_prompt(brief, name),
-            None,
-            None,
             DRAFT_TIMEOUT.as_secs(),
         )?;
         // Its own directory, not the workspace. A draft is a sentence in and a
@@ -836,6 +834,8 @@ impl Store {
             }
             if Instant::now() >= deadline {
                 let _ = manager.kill(&info.id);
+                manager.forget_reader(&info.id, &reader);
+                let _ = manager.close(&info.id);
                 return Err("the draft took too long, so nothing was written".into());
             }
             std::thread::sleep(POLL);
@@ -844,6 +844,8 @@ impl Store {
             collect_agent_text(&parser.push_events(&chunk.bytes), &mut text);
         }
         collect_agent_text(&parser.finish_events(), &mut text);
+        manager.forget_reader(&info.id, &reader);
+        let _ = manager.close(&info.id);
         finish_draft(&text, brief, name)
     }
 
@@ -1086,17 +1088,24 @@ impl Store {
 
     /// The handover an incoming backend should be given, if any.
     ///
-    /// Due whenever this conversation has history and the backend about to run
-    /// has no session of its own to resume. That is not the same question as
-    /// whether the conversation changed hands, which is why `announce` is
-    /// separate: an agent that cannot resume itself needs the summary on every
-    /// turn, and saying "handed to" every turn described a switch that never
-    /// happened.
+    /// Due whenever this conversation has history the selected backend has not
+    /// seen: either it has no session of its own, or another backend owns the
+    /// latest agent event. That is not the same question as whether the
+    /// conversation changed hands, which is why `announce` is separate: an
+    /// agent that cannot resume itself needs the summary on every turn, and
+    /// saying "handed to" every turn described a switch that never happened.
     fn handover(&self, chat: &Conversation) -> Result<Option<Handover>, String> {
-        if chat.resume_tokens.contains_key(&chat.backend) {
+        let (events, _) = self.events(&chat.id, 0)?;
+        let previous = last_backend(&events);
+        // A resume token proves only that this backend remembers the point at
+        // which it last ran. If another backend has spoken since then, that
+        // old session is precisely the one that needs a handover. It is current
+        // only when it also owns the latest agent event.
+        if chat.resume_tokens.contains_key(&chat.backend)
+            && previous.as_deref() == Some(chat.backend.as_str())
+        {
             return Ok(None);
         }
-        let (events, _) = self.events(&chat.id, 0)?;
         let folder = crate::workspaces::folder(&chat.workspace_id)
             .map(|workspace| workspace.path.display().to_string())
             .unwrap_or_default();
@@ -1104,7 +1113,6 @@ impl Store {
         if brief.is_empty() {
             return Ok(None);
         }
-        let previous = last_backend(&events);
         Ok(Some(Handover {
             announce: previous.is_some_and(|name| name != chat.backend),
             brief,
@@ -2755,9 +2763,36 @@ mod tests {
             "a real change of agent belongs on the timeline"
         );
 
-        // And once codex has its own session, it stops being handed one.
+        // Merely having a codex session does not make it current: Claude still
+        // owns the latest event, so resuming this token needs the intervening
+        // history.
         chat.resume_tokens.insert("codex".into(), "thread-1".into());
+        assert!(store.handover(&chat).unwrap().is_some());
+
+        // Once Codex has actually answered, its session is current.
+        store
+            .append(
+                "chat-handoff",
+                &StoredEvent::Agent {
+                    event: Event::Text {
+                        delta: "The retry is in place.".into(),
+                    },
+                    at_ms: 3,
+                    backend: "codex".into(),
+                },
+            )
+            .unwrap();
         assert!(store.handover(&chat).unwrap().is_none());
+
+        // Switching back to Claude must carry Codex's intervening work even
+        // though Claude also has an older resumable session.
+        chat.backend = "claude".into();
+        let returned = store
+            .handover(&chat)
+            .unwrap()
+            .expect("a returning backend must be brought up to date");
+        assert!(returned.brief.contains("The retry is in place"));
+        assert!(returned.announce);
     }
 
     /// An agent that cannot resume itself is handed its own history on every

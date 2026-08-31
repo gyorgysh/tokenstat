@@ -418,6 +418,42 @@ pub struct ChatLaunch<'a> {
     pub attachments: &'a [std::path::PathBuf],
 }
 
+/// A one-turn text transform configured without write-capable agent modes.
+///
+/// Persona drafting used to reuse [`agent_command`], whose contract is an
+/// unattended automation and therefore deliberately bypasses every backend's
+/// permission layer. A temporary cwd is not a sandbox: an agent can still
+/// walk out of it and edit the repository or somebody's home directory. Use
+/// the chat command's plan/read-only path instead, with no approval hook and
+/// no attachments, so every supported backend either gets its native
+/// non-writing mode or runs headlessly without auto-approval.
+pub fn persona_draft_command(
+    backend: &str,
+    prompt: &str,
+    budget_seconds: u64,
+) -> Result<Vec<String>, String> {
+    if backend == "sh" {
+        return Err("pick an agent to write the draft".into());
+    }
+    chat_agent_command(
+        backend,
+        prompt,
+        None,
+        None,
+        budget_seconds,
+        ChatLaunch {
+            resume: None,
+            bypass: false,
+            mode: "plan",
+            hook_helper: None,
+            system_append: None,
+            agy_customization_dir: None,
+            grok_allow_rules: &[],
+            attachments: &[],
+        },
+    )
+}
+
 /// Index at which extra flags can be spliced without splitting a
 /// `--flag value` pair. Headless CLIs put the prompt at `-p` / `--print` /
 /// `--single` or after `--`. Inserting at `len - 1` used to land between
@@ -2506,6 +2542,51 @@ mod tests {
             grok.windows(2)
                 .any(|pair| pair == ["--output-format", "streaming-json"]),
             "Standard grok must keep --output-format next to its value: {grok:?}"
+        );
+    }
+
+    #[test]
+    fn persona_drafts_never_inherit_automation_write_access() {
+        for backend in [
+            "claude",
+            "codex",
+            "grok",
+            "cursor",
+            "agy",
+            "opencode",
+            "opencode2",
+        ] {
+            let argv = persona_draft_command(backend, "Return one JSON object", 90).unwrap();
+            for unsafe_flag in [
+                "--dangerously-skip-permissions",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--trust",
+                "--auto",
+                "bypassPermissions",
+            ] {
+                assert!(
+                    !argv.iter().any(|argument| argument == unsafe_flag),
+                    "{backend} draft retained {unsafe_flag}: {argv:?}"
+                );
+            }
+        }
+
+        let codex = persona_draft_command("codex", "draft", 90).unwrap();
+        assert!(
+            codex
+                .windows(2)
+                .any(|pair| pair == ["--sandbox", "read-only"])
+        );
+        let claude = persona_draft_command("claude", "draft", 90).unwrap();
+        assert!(
+            claude
+                .windows(2)
+                .any(|pair| pair == ["--permission-mode", "plan"])
+        );
+        let grok = persona_draft_command("grok", "draft", 90).unwrap();
+        assert!(
+            grok.windows(2)
+                .any(|pair| pair == ["--permission-mode", "plan"])
         );
     }
 
