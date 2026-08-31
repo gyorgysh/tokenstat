@@ -9,6 +9,11 @@ desktop and Android builds remain previews. Newest first.
 
 ### Fixed
 
+- Chat records one truthful end to a turn. Agent CLIs may call their own tool
+  stream "cancelled" even when the process exits successfully; that no longer
+  becomes a second failed turn or says the person pressed Stop. The host now
+  owns the final `ok`, `error`, or `stopped` outcome, and an explicit Stop is
+  kept distinct from a failure on macOS and iOS.
 - Choosing no persona lasted exactly one conversation. A workspace with no
   default read as one nobody had set up yet, so the next chat quietly made a
   fresh persona and inherited it. A workspace can now say it wants none, and

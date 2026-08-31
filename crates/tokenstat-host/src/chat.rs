@@ -316,6 +316,10 @@ pub struct Store {
     root: PathBuf,
     conversations: Mutex<Vec<Conversation>>,
     active: Mutex<HashMap<String, String>>,
+    /// Conversations whose live process the person explicitly stopped.
+    /// Memory-only and consumed by drain: a persisted `running` bit after a
+    /// daemon restart is stale state, not evidence that somebody pressed Stop.
+    killed: Mutex<HashSet<String>>,
     personas: Mutex<PersonaIndex>,
     approvals: Mutex<Vec<Approval>>,
     /// Per-turn credentials are intentionally memory-only. The 0600 file a
@@ -342,6 +346,7 @@ impl Store {
             root,
             conversations: Mutex::new(Vec::new()),
             active: Mutex::new(HashMap::new()),
+            killed: Mutex::new(HashSet::new()),
             personas: Mutex::new(PersonaIndex::default()),
             approvals: Mutex::new(Vec::new()),
             turn_tokens: Mutex::new(HashMap::new()),
@@ -362,6 +367,7 @@ impl Store {
             root,
             conversations: Mutex::new(conversations),
             active: Mutex::new(HashMap::new()),
+            killed: Mutex::new(HashSet::new()),
             personas: Mutex::new(personas),
             approvals: Mutex::new(Vec::new()),
             turn_tokens: Mutex::new(HashMap::new()),
@@ -1459,9 +1465,19 @@ impl Store {
             .get(id)
             .cloned();
         if let Some(pty) = pty {
+            self.killed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(id.into());
             match tokenstat_pty::manager().kill(&pty) {
                 Ok(()) | Err(tokenstat_pty::PtyError::NoSession(_)) => {}
-                Err(error) => return Err(error.to_string()),
+                Err(error) => {
+                    self.killed
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .remove(id);
+                    return Err(error.to_string());
+                }
             }
         } else {
             // A daemon restart can leave the persisted bit behind without an
@@ -1521,15 +1537,16 @@ impl Store {
         self.record_events(id, backend, events);
         self.record_response_attachments(id, backend, &assistant_text, response_output_dir);
         let exit = manager.info(pty).ok().and_then(|info| info.exit_code);
+        let stopped = self
+            .killed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
         self.record_events(
             id,
             backend,
             vec![Event::Done {
-                status: if exit == Some(0) {
-                    "ok".into()
-                } else {
-                    "error".into()
-                },
+                status: turn_status(exit, stopped).into(),
                 exit_code: exit,
             }],
         );
@@ -1958,6 +1975,16 @@ impl Store {
     }
 }
 
+fn turn_status(exit: Option<i32>, stopped: bool) -> &'static str {
+    if stopped {
+        "stopped"
+    } else if exit == Some(0) {
+        "ok"
+    } else {
+        "error"
+    }
+}
+
 fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
     fs::create_dir_all(path.parent().ok_or("invalid chat raw path")?).map_err(|e| e.to_string())?;
     let mut file = OpenOptions::new()
@@ -2016,10 +2043,24 @@ fn response_file_paths(text: &str) -> Vec<PathBuf> {
             .strip_prefix("file://")
             .or_else(|| destination.strip_prefix("sandbox:"))
             .unwrap_or(destination);
-        if !local.starts_with('/') {
+        // Markdown links may contain either POSIX paths or native Windows
+        // paths. Keep the absolute-path boundary: relative links and URLs do
+        // not grant permission to read from the machine.
+        let is_absolute = local.starts_with('/') || Path::new(local).is_absolute();
+        if !is_absolute {
             continue;
         }
         let decoded = percent_decode_path(local);
+        // `file:///C:/...` is the URL spelling Windows commonly emits. The
+        // leading slash is a URL separator, not part of the drive path.
+        let decoded = if cfg!(windows)
+            && decoded.starts_with('/')
+            && decoded.as_bytes().get(2) == Some(&b':')
+        {
+            &decoded[1..]
+        } else {
+            &decoded
+        };
         let path = PathBuf::from(decoded);
         let key = path.to_string_lossy().to_string();
         if seen.insert(key) {
@@ -2334,6 +2375,16 @@ fn grok_allow_rules(chat: &Conversation) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_exit_is_the_only_turn_outcome() {
+        assert_eq!(turn_status(Some(0), false), "ok");
+        assert_eq!(turn_status(Some(1), false), "error");
+        assert_eq!(turn_status(None, false), "error");
+        assert_eq!(turn_status(Some(0), true), "stopped");
+        assert_eq!(turn_status(Some(137), true), "stopped");
+    }
+
     #[test]
     fn stop_without_an_active_session_clears_running() {
         let root = tempfile::tempdir().unwrap();

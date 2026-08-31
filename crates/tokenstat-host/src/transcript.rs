@@ -330,7 +330,11 @@ impl Parser {
                     out.extend(
                         self.close_open_tools(!cancelled, cancelled.then(|| status.clone())),
                     );
-                    out.push(event);
+                    // A backend's stream ending is not the process outcome.
+                    // In particular, grok reports `cancelled` when one of its
+                    // own tool calls is refused even though the process exits
+                    // successfully. The chat drain observes the real exit and
+                    // writes the conversation's single terminal Done event.
                 }
                 Event::Failed { text } => {
                     out.extend(self.close_open_tools(false, Some(text.clone())));
@@ -1575,10 +1579,10 @@ mod tests {
                 "{backend} lost its tool call: {events:?}"
             );
             assert!(
-                events
+                !events
                     .iter()
                     .any(|event| matches!(event, Event::Done { .. })),
-                "{backend} never finished: {events:?}"
+                "{backend} leaked its stream marker as a process outcome: {events:?}"
             );
         }
     }
@@ -1749,10 +1753,10 @@ mod tests {
             "{events:?}"
         );
         assert!(
-            events
+            !events
                 .iter()
-                .any(|event| matches!(event, Event::Done { status, .. } if status == "cancelled")),
-            "{events:?}"
+                .any(|event| matches!(event, Event::Done { .. })),
+            "the backend's cancelled stream marker is not a turn outcome: {events:?}"
         );
     }
 

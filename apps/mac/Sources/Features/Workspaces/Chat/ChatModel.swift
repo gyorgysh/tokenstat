@@ -961,7 +961,11 @@ struct ChatDisplayItem: Identifiable {
                 flushText()
                 flushThinking()
                 let status = agent.status ?? ""
-                let failed = status == "cancelled" || status == "canceled" || status == "error"
+                // Only the host's process outcome can fail a turn. Older hosts
+                // may still carry a backend-level "cancelled" marker from
+                // grok; that describes its tool stream, not the person
+                // pressing Stop and not a failed process.
+                let failed = status == "error"
                 closeRunningTools(failed: failed, at: event.atMs, detail: failed ? status : nil)
             default:
                 continue

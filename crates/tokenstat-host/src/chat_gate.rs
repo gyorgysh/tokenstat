@@ -325,6 +325,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_space_free_helper_directory_gets_a_link_and_a_spaced_one_is_quoted() {
         let root = tempfile::tempdir().unwrap();
         let plain = root.path().join("bin");

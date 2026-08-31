@@ -9,6 +9,12 @@
 !.env.example
 *.pem
 *.key
+*.p8
+*.p12
+*.pfx
+*.cer
+*.mobileprovision
+*.provisionprofile
 credentials.json
 
 # Local fixtures and scratch data
@@ -57,6 +63,11 @@ desktop.ini
 /release-artifacts/
 /pkg/
 /dist/
+# Local App Store export metadata and archives. The iOS upload script writes
+# these under dist/ and tears down its temporary signing material on exit.
+*.xcarchive/
+*.ipa
+ExportOptions.plist
 # Derived data some local sessions point at the repo root instead of apps/*.
 /build/
 
@@ -93,6 +104,12 @@ desktop.ini
 /apps/mac/PersonaLab/.build/
 xcuserdata/
 *.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+*.xcresult/
+*.dSYM/
+
+# Local App Store Connect credentials, if a developer chooses to keep them
+# beside a checkout rather than in the user's standard key directory.
+/.appstoreconnect/
 
 # Android app. Credentials and local SDK selection never enter the repository.
 /apps/android/.gradle/
