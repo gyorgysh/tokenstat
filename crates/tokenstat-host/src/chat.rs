@@ -490,10 +490,15 @@ impl Store {
             decision: allowed.then(|| "allow".into()),
         };
         if !allowed {
-            self.approvals
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(approval.clone());
+            let already_waiting = {
+                let mut approvals = self
+                    .approvals
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                let found = has_live_approval(&approvals, conversation_id, now);
+                approvals.push(approval.clone());
+                found
+            };
             self.append(
                 conversation_id,
                 &StoredEvent::Approval {
@@ -504,7 +509,11 @@ impl Store {
             // This fixed reason carries no prompt, path, or tool details.
             // Paired devices learn only that an answer is needed, then fetch
             // the ordinary protected conversation API themselves.
-            tokenstat_sync::push::notify_in_background(tokenstat_sync::push::Reason::RunNeedsInput);
+            if !already_waiting {
+                tokenstat_sync::push::notify_in_background(
+                    tokenstat_sync::push::Reason::RunNeedsInput,
+                );
+            }
         }
         Ok(approval)
     }
@@ -1542,14 +1551,18 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
+        let status = turn_status(exit, stopped);
         self.record_events(
             id,
             backend,
             vec![Event::Done {
-                status: turn_status(exit, stopped).into(),
+                status: status.into(),
                 exit_code: exit,
             }],
         );
+        if let Some(reason) = chat_notification(status) {
+            tokenstat_sync::push::notify_in_background(reason);
+        }
         manager.forget_reader(pty, &reader);
         let _ = manager.close(pty);
         self.active
@@ -1985,6 +1998,24 @@ fn turn_status(exit: Option<i32>, stopped: bool) -> &'static str {
     }
 }
 
+fn chat_notification(status: &str) -> Option<tokenstat_sync::push::Reason> {
+    match status {
+        "ok" => Some(tokenstat_sync::push::Reason::ChatFinished),
+        "error" => Some(tokenstat_sync::push::Reason::ChatFailed),
+        // Stop came from the person at a keyboard. It is not news to them and
+        // must never be narrated as a failed turn on another device.
+        _ => None,
+    }
+}
+
+fn has_live_approval(approvals: &[Approval], conversation_id: &str, now: i64) -> bool {
+    approvals.iter().any(|pending| {
+        pending.conversation_id == conversation_id
+            && pending.decision.is_none()
+            && pending.expires_at_ms > now
+    })
+}
+
 fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
     fs::create_dir_all(path.parent().ok_or("invalid chat raw path")?).map_err(|e| e.to_string())?;
     let mut file = OpenOptions::new()
@@ -2383,6 +2414,45 @@ mod tests {
         assert_eq!(turn_status(None, false), "error");
         assert_eq!(turn_status(Some(0), true), "stopped");
         assert_eq!(turn_status(Some(137), true), "stopped");
+    }
+
+    #[test]
+    fn only_unprompted_chat_outcomes_notify() {
+        assert_eq!(
+            chat_notification("ok"),
+            Some(tokenstat_sync::push::Reason::ChatFinished)
+        );
+        assert_eq!(
+            chat_notification("error"),
+            Some(tokenstat_sync::push::Reason::ChatFailed)
+        );
+        assert_eq!(chat_notification("stopped"), None);
+        assert_eq!(chat_notification("cancelled"), None);
+    }
+
+    #[test]
+    fn one_live_approval_suppresses_another_waiting_notification() {
+        let approval = Approval {
+            id: "approval-1".into(),
+            conversation_id: "chat-a".into(),
+            verb: "Shell".into(),
+            preview: "Run tests".into(),
+            shell_prefix: None,
+            created_at_ms: 10,
+            expires_at_ms: 100,
+            decision: None,
+        };
+        assert!(has_live_approval(
+            std::slice::from_ref(&approval),
+            "chat-a",
+            50
+        ));
+        assert!(!has_live_approval(
+            std::slice::from_ref(&approval),
+            "chat-b",
+            50
+        ));
+        assert!(!has_live_approval(&[approval], "chat-a", 100));
     }
 
     #[test]

@@ -58,6 +58,10 @@ desktop and Android builds remain previews. Newest first.
 
 ### Added
 
+- Chat can notify a signed-in phone when a turn finishes or fails, using two
+  fixed content-free reasons composed into sentences by the account server.
+  Stop stays silent, and a burst of unanswered approvals in one conversation
+  sends one waiting notification rather than spending the whole notify budget.
 - A Git-enabled workspace gains a Pull requests section that begins with its
   connection. Connecting uses the tokenstat GitHub App through the device flow:
   the app shows a one-time code, GitHub's page opens, and the answer stays on

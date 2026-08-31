@@ -46,6 +46,10 @@ pub enum Reason {
     RunFailed,
     /// An agent is waiting for an answer and is not going to continue alone.
     RunNeedsInput,
+    /// A conversational agent finished one turn cleanly.
+    ChatFinished,
+    /// A conversational agent's process did not finish cleanly.
+    ChatFailed,
     /// A signed-in device asks the host owner to review screen permission.
     ScreenAccess,
     /// Sent by the "send a test" button, and by nothing else.
@@ -58,6 +62,8 @@ impl Reason {
             Reason::RunFinished => "run.finished",
             Reason::RunFailed => "run.failed",
             Reason::RunNeedsInput => "run.needs_input",
+            Reason::ChatFinished => "chat.finished",
+            Reason::ChatFailed => "chat.failed",
             Reason::ScreenAccess => "screen.access",
             Reason::Test => "test",
         }
@@ -211,6 +217,8 @@ mod tests {
         assert_eq!(Reason::RunFinished.wire(), "run.finished");
         assert_eq!(Reason::RunFailed.wire(), "run.failed");
         assert_eq!(Reason::RunNeedsInput.wire(), "run.needs_input");
+        assert_eq!(Reason::ChatFinished.wire(), "chat.finished");
+        assert_eq!(Reason::ChatFailed.wire(), "chat.failed");
         assert_eq!(Reason::ScreenAccess.wire(), "screen.access");
         assert_eq!(Reason::Test.wire(), "test");
     }
