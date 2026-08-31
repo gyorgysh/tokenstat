@@ -13,11 +13,16 @@
 #
 # The --rust form is needed when tokenstat-ffi or another Rust crate exposed
 # through the FFI changes. Ordinary Swift changes do not need that rebuild.
+# An iOS-only xcframework leftover from an archive still occupies this path,
+# so the script also rebuilds when the macOS slice is missing.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+# A sandbox may export this elsewhere and leave hostd copied from a stale path.
+unset CARGO_TARGET_DIR
 
 ARCH="${TOKENSTAT_MAC_ARCH:-arm64}"
 PROJECT="$ROOT/apps/mac/Tokenstat.xcodeproj"
@@ -36,13 +41,23 @@ case "${1:-}" in
         ;;
 esac
 
-if [ ! -d "$FFI" ]; then
+# A directory at this path is not enough. build-ffi-xcframework.sh replaces
+# the xcframework with only the platforms it was asked for, so an iOS or
+# simulator run leaves no macOS slice here and xcodebuild fails with
+# "no library for this platform".
+ffi_has_macos() {
+    [ -d "$FFI" ] || return 1
+    [ -n "$(find "$FFI" -maxdepth 1 -type d -name 'macos-*' -print -quit)" ]
+}
+
+if [ "$refresh_rust" -eq 0 ] && ! ffi_has_macos; then
+    echo "TokenstatFFI has no macOS slice, rebuilding"
     refresh_rust=1
 fi
 
 if [ "$refresh_rust" -eq 1 ]; then
     echo "Building TokenstatFFI ($ARCH)"
-    TOKENSTAT_FFI_PLATFORMS=macos "$ROOT/scripts/build-ffi-xcframework.sh" macos
+    "$ROOT/scripts/build-ffi-xcframework.sh" macos
 fi
 
 if [ ! -d "$PROJECT" ] || [ "$PROJECT_YML" -nt "$PROJECT/project.pbxproj" ]; then
@@ -55,7 +70,9 @@ if [ ! -d "$PROJECT" ] || [ "$PROJECT_YML" -nt "$PROJECT/project.pbxproj" ]; the
 fi
 
 echo "Building Debug Tokenstat ($ARCH)"
-xcodebuild \
+mkdir -p "$DERIVED"
+LOG="$DERIVED/build-mac-quick.log"
+if ! xcodebuild \
     -project "$PROJECT" \
     -scheme Tokenstat \
     -configuration Debug \
@@ -66,7 +83,16 @@ xcodebuild \
     CODE_SIGNING_ALLOWED=NO \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGN_IDENTITY="" \
-    build > /dev/null
+    build > "$LOG" 2>&1; then
+    echo "xcodebuild failed" >&2
+    if grep -E 'error:|fatal error:' "$LOG" >&2; then
+        :
+    else
+        tail -n 80 "$LOG" >&2
+    fi
+    echo "full log: $LOG" >&2
+    exit 1
+fi
 
 if [ ! -d "$APP" ]; then
     echo "no Debug app bundle at $APP" >&2
