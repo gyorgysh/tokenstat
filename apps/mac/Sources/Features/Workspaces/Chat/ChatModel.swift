@@ -423,11 +423,22 @@ final class ChatModel {
     /// every conversation should have a face whether or not anybody has made a
     /// persona yet.
     var faceSeed: UInt64 {
-        if let personaID = selected?.personaID,
+        selected.map(faceSeed(for:)) ?? personaSeed(for: "chat")
+    }
+
+    /// The face a conversation carries when it is shown somewhere other than
+    /// the open transcript, such as the workspace launcher.
+    func faceSeed(for chat: ChatConversation) -> UInt64 {
+        if let personaID = chat.personaID,
            let persona = personas.first(where: { $0.id == personaID }) {
             return persona.seed
         }
-        return personaSeed(for: selected?.id ?? "chat")
+        return personaSeed(for: chat.id)
+    }
+
+    /// The conversation worth returning to, independent of list ordering.
+    var mostRecent: ChatConversation? {
+        chats.max { lhs, rhs in lhs.updatedAtMs < rhs.updatedAtMs }
     }
 
     /// True while a tool is actually running, as opposed to the agent thinking.

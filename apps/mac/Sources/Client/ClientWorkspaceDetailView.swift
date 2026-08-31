@@ -34,6 +34,11 @@ struct ClientWorkspaceSessionsView: View {
     @State private var browserURL: String?
     @State private var forwardedPort: Int?
     @State private var pendingClose: PtySessionInfo?
+    @State private var showPort = false
+    @State private var portText = "5173"
+    @State private var isOpeningPort = false
+    /// Read-only launcher state for the Chat tile's count and character.
+    @State private var chatPreview = ChatModel()
     /// False until the first `pty.list` and catalog answer land. An empty list
     /// and an unasked question look identical and mean opposite things.
     @State private var loaded = false
@@ -76,6 +81,7 @@ struct ClientWorkspaceSessionsView: View {
                     }
                 }
 
+                openCard
                 launchCard
                 sessionsCard
             }
@@ -108,6 +114,9 @@ struct ClientWorkspaceSessionsView: View {
             }
             await reload()
             watchdog.cancel()
+        }
+        .task(id: workspaceID) {
+            await chatPreview.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await recoverAfterNetworkChange() }
@@ -189,11 +198,81 @@ struct ClientWorkspaceSessionsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showPort) { browserPortSheet }
+    }
+
+    private var openCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Open")
+                .font(ClientType.sectionTitle)
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: Theme.Space.s),
+                    GridItem(.flexible(), spacing: Theme.Space.s),
+                ],
+                spacing: Theme.Space.s
+            ) {
+                NavigationLink {
+                    ClientChatView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        folderName: folder.name,
+                        hostName: hostName,
+                        openConversationOnAppear: true
+                    )
+                } label: {
+                    let recent = chatPreview.mostRecent
+                    ClientLauncherDestinationTile(
+                        section: .chat,
+                        count: chatPreview.chats.count,
+                        personaSeed: recent.map(chatPreview.faceSeed(for:)),
+                        running: recent?.running == true
+                    )
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    ClientFilesView(peer: peer, workspace: workspaceID, folderName: folder.name)
+                } label: {
+                    ClientLauncherDestinationTile(section: .files)
+                }
+                .buttonStyle(.plain)
+
+                Button { showPort = true } label: {
+                    ClientLauncherDestinationTile(section: .browser)
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    ClientWorkspaceChangesView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        folder: folder,
+                        hostName: hostName
+                    )
+                } label: {
+                    ClientLauncherDestinationTile(section: .changes)
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    ClientWorkspaceTasksView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        hostName: hostName,
+                        folderName: folder.name
+                    )
+                } label: {
+                    ClientLauncherDestinationTile(section: .todo)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private var launchCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Start")
+            Text("Run an agent")
                 .font(ClientType.sectionTitle)
             LazyVGrid(
                 columns: [
@@ -242,6 +321,58 @@ struct ClientWorkspaceSessionsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var browserPortSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text("Open a local service")
+                        .font(ClientType.screenTitle)
+                    Text("Enter the port a tool is serving on \(hostName). tokenstat opens an authenticated loopback bridge on this device.")
+                        .font(ClientType.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                TextField("Port", text: $portText)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.themed)
+                Spacer(minLength: 0)
+                HStack(spacing: Theme.Space.s) {
+                    Button("Not now", .dismiss) { showPort = false }
+                        .buttonStyle(SecondaryButtonStyle())
+                    Spacer(minLength: 0)
+                    Button("Open", .browser) { Task { await openPort() } }
+                        .buttonStyle(AccentButtonStyle())
+                        .disabled(isOpeningPort || UInt16(portText) == nil)
+                }
+            }
+            .padding(Theme.Space.l)
+            .background(Theme.background)
+            .navigationTitle("Browser")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium])
+        .presentationBackground(Theme.background)
+    }
+
+    private func openPort() async {
+        guard let port = UInt16(portText.trimmingCharacters(in: .whitespaces)) else { return }
+        isOpeningPort = true
+        defer { isOpeningPort = false }
+        do {
+            let result = try await Bridge.proxyListen(
+                peer: peer,
+                host: "127.0.0.1",
+                port: Int(port)
+            )
+            forwardedPort = Int(port)
+            browserURL = result.url
+            showPort = false
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+            showPort = false
         }
     }
 

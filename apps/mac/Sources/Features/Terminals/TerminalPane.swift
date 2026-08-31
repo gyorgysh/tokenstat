@@ -16,6 +16,9 @@ struct TerminalPane: View {
     let folder: WorkspaceFolder
     @Bindable var terminals: TerminalsModel
     @Bindable var workspaces: WorkspacesModel
+    @Bindable var chat: ChatModel
+    /// Routes launcher destinations that live outside this terminal surface.
+    var onOpenSection: (WorkspaceSection) -> Void
     /// False while the workspace surface is kept mounted but another
     /// destination (Home, Insights, …) is in front. The stack stays in the
     /// hierarchy so paint is not lost; focus and keystroke-speed polling only
@@ -258,6 +261,8 @@ struct TerminalPane: View {
                         folder: folder,
                         terminals: terminals,
                         workspaces: workspaces,
+                        chat: chat,
+                        onOpenSection: onOpenSection,
                         grid: spawnGrid,
                         profiles: launcherCatalog,
                         modelPeer: peer
@@ -296,6 +301,8 @@ struct TerminalPane: View {
                         folder: folder,
                         terminals: terminals,
                         workspaces: workspaces,
+                        chat: chat,
+                        onOpenSection: onOpenSection,
                         grid: spawnGrid,
                         profiles: launcherCatalog,
                         modelPeer: peer
@@ -1088,6 +1095,8 @@ private struct LaunchSurface: View {
     let folder: WorkspaceFolder
     let terminals: TerminalsModel
     let workspaces: WorkspacesModel
+    let chat: ChatModel
+    let onOpenSection: (WorkspaceSection) -> Void
     /// The grid to spawn at, measured by the pane. Passed in rather than
     /// guessed, so the first session opens at the size it will keep.
     let grid: (rows: Int, cols: Int)
@@ -1114,6 +1123,8 @@ private struct LaunchSurface: View {
     @State private var showingCatalog = false
     @State private var pendingInstall: LaunchProfile?
     @State private var pendingHide: LaunchProfile?
+    /// Keeps the Chat tile responsive while a first conversation is created.
+    @State private var openingChat = false
 
     private var visibility: LauncherVisibility { LauncherVisibility.shared }
     private var visibilityScope: String { modelPeer ?? "local" }
@@ -1146,6 +1157,15 @@ private struct LaunchSurface: View {
         LocalModelSelection.stored(for: folder.id, in: workspaces)
     }
 
+    private var recentChat: ChatConversation? {
+        guard chat.folderID == folder.id else { return nil }
+        return chat.mostRecent
+    }
+
+    private var conversationCount: Int {
+        chat.folderID == folder.id ? chat.chats.count : 0
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: Theme.Space.m) {
@@ -1153,17 +1173,41 @@ private struct LaunchSurface: View {
                     runningSessionsBanner
                 }
 
-                Image(systemName: "terminal")
+                Image(systemName: "square.grid.2x2")
                     .font(Theme.font(34, weight: .light))
                     .foregroundStyle(Theme.accent.opacity(0.65))
                     .padding(.top, Theme.Space.m)
-                Text("Run something in \(folder.name)")
+                Text("What do you want to do in \(folder.name)?")
                     .font(Theme.title3.weight(.medium))
-                Text("A session runs as its own process, owned by the host, so it keeps going whether or not the window is here to watch it.")
+                Text("Open the project where you left it, or start an agent that keeps running on its own.")
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 380)
+
+                launcherHeading("Open")
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
+                    spacing: Theme.Space.m
+                ) {
+                    chatButton
+                    utilityButton("Files", symbol: WorkspaceSection.files.symbol) {
+                        onOpenSection(.files)
+                    }
+                    utilityButton("Browser", symbol: WorkspaceSection.browser.symbol) {
+                        onOpenSection(.browser)
+                    }
+                    utilityButton("Changes", symbol: WorkspaceSection.changes.symbol) {
+                        onOpenSection(.changes)
+                    }
+                    utilityButton("Tasks", symbol: WorkspaceSection.todo.symbol) {
+                        onOpenSection(.todo)
+                    }
+                }
+                .frame(maxWidth: 620)
+
+                launcherHeading("Run an agent")
 
                 // Both settings live in the strip above, where they stay
                 // reachable once a session is running. This line is what is
@@ -1175,12 +1219,6 @@ private struct LaunchSurface: View {
                     columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
                     spacing: Theme.Space.m
                 ) {
-                    utilityButton("Browser", symbol: ActionIcon.browser.symbol) {
-                        _ = workspaces.showBrowser(in: folder.id)
-                    }
-                    utilityButton("Files", symbol: ActionIcon.reveal.symbol) {
-                        workspaces.showFiles(in: folder.id)
-                    }
                     ForEach(visibleProfiles) { profile in
                         tile(for: profile)
                     }
@@ -1214,6 +1252,9 @@ private struct LaunchSurface: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
+        .task(id: folder.id) {
+            await chat.load(workspaceID: folder.id, selectFirst: false)
+        }
         .confirmationDialog(
             pendingInstall.map { "Install \($0.name) on this machine?" } ?? "Install this tool?",
             isPresented: Binding(
@@ -1250,6 +1291,81 @@ private struct LaunchSurface: View {
         } message: {
             Text("The tool stays on this machine. You can add it again from +.")
         }
+    }
+
+    private func launcherHeading(_ title: String) -> some View {
+        Text(title)
+            .font(Theme.caption.weight(.semibold))
+            .foregroundStyle(Theme.controlGlyph)
+            .frame(maxWidth: 620, alignment: .leading)
+            .padding(.top, Theme.Space.xs)
+    }
+
+    private var chatButton: some View {
+        Button {
+            guard !openingChat else { return }
+            openingChat = true
+            Task {
+                if chat.folderID != folder.id {
+                    await chat.load(workspaceID: folder.id, selectFirst: false)
+                }
+                if let recent = chat.mostRecent {
+                    await chat.select(recent)
+                } else {
+                    await chat.create()
+                }
+                openingChat = false
+                onOpenSection(.chat)
+            }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                VStack(spacing: Theme.Space.s) {
+                    if openingChat {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(height: 34)
+                    } else if let recentChat {
+                        PersonaMark(
+                            seed: chat.faceSeed(for: recentChat),
+                            size: 34,
+                            state: recentChat.running ? .working : .idle
+                        )
+                    } else {
+                        Image(systemName: WorkspaceSection.chat.symbol)
+                            .font(Theme.font(18))
+                            .foregroundStyle(Theme.accent)
+                            .frame(height: 34)
+                    }
+                    Text(openingChat ? "Opening…" : "Chat")
+                        .font(Theme.font(13, weight: .medium))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Space.m)
+
+                if conversationCount > 0 {
+                    Text("\(conversationCount)")
+                        .font(Theme.numeric(10, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 6)
+                        .frame(height: 18)
+                        .background(Theme.accentSoft, in: Capsule())
+                        .padding(Theme.Space.s)
+                }
+            }
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(openingChat)
+        .help(conversationCount == 0
+              ? "Start a conversation in this workspace."
+              : "Open the most recent of \(conversationCount) conversations.")
+        .accessibilityLabel(conversationCount == 0 ? "Chat" : "Chat, \(conversationCount) conversations")
     }
 
     /// Where the launch settings went, in one line.

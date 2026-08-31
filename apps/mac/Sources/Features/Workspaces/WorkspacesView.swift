@@ -17,6 +17,10 @@ struct WorkspacesView: View {
     @Bindable var model: WorkspacesModel
     #if os(macOS)
     @Bindable var terminals: TerminalsModel
+    @Bindable var chat: ChatModel
+    /// Workspace destinations live in RootView, outside the terminal surface.
+    /// The launcher names what should open and the root performs the route.
+    var onOpenSection: (WorkspaceSection, String) -> Void
     /// True when this is the front destination. Root keeps the view mounted
     /// while the user is on Home or elsewhere so terminals are not torn down;
     /// when false the pane must not claim keyboard focus or poll as focused.
@@ -56,6 +60,8 @@ struct WorkspacesView: View {
                     folder: folder,
                     terminals: terminals,
                     workspaces: model,
+                    chat: chat,
+                    onOpenSection: { onOpenSection($0, folder.id) },
                     isSurfaceActive: isActive
                 )
                 #else

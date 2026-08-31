@@ -14,11 +14,17 @@ struct ClientChatView: View {
     let workspaceID: String
     let folderName: String
     var hostName: String = ""
+    /// Launcher entry: skip the list and land in the conversation worth
+    /// returning to, creating the first one when this folder has none.
+    var openConversationOnAppear = false
 
     @State private var model = ChatModel()
     @State private var loaded = false
     @State private var created: ChatConversation?
     @State private var pendingDelete: ChatConversation?
+    /// The launcher may skip the list once. Back from the thread must still
+    /// reach the list rather than immediately pushing the same chat again.
+    @State private var didOpenConversation = false
 
     private var place: String { folderName.isEmpty ? "this folder" : folderName }
 
@@ -88,6 +94,15 @@ struct ClientChatView: View {
         }
         .task {
             await reload()
+            if openConversationOnAppear, !didOpenConversation {
+                didOpenConversation = true
+                if let recent = model.mostRecent {
+                    await model.select(recent)
+                    created = recent
+                } else {
+                    await create()
+                }
+            }
         }
     }
 

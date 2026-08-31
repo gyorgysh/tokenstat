@@ -72,6 +72,62 @@ struct ClientLaunchTile: View {
     }
 }
 
+/// A project destination in the launcher's Open row.
+///
+/// It deliberately shares the agent tile's measurements, panel and border so
+/// opening Chat does not look like a second launcher bolted above the first.
+struct ClientLauncherDestinationTile: View {
+    let section: WorkspaceSection
+    var count: Int = 0
+    var personaSeed: UInt64?
+    var running = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: Theme.Space.s) {
+                if let personaSeed {
+                    PersonaMark(
+                        seed: personaSeed,
+                        size: 34,
+                        state: running ? .working : .idle
+                    )
+                } else {
+                    Image(systemName: section.symbol)
+                        .font(Theme.font(18, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                        .frame(height: 34)
+                }
+                Text(section.label)
+                    .font(ClientType.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Theme.Space.m)
+
+            if count > 0 {
+                Text("\(count)")
+                    .font(ClientType.rowFigure.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 6)
+                    .frame(height: 18)
+                    .background(Theme.accentSoft, in: Capsule())
+                    .padding(Theme.Space.s)
+            }
+        }
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .contentShape(.rect)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(count > 0
+                            ? "\(section.label), \(count) conversations"
+                            : section.label)
+    }
+}
+
 /// The + tile that opens the rest of the catalog.
 struct ClientMoreTile: View {
     let showing: Bool

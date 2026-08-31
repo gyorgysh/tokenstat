@@ -2168,6 +2168,10 @@ struct RootView: View {
             WorkspacesView(
                 model: workspaces,
                 terminals: terminals,
+                chat: chat,
+                onOpenSection: { section, folderID in
+                    openSection(section, in: folderID)
+                },
                 isActive: showsWorkspaceSurface,
                 tier: account.account?.tier
             )

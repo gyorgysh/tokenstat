@@ -86,6 +86,10 @@ ALLOWED = [
     ("Client/ClientSecurityCard.swift", "UIPasteboard.general.string = key"),
     ("Client/ClientStates.swift", 'Button(showingDetail ?'),
     ("Client/ClientWorkspaceDetailView.swift", "openExisting(session)"),
+    # A launcher destination tile. The browser glyph is inside the shared
+    # `ClientLauncherDestinationTile`, so adding another to the Button would
+    # draw the same symbol twice.
+    ("Client/ClientWorkspaceDetailView.swift", "Button { showPort = true } label:"),
     # Keycaps on the terminal accessory bar: the label is the key, and a
     # glyph beside "esc" or "⇧⇥" would be a second symbol for one keystroke.
     ("Client/ClientTerminalKeys.swift", "Button(action: action) {"),
