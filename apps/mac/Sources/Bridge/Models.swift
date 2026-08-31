@@ -2103,6 +2103,34 @@ struct FileDiff: Codable, Sendable, Hashable {
 }
 
 /// What a git command that changed something reported.
+/// Which write produced a `GitOutcome`.
+///
+/// The panel leads with a sentence about the action and quotes git underneath,
+/// because git's success output is addressed to a script. "To <remote>" and
+/// "abc1234..def5678  main -> main" are both true and neither of them answers
+/// the question the person asked by pressing the button.
+enum GitOutcomeAction: Sendable, Hashable {
+    case commit
+    case push
+
+    /// What to say when it worked.
+    var done: String {
+        switch self {
+        case .commit: return "Committed."
+        case .push: return "Pushed."
+        }
+    }
+
+    /// What to say when it did not. Git's own words follow, and they are the
+    /// part that explains it, so this only has to name what was attempted.
+    var failed: String {
+        switch self {
+        case .commit: return "Could not commit."
+        case .push: return "Could not push."
+        }
+    }
+}
+
 struct GitOutcome: Codable, Sendable, Hashable {
     var ok: Bool
     /// Git's own words. Shown verbatim on failure: they name the file, the

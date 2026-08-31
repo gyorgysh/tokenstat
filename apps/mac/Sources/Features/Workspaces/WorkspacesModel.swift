@@ -245,6 +245,10 @@ final class WorkspacesModel {
     var autoCommitModel: [String: String] = [:]
     /// Result of the last write, for the banner. Cleared on the next attempt.
     var gitOutcome: GitOutcome?
+    /// What produced `gitOutcome`, so the panel can lead with a sentence
+    /// rather than with git's plumbing. "To github.com:owner/repo.git" is a
+    /// true thing to print and not an answer to "did it push".
+    var gitOutcomeAction: GitOutcomeAction?
     var isCommitting = false
 
     /// What each workspace has open beside its terminals, in the order opened.
@@ -1143,11 +1147,11 @@ final class WorkspacesModel {
         let description = (commitDescription[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let message = description.isEmpty ? title : "\(title)\n\n\(description)"
         guard !paths.isEmpty else {
-            gitOutcome = GitOutcome(ok: false, message: "Tick at least one file to commit.")
+            report(.commit, GitOutcome(ok: false, message: "Tick at least one file to commit."))
             return
         }
         guard !title.isEmpty else {
-            gitOutcome = GitOutcome(ok: false, message: "A commit needs a title.")
+            report(.commit, GitOutcome(ok: false, message: "A commit needs a title."))
             return
         }
 
@@ -1156,11 +1160,11 @@ final class WorkspacesModel {
         do {
             let staged = try await Bridge.stage(id: folder.id, paths: paths)
             guard staged.ok else {
-                gitOutcome = staged
+                report(.commit, staged)
                 return
             }
             let committed = try await Bridge.commit(id: folder.id, message: message)
-            gitOutcome = committed
+            report(.commit, committed)
             guard committed.ok else { return }
             stagedSelection[folder.id] = []
             commitMessage[folder.id] = ""
@@ -1168,7 +1172,7 @@ final class WorkspacesModel {
             await refresh()
             await loadHistory(for: folder.id)
         } catch {
-            gitOutcome = GitOutcome(ok: false, message: error.localizedDescription)
+            report(.commit, GitOutcome(ok: false, message: error.localizedDescription))
         }
     }
 
@@ -1176,12 +1180,17 @@ final class WorkspacesModel {
         isCommitting = true
         defer { isCommitting = false }
         do {
-            gitOutcome = try await Bridge.push(id: folder.id)
+            report(.push, try await Bridge.push(id: folder.id))
             await refresh()
             await loadHistory(for: folder.id)
         } catch {
-            gitOutcome = GitOutcome(ok: false, message: error.localizedDescription)
+            report(.push, GitOutcome(ok: false, message: error.localizedDescription))
         }
+    }
+
+    private func report(_ action: GitOutcomeAction, _ outcome: GitOutcome) {
+        gitOutcomeAction = action
+        gitOutcome = outcome
     }
 
     #if os(macOS)

@@ -959,17 +959,33 @@ struct Banner: View {
     var severity: Severity = .warning
     /// Overrides the severity's own symbol where a more specific one says more.
     var symbol: String?
+    /// Somebody else's exact words, under the sentence that says what
+    /// happened. Git's output is the case this exists for: it names the file,
+    /// the hook or the remote, and rewording loses that, but on its own it is
+    /// plumbing rather than an answer. Shown quieter and monospaced, because
+    /// it is a quotation and not the message.
+    var detail: String?
 
     var body: some View {
-        Label(text, systemImage: symbol ?? severity.symbol)
-            .font(.callout)
-            .foregroundStyle(severity.tint)
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                severity.tint.opacity(0.12),
-                in: RoundedRectangle(cornerRadius: Theme.cardRadius)
-            )
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            Label(text, systemImage: symbol ?? severity.symbol)
+                .font(.callout)
+                .foregroundStyle(severity.tint)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            severity.tint.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+        )
     }
 }
 

@@ -16,6 +16,18 @@ desktop and Android builds remain previews. Newest first.
   persona new conversations inherit and offers "No persona" alongside them,
   replacing the "Make default" button, which could only ever say yes to
   whichever persona happened to be open.
+- Committing and pushing say what happened. The panel used to print git's own
+  success output, which is addressed to a script: "To <remote>" and
+  "abc1234..def5678 main to main" are both true and neither answers the
+  question you asked by pressing the button. It now leads with the answer and
+  quotes git underneath, and a failure still shows git's words in full,
+  because those name the file, the hook or the conflict.
+- The bar the commit and push buttons sit in, and the one under a day in
+  Insights, stand on the app's footer surface instead of on the content's own
+  background. The rule above each of them separated nothing, so both read as
+  loose parts at the bottom of a panel rather than as a place where the
+  actions live. Opening a day is the accent now, since it is the reason that
+  panel has a footer at all.
 - Text fields across Workflows, Tasks, Automations, Devices, the browser bar
   and the harness settings sit on the app's own surface instead of the
   platform's grey bezel, which on a dark panel belonged to no part of the

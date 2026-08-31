@@ -524,11 +524,14 @@ private struct CommitBox: View {
     private var box: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let outcome = model.gitOutcome {
-                Text(outcome.message.isEmpty ? "Done." : outcome.message)
-                    .font(Theme.caption)
-                    .foregroundStyle(outcome.ok ? Theme.success : Theme.danger)
-                    .lineLimit(4)
-                    .textSelection(.enabled)
+                let action = model.gitOutcomeAction
+                Banner(
+                    text: outcome.ok
+                        ? (action?.done ?? "Done.")
+                        : (action?.failed ?? "That did not work."),
+                    severity: outcome.ok ? .success : .danger,
+                    detail: outcome.message
+                )
             }
             if let notice = automations.noticeMessage {
                 Text(notice)
@@ -573,15 +576,15 @@ private struct CommitBox: View {
         .padding(.top, Theme.Space.s)
         .padding(.bottom, Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.background)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Theme.border).frame(height: 1)
-        }
+        // The sidebar surface, like every other footer in the app. On the
+        // content's own background the rule above separated nothing and the
+        // bar read as loose parts at the bottom of the panel rather than as a
+        // place where the actions live.
+        .background(Theme.sidebar)
+        .overlay(alignment: .top) { ThemeRule() }
     }
 
-    private var hairline: some View {
-        Rectangle().fill(Theme.border).frame(height: 1)
-    }
+    private var hairline: some View { ThemeRule() }
 
     private var messageFields: some View {
         VStack(spacing: 0) {
