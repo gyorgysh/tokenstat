@@ -63,13 +63,17 @@ struct ThemedSheet<Content: View, Actions: View>: View {
         if scrolls {
             ScrollView {
                 content()
-                    .padding(Theme.Space.l)
+                    .padding(Theme.Modal.bodyPadding)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         } else {
-            content()
-                .padding(Theme.Space.l)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                content()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 0)
+            }
+            .padding(Theme.Modal.bodyPadding)
         }
     }
 
@@ -115,7 +119,7 @@ struct ModalHeader: View {
             if let icon {
                 ActionSeat(icon: icon, size: Theme.Modal.iconSeat)
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text(title)
                     .font(Theme.title3.weight(.semibold))
                     .foregroundStyle(.primary)
@@ -171,7 +175,7 @@ struct ModalInfoRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Space.m) {
             ActionSeat(icon: icon, size: 28)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text(title)
                     .font(Theme.callout.weight(.semibold))
                     .foregroundStyle(.primary)

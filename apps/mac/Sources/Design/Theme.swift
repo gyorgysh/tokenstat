@@ -240,6 +240,10 @@ enum Theme {
         static let iconSeat: CGFloat = 36
         /// Footer that holds one row of 30pt actions, optically centred.
         static let footerHeight: CGFloat = 64
+        /// Inset of the body from the window edges and the header/footer
+        /// rules. Generous on purpose: a sheet that hugs its copy looks
+        /// unfinished, and this is the one padding owner for that air.
+        static let bodyPadding: CGFloat = 32
     }
 
     /// Corner radius for cards and panels.

@@ -74,7 +74,7 @@ struct AddWorkspaceSheet: View {
             .disabled(picking)
             .keyboardShortcut(.defaultAction)
         }
-        .modalFrame(width: 520, height: 380)
+        .modalFrame(width: 540, height: 440)
     }
 }
 #endif
