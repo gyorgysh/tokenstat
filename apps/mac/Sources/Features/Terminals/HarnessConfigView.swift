@@ -25,85 +25,71 @@ struct HarnessConfigView: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .top) {
+        ThemedSheet(
+            title: "Configure \(profile.name)",
+            subtitle: "Model, effort and compaction for the next session. Saved into this tool's own config.",
+            icon: .settings,
+            scrolls: true,
+            onClose: close
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Configure \(profile.name)")
-                        .font(Theme.font(15, weight: .semibold))
-                    Text("Model, effort and compaction for the next session. Saved into this tool's own config.")
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                InspectorCloseButton(
-                    action: close,
-                    help: "Close",
-                    label: "Close"
-                )
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(profile.command)
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                if let path = config?.path, !path.isEmpty {
-                    Text(path)
+                    Text(profile.command)
                         .font(Theme.mono(11))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.controlGlyph)
                         .textSelection(.enabled)
+                    if let path = config?.path, !path.isEmpty {
+                        Text(path)
+                            .font(Theme.mono(11))
+                            .foregroundStyle(Theme.controlGlyph)
+                            .textSelection(.enabled)
+                    }
                 }
-            }
 
-            if loading {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, Theme.Space.l)
-            } else if let config, config.available, !config.fields.isEmpty {
-                if let error {
-                    Banner(text: error, severity: .warning)
-                }
-                ScrollView {
+                if loading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Theme.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, Theme.Space.l)
+                } else if let config, config.available, !config.fields.isEmpty {
+                    if let error {
+                        Banner(text: error, severity: .warning)
+                    }
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                         ForEach(config.fields) { field in
                             fieldRow(field)
                         }
                     }
+                } else {
+                    Text(config.flatMap { $0.available ? nil : $0.reason } ?? error
+                         ?? "This tool has no settings tokenstat can change.")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxHeight: 420)
-            } else {
-                Text(config.flatMap { $0.available ? nil : $0.reason } ?? error
-                     ?? "This tool has no settings tokenstat can change.")
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, Theme.Space.m)
             }
-
-            HStack {
-                Button("Cancel", .dismiss, role: .cancel) { close() }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut(.cancelAction)
-                if saving {
-                    ProgressView().controlSize(.small)
-                }
-                Spacer()
-                Button("Save", .save) {
-                    Task {
-                        await save()
-                        if error == nil { close() }
-                    }
-                }
-                .buttonStyle(AccentButtonStyle())
-                .keyboardShortcut(.defaultAction)
-                .disabled(saving || loading || !dirty)
+        } actions: {
+            Button("Cancel", .dismiss, role: .cancel) { close() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            if saving {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Theme.accent)
             }
+            Spacer()
+            Button("Save", .save) {
+                Task {
+                    await save()
+                    if error == nil { close() }
+                }
+            }
+            .buttonStyle(AccentButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .disabled(saving || loading || !dirty)
         }
-        .padding(Theme.Space.l)
-        .frame(width: 520)
-        .background(Theme.panel)
+        .modalFrame(width: 560, height: 560)
         .task { await load() }
     }
 

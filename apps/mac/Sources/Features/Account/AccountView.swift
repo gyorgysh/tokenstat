@@ -737,49 +737,48 @@ struct AccountView: View {
     @ViewBuilder
     private var forgeLoginSheet: some View {
         if let login = forgeLogin {
-            VStack(spacing: Theme.Space.l) {
-                ZStack {
-                    Circle().fill(Theme.accent.opacity(0.10)).frame(width: 82, height: 82)
-                    Image(systemName: "link")
-                        .font(Theme.fixed(26, weight: .light))
+            ThemedSheet(
+                title: "Connect tokenstat GitHub App",
+                subtitle: "Enter this one-time code in the GitHub page that just opened.",
+                icon: .connect,
+                onClose: { Task { await cancelForgeLogin() } }
+            ) {
+                VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                    Text(login.userCode)
+                        .font(Theme.monoText(30, weight: .semibold, relativeTo: .title))
+                        .tracking(2)
                         .foregroundStyle(Theme.accent)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, Theme.Space.l)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 58)
+                        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                                .strokeBorder(Theme.accent.opacity(0.3))
+                        )
+                    HStack(spacing: Theme.Space.s) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Theme.accent)
+                        Text("Waiting for GitHub…")
+                            .font(Theme.callout)
+                            .foregroundStyle(Theme.controlGlyph)
+                    }
+                    if let forgeLoginError {
+                        Text(FriendlyError.from(forgeLoginError).message)
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                VStack(spacing: Theme.Space.xs) {
-                    Text("Connect tokenstat GitHub App")
-                        .font(Theme.title2.weight(.semibold))
-                    Text("Enter this one-time code in the GitHub page that just opened.")
-                        .font(Theme.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                Text(login.userCode)
-                    .font(Theme.monoText(30, weight: .semibold, relativeTo: .title))
-                    .tracking(2)
-                    .foregroundStyle(Theme.accent)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, Theme.Space.l)
-                    .frame(height: 58)
-                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.accent.opacity(0.3)))
-                HStack(spacing: Theme.Space.s) {
-                    ProgressView().controlSize(.small)
-                    Text("Waiting for GitHub…")
-                        .font(Theme.callout)
-                        .foregroundStyle(.secondary)
-                }
-                if let forgeLoginError {
-                    Text(FriendlyError.from(forgeLoginError).message)
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.danger)
-                        .multilineTextAlignment(.center)
-                }
-                Button("Cancel", .disconnect) { Task { await cancelForgeLogin() } }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+            } actions: {
+                Button("Cancel", .dismiss) { Task { await cancelForgeLogin() } }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
             }
-            .padding(Theme.Space.xl)
-            .frame(minWidth: 340, idealWidth: 420)
-            .background(Theme.panel)
+            .modalFrame(width: 540, height: 440)
             .task(id: login.userCode) { await pollForgeLogin() }
         }
     }
@@ -1116,30 +1115,12 @@ private struct LicensesSheet: View {
     @State private var loadFailed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Open source licenses")
-                        .font(Theme.font(15, weight: .semibold))
-                    Text("Third-party notices for bundled dependencies")
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(Theme.font(10, weight: .semibold))
-                        .foregroundStyle(Theme.controlGlyph)
-                        .frame(width: 22, height: 22)
-                        .background(Circle().fill(Theme.controlSeat))
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .help("Close")
-            }
-
+        ThemedSheet(
+            title: "Third-party notices",
+            subtitle: "Licences for the software bundled with tokenstat.",
+            icon: .docs,
+            onClose: { dismiss() }
+        ) {
             Group {
                 if let text {
                     #if os(macOS)
@@ -1147,7 +1128,7 @@ private struct LicensesSheet: View {
                     #else
                     Text("Open licenses from the account sheet.")
                         .font(Theme.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.controlGlyph)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     #endif
                 } else if loadFailed {
@@ -1155,28 +1136,23 @@ private struct LicensesSheet: View {
                     // build phase, or a bundle that lost the file.
                     Text("The third-party notices are generated at build time and were not found in this build.")
                         .font(Theme.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.controlGlyph)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ProgressView()
+                        .tint(Theme.accent)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .padding(Theme.Space.s)
-            .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.cardRadius)
                     .strokeBorder(Theme.border, lineWidth: 1)
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(Theme.Space.m)
-        #if os(macOS)
-        .frame(width: 620, height: 520)
-        #else
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        #endif
-        .background(Theme.panel)
+        .modalFrame(width: 640, height: 560)
         .task {
             text = await Self.loadNotices()
             loadFailed = text == nil

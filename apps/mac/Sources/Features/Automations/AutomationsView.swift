@@ -812,48 +812,46 @@ private struct AutomationHistorySheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(job.name).font(Theme.title3.weight(.semibold))
-                    Text("Run history").font(Theme.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                InspectorCloseButton(
-                    action: { dismiss() },
-                    help: "Close",
-                    label: "Close run history"
-                )
-                Button("Done", .done) { dismiss() }
-                    .buttonStyle(.borderless)
-            }
+        ThemedSheet(
+            title: job.name,
+            subtitle: "Run history",
+            icon: .history,
+            scrolls: true,
+            onClose: { dismiss() }
+        ) {
             if model.runs(of: job).isEmpty {
-                EmptyState(symbol: "clock", title: "No runs yet", message: "The first run will appear here with its result and output.")
+                EmptyState(
+                    symbol: "clock",
+                    title: "No runs yet",
+                    message: "The first run will appear here with its result and output."
+                )
             } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(model.runs(of: job)) { run in
-                            HStack(spacing: Theme.Space.s) {
-                                Circle().fill(AutomationsView.statusTint(run.status)).frame(width: 8, height: 8)
-                                Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(Theme.callout)
-                                Spacer()
-                                StatusPill(status: run.status, text: run.endedLabel)
-                                Button("View", .preview) {
-                                    onView(run)
-                                    dismiss()
-                                }
-                                    .buttonStyle(.borderless)
+                VStack(spacing: 0) {
+                    ForEach(model.runs(of: job)) { run in
+                        HStack(spacing: Theme.Space.s) {
+                            Circle().fill(AutomationsView.statusTint(run.status)).frame(width: 8, height: 8)
+                            Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(Theme.callout)
+                            Spacer()
+                            StatusPill(status: run.status, text: run.endedLabel)
+                            Button("View", .preview) {
+                                onView(run)
+                                dismiss()
                             }
-                            .padding(.vertical, Theme.Space.s)
-                            ThemeRule()
+                            .buttonStyle(SecondaryButtonStyle(small: true))
                         }
+                        .padding(.vertical, Theme.Space.s)
+                        ThemeRule()
                     }
                 }
             }
+        } actions: {
+            Spacer()
+            Button("Done", .done) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
         }
-        .padding(Theme.Space.l)
-        .frame(width: 520, height: 360)
+        .modalFrame(width: 560, height: 440)
     }
 }
 
@@ -926,63 +924,50 @@ struct NewAutomationSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(existing == nil ? "New automation" : "Edit automation")
-                        .font(Theme.font(15, weight: .semibold))
-                    Text("An agent run headless in a folder, like a person launching it.")
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
+        ThemedSheet(
+            title: existing == nil ? "New automation" : "Edit automation",
+            subtitle: "An agent run headless in a folder, like a person launching it.",
+            icon: .scheduled,
+            scrolls: true,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                if let error = model.errorMessage {
+                    Banner(text: error, severity: .warning)
                 }
-                Spacer()
-                InspectorCloseButton(
-                    action: { dismiss() },
-                    help: "Close",
-                    label: "Close"
-                )
+                stepHeader
+                fields
             }
-
-            if let error = model.errorMessage {
-                Banner(text: error, severity: .warning)
+        } actions: {
+            Button("Cancel", .dismiss, role: .cancel) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            if step > 0 {
+                Button("Back", .back) { step -= 1 }
+                    .buttonStyle(SecondaryButtonStyle())
             }
-
-            stepHeader
-            fields
-
-            HStack {
-                Button("Cancel", .dismiss, role: .cancel) { dismiss() }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                if step > 0 {
-                    Button("Back", .back) { step -= 1 }
-                        .buttonStyle(.borderless)
-                }
-                Button {
-                    if step < 2 {
-                        step += 1
-                    } else {
-                        working = true
-                        Task {
-                            await save()
-                            working = false
-                            if model.errorMessage == nil { dismiss() }
-                        }
+            Spacer()
+            Button {
+                if step < 2 {
+                    step += 1
+                } else {
+                    working = true
+                    Task {
+                        await save()
+                        working = false
+                        if model.errorMessage == nil { dismiss() }
                     }
-                } label: {
-                    let icon: ActionIcon = step < 2 ? .next : (existing == nil ? .create : .save)
-                    let title = step < 2 ? "Continue" : (existing == nil ? "Create" : "Save")
-                    icon.label(title)
                 }
-                .buttonStyle(AccentButtonStyle())
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canContinue || working)
+            } label: {
+                let icon: ActionIcon = step < 2 ? .next : (existing == nil ? .create : .save)
+                let title = step < 2 ? "Continue" : (existing == nil ? "Create" : "Save")
+                icon.label(title)
             }
+            .buttonStyle(AccentButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .disabled(!canContinue || working)
         }
-        .padding(Theme.Space.l)
-        .frame(width: 520)
-        .background(Theme.panel)
+        .modalFrame(width: 560, height: 640)
         .onAppear {
             if let existing, name.isEmpty {
                 name = existing.name

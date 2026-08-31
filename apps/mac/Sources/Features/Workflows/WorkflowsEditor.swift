@@ -311,64 +311,60 @@ struct WorkflowDesignSheet: View {
     @State private var workspaceID = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Design a workflow")
-                        .font(Theme.font(15, weight: .semibold))
-                    Text("A cheap local backend drafts the graph. You review it. It does not run.")
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
+        ThemedSheet(
+            title: "Design a workflow",
+            subtitle: "A cheap local backend drafts the graph. You review it. It does not run.",
+            icon: .create,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                if let error = model.errorMessage {
+                    Banner(text: error, severity: .warning)
                 }
-                Spacer()
-                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close")
-            }
-            if let error = model.errorMessage {
-                Banner(text: error, severity: .warning)
-            }
-            TextField("Describe the run", text: $prompt, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(3...8)
-                .disabled(model.isDesigning)
-            if !designRecipes.isEmpty {
-                WorkflowRecipeChips(recipes: designRecipes) { prompt = $0.prompt }
-            }
-            WorkflowDesignPickers(
-                agents: WorkflowRecipes.designAgents(from: model.pickerBackends(keeping: backend)),
-                folders: folders,
-                backendID: $backend,
-                modelID: $modelID,
-                effort: $effort,
-                workspaceID: $workspaceID
-            )
-            HStack(spacing: Theme.Space.s) {
-                Spacer()
-                Button("Cancel", .dismiss) { dismiss() }
-                    .buttonStyle(SecondaryButtonStyle())
-                Button(model.isDesigning ? "Designing" : "Design", .create) {
-                    Task {
-                        await model.design(
-                            prompt: prompt,
-                            workspaceID: workspaceID.isEmpty ? nil : workspaceID,
-                            backend: backend.isEmpty ? nil : backend,
-                            model: modelID.isEmpty ? nil : modelID,
-                            effort: effort.isEmpty ? nil : effort
-                        )
-                        if model.errorMessage == nil {
-                            dismiss()
-                        }
-                    }
+                TextField("Describe the run", text: $prompt, axis: .vertical)
+                    .textFieldStyle(.themed)
+                    .lineLimit(3...8)
+                    .disabled(model.isDesigning)
+                if !designRecipes.isEmpty {
+                    WorkflowRecipeChips(recipes: designRecipes) { prompt = $0.prompt }
                 }
-                .buttonStyle(AccentButtonStyle())
-                .disabled(
-                    model.isDesigning
-                        || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || WorkflowRecipes.designAgents(from: model.pickerBackends()).isEmpty
+                WorkflowDesignPickers(
+                    agents: WorkflowRecipes.designAgents(from: model.pickerBackends(keeping: backend)),
+                    folders: folders,
+                    backendID: $backend,
+                    modelID: $modelID,
+                    effort: $effort,
+                    workspaceID: $workspaceID
                 )
             }
+        } actions: {
+            Button("Cancel", .dismiss) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button(model.isDesigning ? "Designing" : "Design", .create) {
+                Task {
+                    await model.design(
+                        prompt: prompt,
+                        workspaceID: workspaceID.isEmpty ? nil : workspaceID,
+                        backend: backend.isEmpty ? nil : backend,
+                        model: modelID.isEmpty ? nil : modelID,
+                        effort: effort.isEmpty ? nil : effort
+                    )
+                    if model.errorMessage == nil {
+                        dismiss()
+                    }
+                }
+            }
+            .buttonStyle(AccentButtonStyle())
+            .disabled(
+                model.isDesigning
+                    || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || WorkflowRecipes.designAgents(from: model.pickerBackends()).isEmpty
+            )
+            .keyboardShortcut(.defaultAction)
         }
-        .padding(Theme.Space.l)
-        .frame(minWidth: 460)
+        .modalFrame(width: 560, height: 520)
         .onAppear {
             backend = WorkflowRecipes.defaultBackend(from: model.pickerBackends())
             workspaceID = model.working?.workspaceID ?? folders.first?.id ?? ""

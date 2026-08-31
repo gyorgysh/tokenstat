@@ -136,24 +136,13 @@ struct MachinesView: View {
             Task { await model.load() }
         }
         .sheet(isPresented: $addingDevice) {
-            VStack(spacing: 0) {
-                HStack {
-                    Spacer()
-                    InspectorCloseButton(
-                        action: { addingDevice = false },
-                        help: "Close",
-                        label: "Close add device"
-                    )
-                }
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.top, Theme.Space.s)
-                PairingForm { key, label, address in
-                    await model.pair(key: key, label: label, address: address)
-                    addingDevice = false
-                }
-                .padding(Theme.Space.l)
+            PairingForm(
+                showsCard: false,
+                onClose: { addingDevice = false }
+            ) { key, label, address in
+                await model.pair(key: key, label: label, address: address)
+                addingDevice = false
             }
-            .frame(width: 500)
         }
     }
 
@@ -1564,6 +1553,8 @@ private struct TrustBadge: View {
 /// rather than behind an "advanced" disclosure: it is the thing that makes the
 /// privacy claim checkable instead of promised.
 private struct PairingForm: View {
+    var showsCard: Bool = true
+    var onClose: (() -> Void)? = nil
     var pair: (String, String, String) async -> Void
 
     @State private var link = ""
@@ -1571,12 +1562,37 @@ private struct PairingForm: View {
     @State private var working = false
 
     var body: some View {
-        Card(
-            title: "Connect another device",
-            subtitle: "Paste an invite from the other device. A live invite includes its LAN address when available.",
-            mark: "mark_device"
-        ) {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
+        if showsCard {
+            Card(
+                title: "Connect another device",
+                subtitle: "Paste an invite from the other device. A live invite includes its LAN address when available.",
+                mark: "mark_device"
+            ) {
+                fields(includeConnect: true)
+            }
+        } else {
+            ThemedSheet(
+                title: "Connect another device",
+                subtitle: "Paste an invite from the other device. A live invite includes its LAN address when available.",
+                icon: .pair,
+                onClose: { onClose?() }
+            ) {
+                fields(includeConnect: false)
+            } actions: {
+                Button("Cancel", .dismiss) { onClose?() }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                connectButton
+                    .keyboardShortcut(.defaultAction)
+            }
+            .modalFrame(width: 540, height: 480)
+        }
+    }
+
+    private func fields(includeConnect: Bool) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
                 TextField(
                     "Pairing code",
                     text: $link,
@@ -1584,35 +1600,42 @@ private struct PairingForm: View {
                 )
                 .font(Theme.mono(11))
                 TextField("Name", text: $label, prompt: Text("What you call that device (optional)"))
-
-                HStack {
-                    Spacer()
-                    Button {
-                        working = true
-                        Task {
-                            let (key, address) = splitLink(link)
-                            await pair(key, label, address)
-                            working = false
-                            link = ""
-                            label = ""
-                        }
-                    } label: {
-                        ActionIcon.connect.label("Connect")
-                    }
-                    .buttonStyle(AccentButtonStyle())
-                    .disabled(working || link.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-
-                Text("""
-                Connecting here approves that machine to reach this one. The \
-                other machine has to approve this one too, and its own screen \
-                will show this machine waiting.
-                """)
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
             }
             .textFieldStyle(.themed)
+
+            if includeConnect {
+                HStack {
+                    Spacer()
+                    connectButton
+                }
+            }
+
+            Text("""
+            Connecting here approves that machine to reach this one. The \
+            other machine has to approve this one too, and its own screen \
+            will show this machine waiting.
+            """)
+            .font(Theme.caption)
+            .foregroundStyle(Theme.controlGlyph)
+            .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var connectButton: some View {
+        Button {
+            working = true
+            Task {
+                let (key, address) = splitLink(link)
+                await pair(key, label, address)
+                working = false
+                link = ""
+                label = ""
+            }
+        } label: {
+            ActionIcon.connect.label("Connect")
+        }
+        .buttonStyle(AccentButtonStyle())
+        .disabled(working || link.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
     /// `key@host:port` splits at the last @; a bare key has no address, which

@@ -134,6 +134,15 @@ jobs:
       - name: Adjacent headers share one optical baseline
         run: bash scripts/check-chrome-bars.sh
 
+  sheet-surfaces:
+    name: sheet surfaces
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Mac task sheets share one modal surface
+        run: bash scripts/check-mac-sheet-surfaces.sh
+
   # And again: a control in the wrong typeface is a third rule, and three
   # rules sharing one red check is one check that says nothing.
   fonts:

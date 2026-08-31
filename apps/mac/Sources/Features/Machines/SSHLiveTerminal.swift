@@ -702,47 +702,42 @@ struct SSHSnippetRunSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(snippet.title).font(Theme.title3.weight(.semibold))
-                    Text("Values are asked for every time and never saved.")
-                        .font(Theme.caption).foregroundStyle(.secondary)
+        ThemedSheet(
+            title: snippet.title,
+            subtitle: "Values are asked for every time and never saved.",
+            icon: .run,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                ForEach(names, id: \.self) { name in
+                    SSHEditorField(label: name) {
+                        TextField(name, text: Binding(
+                            get: { values[name] ?? "" },
+                            set: { values[name] = $0 }
+                        ))
+                        .textFieldStyle(.themed)
+                    }
                 }
-                Spacer()
-                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close snippet")
+                Text(filled)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.controlGlyph)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            ThemeRule()
-            ForEach(names, id: \.self) { name in
-                SSHEditorField(label: name) {
-                    TextField(name, text: Binding(
-                        get: { values[name] ?? "" },
-                        set: { values[name] = $0 }
-                    ))
-                    .textFieldStyle(.themed)
-                }
+        } actions: {
+            Button("Cancel", .dismiss) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Run it", .run) {
+                onFilled(filled)
+                dismiss()
             }
-            Text(filled)
-                .font(Theme.mono(11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 0)
-            HStack {
-                Button("Cancel", .dismiss) { dismiss() }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .frame(minWidth: Theme.Control.pairedWidth)
-                Spacer()
-                Button("Run it", .run) {
-                    onFilled(filled)
-                    dismiss()
-                }
-                .buttonStyle(AccentButtonStyle())
-                .disabled(!ready)
-            }
+            .buttonStyle(AccentButtonStyle())
+            .disabled(!ready)
+            .keyboardShortcut(.defaultAction)
         }
-        .padding(Theme.Space.l)
-        .sshSheetFrame(width: 480, height: 420)
+        .modalFrame(width: 540, height: 480)
     }
 }
 

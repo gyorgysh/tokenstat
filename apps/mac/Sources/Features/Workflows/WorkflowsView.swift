@@ -693,67 +693,59 @@ struct RunWorkflowSheet: View {
     @State private var working = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Run \(graph.name)")
-                        .font(Theme.font(15, weight: .semibold))
-                    Text("The starting prompt fills {{input}} in every node.")
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
+        ThemedSheet(
+            title: "Run \(graph.name)",
+            subtitle: "The starting prompt fills {{input}} in every node.",
+            icon: .run,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                if let error = model.errorMessage {
+                    Banner(text: error, severity: .warning)
                 }
-                Spacer()
-                InspectorCloseButton(
-                    action: { dismiss() },
-                    help: "Close",
-                    label: "Close"
-                )
+                TextField("Starting prompt", text: $input, axis: .vertical)
+                    .textFieldStyle(.themed)
+                    .lineLimit(3...8)
+                if folders.isEmpty {
+                    Text("Add a workspace first. Agents run in a folder.")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                } else {
+                    AppMenuPicker(
+                        title: "Workspace",
+                        options: [(value: "", label: "Choose a workspace")]
+                            + folders.map { (value: $0.id, label: $0.name) },
+                        selection: $workspaceID
+                    )
+                    Text("Agents and commands run in this workspace.")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                }
             }
-            if let error = model.errorMessage {
-                Banner(text: error, severity: .warning)
-            }
-            TextField("Starting prompt", text: $input, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(3...8)
-            if folders.isEmpty {
-                Text("Add a workspace first. Agents run in a folder.")
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                AppMenuPicker(
-                    title: "Workspace",
-                    options: [(value: "", label: "Choose a workspace")]
-                        + folders.map { (value: $0.id, label: $0.name) },
-                    selection: $workspaceID
-                )
-                Text("Agents and commands run in this workspace.")
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-            }
-            HStack {
-                Spacer()
-                Button("Cancel", .dismiss) { dismiss() }
-                    .buttonStyle(SecondaryButtonStyle())
-                Button(working ? "Starting" : "Run", .run) {
-                    working = true
-                    Task {
-                        await model.run(
-                            graph,
-                            input: input,
-                            workspaceID: workspaceID.isEmpty ? nil : workspaceID
-                        )
-                        working = false
-                        if model.errorMessage == nil {
-                            dismiss()
-                        }
+        } actions: {
+            Button("Cancel", .dismiss) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button(working ? "Starting" : "Run", .run) {
+                working = true
+                Task {
+                    await model.run(
+                        graph,
+                        input: input,
+                        workspaceID: workspaceID.isEmpty ? nil : workspaceID
+                    )
+                    working = false
+                    if model.errorMessage == nil {
+                        dismiss()
                     }
                 }
-                .buttonStyle(AccentButtonStyle())
-                .disabled(working || workspaceID.isEmpty)
             }
+            .buttonStyle(AccentButtonStyle())
+            .disabled(working || workspaceID.isEmpty)
+            .keyboardShortcut(.defaultAction)
         }
-        .padding(Theme.Space.l)
-        .frame(minWidth: 420)
+        .modalFrame(width: 540, height: 440)
         .onAppear {
             workspaceID = graph.workspaceID ?? folders.first?.id ?? ""
         }

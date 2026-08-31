@@ -237,176 +237,166 @@ struct SSHVaultScreen: View {
     @State private var deleting = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Encrypted vault").font(Theme.title3.weight(.semibold))
-                    Text("Hosts, keys and snippets, readable only by your devices, your password and your recovery code.")
-                        .font(Theme.caption).foregroundStyle(.secondary)
+        ThemedSheet(
+            title: "Encrypted vault",
+            subtitle: "Hosts, keys and snippets, readable only by your devices, your password and your recovery code.",
+            icon: .security,
+            scrolls: true,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                if let error = vault.error {
+                    InlineBanner(text: FriendlyError.from(error).message, kind: .danger) {
+                        vault.error = nil
+                    }
                 }
-                Spacer()
-                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault")
-            }
-            .padding(Theme.Space.l)
-
-            ThemeRule()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.l) {
-                    if let error = vault.error {
-                        InlineBanner(text: FriendlyError.from(error).message, kind: .danger) {
-                            vault.error = nil
-                        }
+                // What the last sync could not do. It has its own line on
+                // the library screen, which this sheet covers, so a sync
+                // started here would otherwise report nothing at all.
+                if let library, let problem = library.vaultError {
+                    InlineBanner(text: "Not everything synced. \(FriendlyError.from(problem).message)") {
+                        library.vaultError = nil
                     }
-                    // What the last sync could not do. It has its own line on
-                    // the library screen, which this sheet covers, so a sync
-                    // started here would otherwise report nothing at all.
-                    if let library, let problem = library.vaultError {
-                        InlineBanner(text: "Not everything synced. \(FriendlyError.from(problem).message)") {
-                            library.vaultError = nil
-                        }
-                    }
-                    if vault.unconfirmedRecovery {
+                }
+                if vault.unconfirmedRecovery {
+                    action(
+                        title: "Confirm your recovery code",
+                        detail: "The code has been generated but not written down. It is the only way back in if the password is forgotten and every device is lost.",
+                        button: "Show code",
+                        icon: .reveal,
+                        prominent: true
+                    ) { showingRecovery = true }
+                }
+
+                // Out of reach beats absent. Offering "set up" here is
+                // what sent people into a create that the account then
+                // refused, and the sentence they got back was about a
+                // machine id rather than about the vault they already had.
+                if let unreachable = vault.unreachable {
+                    let friendly = FriendlyError.from(unreachable)
+                    action(
+                        title: friendly.title,
+                        detail: "\(friendly.message)\n\nAnything already saved on this computer still works.",
+                        button: "Try again",
+                        icon: .refresh,
+                        prominent: true
+                    ) { Task { await vault.registerAndRefresh() } }
+                } else if !vault.created, canWrite {
+                    action(
+                        title: "Set up the vault",
+                        detail: "Creates a vault on this account, locked by a password you choose, and one recovery code. Nothing leaves the machine unencrypted.",
+                        button: "Set up vault",
+                        icon: .security,
+                        prominent: true
+                    ) { showingSetup = true }
+                } else if !vault.created {
+                    // A greyed-out "Set up vault" was the whole of this
+                    // screen on a Free plan: the one thing on it did
+                    // nothing when pressed, and pressing a dead button is
+                    // how somebody finds out what their plan does. The
+                    // button that is here now is the one that can help.
+                    action(
+                        title: "Syncing needs Supporter",
+                        detail: "Your servers, folders, keys and snippets are saved on this device and work exactly as they do now. A vault is what carries them to your other computers and phones, encrypted so that only your devices can read them.",
+                        button: "See plans",
+                        icon: .plans,
+                        prominent: true
+                    ) { Plans.open(using: openURL) }
+                } else if vault.needsRecreate {
+                    action(
+                        title: "Recreate the vault",
+                        detail: "It was made before password unlock and cannot be opened by this version. Anything saved on this Mac stays where it is.",
+                        button: "Recreate",
+                        icon: .refresh,
+                        prominent: true
+                    ) { showingSetup = true }
+                } else if vault.locked {
+                    action(
+                        title: "Unlock the vault",
+                        detail: "Enter your vault password to let this computer read and write the account's saved servers and keys.",
+                        button: "Unlock",
+                        icon: .signIn,
+                        prominent: true
+                    ) { showingSetup = true }
+                } else {
+                    status
+                    if canWrite {
+                        // First, because it is the one thing on this
+                        // screen somebody opens it to do. The three below
+                        // it are maintenance.
                         action(
-                            title: "Confirm your recovery code",
-                            detail: "The code has been generated but not written down. It is the only way back in if the password is forgotten and every device is lost.",
-                            button: "Show code",
-                            icon: .reveal,
-                            prominent: true
-                        ) { showingRecovery = true }
-                    }
-
-                    // Out of reach beats absent. Offering "set up" here is
-                    // what sent people into a create that the account then
-                    // refused, and the sentence they got back was about a
-                    // machine id rather than about the vault they already had.
-                    if let unreachable = vault.unreachable {
-                        let friendly = FriendlyError.from(unreachable)
-                        action(
-                            title: friendly.title,
-                            detail: "\(friendly.message)\n\nAnything already saved on this computer still works.",
-                            button: "Try again",
+                            title: "Sync now",
+                            detail: syncDetail,
+                            button: library?.vaultSyncing == true ? "Syncing" : "Sync now",
                             icon: .refresh,
-                            prominent: true
-                        ) { Task { await vault.registerAndRefresh() } }
-                    } else if !vault.created, canWrite {
+                            busy: library?.vaultSyncing == true
+                        ) {
+                            // The count on this screen is the vault's own
+                            // answer, so it has to be asked again or a
+                            // sync that just carried thirty records across
+                            // still reads "0 records".
+                            Task {
+                                await library?.syncNow()
+                                await vault.refresh()
+                            }
+                        }
                         action(
-                            title: "Set up the vault",
-                            detail: "Creates a vault on this account, locked by a password you choose, and one recovery code. Nothing leaves the machine unencrypted.",
-                            button: "Set up vault",
-                            icon: .security,
-                            prominent: true
-                        ) { showingSetup = true }
-                    } else if !vault.created {
-                        // A greyed-out "Set up vault" was the whole of this
-                        // screen on a Free plan: the one thing on it did
-                        // nothing when pressed, and pressing a dead button is
-                        // how somebody finds out what their plan does. The
-                        // button that is here now is the one that can help.
+                            title: "Change the password",
+                            detail: "Ask for the one you use now, then the new one. The records are untouched: only the lock around them changes.",
+                            button: "Change password",
+                            icon: .edit
+                        ) { changingPassword = true }
                         action(
-                            title: "Syncing needs Supporter",
-                            detail: "Your servers, folders, keys and snippets are saved on this device and work exactly as they do now. A vault is what carries them to your other computers and phones, encrypted so that only your devices can read them.",
+                            title: "New recovery code",
+                            detail: "Replaces the current code. The old one stops working as soon as the encrypted update succeeds, so save the new one before closing.",
+                            button: "New recovery code",
+                            icon: .refresh
+                        ) { confirmingRotation = true }
+                        action(
+                            title: "Lock on this Mac",
+                            detail: "This computer will ask for the password again, including after the helper restarts, until you unlock it here.",
+                            button: "Lock",
+                            icon: .signOut
+                        ) { Task { await vault.lock() } }
+                    } else {
+                        // The state a lapsed, refunded or cancelled
+                        // Supporter lands in, and the one this screen used
+                        // to say least about: the vault is still there,
+                        // still readable, and quietly no longer receiving
+                        // anything. Said plainly, with the way back.
+                        action(
+                            title: "This vault has stopped syncing",
+                            detail: "It still exists on your account and this device can still read it, so nothing has been lost. What has stopped is the other direction: servers and keys you add or change here stay on this device until your plan can write to the vault again.",
                             button: "See plans",
                             icon: .plans,
                             prominent: true
                         ) { Plans.open(using: openURL) }
-                    } else if vault.needsRecreate {
-                        action(
-                            title: "Recreate the vault",
-                            detail: "It was made before password unlock and cannot be opened by this version. Anything saved on this Mac stays where it is.",
-                            button: "Recreate",
-                            icon: .refresh,
-                            prominent: true
-                        ) { showingSetup = true }
-                    } else if vault.locked {
-                        action(
-                            title: "Unlock the vault",
-                            detail: "Enter your vault password to let this computer read and write the account's saved servers and keys.",
-                            button: "Unlock",
-                            icon: .signIn,
-                            prominent: true
-                        ) { showingSetup = true }
-                    } else {
-                        status
-                        if canWrite {
-                            // First, because it is the one thing on this
-                            // screen somebody opens it to do. The three below
-                            // it are maintenance.
-                            action(
-                                title: "Sync now",
-                                detail: syncDetail,
-                                button: library?.vaultSyncing == true ? "Syncing" : "Sync now",
-                                icon: .refresh,
-                                busy: library?.vaultSyncing == true
-                            ) {
-                                // The count on this screen is the vault's own
-                                // answer, so it has to be asked again or a
-                                // sync that just carried thirty records across
-                                // still reads "0 records".
-                                Task {
-                                    await library?.syncNow()
-                                    await vault.refresh()
-                                }
-                            }
-                            action(
-                                title: "Change the password",
-                                detail: "Ask for the one you use now, then the new one. The records are untouched: only the lock around them changes.",
-                                button: "Change password",
-                                icon: .edit
-                            ) { changingPassword = true }
-                            action(
-                                title: "New recovery code",
-                                detail: "Replaces the current code. The old one stops working as soon as the encrypted update succeeds, so save the new one before closing.",
-                                button: "New recovery code",
-                                icon: .refresh
-                            ) { confirmingRotation = true }
-                            action(
-                                title: "Lock on this Mac",
-                                detail: "This computer will ask for the password again, including after the helper restarts, until you unlock it here.",
-                                button: "Lock",
-                                icon: .signOut
-                            ) { Task { await vault.lock() } }
-                        } else {
-                            // The state a lapsed, refunded or cancelled
-                            // Supporter lands in, and the one this screen used
-                            // to say least about: the vault is still there,
-                            // still readable, and quietly no longer receiving
-                            // anything. Said plainly, with the way back.
-                            action(
-                                title: "This vault has stopped syncing",
-                                detail: "It still exists on your account and this device can still read it, so nothing has been lost. What has stopped is the other direction: servers and keys you add or change here stay on this device until your plan can write to the vault again.",
-                                button: "See plans",
-                                icon: .plans,
-                                prominent: true
-                            ) { Plans.open(using: openURL) }
-                        }
-                    }
-
-                    // Outside every branch above, on purpose.
-                    //
-                    // This used to sit inside the unlocked case, which put the
-                    // one way out of a forgotten password behind the door it
-                    // is the way out of: a locked device was offered Unlock and
-                    // nothing else, and somebody with no other device and no
-                    // recovery code had no move left. Deleting needs no
-                    // password, no code and no key, so nothing about it
-                    // belonged behind an unlock.
-                    if vault.created || vault.unreachable != nil {
-                        ThemeRule()
-                        action(
-                            title: "Delete the vault and start over",
-                            detail: startOverDetail,
-                            button: "Delete vault",
-                            icon: .delete,
-                            destructive: true
-                        ) { deleting = true }
                     }
                 }
-                .padding(Theme.Space.l)
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Outside every branch above, on purpose.
+                //
+                // This used to sit inside the unlocked case, which put the
+                // one way out of a forgotten password behind the door it
+                // is the way out of: a locked device was offered Unlock and
+                // nothing else, and somebody with no other device and no
+                // recovery code had no move left. Deleting needs no
+                // password, no code and no key, so nothing about it
+                // belonged behind an unlock.
+                if vault.created || vault.unreachable != nil {
+                    ThemeRule()
+                    action(
+                        title: "Delete the vault and start over",
+                        detail: startOverDetail,
+                        button: "Delete vault",
+                        icon: .delete,
+                        destructive: true
+                    ) { deleting = true }
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .sshSheetFrame(width: 560, height: 520)
+        .modalFrame(width: 580, height: 640)
         .sheet(isPresented: $showingSetup) {
             SSHVaultSetupSheet(tier: tier, status: $vault.status, recovery: $vault.recovery)
         }
@@ -576,31 +566,27 @@ struct SSHVaultDeleteSheet: View {
     private var strandedKeys: [SSHKeyRecord] { library?.keysOnlyInTheVault ?? [] }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(deleted ? "The vault is gone" : "Delete the vault and start over")
-                        .font(Theme.title3.weight(.semibold))
-                    Text(deleted
-                        ? "This account has no vault. Nothing saved on this device was touched."
-                        : "For when the password is forgotten and no other device can open it.")
-                        .font(Theme.caption).foregroundStyle(.secondary)
+        ThemedSheet(
+            title: deleted ? "The vault is gone" : "Delete the vault and start over",
+            subtitle: deleted
+                ? "This account has no vault. Nothing saved on this device was touched."
+                : "For when the password is forgotten and no other device can open it.",
+            icon: .delete,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                if deleted { afterBody } else { beforeBody }
+                if let error = vault.error {
+                    Text(FriendlyError.from(error).message)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault deletion")
             }
-            ThemeRule()
-            if deleted { afterBody } else { beforeBody }
-            if let error = vault.error {
-                Text(FriendlyError.from(error).message)
-                    .font(Theme.caption).foregroundStyle(Theme.danger)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
+        } actions: {
             footer
         }
-        .padding(Theme.Space.l)
-        .sshSheetFrame(width: 560, height: 520)
+        .modalFrame(width: 580, height: 560)
         .sheet(isPresented: $creating) {
             SSHVaultSetupSheet(tier: tier, status: $vault.status, recovery: $vault.recovery)
         }
@@ -691,27 +677,26 @@ struct SSHVaultDeleteSheet: View {
         }
     }
 
+    @ViewBuilder
     private var footer: some View {
-        HStack {
-            Button(deleted ? "Not now" : "Cancel", .dismiss) { dismiss() }
-                .buttonStyle(SecondaryButtonStyle())
-                .frame(minWidth: Theme.Control.pairedWidth)
-            Spacer()
-            if deleted, !canWrite {
-                // The same dead button as the one on the screen behind this,
-                // in the one place somebody arrives at having just lost the
-                // vault they were trying to get back into.
-                Button("See plans", .plans) { Plans.open(using: openURL) }
-                    .buttonStyle(AccentButtonStyle())
-            } else if deleted {
-                Button("Create a new vault", .create) { creating = true }
-                    .buttonStyle(AccentButtonStyle())
-                    .disabled(working)
-            } else {
-                Button("Delete vault", .delete) { Task { await run() } }
-                    .buttonStyle(DestructiveButtonStyle())
-                    .disabled(!confirmed || working)
-            }
+        Button(deleted ? "Not now" : "Cancel", .dismiss) { dismiss() }
+            .buttonStyle(SecondaryButtonStyle())
+            .keyboardShortcut(.cancelAction)
+        Spacer()
+        if deleted, !canWrite {
+            // The same dead button as the one on the screen behind this,
+            // in the one place somebody arrives at having just lost the
+            // vault they were trying to get back into.
+            Button("See plans", .plans) { Plans.open(using: openURL) }
+                .buttonStyle(AccentButtonStyle())
+        } else if deleted {
+            Button("Create a new vault", .create) { creating = true }
+                .buttonStyle(AccentButtonStyle())
+                .disabled(working)
+        } else {
+            Button("Delete vault", .delete) { Task { await run() } }
+                .buttonStyle(DestructiveButtonStyle())
+                .disabled(!confirmed || working)
         }
     }
 
@@ -747,49 +732,47 @@ struct SSHVaultPasswordSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Change vault password").font(Theme.title3.weight(.semibold))
-                    Text("Your saved servers and keys stay exactly as they are.")
-                        .font(Theme.caption).foregroundStyle(.secondary)
+        ThemedSheet(
+            title: "Change vault password",
+            subtitle: "Your saved servers and keys stay exactly as they are.",
+            icon: .security,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                SecureField("Current password", text: $current)
+                    .themedFieldBox()
+                SecureField("New password", text: $next)
+                    .themedFieldBox()
+                SecureField("Type the new one again", text: $again)
+                    .themedFieldBox()
+                VaultPasswordRules(password: next)
+                if !again.isEmpty, next != again {
+                    Text("The two do not match.")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.danger)
                 }
-                Spacer()
-                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close password change")
-            }
-            ThemeRule()
-            SecureField("Current password", text: $current)
-                .themedFieldBox()
-            SecureField("New password", text: $next)
-                .themedFieldBox()
-            SecureField("Type the new one again", text: $again)
-                .themedFieldBox()
-            VaultPasswordRules(password: next)
-            if !again.isEmpty, next != again {
-                Text("The two do not match.").font(Theme.caption).foregroundStyle(Theme.danger)
-            }
-            if let error = vault.error {
-                Text(FriendlyError.from(error).message).font(Theme.caption).foregroundStyle(Theme.danger)
-            }
-            Spacer(minLength: 0)
-            HStack {
-                Button("Cancel", .dismiss) { dismiss() }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .frame(minWidth: Theme.Control.pairedWidth)
-                Spacer()
-                Button("Change password", .save) {
-                    Task {
-                        working = true
-                        if await vault.changePassword(current: current, to: next) { dismiss() }
-                        working = false
-                    }
+                if let error = vault.error {
+                    Text(FriendlyError.from(error).message)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.danger)
                 }
-                .buttonStyle(AccentButtonStyle())
-                .frame(minWidth: Theme.Control.pairedWidth)
-                .disabled(!canSave)
             }
+        } actions: {
+            Button("Cancel", .dismiss) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Change password", .save) {
+                Task {
+                    working = true
+                    if await vault.changePassword(current: current, to: next) { dismiss() }
+                    working = false
+                }
+            }
+            .buttonStyle(AccentButtonStyle())
+            .disabled(!canSave)
+            .keyboardShortcut(.defaultAction)
         }
-        .padding(Theme.Space.l)
-        .sshSheetFrame(width: 520, height: 420)
+        .modalFrame(width: 540, height: 520)
     }
 }

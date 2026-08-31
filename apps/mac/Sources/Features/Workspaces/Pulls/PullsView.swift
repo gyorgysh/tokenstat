@@ -390,54 +390,53 @@ struct PullsView: View {
     @ViewBuilder
     private var loginSheet: some View {
         if let login = model.login {
-            VStack(spacing: Theme.Space.l) {
-                ZStack {
-                    Circle().fill(Theme.accent.opacity(0.10)).frame(width: 82, height: 82)
-                    Image(systemName: "link")
-                        .font(Theme.fixed(26, weight: .light))
+            ThemedSheet(
+                title: "Connect GitHub",
+                subtitle: "Enter this one-time code in the GitHub page that just opened.",
+                icon: .connect,
+                onClose: { Task { await model.cancelLogin() } }
+            ) {
+                VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                    Text(login.userCode)
+                        .font(Theme.monoText(30, weight: .semibold, relativeTo: .title))
+                        .tracking(2)
                         .foregroundStyle(Theme.accent)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, Theme.Space.l)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 58)
+                        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                                .strokeBorder(Theme.accent.opacity(0.3))
+                        )
+                    HStack(spacing: Theme.Space.s) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Theme.accent)
+                        Text("Waiting for GitHub…")
+                            .font(Theme.callout)
+                            .foregroundStyle(Theme.controlGlyph)
+                    }
+                    if let error = model.loginError {
+                        Text(FriendlyError.from(error).message)
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                VStack(spacing: Theme.Space.xs) {
-                    Text("Connect GitHub")
-                        .font(Theme.title2.weight(.semibold))
-                    Text("Enter this one-time code in the GitHub page that just opened.")
-                        .font(Theme.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                Text(login.userCode)
-                    .font(Theme.monoText(30, weight: .semibold, relativeTo: .title))
-                    .tracking(2)
-                    .foregroundStyle(Theme.accent)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, Theme.Space.l)
-                    .frame(height: 58)
-                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.accent.opacity(0.3)))
-                HStack(spacing: Theme.Space.s) {
-                    ProgressView().controlSize(.small)
-                    Text("Waiting for GitHub…")
-                        .font(Theme.callout)
-                        .foregroundStyle(.secondary)
-                }
-                if let error = model.loginError {
-                    Text(FriendlyError.from(error).message)
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.danger)
-                        .multilineTextAlignment(.center)
-                }
-                Button("Cancel") { Task { await model.cancelLogin() } }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+            } actions: {
+                Button("Cancel", .dismiss) { Task { await model.cancelLogin() } }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
             }
-            .padding(Theme.Space.xl)
-            .frame(minWidth: 340, idealWidth: 420)
-            .background(Theme.panel)
+            .modalFrame(width: 540, height: 440)
             .task(id: login.userCode) {
                 await model.pollLogin(workspaceID: workspaceID, peer: peer)
             }
             #if !os(macOS)
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
             #endif
         }

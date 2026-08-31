@@ -69,6 +69,9 @@ ALLOWED = [
     # The busy variant of the editor footer's action. It carries a glyph when
     # it is idle; while a request is in flight the spinner stands in for it.
     ("Features/Machines/SSHLibraryEditors.swift", "ProgressView().controlSize(.small)"),
+    # Same busy stand-in on the connect sheet: the idle button carries a
+    # glyph, and the spinner takes its seat while a probe or connect runs.
+    ("Features/Machines/SSHConnectionsView.swift", "ProgressView()"),
     # A segmented tab. The whole surface is the label, like a sidebar row.
     ("Design/Theme.swift", "withAnimation(.snappy(duration: 0.22)) { selection = option }"),
     ("Client/AvatarButton.swift", "Button(action: action)"),

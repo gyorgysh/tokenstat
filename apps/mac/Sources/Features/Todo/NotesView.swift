@@ -299,61 +299,53 @@ struct ConvertNoteSheet: View {
     @State private var folderID = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Make a task")
-                        .font(Theme.font(15, weight: .semibold))
-                    Text("This note becomes a card on the board. Pick a folder, or leave it unassigned.")
+        ThemedSheet(
+            title: "Make a task",
+            subtitle: "This note becomes a card on the board. Pick a folder, or leave it unassigned.",
+            icon: .move,
+            onClose: onCancel
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                Text(note.title)
+                    .font(Theme.callout)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Theme.Space.m)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Theme.cardRadius)
+                            .strokeBorder(Theme.border, lineWidth: 1)
+                    }
+
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Text("Folder")
                         .font(Theme.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                InspectorCloseButton(
-                    action: onCancel,
-                    help: "Close",
-                    label: "Close"
-                )
-            }
-
-            Text(note.title)
-                .font(Theme.font(13))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(Theme.Space.s)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-
-            Text("Folder")
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
-            FlowLayout(spacing: 6, rowSpacing: 6) {
-                ChoiceChip(title: "Unassigned", isSelected: folderID.isEmpty) {
-                    folderID = ""
-                }
-                ForEach(folders) { folder in
-                    ChoiceChip(
-                        title: folder.name,
-                        isSelected: folderID == folder.id
-                    ) {
-                        folderID = folder.id
+                        .foregroundStyle(Theme.controlGlyph)
+                    FlowLayout(spacing: 6, rowSpacing: 6) {
+                        ChoiceChip(title: "Unassigned", isSelected: folderID.isEmpty) {
+                            folderID = ""
+                        }
+                        ForEach(folders) { folder in
+                            ChoiceChip(
+                                title: folder.name,
+                                isSelected: folderID == folder.id
+                            ) {
+                                folderID = folder.id
+                            }
+                        }
                     }
                 }
             }
-
-            HStack {
-                Button("Cancel", .dismiss, role: .cancel) { onCancel() }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Make a task", .move) { onConvert(folderID) }
-                    .buttonStyle(AccentButtonStyle())
-                    .keyboardShortcut(.defaultAction)
-            }
+        } actions: {
+            Button("Cancel", .dismiss, role: .cancel) { onCancel() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Make a task", .move) { onConvert(folderID) }
+                .buttonStyle(AccentButtonStyle())
+                .keyboardShortcut(.defaultAction)
         }
-        .padding(Theme.Space.l)
-        .frame(width: 440)
-        .background(Theme.panel)
+        .modalFrame(width: 520, height: 440)
         .onAppear {
             folderID = note.workspaceID
         }

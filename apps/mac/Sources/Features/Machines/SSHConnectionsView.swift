@@ -161,37 +161,42 @@ struct SSHRecoveryWordsSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            header
-            ThemeRule()
-            switch step {
-            case .read: readStep
-            case .confirm: confirmStep
+        ThemedSheet(
+            title: step == .read ? "Save your recovery code" : "Type the recovery code",
+            subtitle: step == .read
+                ? "This is the only way back if the password is forgotten and every device is lost."
+                : "The code is off screen on purpose. Type it from where you saved it.",
+            icon: .security,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                switch step {
+                case .read: readStep
+                case .confirm: confirmStep
+                }
+                Text("Close without confirming to look at the code later. Discard deletes the vault so you can create a new one.")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 0)
-            footer
+        } actions: {
+            Button("Discard this vault", .delete) { confirmingDiscard = true }
+                .buttonStyle(DestructiveButtonStyle())
+            Spacer()
+            if step == .read {
+                Button("I have saved this", .next) { step = .confirm }
+                    .buttonStyle(AccentButtonStyle())
+            } else {
+                Button("Done", .done) { onConfirmed(); dismiss() }
+                    .buttonStyle(AccentButtonStyle())
+                    .disabled(!codesMatch)
+            }
         }
-        .padding(Theme.Space.l)
-        .sshSheetFrame(width: 560, height: 460)
+        .modalFrame(width: 580, height: 520)
         .confirmationDialog("Delete this vault?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
             Button("Delete vault", role: .destructive) { onDiscard(); dismiss() }
             Button("Cancel", role: .cancel) {}
         } message: { Text("Every encrypted SSH secret in the vault is permanently lost. This cannot be undone.") }
-    }
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(step == .read ? "Save your recovery code" : "Type the recovery code")
-                    .font(Theme.title3.weight(.semibold))
-                Text(step == .read
-                    ? "This is the only way back if the password is forgotten and every device is lost."
-                    : "The code is off screen on purpose. Type it from where you saved it.")
-                    .font(Theme.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close recovery code")
-        }
     }
 
     /// The code's ten groups, which is how it is written and how it is read
@@ -258,28 +263,6 @@ struct SSHRecoveryWordsSheet: View {
             Text("Going back is fine. It clears what was typed, so the code still has to be read from where you saved it.")
                 .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            HStack {
-                Button("Discard this vault", .delete) { confirmingDiscard = true }
-                    .buttonStyle(DestructiveButtonStyle())
-                Spacer()
-                if step == .read {
-                    Button("I have saved this", .next) { step = .confirm }
-                        .buttonStyle(AccentButtonStyle())
-                        .frame(minWidth: Theme.Control.pairedWidth)
-                } else {
-                    Button("Done", .done) { onConfirmed(); dismiss() }
-                        .buttonStyle(AccentButtonStyle())
-                        .frame(minWidth: Theme.Control.pairedWidth)
-                        .disabled(!codesMatch)
-                }
-            }
-            Text("Close without confirming to look at the code later. Discard deletes the vault so you can create a new one.")
-                .font(Theme.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -375,31 +358,30 @@ struct SSHVaultSetupSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(Theme.title3.weight(.semibold))
-                    Text(subtitle).font(Theme.caption).foregroundStyle(.secondary)
+        ThemedSheet(
+            title: title,
+            subtitle: subtitle,
+            icon: .security,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                if stale {
+                    staleBody
+                } else if exists {
+                    unlockBody
+                } else {
+                    createBody
                 }
-                Spacer()
-                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault setup")
+                if let error {
+                    Text(FriendlyError.from(error).message)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.danger)
+                }
             }
-            ThemeRule()
-            if stale {
-                staleBody
-            } else if exists {
-                unlockBody
-            } else {
-                createBody
-            }
-            if let error {
-                Text(FriendlyError.from(error).message).font(Theme.caption).foregroundStyle(Theme.danger)
-            }
-            Spacer(minLength: 0)
+        } actions: {
             footer
         }
-        .padding(Theme.Space.l)
-        .sshSheetFrame(width: 560, height: 460)
+        .modalFrame(width: 580, height: 560)
         .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
             Button("Delete vault", role: .destructive) { Task { await resetVault() } }
             Button("Cancel", role: .cancel) {}
@@ -479,34 +461,33 @@ struct SSHVaultSetupSheet: View {
         }
     }
 
+    @ViewBuilder
     private var footer: some View {
-        HStack {
-            Button("Cancel", .dismiss) { dismiss() }
-                .buttonStyle(SecondaryButtonStyle())
-                .frame(minWidth: Theme.Control.pairedWidth)
-            if exists {
-                // The way out when the password is gone and no other device
-                // can open it. Deleting needs neither, so it is offered here
-                // rather than only after a successful unlock.
-                Button("Delete vault", .delete) { confirmingReset = true }
-                    .buttonStyle(DestructiveButtonStyle())
-                    .disabled(working)
-            }
-            Spacer()
-            // Written out rather than one button with two ternaries. The two
-            // do different things and read differently, and a glyph chosen by
-            // an expression is a glyph nobody can grep for.
-            if exists {
-                Button("Unlock", .signIn) { attempt() }
-                    .buttonStyle(AccentButtonStyle())
-                    .frame(minWidth: Theme.Control.pairedWidth)
-                    .disabled(working)
-            } else if !stale {
-                Button("Create vault", .create) { attempt() }
-                    .buttonStyle(AccentButtonStyle())
-                    .frame(minWidth: Theme.Control.pairedWidth)
-                    .disabled(working)
-            }
+        Button("Cancel", .dismiss) { dismiss() }
+            .buttonStyle(SecondaryButtonStyle())
+            .keyboardShortcut(.cancelAction)
+        if exists {
+            // The way out when the password is gone and no other device
+            // can open it. Deleting needs neither, so it is offered here
+            // rather than only after a successful unlock.
+            Button("Delete vault", .delete) { confirmingReset = true }
+                .buttonStyle(DestructiveButtonStyle())
+                .disabled(working)
+        }
+        Spacer()
+        // Written out rather than one button with two ternaries. The two
+        // do different things and read differently, and a glyph chosen by
+        // an expression is a glyph nobody can grep for.
+        if exists {
+            Button("Unlock", .signIn) { attempt() }
+                .buttonStyle(AccentButtonStyle())
+                .disabled(working)
+                .keyboardShortcut(.defaultAction)
+        } else if !stale {
+            Button("Create vault", .create) { attempt() }
+                .buttonStyle(AccentButtonStyle())
+                .disabled(working)
+                .keyboardShortcut(.defaultAction)
         }
     }
 
@@ -650,54 +631,77 @@ struct SSHConnectForm: View {
     /// the task means leaving is leaving.
     @State private var inFlight: Task<Void, Never>?
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                SSHEditorBody(working: working) {
-                    if let error {
-                        InlineBanner(text: error, kind: .danger) { self.error = nil }
+        ThemedSheet(
+            title: host.label,
+            subtitle: connectSubtitle,
+            icon: .connect,
+            onClose: { cancelAndClose() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                if let error {
+                    InlineBanner(text: error, kind: .danger) { self.error = nil }
+                }
+                if host.hostKeys.isEmpty {
+                    SSHEditorSection(title: "Server identity") {
+                        SSHEditorNote(text: "Verify the server identity before sending credentials.")
+                        if let offeredFingerprint {
+                            SSHEditorField(label: "Fingerprint") {
+                                Text(offeredFingerprint)
+                                    .font(Theme.mono(11))
+                                    .textSelection(.enabled)
+                            }
+                        }
                     }
-                    if host.hostKeys.isEmpty {
-                        SSHEditorSection(title: "Server identity") {
-                            SSHEditorNote(text: "Verify the server identity before sending credentials.")
-                            if let offeredFingerprint {
-                                SSHEditorField(label: "Fingerprint") {
-                                    Text(offeredFingerprint)
-                                        .font(Theme.mono(11))
-                                        .textSelection(.enabled)
-                                }
+                } else {
+                    SSHEditorSection(title: "Authentication") {
+                        SSHEditorField(label: "Use") {
+                            Picker("Authentication", selection: $selectedKeyID) {
+                                Text("Password").tag("")
+                                ForEach(model.keys) { Text($0.label).tag($0.id) }
                             }
                         }
-                    } else {
-                        SSHEditorSection(title: "Authentication") {
-                            SSHEditorField(label: "Use") {
-                                Picker("Authentication", selection: $selectedKeyID) {
-                                    Text("Password").tag("")
-                                    ForEach(model.keys) { Text($0.label).tag($0.id) }
-                                }
+                        if selectedKeyID.isEmpty {
+                            SSHEditorField(label: "Password") {
+                                SecureField("Password", text: $password)
+                                    .themedFieldBox()
                             }
-                            if selectedKeyID.isEmpty {
-                                SSHEditorField(label: "Password") {
-                                    SecureField("Password", text: $password)
-                                        .themedFieldBox()
-                                }
-                            }
-                            SSHEditorNote(text: "Passwords are used for this connection and are never saved.")
                         }
+                        SSHEditorNote(text: "Passwords are used for this connection and are never saved.")
                     }
                 }
-                SSHEditorFooter(
-                    saveTitle: connectActionTitle,
-                    saveIcon: connectActionIcon,
-                    canSave: canContinue,
-                    working: working,
-                    onSave: { start() },
-                    onCancel: { cancelAndClose() },
-                    onDelete: nil
-                )
             }
-            .navigationTitle(host.label)
+            .disabled(working)
+            .opacity(working ? 0.6 : 1)
+            .animation(.easeOut(duration: 0.15), value: working)
+        } actions: {
+            Button("Cancel", .dismiss) { cancelAndClose() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Group {
+                if working {
+                    Button(action: {}) {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Theme.accent)
+                            Text(connectBusyTitle)
+                        }
+                    }
+                } else {
+                    switch connectActionIcon {
+                    case .connect: Button(connectActionTitle, .connect, action: start)
+                    case .security: Button(connectActionTitle, .security, action: start)
+                    case .approve: Button(connectActionTitle, .approve, action: start)
+                    default: Button(connectActionTitle, .connect, action: start)
+                    }
+                }
+            }
+            .buttonStyle(AccentButtonStyle())
+            .disabled(!canContinue || working)
+            .keyboardShortcut(.defaultAction)
         }
-        .sshSheetFrame(width: 500, height: 360)
+        .modalFrame(width: 540, height: 500)
         .onAppear {
             if let credentialID = host.credentialID,
                model.keys.contains(where: { $0.id == credentialID })
@@ -709,9 +713,21 @@ struct SSHConnectForm: View {
         }
     }
 
+    private var connectSubtitle: String {
+        if host.hostKeys.isEmpty {
+            return "Confirm the server fingerprint before sending credentials."
+        }
+        return "Passwords are used for this connection and are never saved."
+    }
+
     private var connectActionTitle: String {
         if !host.hostKeys.isEmpty { return "Connect" }
         return offeredFingerprint == nil ? "Show fingerprint" : "Trust fingerprint"
+    }
+
+    private var connectBusyTitle: String {
+        if !host.hostKeys.isEmpty { return "Connecting…" }
+        return offeredFingerprint == nil ? "Checking…" : "Trusting…"
     }
 
     private var connectActionIcon: ActionIcon {
@@ -830,30 +846,5 @@ struct SSHConnectForm: View {
             guard !Task.isCancelled else { return }
             self.error = error.localizedDescription
         }
-    }
-}
-
-extension View {
-    /// A sheet in the SSH path: a fixed size on the Mac, the whole screen on
-    /// a phone, on the app's own background either way.
-    ///
-    /// The background is part of the frame rather than left to each sheet,
-    /// because leaving it to each sheet is what happened: none of them set
-    /// one, so every SSH sheet resolved to the system's window grey and was
-    /// the only surface in the app that did not look like the app. A sheet is
-    /// a small window, and `presentationBackground` is what paints the window
-    /// rather than the view inside it, so both are set: the fill for the
-    /// content, the presentation for the corners around it.
-    @ViewBuilder
-    func sshSheetFrame(width: CGFloat, height: CGFloat) -> some View {
-        #if os(macOS)
-        frame(width: width, height: height)
-            .background(Theme.background)
-            .presentationBackground(Theme.background)
-        #else
-        frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.background)
-            .presentationBackground(Theme.background)
-        #endif
     }
 }

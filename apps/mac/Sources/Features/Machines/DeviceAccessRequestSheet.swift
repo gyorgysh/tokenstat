@@ -27,53 +27,42 @@ struct DeviceAccessRequestSheet: View {
     @State private var isAnswering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
-            header
-            DeviceAccessScene(kind: request.kind, reduceMotion: reduceMotion)
-                .frame(maxWidth: .infinity)
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Approve only a device you recognise. Everything it reaches is encrypted between the two of them, and you can take this back in Devices at any time.")
-                    .font(Theme.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(scope)
-                    .font(Theme.caption)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+        ThemedSheet(
+            title: request.headline,
+            subtitle: request.detail,
+            icon: request.kind == .screen ? .preview : .reveal,
+            onClose: { answer(view: false, control: false) }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                DeviceAccessScene(kind: request.kind, reduceMotion: reduceMotion)
+                    .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Text("Approve only a device you recognise. Everything it reaches is encrypted between the two of them, and you can take this back in Devices at any time.")
+                        .font(Theme.callout)
+                        .foregroundStyle(Theme.controlGlyph)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(scope)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let error = model.errorMessage {
+                    Text(error)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            if let error = model.errorMessage {
-                Text(error)
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.danger)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
+        } actions: {
             answers
         }
-        .padding(Theme.Space.xl)
         // A minimum, not a size. The copy wraps, and at an accessibility text
         // size a fixed height would put the answers off the bottom of a sheet
         // that cannot scroll.
-        .frame(width: 520)
-        .frame(minHeight: 460)
-        // Painted, not inherited. See the type comment.
-        .background(Theme.panel)
-    }
-
-    private var header: some View {
-        HStack(alignment: .top, spacing: Theme.Space.m) {
-            ActionSeat(icon: request.kind == .screen ? .preview : .reveal, size: 48)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(request.headline)
-                    .font(Theme.title2.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(request.detail)
-                    .font(Theme.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
+        .frame(width: 540)
+        .frame(minHeight: 520)
+        .background(Theme.background)
+        .presentationBackground(Theme.background)
     }
 
     private var scope: String {

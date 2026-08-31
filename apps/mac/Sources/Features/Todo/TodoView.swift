@@ -943,66 +943,70 @@ struct DelegateSheet: View {
     @State private var working = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("Run this task")
-                .font(Theme.font(17, weight: .semibold))
-            Text(card.title)
-                .font(Theme.callout)
-                .foregroundStyle(.secondary)
-            AppMenuPicker(
-                title: "Agent",
-                options: model.pickerBackends(keeping: card.backend).map { (value: $0.id, label: $0.label) },
-                selection: $backendID
-            )
-            AppMenuPicker(
-                title: "Workspace",
-                options: [(value: "", label: "Choose workspace")]
-                    + folders.map { (value: $0.id, label: $0.name) },
-                selection: $workspaceID
-            )
-            if let backend = model.backends.first(where: { $0.id == backendID }),
-               !backend.models.isEmpty || !backend.efforts.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    if !backend.models.isEmpty {
-                        FavoriteModelPicker(
-                            backendID: backend.id,
-                            models: backend.models,
-                            extra: modelChoice,
-                            selection: $modelChoice
-                        )
-                    }
-                    if !backend.efforts.isEmpty {
-                        AppMenuPicker(
-                            title: "Effort",
-                            options: [(value: "", label: "Default")]
-                                + backend.efforts.map { (value: $0, label: $0) },
-                            selection: $effortChoice
-                        )
+        ThemedSheet(
+            title: "Run this task",
+            subtitle: card.title,
+            icon: .run,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                AppMenuPicker(
+                    title: "Agent",
+                    options: model.pickerBackends(keeping: card.backend).map { (value: $0.id, label: $0.label) },
+                    selection: $backendID
+                )
+                AppMenuPicker(
+                    title: "Workspace",
+                    options: [(value: "", label: "Choose workspace")]
+                        + folders.map { (value: $0.id, label: $0.name) },
+                    selection: $workspaceID
+                )
+                if let backend = model.backends.first(where: { $0.id == backendID }),
+                   !backend.models.isEmpty || !backend.efforts.isEmpty {
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        if !backend.models.isEmpty {
+                            FavoriteModelPicker(
+                                backendID: backend.id,
+                                models: backend.models,
+                                extra: modelChoice,
+                                selection: $modelChoice
+                            )
+                        }
+                        if !backend.efforts.isEmpty {
+                            AppMenuPicker(
+                                title: "Effort",
+                                options: [(value: "", label: "Default")]
+                                    + backend.efforts.map { (value: $0, label: $0) },
+                                selection: $effortChoice
+                            )
+                        }
                     }
                 }
+                HStack {
+                    Text("Time limit")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                    TextField("180", text: $budgetMinutes)
+                        .themedFieldBox(small: true)
+                        .frame(width: 64)
+                        .disabled(noTimeLimit)
+                    Text("minutes")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                    BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
+                }
             }
-            HStack {
-                Text("Time limit")
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-                TextField("180", text: $budgetMinutes)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 56)
-                    .disabled(noTimeLimit)
-                Text("minutes")
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-                BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
-            }
+        } actions: {
+            Button("Cancel", .dismiss) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Spacer()
             TaskRunBar(canRun: canRun, running: working) { placement in
                 working = true
                 Task { await run(inFront: placement == .front) }
             }
-            Button("Cancel", .dismiss) { dismiss() }
-                .buttonStyle(SecondaryButtonStyle())
         }
-        .padding(Theme.Space.l)
-        .frame(width: 420)
+        .modalFrame(width: 540, height: 520)
         .onAppear {
             backendID = card.backend
             workspaceID = card.workspaceID
