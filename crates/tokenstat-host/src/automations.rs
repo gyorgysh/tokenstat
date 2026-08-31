@@ -397,9 +397,12 @@ pub struct ChatLaunch<'a> {
     /// `plan` or `execute`. Plan uses a native CLI flag where the backend has
     /// one. Backends without a flag keep their existing prompt path.
     pub mode: &'a str,
-    /// Absolute path of this daemon for lifecycle hooks. Relative PATH lookup
-    /// is wrong for launchd and for the private environment of an agent CLI.
-    pub hook_command: Option<&'a str>,
+    /// Absolute path of this daemon, which is also the gate hook. `None` in
+    /// Bypass, where nothing is asked. `chat_gate` turns it into a runnable,
+    /// shell-quoted command line: the path contains a space on every Mac, and
+    /// building that line by interpolation is what left Standard mode unable
+    /// to stop a single tool call.
+    pub hook_helper: Option<&'a Path>,
     /// The conversation's standing rules: its persona brief and how to hand a
     /// file back. Delivered through a backend's own system-prompt flag where
     /// one exists, and prepended to the turn in a tagged block where one does
@@ -490,7 +493,19 @@ pub fn chat_agent_command(
     // approval channel decides otherwise, it must not inherit those flags.
     // Removing them means a CLI that cannot prompt headlessly fails closed
     // instead of silently editing the workspace.
-    if !launch.bypass || plan {
+    // Agy is the exception, and it is deliberate. Its own permission layer
+    // *auto-denies* anything it would have to prompt for in headless mode,
+    // after the hook has already run, so a guarded turn that keeps this flag
+    // reaches the person for an answer and is then refused anyway by a
+    // decision nobody made. Handing agy the flag puts tokenstat's `PreToolUse`
+    // hook in sole charge, which is the same arrangement codex
+    // (`--dangerously-bypass-hook-trust`) and opencode (`permission: allow`
+    // plus a plugin) already run under. It is only safe *because* the hook is
+    // installed: `write_agy_home` is fallible and its failure aborts the turn
+    // before anything spawns, so there is no path where the flag ships without
+    // the gate behind it.
+    let agy_gated = backend == "agy" && !plan && launch.hook_helper.is_some();
+    if (!launch.bypass || plan) && !agy_gated {
         match backend {
             "claude" | "agy" => argv.retain(|arg| arg != "--dangerously-skip-permissions"),
             "codex" => argv.retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox"),
@@ -506,15 +521,26 @@ pub fn chat_agent_command(
         // value, which is the error a Standard grok turn printed instead of
         // answering.
         argv.retain(|arg| arg != "--permission-mode" && arg != "bypassPermissions");
+        // `default` rather than `dontAsk` for a guarded turn. Grok discovers
+        // hooks from `$GROK_HOME`, which the caller now points at a private
+        // directory holding ours, so a Standard turn has a real gate and no
+        // longer has to decide everything at launch. `dontAsk` would deny
+        // whatever it would otherwise have to prompt for, which is what made
+        // grok look like it never asked: it never could.
         let permission = if plan {
             "plan"
         } else if launch.bypass {
             "bypassPermissions"
+        } else if launch.hook_helper.is_some() {
+            "default"
         } else {
             "dontAsk"
         };
         extra.extend(["--permission-mode".into(), permission.into()]);
-        if permission == "dontAsk" {
+        // Saved always-allow answers still ride as rules. A rule that matches
+        // is approved without a hook round trip, so "always allow" stays
+        // instant rather than becoming a card the person answers twice.
+        if !launch.bypass && !plan {
             for rule in launch.grok_allow_rules {
                 extra.extend(["--allow".into(), rule.clone()]);
             }
@@ -544,28 +570,21 @@ pub fn chat_agent_command(
             _ => {}
         }
     }
-    if backend == "claude" && !launch.bypass {
-        if let Some(command) = launch.hook_command {
-            // Claude accepts settings JSON directly. The hook itself owns the
-            // fail-closed decision; keeping this inline avoids a settings file
-            // in the person's project or home directory.
-            let settings = serde_json::json!({
-                "hooks": {
-                    "PreToolUse": [{
-                        "matcher": ".*",
-                        "hooks": [{"type": "command", "command": format!("{command} hook claude pre")}]
-                    }],
-                    "PostToolUse": [{
-                        "matcher": ".*",
-                        "hooks": [{"type": "command", "command": format!("{command} hook claude post")}]
-                    }]
-                }
-            })
-            .to_string();
-            insert_flags(&mut argv, ["--settings".into(), settings]);
-        }
+    if backend == "claude"
+        && !launch.bypass
+        && let Some(helper) = launch.hook_helper
+    {
+        // Claude accepts its settings document directly as one argument, so
+        // the gate needs no file in the person's project or home directory.
+        insert_flags(
+            &mut argv,
+            [
+                "--settings".into(),
+                crate::chat_gate::claude_settings(helper),
+            ],
+        );
     }
-    if backend == "codex" && !launch.bypass && launch.hook_command.is_some() {
+    if backend == "codex" && !launch.bypass && launch.hook_helper.is_some() {
         // Codex otherwise silently skips an untrusted hook. The caller gives
         // it a private, tokenstat-owned CODEX_HOME, so this flag is safe only
         // beside that setup and must never be used for the user's home.
@@ -2212,7 +2231,7 @@ mod tests {
                     resume: None,
                     bypass: true,
                     mode: "execute",
-                    hook_command: None,
+                    hook_helper: None,
                     system_append: Some("You explain Rust errors patiently."),
                     agy_customization_dir: None,
                     grok_allow_rules: &[],
@@ -2246,6 +2265,69 @@ mod tests {
         assert!(!codex.iter().any(|arg| arg == "--append-system-prompt"));
     }
 
+    /// Agy keeps `--dangerously-skip-permissions` in a guarded turn, and that
+    /// looks alarming until you know why: its own permission layer auto-denies
+    /// anything it would have to prompt for in headless mode, *after* the hook
+    /// has run. Without the flag a person is asked, answers Allow, and the
+    /// tool is refused anyway. The hook is the gate; this asserts it is
+    /// present whenever the flag is.
+    #[test]
+    fn agy_keeps_its_own_gate_out_of_the_way_only_when_ours_is_installed() {
+        let home = std::path::PathBuf::from("/tmp/agy-hook");
+        let launch = |helper: Option<&'static str>, mode: &'static str| {
+            chat_agent_command(
+                "agy",
+                "inspect this",
+                None,
+                None,
+                DEFAULT_BUDGET_SECONDS,
+                ChatLaunch {
+                    resume: None,
+                    bypass: false,
+                    mode,
+                    hook_helper: helper.map(Path::new),
+                    system_append: None,
+                    agy_customization_dir: Some(&home),
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap()
+        };
+
+        let guarded = launch(Some("/tmp/tokenstat-hostd"), "execute");
+        assert!(
+            guarded
+                .iter()
+                .any(|arg| arg == "--dangerously-skip-permissions"),
+            "a guarded agy turn must not be auto-denied by agy's own headless rule"
+        );
+        assert!(
+            guarded
+                .windows(2)
+                .any(|pair| pair[0] == "--add-dir" && pair[1] == home.display().to_string()),
+            "the flag is only safe beside tokenstat's own hook"
+        );
+
+        // No hook, no flag. Nothing may run ungated.
+        let ungated = launch(None, "execute");
+        assert!(
+            !ungated
+                .iter()
+                .any(|arg| arg == "--dangerously-skip-permissions"),
+            "without a hook there is no gate, so nothing may bypass agy's own"
+        );
+
+        // Plan mode is a read-only promise agy enforces itself. Leave it alone.
+        let planning = launch(Some("/tmp/tokenstat-hostd"), "plan");
+        assert!(
+            !planning
+                .iter()
+                .any(|arg| arg == "--dangerously-skip-permissions"),
+            "plan mode keeps agy's own restraint"
+        );
+    }
+
     #[test]
     fn chat_defaults_to_no_bypass_flags() {
         let claude = chat_agent_command(
@@ -2258,7 +2340,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 mode: "execute",
-                hook_command: None,
+                hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2281,9 +2363,9 @@ mod tests {
                 resume: None,
                 bypass: false,
                 mode: "execute",
-                hook_command: Some(
+                hook_helper: Some(Path::new(
                     "/Applications/Tokenstat.app/Contents/Resources/tokenstat-hostd",
-                ),
+                )),
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2310,7 +2392,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 mode: "execute",
-                hook_command: None,
+                hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2333,7 +2415,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 mode: "execute",
-                hook_command: Some("/tmp/tokenstat-hostd"),
+                hook_helper: Some(Path::new("/tmp/tokenstat-hostd")),
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2356,7 +2438,7 @@ mod tests {
                 resume: None,
                 bypass: true,
                 mode: "execute",
-                hook_command: None,
+                hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2380,7 +2462,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 mode: "execute",
-                hook_command: Some("/tmp/tokenstat-hostd"),
+                hook_helper: Some(Path::new("/tmp/tokenstat-hostd")),
                 system_append: None,
                 agy_customization_dir: Some(agy_home),
                 grok_allow_rules: &[],
@@ -2404,7 +2486,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 mode: "execute",
-                hook_command: None,
+                hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &rules,
@@ -2439,7 +2521,7 @@ mod tests {
                 resume: Some("sess-1"),
                 bypass: false,
                 mode: "execute",
-                hook_command: None,
+                hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2467,7 +2549,7 @@ mod tests {
                 resume: None,
                 bypass: true,
                 mode: "execute",
-                hook_command: None,
+                hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2494,7 +2576,7 @@ mod tests {
                     resume: None,
                     bypass: false,
                     mode: "plan",
-                    hook_command: None,
+                    hook_helper: None,
                     system_append: None,
                     agy_customization_dir: None,
                     grok_allow_rules: &[],
@@ -2560,7 +2642,7 @@ mod tests {
                     resume: None,
                     bypass: true,
                     mode: "plan",
-                    hook_command: None,
+                    hook_helper: None,
                     system_append: None,
                     agy_customization_dir: None,
                     grok_allow_rules: &[],
@@ -2594,7 +2676,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 mode: "execute",
-                hook_command: None,
+                hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2617,7 +2699,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 mode: "execute",
-                hook_command: None,
+                hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],

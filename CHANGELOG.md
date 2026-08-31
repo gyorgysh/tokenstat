@@ -34,23 +34,32 @@ desktop and Android builds remain previews. Newest first.
 - The Windows preview gains the pull-request list, conversation, lazy diff,
   checks, review actions, connection status, and branch controls in WinUI.
 - A workspace Chat section talks to the agents already installed for that
-  folder. Conversations persist and resume. Default mode asks before a tool
-  runs, on the backends that can ask, and says so when a backend cannot.
-  The composer sits at the bottom of the conversation: Return sends,
-  Shift+Return inserts a newline, Escape stops a running turn, and one
-  field picks agent, model and effort. Plan, execute and bypass sit as
-  pills beside it. Full setup stays in the inspector (Setup on the phone).
-  A grok Standard turn keeps its output format, Cursor without a named
-  model uses Auto, and a tool call no longer blanks the transcript or
-  stays Running after the turn ends. A message sends what you wrote and
-  nothing else: an agent's own brief travels as a system prompt where its
-  CLI has one, so a conversation no longer opens by describing tokenstat's
-  own plumbing. Instructions in the inspector holds that brief, editable,
-  beside the one rule tokenstat adds and the exact words it sends. The
-  phone is a list first, then a
-  transcript with a glass composer. Windows has the same list, composer,
-  transcript, approvals and cost meter. Sidebar badges show how many
-  chats a folder holds. Token cost is a quiet in/out bar, and a
+  folder. Conversations persist and resume. The composer sits at the bottom
+  of the conversation: Return sends, Shift+Return inserts a newline, Escape
+  stops a running turn, and one field picks agent, model and effort. Plan,
+  execute and bypass sit as pills beside it. Full setup stays in the
+  inspector (Setup on the phone). A message sends what you wrote and nothing
+  else: an agent's own brief travels as a system prompt where its CLI has
+  one, so a conversation no longer opens by describing tokenstat's own
+  plumbing. Instructions in the inspector holds that brief, editable, beside
+  the one rule tokenstat adds and the exact words it sends.
+- Default mode in Chat really does stop a tool and ask. The card appears in
+  the conversation where the agent paused, the composer is replaced by the
+  question so a waiting turn cannot be missed, and Deny refuses the call
+  rather than letting it through. Claude Code, Codex, Grok Build,
+  Antigravity and OpenCode all ask; Cursor cannot, and its chats say so
+  instead of offering a switch that does nothing. A card shows how long is
+  left and refuses on its own rather than holding a turn open forever, and
+  the answer stays on the conversation afterwards. Always allow remembers
+  one tool or one command prefix, for that conversation only, and the
+  inspector lists what it remembered. A paired phone can answer the same
+  card, and whichever surface answers first wins.
+- Chat also brings a grok Standard turn that keeps its output format, Cursor
+  without a named model using Auto, and a tool call that no longer blanks
+  the transcript or stays Running after the turn ends. The phone is a list
+  first, then a transcript with a glass composer. Windows has the same list,
+  composer, transcript, approvals and cost meter. Sidebar badges show how
+  many chats a folder holds. Token cost is a quiet in/out bar, and a
   plan-covered turn is not drawn as money charged.
 
 ### Changed

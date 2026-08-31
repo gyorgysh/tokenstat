@@ -618,6 +618,7 @@ struct ChatDisplayItem: Identifiable {
     static func coalesce(_ events: [ChatTimelineEvent], defaultBackend: String? = nil) -> [ChatDisplayItem] {
         var items: [ChatDisplayItem] = []
         var toolIndex: [String: Int] = [:]
+        var approvalIndex: [String: Int] = [:]
         var text = ""
         var textID = ""
         var textBackend: String?
@@ -675,7 +676,18 @@ struct ChatDisplayItem: Identifiable {
             if let approval = event.approval {
                 flushText()
                 flushThinking()
-                items.append(ChatDisplayItem(id: "approval-\(approval.id)", kind: .approval(approval)))
+                // The timeline records an approval twice: once when the agent
+                // paused, and again with the answer. Keep the row in the place
+                // it happened and let the later state win, so a conversation
+                // reopened tomorrow shows the outcome rather than a question
+                // that looks like it is still waiting.
+                let rowID = "approval-\(approval.id)"
+                if let at = approvalIndex[rowID] {
+                    items[at] = ChatDisplayItem(id: rowID, kind: .approval(approval))
+                } else {
+                    approvalIndex[rowID] = items.count
+                    items.append(ChatDisplayItem(id: rowID, kind: .approval(approval)))
+                }
                 continue
             }
             guard let agent = event.event else { continue }
@@ -835,11 +847,11 @@ enum ChatGateCopy {
         }
         switch tier {
         case "full":
-            return "tokenstat asks before every tool action."
+            return "tokenstat asks before every tool action, and the agent waits for your answer."
         case "rules":
             return "Saved permission rules run. Anything else is denied."
         case "bypassOnly":
-            return "This backend has no tokenstat approval gate. Use Bypass only if you intend that."
+            return "This backend has no tokenstat approval gate, so this chat can only run without asking."
         default:
             return "Checking this backend's permission support."
         }

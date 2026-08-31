@@ -7,6 +7,8 @@ struct ChatView: View {
     let workspaceID: String
     var workspaceName: String? = nil
     @State private var draft = ""
+    /// A row the transcript should jump to, set by the pending-approval bar.
+    @State private var scrollTarget: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -20,19 +22,35 @@ struct ChatView: View {
             #endif
             if let chat = model.selected {
                 transcript(chat)
-                ChatComposer(
-                    model: model,
-                    chat: chat,
-                    draft: $draft,
-                    attachments: model.attachments,
-                    previews: model.attachmentPreviews,
-                    running: model.busy,
-                    placeholder: "Ask about \(workspaceName ?? "this folder")",
-                    onSend: { submit(from: chat) },
-                    onStop: { Task { await model.stop() } },
-                    onAttach: { item in await model.attach(item) },
-                    onRemove: { model.removeAttachment($0) }
-                )
+                // A blocked turn takes the composer's place rather than
+                // sitting beside it. There is nothing useful to type while an
+                // agent is parked, and removing the field is the plainest way
+                // to say what the conversation is actually waiting for.
+                if model.approvals.isEmpty {
+                    ChatComposer(
+                        model: model,
+                        chat: chat,
+                        draft: $draft,
+                        attachments: model.attachments,
+                        previews: model.attachmentPreviews,
+                        running: model.busy,
+                        placeholder: "Ask about \(workspaceName ?? "this folder")",
+                        onSend: { submit(from: chat) },
+                        onStop: { Task { await model.stop() } },
+                        onAttach: { item in await model.attach(item) },
+                        onRemove: { model.removeAttachment($0) }
+                    )
+                } else {
+                    ChatApprovalBar(
+                        approvals: model.approvals,
+                        resolve: { approval, choice in
+                            Task { await model.resolve(approval, choice: choice) }
+                        },
+                        showInTranscript: { approval in
+                            scrollTarget = "approval-\(approval.id)"
+                        }
+                    )
+                }
             } else {
                 empty
             }
@@ -114,6 +132,18 @@ struct ChatView: View {
             .onChange(of: chat.running) { _, _ in
                 scrollToLatest(proxy)
             }
+            // A request that arrives while a reply is still streaming would
+            // otherwise be pushed off the top of the page before anyone saw
+            // it. Bring the card to them.
+            .onChange(of: model.approvals.first?.id) { _, id in
+                guard let id else { return }
+                scrollTo("approval-\(id)", proxy)
+            }
+            .onChange(of: scrollTarget) { _, target in
+                guard let target else { return }
+                scrollTo(target, proxy)
+                scrollTarget = nil
+            }
             .onAppear { scrollToLatest(proxy) }
         }
     }
@@ -134,13 +164,19 @@ struct ChatView: View {
     #endif
 
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
-        let animated = !reduceMotion
-        if animated {
-            withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo("chat-bottom", anchor: .bottom)
-            }
+        // A pending request owns the view. Streaming text must not scroll it
+        // back out from under somebody who is reading it to decide.
+        guard model.approvals.isEmpty else { return }
+        scrollTo("chat-bottom", proxy)
+    }
+
+    private func scrollTo(_ id: String, _ proxy: ScrollViewProxy) {
+        if reduceMotion {
+            proxy.scrollTo(id, anchor: .bottom)
         } else {
-            proxy.scrollTo("chat-bottom", anchor: .bottom)
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(id, anchor: .bottom)
+            }
         }
     }
 

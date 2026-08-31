@@ -281,27 +281,42 @@ private struct ChatEditRow: View {
     }
 }
 
-/// A decision stays where the agent stopped, so the person can see the tool,
-/// its target and the surrounding response without losing their reading place.
+/// One tool call, waiting on a person, in the place it happened.
+///
+/// Inline rather than a sheet. A modal over a streaming transcript loses your
+/// place, and a prompt that can only be answered one way is how a turn wedges.
+/// The card carries a countdown because the wait is bounded: the backend gives
+/// up after `chat_gate::GATE_TIMEOUT_SECONDS` and the request is refused, and
+/// a deadline nobody can see is a trap rather than a safeguard.
 struct ChatApprovalCard: View {
     let approval: ChatApproval
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
 
+    @State private var now = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
-                Image(systemName: "hand.raised.fill")
-                    .foregroundStyle(Theme.accent)
-                Text(isPending ? "Permission needed" : "Permission answered")
+                Image(systemName: outcome.symbol)
+                    .foregroundStyle(outcome.tint)
+                Text(outcome.title)
                     .font(Theme.callout.weight(.semibold))
-                Spacer()
+                Spacer(minLength: Theme.Space.s)
+                if isPending, let remaining = remainingText {
+                    Text(remaining)
+                        .font(Theme.numeric(11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .accessibilityLabel("\(remaining) left to answer")
+                }
                 Text(approval.verb)
                     .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(outcome.tint)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Theme.accentSoft, in: Capsule())
+                    .background(outcome.tint.opacity(0.12), in: Capsule())
             }
             Text(approval.preview)
                 .font(Theme.monoText(11))
@@ -309,16 +324,18 @@ struct ChatApprovalCard: View {
                 .foregroundStyle(.primary)
                 .lineLimit(4)
             if isPending {
-                HStack(spacing: Theme.Space.s) {
-                    Button("Allow", .allow) { resolve(approval, "allow") }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
-                    Button("Always allow", .allow) { resolve(approval, "allowAlways") }
-                        .buttonStyle(AccentButtonStyle(small: true))
-                    Button("Deny", .deny, role: .destructive) { resolve(approval, "deny") }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
+                ChatApprovalActions(approval: approval, resolve: resolve)
+                if let prefix = approval.shellPrefix {
+                    Text("Always allow remembers \(prefix) for this chat only.")
+                        .font(Theme.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text("Always allow remembers \(approval.verb) for this chat only.")
+                        .font(Theme.caption)
+                        .foregroundStyle(.tertiary)
                 }
             } else {
-                Label("This request is no longer waiting.", systemImage: ActionIcon.allow.symbol)
+                Text(outcome.detail)
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
@@ -327,7 +344,99 @@ struct ChatApprovalCard: View {
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(isPending ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1)
+                .strokeBorder(
+                    isPending ? outcome.tint.opacity(0.55) : Theme.border,
+                    lineWidth: isPending ? 1.5 : 1
+                )
         }
+        .task(id: isPending) {
+            guard isPending else { return }
+            while !Task.isCancelled {
+                now = Date()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    private var outcome: ChatApprovalOutcome {
+        ChatApprovalOutcome(approval: approval, isPending: isPending)
+    }
+
+    private var remainingText: String? {
+        let seconds = Int((Double(approval.expiresAtMs) / 1000 - now.timeIntervalSince1970).rounded())
+        guard seconds > 0 else { return nil }
+        return seconds >= 60 ? "\(seconds / 60)m \(seconds % 60)s" : "\(seconds)s"
+    }
+}
+
+/// Allow, Always allow, Deny. One row, one meaning each, shared by the card in
+/// the transcript and the bar pinned above the composer so the two can never
+/// offer different answers to the same question.
+struct ChatApprovalActions: View {
+    let approval: ChatApproval
+    let resolve: (ChatApproval, String) -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            Button("Allow", .allow) { resolve(approval, "allow") }
+                .buttonStyle(AccentButtonStyle(small: true))
+                .keyboardShortcut(.return, modifiers: [.command])
+            Button("Always allow", .allow) { resolve(approval, "allowAlways") }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+            Spacer(minLength: 0)
+            Button("Deny", .deny, role: .destructive) { resolve(approval, "deny") }
+                .buttonStyle(DestructiveButtonStyle(small: true))
+        }
+    }
+}
+
+/// How an approval reads once it has an answer.
+///
+/// Named states rather than "no longer waiting". Somebody scrolling back wants
+/// to know what happened, and "this was denied" and "nobody was here in time"
+/// are different things that both stopped the same tool.
+struct ChatApprovalOutcome {
+    let title: String
+    let detail: String
+    let symbol: String
+    let tint: Color
+
+    init(approval: ChatApproval, isPending: Bool) {
+        if isPending {
+            self.init(
+                title: "Permission needed",
+                detail: "",
+                symbol: "hand.raised.fill",
+                tint: Theme.accent
+            )
+        } else if approval.decision == "allow" {
+            self.init(
+                title: "Allowed",
+                detail: "You allowed this and the agent went ahead.",
+                symbol: ActionIcon.allow.symbol,
+                tint: Theme.accent
+            )
+        } else if approval.decision == "deny" {
+            self.init(
+                title: "Denied",
+                detail: "This was refused. The agent was told not to retry it.",
+                symbol: ActionIcon.deny.symbol,
+                tint: Theme.danger
+            )
+        } else {
+            self.init(
+                title: "Expired",
+                detail: "Nobody answered in time, so the agent was refused.",
+                symbol: "clock",
+                tint: Theme.warning
+            )
+        }
+    }
+
+    private init(title: String, detail: String, symbol: String, tint: Color) {
+        self.title = title
+        self.detail = detail
+        self.symbol = symbol
+        self.tint = tint
     }
 }

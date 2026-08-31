@@ -22,7 +22,13 @@ use crate::transcript::{Event, Parser};
 
 const EVENTS_CAP: u64 = 1024 * 1024;
 const ATTACHMENT_CAP: usize = 12 * 1024 * 1024;
-const APPROVAL_TTL_MS: i64 = 10 * 60 * 1000;
+/// How long a pending approval stays answerable.
+///
+/// Tied to the hook's own deadline rather than picked. The hook stops waiting
+/// at [`crate::chat_gate::GATE_DEADLINE_SECONDS`] and denies, so an approval
+/// that outlived that is a card which can no longer do anything: pressing
+/// Allow on it would report success while the tool had already been refused.
+const APPROVAL_TTL_MS: i64 = crate::chat_gate::GATE_DEADLINE_SECONDS as i64 * 1000;
 const POLL: Duration = Duration::from_millis(400);
 static APPROVAL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -538,6 +544,18 @@ impl Store {
             drop(chats);
             self.save()?;
         }
+        // Write the answer back to the timeline. The queue holds the live
+        // decision only until the request expires, so without this a
+        // conversation reopened tomorrow shows a card that looks like it is
+        // still waiting for an answer somebody already gave. The transcript is
+        // where "what happened here" has to survive.
+        self.append(
+            &out.conversation_id,
+            &StoredEvent::Approval {
+                approval: out.clone(),
+                at_ms: now_ms(),
+            },
+        )?;
         Ok(out)
     }
 
@@ -895,10 +913,12 @@ impl Store {
         let system_append = standing_is_due(&chat, &composed.standing_fingerprint)
             .then_some(composed.standing_text.as_str());
         let prompt = composed.user_text.as_str();
-        let hook_command = if chat.autonomy == "standard" {
-            std::env::current_exe()
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_owned))
+        // The daemon asks its own tool calls back through itself. A relative
+        // PATH lookup would be wrong under launchd and inside the private
+        // environment an agent CLI runs in, so this is the absolute path and
+        // `chat_gate` is what turns it into a runnable command line.
+        let helper = if chat.autonomy == "standard" {
+            Some(std::env::current_exe().map_err(|_| "cannot locate the tokenstat host hook")?)
         } else {
             None
         };
@@ -915,7 +935,7 @@ impl Store {
                 resume: resume_token,
                 bypass: chat.autonomy == "bypass",
                 mode: &chat.mode,
-                hook_command: hook_command.as_deref(),
+                hook_helper: helper.as_deref(),
                 system_append,
                 agy_customization_dir: agy_customization_dir.as_deref(),
                 grok_allow_rules: &grok_allow_rules,
@@ -944,21 +964,45 @@ impl Store {
                 "TOKENSTAT_CHAT_TURN_FILE".into(),
                 turn_file.display().to_string(),
             ));
+            // The hook must decide before the CLI's own timeout kills it. A
+            // killed hook is a non-blocking error to every one of these
+            // backends, which means the tool runs.
+            environment.push((
+                crate::chat_gate::DEADLINE_ENV.into(),
+                crate::chat_gate::GATE_DEADLINE_SECONDS.to_string(),
+            ));
         }
-        let codex_hook_home = if chat.backend == "codex" && chat.autonomy == "standard" {
-            let home = self.write_codex_hook_home(id, hook_command.as_deref())?;
+        let codex_hook_home = if chat.backend == "codex"
+            && let Some(helper) = &helper
+        {
+            let home = self.root.join(id).join("codex-hook");
+            crate::chat_gate::write_codex_home(&home, helper)?;
             environment.push(("CODEX_HOME".into(), home.display().to_string()));
             Some(home)
         } else {
             None
         };
-        let agy_hook_home = if chat.backend == "agy" && chat.autonomy == "standard" {
-            Some(self.write_agy_hook_home(id, hook_command.as_deref())?)
+        // Grok is the one home that outlives its turn. Its sessions live under
+        // `$GROK_HOME`, so rebuilding it per turn would take `--resume` with
+        // it and every message would start a new conversation.
+        if chat.backend == "grok"
+            && let Some(helper) = &helper
+        {
+            let home = self.grok_hook_home(id);
+            crate::chat_gate::write_grok_home(&home, helper)?;
+            environment.push(("GROK_HOME".into(), home.display().to_string()));
+        }
+        let agy_hook_home = if chat.backend == "agy"
+            && let Some(helper) = &helper
+        {
+            let home = self.agy_hook_home(id);
+            crate::chat_gate::write_agy_home(&home, helper)?;
+            Some(home)
         } else {
             None
         };
         let opencode_hook_home = if matches!(chat.backend.as_str(), "opencode" | "opencode2")
-            && chat.autonomy == "standard"
+            && let Some(helper) = &helper
         {
             let (home, plugin) = self.write_opencode_hook_home(id)?;
             environment.push(("OPENCODE_CONFIG_DIR".into(), home.display().to_string()));
@@ -975,11 +1019,13 @@ impl Store {
                 })
                 .to_string(),
             ));
+            // The raw path, not a command line. The plugin spawns this as
+            // argv rather than through a shell, so the quoting every other
+            // backend needs would become part of the filename here. The
+            // variable is named for which of the two it carries.
             environment.push((
-                "TOKENSTAT_CHAT_HOOK_COMMAND".into(),
-                hook_command
-                    .clone()
-                    .ok_or("cannot locate the tokenstat host hook")?,
+                crate::chat_gate::HELPER_PATH_ENV.into(),
+                helper.display().to_string(),
             ));
             Some(home)
         } else {
@@ -1369,53 +1415,15 @@ impl Store {
         Ok(path)
     }
 
-    fn write_codex_hook_home(&self, id: &str, command: Option<&str>) -> Result<PathBuf, String> {
-        let command = command.ok_or("cannot locate the tokenstat host hook")?;
-        let home = self.root.join(id).join("codex-hook");
-        fs::create_dir_all(&home).map_err(|error| error.to_string())?;
-        let hooks = json!({"hooks": {
-            "PreToolUse": [{"hooks": [{
-                "type": "command", "command": format!("{command} hook codex pre"), "timeout": 5
-            }]}],
-            "PostToolUse": [{"hooks": [{
-                "type": "command", "command": format!("{command} hook codex post"), "timeout": 5
-            }]}]
-        }});
-        fs::write(home.join("hooks.json"), hooks.to_string()).map_err(|error| error.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            if let Ok(user_home) = std::env::var("HOME") {
-                let auth = PathBuf::from(user_home).join(".codex").join("auth.json");
-                let target = home.join("auth.json");
-                if auth.is_file() && !target.exists() {
-                    symlink(auth, target).map_err(|error| error.to_string())?;
-                }
-            }
-        }
-        Ok(home)
-    }
-
     fn agy_hook_home(&self, id: &str) -> PathBuf {
         self.root.join(id).join("agy-hook")
     }
 
-    fn write_agy_hook_home(&self, id: &str, command: Option<&str>) -> Result<PathBuf, String> {
-        let command = command.ok_or("cannot locate the tokenstat host hook")?;
-        let home = self.agy_hook_home(id);
-        let agents = home.join(".agents");
-        fs::create_dir_all(&agents).map_err(|error| error.to_string())?;
-        let hooks = json!({"tokenstat": {
-            "PreToolUse": [{"matcher": "*", "hooks": [{
-                "type": "command", "command": format!("{command} hook agy pre"), "timeout": 5
-            }]}],
-            "PostToolUse": [{"matcher": "*", "hooks": [{
-                "type": "command", "command": format!("{command} hook agy post"), "timeout": 5
-            }]}]
-        }});
-        fs::write(agents.join("hooks.json"), hooks.to_string())
-            .map_err(|error| error.to_string())?;
-        Ok(home)
+    /// Persistent for the life of the conversation, unlike the other homes.
+    /// See `chat_gate::write_grok_home`: grok keeps its sessions in here, so
+    /// deleting it after a turn would delete the thing `--resume` needs.
+    fn grok_hook_home(&self, id: &str) -> PathBuf {
+        self.root.join(id).join("grok-home")
     }
 
     fn write_opencode_hook_home(&self, id: &str) -> Result<(PathBuf, PathBuf), String> {
@@ -1488,21 +1496,41 @@ impl Store {
         fs::rename(temporary, self.root.join("personas.json")).map_err(|e| e.to_string())
     }
 
+    /// Settle anything nobody answered, and forget what is long settled.
+    ///
+    /// A timeout is a denial, and it goes onto the timeline like any other, so
+    /// a person coming back to the conversation reads "this was refused
+    /// because nobody was here" rather than a card frozen mid-question.
     fn prune_approvals(&self) {
         let now = now_ms();
-        let mut approvals = self
-            .approvals
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        for approval in approvals
-            .iter_mut()
-            .filter(|approval| approval.decision.is_none() && approval.expires_at_ms <= now)
-        {
-            approval.decision = Some("deny".into());
+        let expired: Vec<Approval> = {
+            let mut approvals = self
+                .approvals
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let expired = approvals
+                .iter_mut()
+                .filter(|approval| approval.decision.is_none() && approval.expires_at_ms <= now)
+                .map(|approval| {
+                    approval.decision = Some("deny".into());
+                    approval.clone()
+                })
+                .collect();
+            approvals.retain(|approval| {
+                approval.decision.is_none() || approval.expires_at_ms + APPROVAL_TTL_MS > now
+            });
+            expired
+        };
+        for approval in expired {
+            let conversation_id = approval.conversation_id.clone();
+            let _ = self.append(
+                &conversation_id,
+                &StoredEvent::Approval {
+                    approval,
+                    at_ms: now,
+                },
+            );
         }
-        approvals.retain(|approval| {
-            approval.decision.is_none() || approval.expires_at_ms + APPROVAL_TTL_MS > now
-        });
     }
 }
 
@@ -1684,10 +1712,13 @@ pub fn backends() -> Vec<Value> {
                 let id = map.get("id").and_then(Value::as_str).unwrap_or("");
                 map.insert(
                     "gateTier".into(),
+                    // Grok used to be `rules`: launched `--permission-mode
+                    // dontAsk` with allow rules fixed at spawn, it could not
+                    // ask about anything else, it could only refuse. It now
+                    // runs against a private `$GROK_HOME` holding tokenstat's
+                    // own `PreToolUse` hook, so it asks like the rest.
                     json!(if matches!(id, "cursor" | "sh") {
                         "bypassOnly"
-                    } else if id == "grok" {
-                        "rules"
                     } else {
                         "full"
                     }),
@@ -1961,7 +1992,7 @@ mod tests {
             .iter()
             .find(|backend| backend["id"] == "grok")
             .expect("grok");
-        assert_eq!(grok["gateTier"], "rules");
+        assert_eq!(grok["gateTier"], "full");
         assert_eq!(grok["label"], "Grok");
         let cursor = rows
             .iter()
@@ -2276,26 +2307,32 @@ mod tests {
             );
         }
         let _ = fs::remove_file(turn_file);
-        let codex_home = store
-            .write_codex_hook_home("chat-test", Some("/tmp/tokenstat-hostd"))
-            .unwrap();
+        let helper = Path::new("/tmp/tokenstat-hostd");
+        let codex_home = store.root.join("chat-test").join("codex-hook");
+        crate::chat_gate::write_codex_home(&codex_home, helper).unwrap();
         let hooks = fs::read_to_string(codex_home.join("hooks.json")).unwrap();
         assert!(hooks.contains("PreToolUse"));
         assert!(hooks.contains("hook codex pre"));
         assert!(hooks.contains("PostToolUse"));
         assert!(hooks.contains("hook codex post"));
         let _ = fs::remove_dir_all(codex_home);
-        let agy_home = store
-            .write_agy_hook_home("chat-test", Some("/tmp/tokenstat-hostd"))
-            .unwrap();
+        let agy_home = store.agy_hook_home("chat-test");
+        crate::chat_gate::write_agy_home(&agy_home, helper).unwrap();
         let agy_hooks = fs::read_to_string(agy_home.join(".agents/hooks.json")).unwrap();
         assert!(agy_hooks.contains("hook agy pre"));
         assert!(agy_hooks.contains("hook agy post"));
         let _ = fs::remove_dir_all(agy_home);
+        // Grok's home is the one that must survive the turn, because its
+        // sessions live inside it and `--resume` needs them.
+        let grok_home = store.grok_hook_home("chat-test");
+        crate::chat_gate::write_grok_home(&grok_home, helper).unwrap();
+        let grok_hooks = fs::read_to_string(grok_home.join("hooks/tokenstat.json")).unwrap();
+        assert!(grok_hooks.contains("hook grok pre"));
+        let _ = fs::remove_dir_all(grok_home);
         let (opencode_home, opencode_plugin) = store.write_opencode_hook_home("chat-test").unwrap();
         let plugin = fs::read_to_string(opencode_plugin).unwrap();
         assert!(plugin.contains("tool.execute.before"));
-        assert!(plugin.contains("TOKENSTAT_CHAT_HOOK_COMMAND"));
+        assert!(plugin.contains(crate::chat_gate::HELPER_PATH_ENV));
         let _ = fs::remove_dir_all(opencode_home);
         let hook_approval = store
             .request_turn_approval(&turn_token, "Edit", "Edit src/main.rs", None)
@@ -2319,12 +2356,18 @@ mod tests {
             None,
             "a hook gets pending without parking a connection"
         );
+        // An approval is written twice on purpose: where the agent paused,
+        // and again with the answer, so a conversation reopened later shows
+        // the outcome instead of a question frozen mid-ask.
         let (events, _) = store.events("chat-test", 0).unwrap();
-        assert_eq!(events.len(), 3);
-        let event = &events[1];
-        assert_eq!(event["kind"], "agent");
-        assert_eq!(event["event"]["kind"], "toolEnd");
-        assert_eq!(events[2]["approval"]["id"], pending.id);
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0]["approval"]["id"], hook_approval.id);
+        assert_eq!(events[0]["approval"]["decision"], Value::Null);
+        assert_eq!(events[1]["approval"]["id"], hook_approval.id);
+        assert_eq!(events[1]["approval"]["decision"], "deny");
+        assert_eq!(events[2]["kind"], "agent");
+        assert_eq!(events[2]["event"]["kind"], "toolEnd");
+        assert_eq!(events[3]["approval"]["id"], pending.id);
         assert_eq!(
             store
                 .resolve_approval(&pending.id, "allowAlways")

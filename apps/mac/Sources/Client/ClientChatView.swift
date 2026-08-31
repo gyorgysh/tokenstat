@@ -145,6 +145,8 @@ private struct ClientChatThread: View {
     let folderName: String
     let hostName: String
     @State private var draft = ""
+    /// A row the transcript should jump to, set by the pending-approval bar.
+    @State private var scrollTarget: String?
     @State private var showingSetup = false
     @State private var showingPersonas = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -157,20 +159,36 @@ private struct ClientChatThread: View {
         VStack(spacing: 0) {
             if let chat {
                 transcript(chat)
-                ClientChatComposer(
-                    model: model,
-                    chat: chat,
-                    draft: $draft,
-                    attachments: model.attachments,
-                    previews: model.attachmentPreviews,
-                    running: model.busy,
-                    placeholder: "Ask about \(folderName.isEmpty ? "this folder" : folderName)",
-                    onSend: { submit(from: chat) },
-                    onStop: { Task { await model.stop() } },
-                    onAttach: { item in await model.attach(item) },
-                    onRemove: { model.removeAttachment($0) },
-                    onOpenSetup: { showingSetup = true }
-                )
+                // Same rule as the Mac: a blocked turn takes the composer's
+                // place. On a phone this matters more, not less, because the
+                // card scrolls out of a short viewport in one streamed
+                // paragraph.
+                if model.approvals.isEmpty {
+                    ClientChatComposer(
+                        model: model,
+                        chat: chat,
+                        draft: $draft,
+                        attachments: model.attachments,
+                        previews: model.attachmentPreviews,
+                        running: model.busy,
+                        placeholder: "Ask about \(folderName.isEmpty ? "this folder" : folderName)",
+                        onSend: { submit(from: chat) },
+                        onStop: { Task { await model.stop() } },
+                        onAttach: { item in await model.attach(item) },
+                        onRemove: { model.removeAttachment($0) },
+                        onOpenSetup: { showingSetup = true }
+                    )
+                } else {
+                    ChatApprovalBar(
+                        approvals: model.approvals,
+                        resolve: { approval, choice in
+                            Task { await model.resolve(approval, choice: choice) }
+                        },
+                        showInTranscript: { approval in
+                            scrollTarget = "approval-\(approval.id)"
+                        }
+                    )
+                }
             } else {
                 ClientEmptyState(
                     kind: .nothingYet,
@@ -258,6 +276,17 @@ private struct ClientChatThread: View {
             .clientHideScrollEdgeEffect()
             .onChange(of: scrollToken) { _, _ in scrollToLatest(proxy) }
             .onChange(of: chat.running) { _, _ in scrollToLatest(proxy) }
+            // A request that arrives mid-stream would otherwise be pushed off
+            // a short viewport before anybody saw it.
+            .onChange(of: model.approvals.first?.id) { _, id in
+                guard let id else { return }
+                scrollTo("approval-\(id)", proxy)
+            }
+            .onChange(of: scrollTarget) { _, target in
+                guard let target else { return }
+                scrollTo(target, proxy)
+                scrollTarget = nil
+            }
             .onAppear { scrollToLatest(proxy) }
         }
     }
@@ -319,11 +348,18 @@ private struct ClientChatThread: View {
     }
 
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        // A pending request owns the view. Streaming text must not scroll it
+        // out from under somebody who is reading it to decide.
+        guard model.approvals.isEmpty else { return }
+        scrollTo("chat-bottom", proxy)
+    }
+
+    private func scrollTo(_ id: String, _ proxy: ScrollViewProxy) {
         if reduceMotion {
-            proxy.scrollTo("chat-bottom", anchor: .bottom)
+            proxy.scrollTo(id, anchor: .bottom)
         } else {
             withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo("chat-bottom", anchor: .bottom)
+                proxy.scrollTo(id, anchor: .bottom)
             }
         }
     }
