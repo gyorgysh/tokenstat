@@ -142,5 +142,11 @@ pub use tokenstat_pty::warm_shell_pool;
 /// used to print `unknown method: ssh.host.list` at a person. 2 was the SSH
 /// library and screen input work. 3 is the password vault: `ssh.vault.password.set`,
 /// `ssh.vault.lock`, `ssh.vault.recovery.rotate`, and enrollment gone from the
-/// public methods.
-pub const PROTOCOL_VERSION: &str = "3";
+/// public methods. 4 adds `ssh.session.suggest` and `chat.eventPage`.
+///
+/// The helper outlives the app that installed it, so forgetting this is not a
+/// cosmetic miss: a new app talks to the old daemon on the same socket, every
+/// new method answers `unknown method`, and the feature is simply absent with
+/// nothing on screen to say why. `Bridge.connect` replaces a helper whose
+/// number does not match, and that check is the only thing that notices.
+pub const PROTOCOL_VERSION: &str = "4";
