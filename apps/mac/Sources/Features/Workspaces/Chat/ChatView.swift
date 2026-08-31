@@ -7,8 +7,13 @@ struct ChatView: View {
     let workspaceID: String
     var workspaceName: String? = nil
     @State private var draft = ""
+    @State private var draftSelection = NSRange(location: 0, length: 0)
     /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
+    @State private var paneDropTargeted = false
+    @State private var composerDropTargeted = false
+    @State private var dropNotice: String?
+    @State private var dropNoticeGeneration = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -22,6 +27,11 @@ struct ChatView: View {
             #endif
             if let chat = model.selected {
                 transcript(chat)
+                    .overlay {
+                        if dropExperienceVisible {
+                            dropExperience
+                        }
+                    }
                 // A blocked turn takes the composer's place rather than
                 // sitting beside it. There is nothing useful to type while an
                 // agent is parked, and removing the field is the plainest way
@@ -31,6 +41,7 @@ struct ChatView: View {
                         model: model,
                         chat: chat,
                         draft: $draft,
+                        selection: $draftSelection,
                         attachments: model.attachments,
                         previews: model.attachmentPreviews,
                         running: model.busy,
@@ -38,7 +49,11 @@ struct ChatView: View {
                         onSend: { submit(from: chat) },
                         onStop: { Task { await model.stop() } },
                         onAttach: { item in await model.attach(item) },
-                        onRemove: { model.removeAttachment($0) }
+                        onRemove: { model.removeAttachment($0) },
+                        onDropProviders: { providers in
+                            Task { await receive(providers) }
+                        },
+                        onDropTargeted: { composerDropTargeted = $0 }
                     )
                 } else {
                     ChatApprovalBar(
@@ -53,9 +68,24 @@ struct ChatView: View {
                 }
             } else {
                 empty
+                    .overlay {
+                        if dropExperienceVisible {
+                            dropExperience
+                        }
+                    }
             }
         }
         .background(Theme.background)
+        .onDrop(of: ChatInbox.dropTypes, isTargeted: $paneDropTargeted) { providers in
+            Task { await receive(providers) }
+            return true
+        }
+        .overlay(alignment: .topTrailing) {
+            TransientToast(message: $dropNotice, severity: .warning)
+                .padding(.top, Theme.Space.m)
+                .padding(.trailing, Theme.Space.m)
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
         #if os(macOS)
         .onExitCommand {
             if model.busy { Task { await model.stop() } }
@@ -210,6 +240,54 @@ struct ChatView: View {
         Task { await model.send(text) }
     }
 
+    private var dropExperienceVisible: Bool {
+        paneDropTargeted || composerDropTargeted
+    }
+
+    private var dropExperience: some View {
+        ChatDropExperience(seed: model.faceSeed)
+    }
+
+    private func receive(_ providers: [NSItemProvider]) async {
+        await receive(ChatInbox.drops(from: providers))
+    }
+
+    private func receive(_ drops: [ChatInboxDrop]) async {
+        guard !drops.isEmpty else { return }
+        if model.selected == nil {
+            await model.create()
+        }
+        for drop in drops {
+            switch drop {
+            case let .attachment(item):
+                await model.attach(item)
+            case let .text(text):
+                insertInDraft(text)
+            case .folder:
+                showDropNotice("Attach files, not folders")
+            }
+        }
+    }
+
+    private func insertInDraft(_ text: String) {
+        let current = draft as NSString
+        let location = min(max(0, draftSelection.location), current.length)
+        let length = min(max(0, draftSelection.length), current.length - location)
+        draft = current.replacingCharacters(in: NSRange(location: location, length: length), with: text)
+        draftSelection = NSRange(location: location + (text as NSString).length, length: 0)
+    }
+
+    private func showDropNotice(_ message: String) {
+        dropNoticeGeneration += 1
+        let generation = dropNoticeGeneration
+        dropNotice = message
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard dropNoticeGeneration == generation else { return }
+            dropNotice = nil
+        }
+    }
+
     private var emptyConversation: some View {
         VStack(spacing: Theme.Space.m) {
             ChatScene(reduceMotion: reduceMotion)
@@ -242,5 +320,40 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Theme.Space.l)
+    }
+}
+
+/// One themed promise for every chat drop target, from a wide Mac transcript
+/// to an empty iPad conversation.
+struct ChatDropExperience: View {
+    var seed: UInt64
+
+    var body: some View {
+        ZStack {
+            Theme.accentSoft.opacity(0.58)
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .strokeBorder(Theme.accent.opacity(0.82), lineWidth: 1.5)
+                .padding(8)
+            VStack(spacing: Theme.Space.s) {
+                PersonaMark(seed: seed, size: 58, state: .waiting)
+                Text("Drop to attach")
+                    .font(Theme.callout.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                Text("Files attach. Text and links join your message.")
+                    .font(Theme.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.vertical, Theme.Space.m)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                    .strokeBorder(Theme.accent.opacity(0.34), lineWidth: 1)
+            }
+            .shadow(color: Theme.shadow(0.18), radius: 18, y: 8)
+        }
+        .allowsHitTesting(false)
+        .transition(.opacity)
+        .accessibilityHidden(true)
     }
 }

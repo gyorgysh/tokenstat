@@ -24,10 +24,16 @@ struct ClientChatComposer: View {
     var onAttach: (ChatInboxItem) async -> Void
     var onRemove: (ChatAttachment) -> Void
     var onOpenSetup: () -> Void
+    var onDropURLs: ([URL]) -> Void
+    var onDropText: ([String]) -> Void
+    var onDropData: ([Data]) -> Void
+    var onDropTargeted: (Bool) -> Void
 
     @State private var importing = false
     @State private var pickingPhotos = false
-    @State private var dropTargeted = false
+    @State private var urlDropTargeted = false
+    @State private var textDropTargeted = false
+    @State private var dataDropTargeted = false
     @State private var photos: [PhotosPickerItem] = []
     @FocusState private var focused: Bool
 
@@ -72,12 +78,26 @@ struct ClientChatComposer: View {
                     .allowsHitTesting(false)
             }
         }
-        .onDrop(
-            of: [.fileURL, .image, .png, .jpeg, .gif, .webP, .heic, .tiff, .pdf, .plainText],
-            isTargeted: $dropTargeted
-        ) { providers in
-            Task { await ingest(providers: providers) }
-            return true
+        .dropDestination(for: String.self) { items, _ in
+            onDropText(items)
+            return !items.isEmpty
+        } isTargeted: { targeted in
+            textDropTargeted = targeted
+            reportDropTarget()
+        }
+        .dropDestination(for: Data.self) { items, _ in
+            onDropData(items)
+            return !items.isEmpty
+        } isTargeted: { targeted in
+            dataDropTargeted = targeted
+            reportDropTarget()
+        }
+        .dropDestination(for: URL.self) { items, _ in
+            onDropURLs(items)
+            return !items.isEmpty
+        } isTargeted: { targeted in
+            urlDropTargeted = targeted
+            reportDropTarget()
         }
         .animation(.easeOut(duration: 0.16), value: dropTargeted)
         .fileImporter(
@@ -86,7 +106,7 @@ struct ClientChatComposer: View {
             allowsMultipleSelection: true
         ) { result in
             if case let .success(urls) = result {
-                ingest(urls: urls)
+                onDropURLs(urls)
             }
         }
         .photosPicker(
@@ -151,12 +171,12 @@ struct ClientChatComposer: View {
         running || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func ingest(urls: [URL]) {
-        ingest(items: urls.compactMap(ChatInbox.item(from:)))
+    private var dropTargeted: Bool {
+        urlDropTargeted || textDropTargeted || dataDropTargeted
     }
 
-    private func ingest(providers: [NSItemProvider]) async {
-        ingest(items: await ChatInbox.items(from: providers))
+    private func reportDropTarget() {
+        onDropTargeted(dropTargeted)
     }
 
     private func ingest(photos items: [PhotosPickerItem]) async {

@@ -12,6 +12,7 @@ struct ChatComposer: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     @Binding var draft: String
+    @Binding var selection: NSRange
     var attachments: [ChatAttachment]
     var previews: [String: Data]
     var running: Bool
@@ -20,6 +21,8 @@ struct ChatComposer: View {
     var onStop: () -> Void
     var onAttach: (ChatInboxItem) async -> Void
     var onRemove: (ChatAttachment) -> Void
+    var onDropProviders: ([NSItemProvider]) -> Void
+    var onDropTargeted: (Bool) -> Void
 
     @State private var importing = false
     @State private var dropTargeted = false
@@ -90,10 +93,10 @@ struct ChatComposer: View {
             }
         }
         .onDrop(
-            of: [.fileURL, .image, .png, .jpeg, .gif, .webP, .heic, .tiff, .pdf, .plainText],
+            of: ChatInbox.dropTypes,
             isTargeted: $dropTargeted
         ) { providers in
-            Task { await ingest(providers: providers) }
+            onDropProviders(providers)
             return true
         }
         #if os(macOS)
@@ -103,6 +106,9 @@ struct ChatComposer: View {
         #endif
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropTargeted)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: attachments.count)
+        .onChange(of: dropTargeted) { _, targeted in
+            onDropTargeted(targeted)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Message")
     }
@@ -150,6 +156,7 @@ struct ChatComposer: View {
         #if os(macOS)
         ChatDraftView(
             text: $draft,
+            selection: $selection,
             placeholder: placeholder,
             enabled: !running,
             onSend: {

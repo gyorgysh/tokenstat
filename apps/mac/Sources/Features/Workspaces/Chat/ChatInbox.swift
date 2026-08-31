@@ -17,8 +17,19 @@ struct ChatInboxItem: Sendable {
     var mediaType: String?
 }
 
-/// Drops, pastes and the file picker all become `ChatInboxItem`s here, so the
-/// composer never talks to a pasteboard itself.
+/// What a drop means before the chat decides how to present it.
+///
+/// Keeping text and refusals beside attachments is deliberate: every surface
+/// can share one decoding policy without pretending a sentence is a file or a
+/// directory is an unreadable attachment.
+enum ChatInboxDrop: Sendable {
+    case attachment(ChatInboxItem)
+    case text(String)
+    case folder
+}
+
+/// Drops become explicit outcomes here, while pastes and the file picker share
+/// the same attachment decoding path, so no composer talks to a pasteboard.
 ///
 /// Screenshot thumbnails are the reason this is not just `Data(contentsOf:)`.
 /// They often carry pixels without a durable file, or a `file://` that vanishes
@@ -26,6 +37,9 @@ struct ChatInboxItem: Sendable {
 /// HEIC to PNG so the agent CLI is opening something it can actually decode.
 enum ChatInbox {
     static let maxBytes = 12 * 1024 * 1024
+    static let dropTypes: [UTType] = [
+        .fileURL, .url, .image, .png, .jpeg, .gif, .webP, .heic, .tiff, .pdf, .plainText,
+    ]
 
     static func pasteboardHasAttachment() -> Bool {
         #if os(macOS)
@@ -67,17 +81,58 @@ enum ChatInbox {
         return items
     }
 
+    static func drops(from providers: [NSItemProvider]) async -> [ChatInboxDrop] {
+        var drops: [ChatInboxDrop] = []
+        for provider in providers {
+            if let drop = await drop(from: provider) {
+                drops.append(drop)
+            }
+        }
+        return drops
+    }
+
+    static func drops(from urls: [URL]) -> [ChatInboxDrop] {
+        urls.compactMap(drop(from:))
+    }
+
+    static func imageDrop(from data: Data) -> ChatInboxDrop? {
+        guard !data.isEmpty,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let identifier = CGImageSourceGetType(source)
+        else { return nil }
+        let type = UTType(identifier as String) ?? .png
+        return .attachment(prepared(ChatInboxItem(
+            data: data,
+            name: defaultImageName(type),
+            mediaType: type.preferredMIMEType ?? "image/png"
+        )))
+    }
+
     static func item(from url: URL) -> ChatInboxItem? {
+        guard case let .attachment(item)? = drop(from: url) else { return nil }
+        return item
+    }
+
+    static func drop(from url: URL) -> ChatInboxDrop? {
+        guard url.isFileURL else {
+            let text = url.absoluteString.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : .text(text)
+        }
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return nil
+        }
+        if isDirectory.boolValue { return .folder }
         guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
-        return prepared(
+        return .attachment(prepared(
             ChatInboxItem(
                 data: data,
                 name: usableName(url.lastPathComponent),
                 mediaType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
             )
-        )
+        ))
     }
 
     static func prepared(_ item: ChatInboxItem) -> ChatInboxItem {
@@ -143,20 +198,71 @@ enum ChatInbox {
         return nil
     }
 
+    private static func drop(from provider: NSItemProvider) async -> ChatInboxDrop? {
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            guard let url = await url(from: provider, type: .fileURL) else { return nil }
+            return drop(from: url)
+        }
+        let imageTypes: [UTType] = [.png, .jpeg, .gif, .webP, .heic, .tiff, .image]
+        for type in imageTypes where provider.hasItemConformingToTypeIdentifier(type.identifier) {
+            if let data = await data(from: provider, type: type), !data.isEmpty {
+                return .attachment(prepared(ChatInboxItem(
+                    data: data,
+                    name: defaultImageName(type),
+                    mediaType: type.preferredMIMEType ?? "image/png"
+                )))
+            }
+        }
+        if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
+           let url = await url(from: provider, type: .url)
+        {
+            return drop(from: url)
+        }
+        if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier),
+           let text = await text(from: provider)
+        {
+            let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return clean.isEmpty ? nil : .text(clean)
+        }
+        return nil
+    }
+
     private static func fileItem(from provider: NSItemProvider) async -> ChatInboxItem? {
         guard let url = await url(from: provider) else { return nil }
         return item(from: url)
     }
 
     private static func url(from provider: NSItemProvider) async -> URL? {
+        await url(from: provider, type: .fileURL)
+    }
+
+    private static func url(from provider: NSItemProvider, type: UTType) async -> URL? {
         await withCheckedContinuation { continuation in
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+            provider.loadItem(forTypeIdentifier: type.identifier, options: nil) { item, _ in
                 if let url = item as? URL {
                     continuation.resume(returning: url)
+                } else if let url = item as? NSURL {
+                    continuation.resume(returning: url as URL)
                 } else if let data = item as? Data {
                     continuation.resume(returning: URL(dataRepresentation: data, relativeTo: nil))
                 } else if let text = item as? String {
                     continuation.resume(returning: URL(string: text))
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
+    private static func text(from provider: NSItemProvider) async -> String? {
+        await withCheckedContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { item, _ in
+                if let text = item as? String {
+                    continuation.resume(returning: text)
+                } else if let text = item as? NSAttributedString {
+                    continuation.resume(returning: text.string)
+                } else if let data = item as? Data {
+                    continuation.resume(returning: String(data: data, encoding: .utf8))
                 } else {
                     continuation.resume(returning: nil)
                 }

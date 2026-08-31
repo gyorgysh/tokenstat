@@ -164,6 +164,12 @@ private struct ClientChatThread: View {
     @State private var scrollTarget: String?
     @State private var showingSetup = false
     @State private var showingPersonas = false
+    @State private var urlDropTargeted = false
+    @State private var textDropTargeted = false
+    @State private var dataDropTargeted = false
+    @State private var composerDropTargeted = false
+    @State private var dropNotice: String?
+    @State private var dropNoticeGeneration = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var chat: ChatConversation? {
@@ -174,6 +180,11 @@ private struct ClientChatThread: View {
         VStack(spacing: 0) {
             if let chat {
                 transcript(chat)
+                    .overlay {
+                        if dropExperienceVisible {
+                            ChatDropExperience(seed: model.faceSeed)
+                        }
+                    }
                 // Same rule as the Mac: a blocked turn takes the composer's
                 // place. On a phone this matters more, not less, because the
                 // card scrolls out of a short viewport in one streamed
@@ -191,7 +202,17 @@ private struct ClientChatThread: View {
                         onStop: { Task { await model.stop() } },
                         onAttach: { item in await model.attach(item) },
                         onRemove: { model.removeAttachment($0) },
-                        onOpenSetup: { showingSetup = true }
+                        onOpenSetup: { showingSetup = true },
+                        onDropURLs: { urls in
+                            Task { await receive(ChatInbox.drops(from: urls)) }
+                        },
+                        onDropText: { items in
+                            Task { await receive(items.map(ChatInboxDrop.text)) }
+                        },
+                        onDropData: { items in
+                            Task { await receive(items.compactMap(ChatInbox.imageDrop(from:))) }
+                        },
+                        onDropTargeted: { composerDropTargeted = $0 }
                     )
                 } else {
                     ChatApprovalBar(
@@ -215,6 +236,25 @@ private struct ClientChatThread: View {
             }
         }
         .background(Theme.background)
+        .dropDestination(for: String.self) { items, _ in
+            Task { await receive(items.map(ChatInboxDrop.text)) }
+            return !items.isEmpty
+        } isTargeted: { textDropTargeted = $0 }
+        .dropDestination(for: Data.self) { items, _ in
+            let drops = items.compactMap(ChatInbox.imageDrop(from:))
+            Task { await receive(drops) }
+            return !drops.isEmpty
+        } isTargeted: { dataDropTargeted = $0 }
+        .dropDestination(for: URL.self) { items, _ in
+            let drops = ChatInbox.drops(from: items)
+            Task { await receive(drops) }
+            return !drops.isEmpty
+        } isTargeted: { urlDropTargeted = $0 }
+        .overlay(alignment: .topTrailing) {
+            TransientToast(message: $dropNotice, severity: .warning)
+                .padding(Theme.Space.m)
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
         .navigationTitle(chat?.title ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -382,6 +422,34 @@ private struct ClientChatThread: View {
         guard !text.isEmpty, !model.busy else { return }
         draft = ""
         Task { await model.send(text) }
+    }
+
+    private var dropExperienceVisible: Bool {
+        urlDropTargeted || textDropTargeted || dataDropTargeted || composerDropTargeted
+    }
+
+    private func receive(_ drops: [ChatInboxDrop]) async {
+        for drop in drops {
+            switch drop {
+            case let .attachment(item):
+                await model.attach(item)
+            case let .text(text):
+                draft.append(text)
+            case .folder:
+                showDropNotice("Attach files, not folders")
+            }
+        }
+    }
+
+    private func showDropNotice(_ message: String) {
+        dropNoticeGeneration += 1
+        let generation = dropNoticeGeneration
+        dropNotice = message
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard dropNoticeGeneration == generation else { return }
+            dropNotice = nil
+        }
     }
 }
 

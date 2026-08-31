@@ -11,6 +11,7 @@ import SwiftUI
 /// delivers `.onKeyPress(.return)`. The rest of the well stays SwiftUI.
 struct ChatDraftView: NSViewRepresentable {
     @Binding var text: String
+    @Binding var selection: NSRange
     var placeholder: String
     var enabled: Bool
     var onSend: () -> Void
@@ -18,7 +19,7 @@ struct ChatDraftView: NSViewRepresentable {
     var onPasteAttachments: () -> Void = {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onSend: onSend, onStop: onStop)
+        Coordinator(text: $text, selection: $selection, onSend: onSend, onStop: onStop)
     }
 
     func makeNSView(context: Context) -> ChatDraftScrollView {
@@ -74,6 +75,7 @@ struct ChatDraftView: NSViewRepresentable {
         guard let textView = scroll.documentView as? ChatDraftTextView else { return }
         context.coordinator.onSend = onSend
         context.coordinator.onStop = onStop
+        context.coordinator.selection = $selection
         textView.draftSend = onSend
         textView.draftStop = onStop
         textView.pasteAttachments = onPasteAttachments
@@ -83,18 +85,32 @@ struct ChatDraftView: NSViewRepresentable {
             textView.string = text
             textView.needsDisplay = true
         }
+        let safeSelection = NSRange(
+            location: min(selection.location, (textView.string as NSString).length),
+            length: min(selection.length, max(0, (textView.string as NSString).length - selection.location))
+        )
+        if textView.selectedRange() != safeSelection {
+            textView.setSelectedRange(safeSelection)
+        }
         textView.invalidateIntrinsicContentSize()
         scroll.invalidateIntrinsicContentSize()
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
+        var selection: Binding<NSRange>
         var onSend: () -> Void
         var onStop: () -> Void
         weak var textView: ChatDraftTextView?
 
-        init(text: Binding<String>, onSend: @escaping () -> Void, onStop: @escaping () -> Void) {
+        init(
+            text: Binding<String>,
+            selection: Binding<NSRange>,
+            onSend: @escaping () -> Void,
+            onStop: @escaping () -> Void
+        ) {
             self.text = text
+            self.selection = selection
             self.onSend = onSend
             self.onStop = onStop
         }
@@ -104,6 +120,11 @@ struct ChatDraftView: NSViewRepresentable {
             text.wrappedValue = textView.string
             textView.invalidateIntrinsicContentSize()
             textView.enclosingScrollView?.invalidateIntrinsicContentSize()
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? ChatDraftTextView else { return }
+            selection.wrappedValue = textView.selectedRange()
         }
 
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
