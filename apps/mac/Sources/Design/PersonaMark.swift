@@ -9,11 +9,11 @@ import SwiftUI
 /// asset to ship, scale, or theme. It works at 16pt beside a message and at
 /// 96pt in the wizard from the same source, on Mac and phone alike.
 ///
-/// It is one creature in different moods rather than six icons. That is the
-/// point of it: the same character that sits beside a persona's name is the
-/// one that squashes while the agent thinks and goes wide-eyed when the agent
-/// needs an answer, so a glance at the transcript tells you what is happening
-/// without reading a word.
+/// It is one creature in different moods rather than six icons. Motion stays
+/// inside a fixed frame: a slow breathe at rest, a gel morph while thinking,
+/// a one-shot hop or tilt for events. The outer size never changes, which is
+/// why a streaming transcript can pin to this seat without the character
+/// appearing to travel.
 ///
 /// **Colour stays inside the brand.** Hues are sampled along the arc from
 /// `Theme.accent` to `Theme.secondary`, never across the whole wheel, so a
@@ -28,95 +28,82 @@ struct PersonaMark: View {
     var state: PersonaMood = .idle
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var breathing = false
+    @Environment(\.scenePhase) private var scenePhase
+    #if os(macOS)
+    @Environment(\.controlActiveState) private var controlActiveState
+    #endif
     @State private var blinking = false
+    @State private var hop: CGFloat = 0
+    @State private var tilt: Double = 0
 
     private var traits: PersonaTraits { PersonaTraits(seed: seed) }
 
     var body: some View {
-        Canvas { context, canvasSize in
-            draw(in: &context, size: canvasSize)
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: !shouldPulse)) { context in
+            let phase = pulse(at: context.date)
+            mark(phase: phase)
         }
         .frame(width: size, height: size)
-        .animation(motion, value: breathing)
-        .animation(.easeInOut(duration: 0.09), value: blinking)
-        .onAppear(perform: start)
-        .onChange(of: state) { _, _ in start() }
+        .offset(y: hop)
+        .rotationEffect(.degrees(tilt), anchor: .bottom)
         .accessibilityHidden(true)
+        .task(id: blinkToken) { await blinkLoop() }
+        .task(id: state) { await play(state) }
     }
 
     // MARK: - Drawing
 
-    private func draw(in context: inout GraphicsContext, size canvas: CGSize) {
+    @ViewBuilder
+    private func mark(phase: CGFloat) -> some View {
         let traits = traits
-        let unit = min(canvas.width, canvas.height)
         let hue = traits.hue
-        let accent = state.accent
-
-        // Room above the body for an antenna, and a hair below for the shadow
-        // it sits on. Reserving it here rather than letting the frame clip is
-        // why the flourish is visible at all.
-        let headroom = unit * 0.16
-        let squash = state.squash(breathing)
-        let width = unit * squash.width
-        let height = (unit - headroom) * squash.height
-        let body = CGRect(
-            x: (canvas.width - width) / 2,
-            y: canvas.height - height - unit * 0.04,
-            width: width,
-            height: height
+        let geometry = PersonaGeometry(size: size, phase: phase, mood: state)
+        let blob = PersonaBlobShape(
+            phase: phase,
+            droop: state.droop,
+            amplitude: state.gelAmplitude,
+            asymmetric: state.asymmetricGel,
+            roundness: traits.roundness,
+            wobbleA: traits.wobble.0,
+            wobbleB: traits.wobble.1,
+            wobbleC: traits.wobble.2,
+            wobbleD: traits.wobble.3,
+            squashWidth: geometry.squash.width,
+            squashHeight: geometry.squash.height
         )
-
-        // The thing it is resting on. A blob with no contact shadow floats,
-        // and a floating blob is a logo rather than a creature.
-        context.fill(
-            Path(ellipseIn: CGRect(
-                x: body.midX - width * 0.34,
-                y: body.maxY - unit * 0.015,
-                width: width * 0.68,
-                height: unit * 0.05
-            )),
-            with: .color(hue.opacity(0.16))
-        )
-
-        if traits.hasAntenna {
-            drawAntenna(in: &context, body: body, unit: unit, tint: hue)
-        }
-
-        let shape = blobPath(in: body, traits: traits, state: state)
-        // Gel, not a sticker: a soft vertical wash so the base reads heavier
-        // than the dome, which is what makes the silhouette look like it holds
-        // something rather than being cut out of paper.
-        context.fill(
-            shape,
-            with: .linearGradient(
-                Gradient(colors: [hue.opacity(0.16), hue.opacity(0.34)]),
-                startPoint: CGPoint(x: body.midX, y: body.minY),
-                endPoint: CGPoint(x: body.midX, y: body.maxY)
+        ZStack {
+            Ellipse()
+                .fill(hue.opacity(0.16))
+                .frame(width: geometry.body.width * 0.68, height: size * 0.05)
+                .offset(y: geometry.body.maxY - size / 2 - size * 0.015)
+            blob.fill(
+                LinearGradient(
+                    colors: [hue.opacity(0.16), hue.opacity(0.34)],
+                    startPoint: UnitPoint(x: 0.5, y: geometry.body.minY / size),
+                    endPoint: UnitPoint(x: 0.5, y: geometry.body.maxY / size)
+                )
             )
-        )
-        context.stroke(shape, with: .color(hue.opacity(0.9)), lineWidth: max(1, unit * 0.042))
-
-        // One highlight, off to the upper left. This single ellipse is what
-        // turns the fill into something wet.
-        context.fill(
-            Path(ellipseIn: CGRect(
-                x: body.minX + width * 0.16,
-                y: body.minY + height * 0.12,
-                width: width * 0.20,
-                height: height * 0.13
-            )),
-            with: .color(.white.opacity(0.5))
-        )
-
-        drawFace(in: &context, body: body, unit: unit, traits: traits, hue: hue)
-
-        // A mood is a ring, never a repaint. Recolouring the whole creature
-        // for "waiting" threw away the one thing that made it this persona,
-        // so the state rides on the outline and the eyes instead.
-        if let accent {
-            context.stroke(shape, with: .color(accent), lineWidth: max(1.5, unit * 0.055))
+            blob.stroke(hue.opacity(0.9), lineWidth: max(1, size * 0.042))
+            if let accent = state.accent {
+                blob.stroke(accent, lineWidth: max(1.5, size * 0.055))
+            }
+            Canvas { context, canvas in
+                if traits.hasAntenna {
+                    drawAntenna(in: &context, body: geometry.body, unit: geometry.unit, tint: hue)
+                }
+                context.fill(
+                    Path(ellipseIn: CGRect(
+                        x: geometry.body.minX + geometry.body.width * 0.16,
+                        y: geometry.body.minY + geometry.body.height * 0.12,
+                        width: geometry.body.width * 0.20,
+                        height: geometry.body.height * 0.13
+                    )),
+                    with: .color(.white.opacity(0.5))
+                )
+                drawFace(in: &context, body: geometry.body, unit: geometry.unit, traits: traits, hue: hue)
+            }
         }
+        .frame(width: size, height: size)
     }
 
     private func drawAntenna(
@@ -145,58 +132,6 @@ struct PersonaMark: View {
         )
     }
 
-    /// A closed curve through four points, each pushed well off centre.
-    ///
-    /// The wobble is large on purpose. An earlier version nudged the control
-    /// points by a few percent and produced ten rounded rectangles: technically
-    /// distinct, visually one shape. A silhouette has to be different enough to
-    /// recognise across a list before it is worth deriving at all.
-    ///
-    /// The base stays wide and low whatever the seed does, so every character
-    /// sits rather than floats, and the top is where the variation goes.
-    private func blobPath(in rect: CGRect, traits: PersonaTraits, state: PersonaMood) -> Path {
-        var path = Path()
-        let w = rect.width, h = rect.height
-        let (a, b, c, d) = traits.wobble
-        let droop = state == .failed ? 0.22 : 0
-
-        // How far the control points reach. Low is a circle, high is a
-        // rounded square, and this one number is what makes two seeds read as
-        // different creatures rather than the same one nudged.
-        let k = traits.roundness
-
-        let top = CGPoint(x: rect.midX + w * a * 0.24, y: rect.minY + h * abs(b) * 0.09)
-        let right = CGPoint(x: rect.maxX - w * abs(b) * 0.05, y: rect.midY + h * (c * 0.22 + droop))
-        let bottom = CGPoint(x: rect.midX + w * d * 0.12, y: rect.maxY)
-        let left = CGPoint(x: rect.minX + w * abs(d) * 0.05, y: rect.midY + h * (a * 0.22 + droop))
-
-        path.move(to: top)
-        path.addCurve(
-            to: right,
-            control1: CGPoint(x: rect.midX + w * (k + c * 0.14), y: rect.minY - h * (k - 0.34)),
-            control2: CGPoint(x: rect.maxX + w * (k - 0.34), y: rect.midY - h * (k * 0.62 + b * 0.12))
-        )
-        // Both lower controls hug the base line, which is what keeps the
-        // bottom flat-ish however wild the top gets.
-        path.addCurve(
-            to: bottom,
-            control1: CGPoint(x: rect.maxX + w * (k - 0.36), y: rect.maxY + h * 0.10),
-            control2: CGPoint(x: rect.midX + w * (k - 0.02), y: rect.maxY + h * 0.08)
-        )
-        path.addCurve(
-            to: left,
-            control1: CGPoint(x: rect.midX - w * (k - 0.02), y: rect.maxY + h * 0.08),
-            control2: CGPoint(x: rect.minX - w * (k - 0.36), y: rect.maxY + h * 0.10)
-        )
-        path.addCurve(
-            to: top,
-            control1: CGPoint(x: rect.minX - w * (k - 0.34), y: rect.midY - h * (k * 0.62 + d * 0.12)),
-            control2: CGPoint(x: rect.midX - w * (k + a * 0.14), y: rect.minY - h * (k - 0.34))
-        )
-        path.closeSubpath()
-        return path
-    }
-
     private func drawFace(
         in context: inout GraphicsContext,
         body: CGRect,
@@ -205,12 +140,8 @@ struct PersonaMark: View {
         hue: Color
     ) {
         let count = traits.eyeCount
-        // Eyes grow relative to the body as the frame shrinks. At 16pt a
-        // proportional face is a smudge, and the sidebar is full of 16pt.
-        let scale = unit < 24 ? 1.35 : unit < 34 ? 1.15 : 1.0
+        let scale: CGFloat = unit < 24 ? 1.35 : unit < 34 ? 1.15 : 1.0
         let radius = unit * (count == 1 ? 0.115 : count == 2 ? 0.082 : 0.065) * scale
-        // Comfortably more than twice the radius, or two eyes touch and read
-        // as one peanut. That is what the first pass did.
         let spread = radius * (count == 2 ? 2.9 : 2.6)
         let ink = state.eyeInk ?? hue
         let centreY = body.midY - body.height * (0.02 - state.eyeLift)
@@ -228,7 +159,7 @@ struct PersonaMark: View {
             )
             switch shape {
             case .round, .oval:
-                let squeeze = shape == .oval ? 0.78 : 1.0
+                let squeeze: CGFloat = shape == .oval ? 0.78 : 1.0
                 context.fill(
                     Path(ellipseIn: rect.insetBy(dx: radius * (1 - squeeze), dy: 0)),
                     with: .color(ink)
@@ -239,8 +170,6 @@ struct PersonaMark: View {
                     with: .color(ink)
                 )
             case .arc:
-                // Shut is a line whatever it is open, so an arc still blinks
-                // rather than disappearing.
                 var arc = Path()
                 arc.move(to: CGPoint(x: rect.minX, y: rect.maxY))
                 arc.addQuadCurve(
@@ -288,28 +217,206 @@ struct PersonaMark: View {
 
     // MARK: - Motion
 
-    private var motion: Animation? {
-        guard !reduceMotion, let period = state.period else { return nil }
-        return .easeInOut(duration: period).repeatForever(autoreverses: true)
+    private var sceneIsActive: Bool {
+        if scenePhase != .active { return false }
+        #if os(macOS)
+        if controlActiveState != .key { return false }
+        #endif
+        return true
     }
 
-    private func start() {
-        breathing = false
-        blinking = false
-        guard !reduceMotion else { return }
-        // Set on the next runloop pass, so the animation has a value to move
-        // from. Assigning inside `onAppear` with the same value does nothing.
-        DispatchQueue.main.async { breathing = true }
-        guard state.blinks else { return }
-        Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(.random(in: 2.4...5.5)))
-                blinking = true
-                try? await Task.sleep(for: .milliseconds(110))
-                blinking = false
-            }
+    private var shouldMove: Bool {
+        !reduceMotion && sceneIsActive
+    }
+
+    private var shouldPulse: Bool {
+        shouldMove && state.period != nil
+    }
+
+    private var blinkToken: String {
+        "\(state.blinks)-\(shouldMove)"
+    }
+
+    private func pulse(at date: Date) -> CGFloat {
+        guard shouldPulse, let period = state.period, period > 0 else { return 0 }
+        let turn = date.timeIntervalSinceReferenceDate / period
+        return CGFloat(turn.truncatingRemainder(dividingBy: 1))
+    }
+
+    private func blinkLoop() async {
+        guard state.blinks, shouldMove else { return }
+        while !Task.isCancelled {
+            let wait = Double.random(in: 2.4...5.5)
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled else { return }
+            blinking = true
+            try? await Task.sleep(for: .milliseconds(110))
+            blinking = false
         }
     }
+
+    /// One-shot gestures. Repeating motion lives on the phase, not here.
+    private func play(_ mood: PersonaMood) async {
+        hop = 0
+        tilt = 0
+        guard shouldMove else { return }
+        switch mood {
+        case .working:
+            withAnimation(.easeOut(duration: 0.10)) { hop = -2 }
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.16)) { hop = 0 }
+        case .waiting:
+            withAnimation(.easeOut(duration: 0.14)) { tilt = 7 }
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.22)) { tilt = 0 }
+        case .ok:
+            withAnimation(.spring(duration: 0.22, bounce: 0.38)) { hop = -1.5 }
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(duration: 0.28, bounce: 0.18)) { hop = 0 }
+        default:
+            break
+        }
+    }
+}
+
+/// The blob's outer path, driven by a scalar phase so SwiftUI interpolates
+/// gel rather than swapping two Boolean poses.
+struct PersonaBlobShape: Shape {
+    var phase: CGFloat
+    var droop: CGFloat
+    var amplitude: CGFloat
+    var asymmetric: Bool
+    var roundness: CGFloat
+    var wobbleA: CGFloat
+    var wobbleB: CGFloat
+    var wobbleC: CGFloat
+    var wobbleD: CGFloat
+    var squashWidth: CGFloat
+    var squashHeight: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(phase, droop) }
+        set {
+            phase = newValue.first
+            droop = newValue.second
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let geometry = PersonaGeometry(
+            canvas: rect.size,
+            squash: (squashWidth, squashHeight)
+        )
+        return blobPath(in: geometry.body)
+    }
+
+    /// A closed curve through four points, each pushed well off centre.
+    ///
+    /// Phase nudges the control points. After the nudge the centroid is
+    /// pulled back, then clamped to one point, so thinking reads as gel and
+    /// not as the whole creature sliding in its seat.
+    private func blobPath(in rect: CGRect) -> Path {
+        let w = rect.width
+        let h = rect.height
+        let k = roundness
+        let wave = sin(phase * 2 * .pi)
+        let wave2 = sin(phase * 2 * .pi + 1.17)
+        let leftAmp = amplitude * (asymmetric ? 1.0 : 0.55)
+        let rightAmp = amplitude * (asymmetric ? 0.7 : 0.55)
+        let droopY = h * droop * 0.22
+
+        var top = CGPoint(
+            x: rect.midX + w * wobbleA * 0.24 + w * amplitude * wave * 0.35,
+            y: rect.minY + h * abs(wobbleB) * 0.09 + h * amplitude * 0.28 * wave2
+        )
+        var right = CGPoint(
+            x: rect.maxX - w * abs(wobbleB) * 0.05 + w * rightAmp * wave2,
+            y: rect.midY + h * (wobbleC * 0.22) + droopY + h * rightAmp * wave * 0.4
+        )
+        var bottom = CGPoint(
+            x: rect.midX + w * wobbleD * 0.12,
+            y: rect.maxY
+        )
+        var left = CGPoint(
+            x: rect.minX + w * abs(wobbleD) * 0.05 - w * leftAmp * wave,
+            y: rect.midY + h * (wobbleA * 0.22) + droopY + h * leftAmp * wave2 * 0.4
+        )
+
+        let centroid = CGPoint(
+            x: (top.x + right.x + bottom.x + left.x) / 4,
+            y: (top.y + right.y + bottom.y + left.y) / 4
+        )
+        let shift = CGPoint(
+            x: clamp(rect.midX - centroid.x, -1, 1),
+            y: clamp(rect.midY - centroid.y, -1, 1)
+        )
+        top.x += shift.x
+        top.y += shift.y
+        right.x += shift.x
+        right.y += shift.y
+        bottom.x += shift.x
+        bottom.y += shift.y
+        left.x += shift.x
+        left.y += shift.y
+
+        var path = Path()
+        path.move(to: top)
+        path.addCurve(
+            to: right,
+            control1: CGPoint(x: rect.midX + w * (k + wobbleC * 0.14) + shift.x, y: rect.minY - h * (k - 0.34) + shift.y),
+            control2: CGPoint(x: rect.maxX + w * (k - 0.34) + shift.x, y: rect.midY - h * (k * 0.62 + wobbleB * 0.12) + shift.y)
+        )
+        path.addCurve(
+            to: bottom,
+            control1: CGPoint(x: rect.maxX + w * (k - 0.36) + shift.x, y: rect.maxY + h * 0.10 + shift.y),
+            control2: CGPoint(x: rect.midX + w * (k - 0.02) + shift.x, y: rect.maxY + h * 0.08 + shift.y)
+        )
+        path.addCurve(
+            to: left,
+            control1: CGPoint(x: rect.midX - w * (k - 0.02) + shift.x, y: rect.maxY + h * 0.08 + shift.y),
+            control2: CGPoint(x: rect.minX - w * (k - 0.36) + shift.x, y: rect.maxY + h * 0.10 + shift.y)
+        )
+        path.addCurve(
+            to: top,
+            control1: CGPoint(x: rect.minX - w * (k - 0.34) + shift.x, y: rect.midY - h * (k * 0.62 + wobbleD * 0.12) + shift.y),
+            control2: CGPoint(x: rect.midX - w * (k + wobbleA * 0.14) + shift.x, y: rect.minY - h * (k - 0.34) + shift.y)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Shared layout for the blob and the face that sits on it, so fill and
+/// features agree on where the body is.
+struct PersonaGeometry {
+    let unit: CGFloat
+    let body: CGRect
+    let squash: (width: CGFloat, height: CGFloat)
+
+    init(size: CGFloat, phase: CGFloat, mood: PersonaMood) {
+        self.init(canvas: CGSize(width: size, height: size), squash: mood.squash(phase))
+    }
+
+    init(canvas: CGSize, squash: (width: CGFloat, height: CGFloat)) {
+        unit = min(canvas.width, canvas.height)
+        self.squash = squash
+        let headroom = unit * 0.16
+        let width = unit * squash.width
+        let height = (unit - headroom) * squash.height
+        body = CGRect(
+            x: (canvas.width - width) / 2,
+            y: canvas.height - height - unit * 0.04,
+            width: width,
+            height: height
+        )
+    }
+}
+
+private func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
+    min(upper, max(lower, value))
 }
 
 /// What the character is doing, which is what the conversation is doing.
@@ -325,22 +432,31 @@ enum PersonaMood: Hashable {
 
     var blinks: Bool { self == .idle || self == .ok }
 
-    /// Seconds per breath, or nil for a pose that does not move.
+    /// Seconds per gel cycle, or nil for a pose that holds still.
     var period: Double? {
         switch self {
-        case .idle: return 2.6
-        case .thinking: return 0.9
-        case .working: return 0.55
-        case .waiting: return 1.4
-        case .ok, .failed: return nil
+        case .idle: return 2.8
+        case .thinking: return 1.15
+        case .working: return 0.9
+        case .waiting, .ok, .failed: return nil
         }
     }
 
+    /// How far phase may push the silhouette, as a fraction of the body.
+    var gelAmplitude: CGFloat {
+        switch self {
+        case .idle: return 0.025
+        case .thinking: return 0.048
+        case .working: return 0.02
+        default: return 0
+        }
+    }
+
+    var asymmetricGel: Bool { self == .thinking }
+
+    var droop: CGFloat { self == .failed ? 1 : 0 }
+
     /// An outline colour that overrides the persona's own, or nil to keep it.
-    ///
-    /// Only the two states that carry a warning get one, and only on the
-    /// outline. Repainting the whole creature threw away the thing that made
-    /// it recognisable as this persona, which is most of its job.
     var accent: Color? {
         switch self {
         case .waiting: return Theme.warning
@@ -349,7 +465,6 @@ enum PersonaMood: Hashable {
         }
     }
 
-    /// Ink for the eyes and mouth. Nil means the persona's own colour.
     var eyeInk: Color? {
         switch self {
         case .waiting: return Theme.warning
@@ -358,8 +473,6 @@ enum PersonaMood: Hashable {
         }
     }
 
-    /// Some states own their expression regardless of the seed, because the
-    /// expression is the message. A finished turn smiles whatever face it has.
     var forcedEyeShape: PersonaTraits.EyeShape? {
         switch self {
         case .ok: return .arc
@@ -376,40 +489,42 @@ enum PersonaMood: Hashable {
         }
     }
 
-    /// Width and height as a fraction of the frame. Squash and stretch: the
-    /// body gets wider as it gets shorter, so volume looks conserved and the
-    /// thing reads as soft rather than as an image being scaled.
-    func squash(_ phase: Bool) -> (width: CGFloat, height: CGFloat) {
+    /// Width and height as a fraction of the frame. Volume stays close to
+    /// conserved. Idle is a 2-3% breathe, thinking barely changes the box,
+    /// failed is a held squash.
+    func squash(_ phase: CGFloat) -> (width: CGFloat, height: CGFloat) {
+        let wave = sin(phase * 2 * .pi)
         switch self {
         case .idle:
-            return phase ? (0.86, 0.80) : (0.81, 0.86)
+            let breathe = wave * 0.025
+            return (0.84 + breathe, 0.83 - breathe)
         case .thinking:
-            return phase ? (0.74, 0.94) : (0.92, 0.72)
+            let breathe = wave * 0.012
+            return (0.84 + breathe, 0.83 - breathe * 0.6)
         case .working:
-            return phase ? (0.90, 0.76) : (0.78, 0.90)
+            let breathe = wave * 0.018
+            return (0.84 + breathe, 0.83 - breathe)
         case .waiting:
-            return phase ? (0.87, 0.87) : (0.82, 0.82)
+            return (0.85, 0.84)
         case .ok:
             return (0.84, 0.84)
         case .failed:
-            return (0.96, 0.60)
+            return (0.94, 0.64)
         }
     }
 
-    /// How far the eyes sit above centre. Looking up reads as thinking.
     var eyeLift: CGFloat {
         switch self {
-        case .thinking: return 0.12
+        case .thinking: return 0.08
         case .waiting: return 0.05
         default: return 0
         }
     }
 
-    /// 1 is wide open, 0 is shut.
     func openness(_ blinking: Bool) -> CGFloat {
         if blinking { return 0.12 }
         switch self {
-        case .working: return 0.42
+        case .working: return 0.55
         case .waiting: return 1.2
         case .failed: return 0.35
         default: return 1
@@ -438,16 +553,11 @@ struct PersonaTraits {
     init(seed: UInt64) {
         var bits = seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed
         func next(_ modulo: UInt64) -> UInt64 {
-            // A cheap xorshift, so eight draws from one number are not eight
-            // views of the same low bits.
             bits ^= bits << 13
             bits ^= bits >> 7
             bits ^= bits << 17
             return bits % modulo
         }
-        // Two eyes most of the time, one often enough to be a surprise, three
-        // rarely. A gallery where every third face is a cyclops is a novelty;
-        // one where it happens now and then is a character.
         eyeCount = switch next(10) {
         case 0, 1: 1
         case 2: 3
@@ -459,8 +569,6 @@ struct PersonaTraits {
         case 2: .pixel
         default: .oval
         }
-        // Often no mouth at all. A face that is only eyes is calmer, and it
-        // leaves the mouth free to mean something when a state adds one.
         mouth = switch next(5) {
         case 0: .smile
         case 1: .flat
@@ -469,21 +577,12 @@ struct PersonaTraits {
         }
         hasAntenna = next(3) == 0
         roundness = 0.34 + CGFloat(next(5)) * 0.055
-        // Full-range, because half-hearted wobble produced ten rounded
-        // rectangles that were technically distinct and visually identical.
         wobble = (
             CGFloat(next(200)) / 100 - 1,
             CGFloat(next(200)) / 100 - 1,
             CGFloat(next(200)) / 100 - 1,
             CGFloat(next(200)) / 100 - 1
         )
-        // Sampled along the brand arc only: `Theme.accent` at one end,
-        // `Theme.secondary` at the other, nothing outside it.
-        //
-        // Seven stops rather than a continuous mix. A continuous one gave ten
-        // personas nine shades of the same violet, because neighbouring points
-        // on a short arc are not a difference anybody can see. Quantising
-        // spends the whole arc on telling faces apart.
         hue = Theme.accent.mixed(with: Theme.secondary, by: Double(next(7)) / 6)
     }
 }

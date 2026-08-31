@@ -10,6 +10,8 @@ struct ChatView: View {
     @State private var draftSelection = NSRange(location: 0, length: 0)
     /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
+    @State private var follow = TranscriptFollowState()
+    @State private var settleMood: PersonaMood?
     @State private var paneDropTargeted = false
     @State private var composerDropTargeted = false
     @State private var dropNotice: String?
@@ -141,43 +143,72 @@ struct ChatView: View {
                             isPending: pendingApproval(item),
                             resolve: { approval, choice in
                                 Task { await model.resolve(approval, choice: choice) }
-                            }
+                            },
+                            faceSeed: model.faceSeed
                         )
                     }
-                    if model.busy {
-                        ChatWorkingIndicator(
-                            seed: model.faceSeed,
-                            isRunningTool: model.isRunningTool
-                        )
+                    if let mood = liveMood {
+                        ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
                     }
-                    Color.clear
-                        .frame(height: 1)
-                        .id("chat-bottom")
+                    TranscriptBottomSentinel()
                 }
                 .frame(maxWidth: 780, alignment: .leading)
                 .padding(.vertical, Theme.Space.xl)
                 .padding(.horizontal, Theme.Space.l)
                 .frame(maxWidth: .infinity, alignment: .top)
+                .chatScrollContent()
             }
-            .onChange(of: scrollToken) { _, _ in
-                scrollToLatest(proxy)
+            .chatScrollViewport()
+            .overlay(alignment: .bottom) {
+                if follow.showJump && model.approvals.isEmpty {
+                    JumpToLatestButton {
+                        follow.jump()
+                        pinToLatest(proxy, animated: true)
+                    }
+                }
+            }
+            .onPreferenceChange(ChatScrollContentKey.self) { frame in
+                follow.noteContent(frame)
+            }
+            .onPreferenceChange(ChatScrollViewportKey.self) { height in
+                follow.noteViewport(height: height)
+            }
+            .onChange(of: structureToken) { _, _ in
+                pinToLatest(proxy, animated: true)
+            }
+            .onChange(of: streamToken) { _, _ in
+                pinToLatest(proxy, animated: false)
             }
             .onChange(of: chat.running) { _, _ in
-                scrollToLatest(proxy)
+                pinToLatest(proxy, animated: true)
+            }
+            .onChange(of: model.busy) { was, now in
+                settleAfterTurn(was: was, now: now)
+            }
+            .onChange(of: model.approvals.isEmpty) { _, empty in
+                follow.suppressed = !empty
             }
             // A request that arrives while a reply is still streaming would
             // otherwise be pushed off the top of the page before anyone saw
             // it. Bring the card to them.
             .onChange(of: model.approvals.first?.id) { _, id in
                 guard let id else { return }
-                scrollTo("approval-\(id)", proxy)
+                scrollTo("approval-\(id)", proxy, animated: true)
             }
             .onChange(of: scrollTarget) { _, target in
                 guard let target else { return }
-                scrollTo(target, proxy)
+                scrollTo(target, proxy, animated: true)
                 scrollTarget = nil
             }
-            .onAppear { scrollToLatest(proxy) }
+            .onAppear {
+                follow.suppressed = !model.approvals.isEmpty
+                pinToLatest(proxy, animated: false)
+            }
+            .task(id: settleMood) {
+                guard settleMood == .ok else { return }
+                try? await Task.sleep(for: .milliseconds(480))
+                settleMood = nil
+            }
         }
     }
 
@@ -196,33 +227,53 @@ struct ChatView: View {
     }
     #endif
 
-    private func scrollToLatest(_ proxy: ScrollViewProxy) {
-        // A pending request owns the view. Streaming text must not scroll it
-        // back out from under somebody who is reading it to decide.
-        guard model.approvals.isEmpty else { return }
-        scrollTo("chat-bottom", proxy)
+    private var liveMood: PersonaMood? {
+        if let settleMood { return settleMood }
+        if !model.approvals.isEmpty { return .waiting }
+        guard model.busy else { return nil }
+        return model.isRunningTool ? .working : .thinking
     }
 
-    private func scrollTo(_ id: String, _ proxy: ScrollViewProxy) {
-        if reduceMotion {
-            proxy.scrollTo(id, anchor: .bottom)
+    private var structureToken: String {
+        TranscriptFollow.structureToken(
+            items: model.displayItems,
+            busy: model.busy,
+            runningTool: model.isRunningTool,
+            settle: settleMood
+        )
+    }
+
+    private var streamToken: Int {
+        TranscriptFollow.streamExtent(model.displayItems)
+    }
+
+    private func settleAfterTurn(was: Bool, now: Bool) {
+        if now {
+            settleMood = nil
+            return
+        }
+        guard was else { return }
+        if case .failed = model.displayItems.last?.kind {
+            settleMood = nil
         } else {
-            withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo(id, anchor: .bottom)
-            }
+            settleMood = .ok
         }
     }
 
-    /// Count alone misses streaming: coalesced text grows in place.
-    private var scrollToken: String {
-        guard let last = model.displayItems.last else { return "" }
-        switch last.kind {
-        case let .assistant(text, _), let .thinking(text):
-            return "\(last.id)-\(text.count)"
-        case let .tool(state):
-            return "\(last.id)-\(state.running)-\(state.failed)-\(state.detail?.count ?? 0)"
-        default:
-            return last.id
+    private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
+        // A pending request owns the view. Streaming text must not scroll it
+        // back out from under somebody who is reading it to decide.
+        guard follow.pinned, model.approvals.isEmpty else { return }
+        scrollTo(TranscriptFollow.bottomID, proxy, animated: animated)
+    }
+
+    private func scrollTo(_ id: String, _ proxy: ScrollViewProxy, animated: Bool) {
+        if !animated || reduceMotion {
+            proxy.scrollTo(id, anchor: .bottom)
+        } else {
+            withAnimation(.easeOut(duration: TranscriptFollow.structureDuration)) {
+                proxy.scrollTo(id, anchor: .bottom)
+            }
         }
     }
 

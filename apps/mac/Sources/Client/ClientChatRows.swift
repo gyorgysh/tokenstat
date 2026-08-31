@@ -15,6 +15,7 @@ struct ClientChatEventRow: View {
     let agentLabel: (String) -> String
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
+    var faceSeed: UInt64 = 0
 
     var body: some View {
         switch item.kind {
@@ -88,10 +89,13 @@ struct ClientChatEventRow: View {
             .font(ClientType.caption)
             .foregroundStyle(.secondary)
         case let .failed(text):
-            Text(text)
-                .font(ClientType.label)
-                .foregroundStyle(Theme.danger)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                PersonaMark(seed: faceSeed, size: 26, state: .failed)
+                Text(text)
+                    .font(ClientType.label)
+                    .foregroundStyle(Theme.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 }

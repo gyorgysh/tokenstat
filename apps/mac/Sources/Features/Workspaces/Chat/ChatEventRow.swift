@@ -15,6 +15,9 @@ struct ChatEventRow: View {
     let attachmentRevision: UInt64
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
+    /// The conversation's face, used when a turn fails so the same character
+    /// that was thinking is the one that droops.
+    var faceSeed: UInt64 = 0
 
     var body: some View {
         switch item.kind {
@@ -90,10 +93,13 @@ struct ChatEventRow: View {
             .font(Theme.caption)
             .foregroundStyle(.secondary)
         case let .failed(text):
-            Text(text)
-                .font(Theme.callout)
-                .foregroundStyle(Theme.danger)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                PersonaMark(seed: faceSeed, size: 26, state: .failed)
+                Text(text)
+                    .font(Theme.callout)
+                    .foregroundStyle(Theme.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 }
@@ -202,25 +208,37 @@ private struct ChatResponseAttachment: View {
 
 /// A lightweight streaming cue that sits at the same left edge as an agent
 /// reply. It makes an in-progress turn feel like a conversation without
-/// reserving the visual weight of another card.
+/// reserving the visual weight of another card. Height is fixed so a mood
+/// change cannot shove the transcript.
 struct ChatWorkingIndicator: View {
     /// The conversation's own face, so the thing that moves while you wait is
     /// the character you already associate with this chat.
     var seed: UInt64
-    /// Narrowed once a tool is running, because "thinking" and "doing" are
-    /// different waits and the difference is worth a glance.
-    var isRunningTool: Bool = false
+    var mood: PersonaMood = .thinking
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
-            PersonaMark(seed: seed, size: 26, state: isRunningTool ? .working : .thinking)
-            Text(isRunningTool ? "Working" : "Thinking")
+            PersonaMark(seed: seed, size: 26, state: mood)
+            Text(label)
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: TranscriptFollow.seatHeight)
+        .transaction { $0.animation = nil }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(isRunningTool ? "Running a tool" : "Thinking")
+        .accessibilityLabel(label)
+    }
+
+    private var label: String {
+        switch mood {
+        case .working: return "Working"
+        case .waiting: return "Waiting"
+        case .ok: return "Done"
+        case .failed: return "Failed"
+        default: return "Thinking"
+        }
     }
 }
 
