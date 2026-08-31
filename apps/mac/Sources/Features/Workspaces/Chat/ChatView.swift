@@ -6,7 +6,6 @@ struct ChatView: View {
     @Bindable var model: ChatModel
     let workspaceID: String
     var workspaceName: String? = nil
-    var onOpenInspector: (() -> Void)? = nil
     @State private var draft = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -14,7 +13,6 @@ struct ChatView: View {
         VStack(spacing: 0) {
             #if os(macOS)
             DetailChromeBar(scope: workspaceName.map { ScopeChip(label: $0, symbol: "folder.fill") }) {
-                conversationMenu
                 ToolbarIconButton(systemImage: "plus", help: "New chat") {
                     Task { await model.create() }
                 }
@@ -33,8 +31,7 @@ struct ChatView: View {
                     onSend: { submit(from: chat) },
                     onStop: { Task { await model.stop() } },
                     onAttach: { item in await model.attach(item) },
-                    onRemove: { model.removeAttachment($0) },
-                    onOpenInspector: onOpenInspector
+                    onRemove: { model.removeAttachment($0) }
                 )
             } else {
                 empty
@@ -72,47 +69,6 @@ struct ChatView: View {
         }
     }
 
-    private var conversationMenu: some View {
-        Menu {
-            if model.chats.isEmpty {
-                Text("No chats yet")
-            } else {
-                ForEach(model.chats) { chat in
-                    Button(chat.running ? "\(chat.title) · working" : chat.title, .comment) {
-                        Task { await model.select(chat) }
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                if model.selected?.running == true {
-                    Circle()
-                        .fill(Theme.accent)
-                        .frame(width: 7, height: 7)
-                }
-                Text(model.selected?.title ?? "Chat")
-                    .font(Theme.callout.weight(.medium))
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(Theme.fixed(9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            }
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .buttonStyle(.plain)
-        .disabled(model.chats.isEmpty)
-        .frame(maxWidth: 260, alignment: .leading)
-        .help("Switch conversation")
-    }
-
     private func transcript(_ chat: ChatConversation) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -128,6 +84,11 @@ struct ChatView: View {
                     ForEach(model.displayItems) { item in
                         ChatEventRow(
                             item: item,
+                            defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
+                            agentLabel: { backend in
+                                model.backend(for: backend)?.label ?? backend.capitalized
+                            },
+                            attachmentData: attachmentData(for: item),
                             isPending: pendingApproval(item),
                             resolve: { approval, choice in
                                 Task { await model.resolve(approval, choice: choice) }
@@ -135,13 +96,7 @@ struct ChatView: View {
                         )
                     }
                     if model.busy {
-                        HStack(spacing: Theme.Space.s) {
-                            ProgressView().controlSize(.small)
-                            Text("Working")
-                                .font(Theme.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, Theme.Space.l)
+                        ChatWorkingIndicator()
                     }
                     Color.clear
                         .frame(height: 1)
@@ -162,6 +117,21 @@ struct ChatView: View {
         }
     }
 
+    private func attachmentData(for item: ChatDisplayItem) -> Data? {
+        guard case let .attachment(attachment) = item.kind else { return nil }
+        return model.responseAttachmentData[attachment.id]
+    }
+
+    #if !os(macOS)
+    private var conversationMenu: some View {
+        Menu(model.selected?.title ?? "Chat") {
+            ForEach(model.chats) { conversation in
+                Button(conversation.title) { Task { await model.select(conversation) } }
+            }
+        }
+    }
+    #endif
+
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
         let animated = !reduceMotion
         if animated {
@@ -177,7 +147,7 @@ struct ChatView: View {
     private var scrollToken: String {
         guard let last = model.displayItems.last else { return "" }
         switch last.kind {
-        case let .assistant(text), let .thinking(text):
+        case let .assistant(text, _), let .thinking(text):
             return "\(last.id)-\(text.count)"
         case let .tool(state):
             return "\(last.id)-\(state.running)-\(state.failed)-\(state.detail?.count ?? 0)"

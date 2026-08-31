@@ -3,11 +3,11 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The bar under the transcript: setup, attachments, a field, Send.
+/// The bar under the transcript: message first, compact controls underneath.
 ///
-/// Controls sit above the field, each in its own place. The field is the
-/// message. Drop and paste land here so a screenshot does not have to be
-/// saved first. The well lights up in the accent when a drag is over it.
+/// The first row is an uninterrupted writing surface. Attach, agent options
+/// and send share one aligned utility row underneath, like a normal chat
+/// composer rather than a settings form sitting above a text field.
 struct ChatComposer: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
@@ -20,7 +20,6 @@ struct ChatComposer: View {
     var onStop: () -> Void
     var onAttach: (ChatInboxItem) async -> Void
     var onRemove: (ChatAttachment) -> Void
-    var onOpenInspector: (() -> Void)? = nil
 
     @State private var importing = false
     @State private var dropTargeted = false
@@ -48,19 +47,19 @@ struct ChatComposer: View {
     }
 
     private var well: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ChatComposerControls(
-                model: model,
-                chat: chat,
-                locked: running,
-                onOpenInspector: onOpenInspector
-            )
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             if !attachments.isEmpty {
                 strip
             }
-            HStack(alignment: .bottom, spacing: Theme.Space.s) {
+            field
+            HStack(alignment: .center, spacing: Theme.Space.s) {
                 attachControl
-                field
+                ChatComposerControls(
+                    model: model,
+                    chat: chat,
+                    locked: running
+                )
+                Spacer(minLength: Theme.Space.s)
                 if running {
                     Button("Stop", .stop) { onStop() }
                         .buttonStyle(DestructiveButtonStyle(small: true))
@@ -79,7 +78,7 @@ struct ChatComposer: View {
             if running { onStop() }
         }
         #endif
-        .padding(10)
+        .padding(12)
         .background(wellFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -163,7 +162,7 @@ struct ChatComposer: View {
                 ingest(items: ChatInbox.pasteboardItems())
             }
         )
-        .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 160, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 160, alignment: .topLeading)
         .layoutPriority(1)
         .fixedSize(horizontal: false, vertical: true)
         #else

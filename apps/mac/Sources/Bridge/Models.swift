@@ -2464,6 +2464,12 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var name: String
     var mediaType: String?
+    var size: UInt64?
+}
+
+struct ChatAttachmentData: Codable, Sendable {
+    var attachment: ChatAttachment
+    var data: String
 }
 
 struct ChatEventChunk: Codable, Sendable {
@@ -2501,6 +2507,7 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     var kind: String
     var text: String?
     var atMs: Int64?
+    var backend: String?
     var event: ChatAgentEvent?
     var approval: ChatApproval?
     var id: String {
@@ -2547,10 +2554,15 @@ struct ChatAgentEvent: Codable, Sendable {
     var cacheRead: UInt64?
     var cacheWrite: UInt64?
     var exitCode: Int32?
+    var id: String?
+    var name: String?
+    var mediaType: String?
+    var size: UInt64?
 
     enum CodingKeys: String, CodingKey {
         case kind, delta, verb, target, path, added, removed, patch, status, text
         case input, output, costUsd, callId, ok, detail, cacheRead, cacheWrite, exitCode
+        case id, name, mediaType, size
     }
 
     init(from decoder: Decoder) throws {
@@ -2574,6 +2586,10 @@ struct ChatAgentEvent: Codable, Sendable {
         cacheRead = c.decodeCount(forKey: .cacheRead)
         cacheWrite = c.decodeCount(forKey: .cacheWrite)
         exitCode = try c.decodeIfPresent(Int32.self, forKey: .exitCode)
+        id = try c.decodeIfPresent(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        mediaType = try c.decodeIfPresent(String.self, forKey: .mediaType)
+        size = c.decodeCount(forKey: .size)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2597,6 +2613,10 @@ struct ChatAgentEvent: Codable, Sendable {
         try c.encodeIfPresent(cacheRead, forKey: .cacheRead)
         try c.encodeIfPresent(cacheWrite, forKey: .cacheWrite)
         try c.encodeIfPresent(exitCode, forKey: .exitCode)
+        try c.encodeIfPresent(id, forKey: .id)
+        try c.encodeIfPresent(name, forKey: .name)
+        try c.encodeIfPresent(mediaType, forKey: .mediaType)
+        try c.encodeIfPresent(size, forKey: .size)
     }
 }
 

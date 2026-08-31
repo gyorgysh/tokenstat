@@ -48,10 +48,7 @@ struct TodoInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                FeatureMark(name: "mark_todo", tint: Theme.accent, size: 16)
-                    .padding(.leading, Theme.Space.m)
-                Text("Task")
-                    .font(Theme.font(13, weight: .semibold))
+                InspectorTitle(title: "Task", symbol: "checklist")
                 Spacer(minLength: 0)
             }
             Group {

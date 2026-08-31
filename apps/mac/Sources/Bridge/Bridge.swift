@@ -969,6 +969,17 @@ extension Bridge {
         _ = try await chatInvoke(peer: peer, "chat.remove", ["id": id], as: Removed.self)
     }
 
+    static func removeAllChats(workspaceID: String, peer: String? = nil) async throws -> Int {
+        struct Removed: Codable, Sendable { var removed: Int }
+        let route = chatRoute(workspaceID: workspaceID, peer: peer)
+        return try await chatInvoke(
+            peer: route.peer,
+            "chat.removeAll",
+            ["workspaceId": route.workspaceID],
+            as: Removed.self
+        ).removed
+    }
+
     static func sendChat(
         id: String,
         text: String,
@@ -993,6 +1004,19 @@ extension Bridge {
             "chat.events",
             ["id": id, "offset": offset],
             as: ChatEventChunk.self
+        )
+    }
+
+    static func chatAttachment(
+        id: String,
+        attachmentID: String,
+        peer: String? = nil
+    ) async throws -> ChatAttachmentData {
+        try await chatInvoke(
+            peer: peer,
+            "chat.attachment",
+            ["id": id, "attachmentId": attachmentID],
+            as: ChatAttachmentData.self
         )
     }
 

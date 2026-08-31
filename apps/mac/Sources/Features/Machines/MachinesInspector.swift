@@ -22,9 +22,7 @@ struct MachinesInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                Text("Device")
-                    .font(Theme.font(13, weight: .semibold))
-                    .padding(.leading, Theme.Space.m)
+                InspectorTitle(title: "Device", symbol: "laptopcomputer")
                 Spacer(minLength: 0)
             }
             Group {

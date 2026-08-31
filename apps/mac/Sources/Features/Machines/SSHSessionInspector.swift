@@ -59,10 +59,7 @@ struct SSHSessionInspector: View {
                         .buttonStyle(.plain)
                         .padding(.leading, Theme.Space.s)
                 } else {
-                    Text("Snippets")
-                        .font(Theme.font(13, weight: .semibold))
-                        .lineLimit(1)
-                        .padding(.leading, Theme.Space.m)
+                    InspectorTitle(title: "Snippets", symbol: "text.badge.plus")
                 }
                 Spacer(minLength: 0)
             }

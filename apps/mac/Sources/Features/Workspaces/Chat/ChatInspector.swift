@@ -18,10 +18,7 @@ struct ChatInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                chromeMark
-                    .padding(.leading, Theme.Space.m)
-                Text("Chat")
-                    .font(Theme.font(13, weight: .semibold))
+                InspectorTitle(title: "Chat", symbol: "bubble.left.and.bubble.right")
                 Spacer(minLength: 0)
             }
             Group {
@@ -76,19 +73,6 @@ struct ChatInspector: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The transcript stays on this computer until you delete it. This cannot be undone.")
-        }
-    }
-
-    @ViewBuilder
-    private var chromeMark: some View {
-        if let chat = model.selected {
-            HarnessMark(id: chat.backend, size: 16)
-        } else {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(Theme.font(11, weight: .semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 16, height: 16)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 4.5, style: .continuous))
         }
     }
 

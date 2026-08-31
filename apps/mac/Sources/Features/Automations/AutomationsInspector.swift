@@ -23,10 +23,7 @@ struct AutomationsInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                FeatureMark(name: "mark_automation", tint: Theme.accent, size: 16)
-                    .padding(.leading, Theme.Space.m)
-                Text(chromeTitle)
-                    .font(Theme.font(13, weight: .semibold))
+                InspectorTitle(title: chromeTitle, symbol: "bolt.fill")
                 Spacer(minLength: 0)
             }
             Group {

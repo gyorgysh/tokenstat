@@ -2,12 +2,16 @@
 
 #if !os(macOS)
 import SwiftUI
+import UIKit
 
 /// Phone-sized transcript blocks. Assistant prose and tools are the same
 /// views as the Mac. Edits use `DiffLineRow` so a hunk does not spend a
 /// quarter of the screen on two gutters.
 struct ClientChatEventRow: View {
     let item: ChatDisplayItem
+    let attachmentData: Data?
+    let defaultAgentName: String
+    let agentLabel: (String) -> String
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
 
@@ -21,10 +25,20 @@ struct ClientChatEventRow: View {
                     .padding(Theme.Space.m)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-        case let .assistant(text):
-            MarkdownText(text)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        case let .assistant(text, backend):
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
+                    .font(ClientType.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                MarkdownText(text)
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.panel.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
+            }
         case let .thinking(text):
             Text(text)
                 .font(ClientType.caption)
@@ -42,6 +56,8 @@ struct ClientChatEventRow: View {
             )
         case let .edit(path, added, removed, patch):
             ClientChatEditRow(path: path, added: added, removed: removed, patch: patch)
+        case let .attachment(attachment):
+            ClientChatResponseAttachment(attachment: attachment, data: attachmentData)
         case let .approval(approval):
             ClientChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
         case let .usage(input, output, cost):
@@ -59,6 +75,99 @@ struct ClientChatEventRow: View {
                 .font(ClientType.label)
                 .foregroundStyle(Theme.danger)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct ClientChatResponseAttachment: View {
+    let attachment: ChatAttachment
+    let data: Data?
+    @State private var exportURL: URL?
+
+    var body: some View {
+        Group {
+            if let exportURL {
+                ShareLink(item: exportURL) { content }
+                    .buttonStyle(.plain)
+            } else {
+                content
+            }
+        }
+        .task(id: data) { exportURL = stage() }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 320)
+                    .background(Theme.background)
+            }
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: symbol)
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 24, height: 24)
+                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(attachment.name)
+                        .font(ClientType.label.weight(.medium))
+                        .lineLimit(1)
+                    Text(detail)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if data == nil {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "square.and.arrow.up")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(Theme.Space.m)
+        }
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        }
+    }
+
+    private var image: UIImage? {
+        guard attachment.mediaType?.hasPrefix("image/") == true, let data else { return nil }
+        return UIImage(data: data)
+    }
+
+    private var detail: String {
+        let type = attachment.mediaType ?? "File"
+        guard let size = attachment.size else { return type }
+        return "\(type) · \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))"
+    }
+
+    private var symbol: String {
+        let type = attachment.mediaType ?? ""
+        if type.hasPrefix("image/") { return "photo" }
+        if type.hasPrefix("audio/") { return "waveform" }
+        if type.hasPrefix("video/") { return "film" }
+        if type == "application/pdf" { return "doc.richtext" }
+        if type.hasPrefix("text/") || type.contains("json") { return "doc.text" }
+        return "doc"
+    }
+
+    private func stage() -> URL? {
+        guard let data else { return nil }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tokenstat-chat-files", isDirectory: true)
+            .appendingPathComponent(attachment.id, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent(attachment.name)
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
         }
     }
 }

@@ -81,7 +81,6 @@ struct ChatSetupHeader: View {
 
     private var chips: some View {
         HStack(spacing: Theme.Space.s) {
-            HarnessMark(id: chat.backend, size: 22)
             chip(backend?.label ?? chat.backend)
             chip(chat.mode == "plan" ? "Plan" : "Execute")
             if let modelName = chat.model, !modelName.isEmpty {
@@ -119,8 +118,6 @@ struct ChatSetupHeader: View {
     private var agentRow: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
-                HarnessMark(id: chat.backend, size: 28)
-                    .padding(.bottom, 1)
                 AppMenuPicker(
                     title: "Agent",
                     options: agentOptions,
@@ -220,7 +217,7 @@ struct ChatSetupHeader: View {
     }
 }
 
-/// One field for agent, model and effort. Plan, bypass and Setup sit beside it.
+/// One field for agent, model and effort. Plan and permission sit beside it.
 ///
 /// Full setup stays in the inspector. These controls must not stretch across
 /// the well: each takes its own width, the field is the message.
@@ -228,7 +225,6 @@ struct ChatComposerControls: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     var locked: Bool
-    var onOpenInspector: (() -> Void)? = nil
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -237,8 +233,6 @@ struct ChatComposerControls: View {
                 ChatAgentMenu(model: model, chat: chat, locked: locked)
                 HStack(alignment: .center, spacing: Theme.Space.s) {
                     pills
-                    Spacer(minLength: 0)
-                    setupButton
                 }
             }
         }
@@ -250,8 +244,6 @@ struct ChatComposerControls: View {
     private var content: some View {
         ChatAgentMenu(model: model, chat: chat, locked: locked)
         pills
-        Spacer(minLength: 0)
-        setupButton
     }
 
     @ViewBuilder
@@ -280,15 +272,6 @@ struct ChatComposerControls: View {
                 selection: autonomyBinding
             )
             .disabled(locked)
-        }
-    }
-
-    @ViewBuilder
-    private var setupButton: some View {
-        if let onOpenInspector {
-            Button("Setup", .settings) { onOpenInspector() }
-                .buttonStyle(SecondaryButtonStyle(small: true))
-                .environment(\.compactActions, true)
         }
     }
 
@@ -392,7 +375,6 @@ private struct ChatAgentMenu: View {
             }
         } label: {
             HStack(spacing: 6) {
-                HarnessMark(id: chat.backend, size: 16)
                 Text(summary)
                     .font(Theme.font(12, weight: .medium))
                     .lineLimit(1)

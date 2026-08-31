@@ -22,10 +22,7 @@ struct HomeInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                FeatureMark(name: "mark_activity", tint: Theme.accent, size: 16)
-                    .padding(.leading, Theme.Space.m)
-                Text("Day")
-                    .font(Theme.font(13, weight: .semibold))
+                InspectorTitle(title: "Day", symbol: "calendar")
                 Spacer(minLength: 0)
             }
             Group {

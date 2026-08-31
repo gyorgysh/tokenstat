@@ -27,6 +27,7 @@ struct ClientChatComposer: View {
 
     @State private var importing = false
     @State private var pickingPhotos = false
+    @State private var dropTargeted = false
     @State private var photos: [PhotosPickerItem] = []
     @FocusState private var focused: Bool
 
@@ -35,8 +36,7 @@ struct ClientChatComposer: View {
             ChatComposerControls(
                 model: model,
                 chat: chat,
-                locked: running,
-                onOpenInspector: onOpenSetup
+                locked: running
             )
             if !attachments.isEmpty {
                 strip
@@ -60,6 +60,26 @@ struct ClientChatComposer: View {
         .clientFloatingBar()
         .padding(.horizontal, Theme.Space.s)
         .padding(.bottom, Theme.Space.s)
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Theme.accentSoft.opacity(0.94))
+                    .overlay {
+                        Text("Drop to attach")
+                            .font(ClientType.label.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(
+            of: [.fileURL, .image, .png, .jpeg, .gif, .webP, .heic, .tiff, .pdf, .plainText],
+            isTargeted: $dropTargeted
+        ) { providers in
+            Task { await ingest(providers: providers) }
+            return true
+        }
+        .animation(.easeOut(duration: 0.16), value: dropTargeted)
         .fileImporter(
             isPresented: $importing,
             allowedContentTypes: [.item],
@@ -133,6 +153,10 @@ struct ClientChatComposer: View {
 
     private func ingest(urls: [URL]) {
         ingest(items: urls.compactMap(ChatInbox.item(from:)))
+    }
+
+    private func ingest(providers: [NSItemProvider]) async {
+        ingest(items: await ChatInbox.items(from: providers))
     }
 
     private func ingest(photos items: [PhotosPickerItem]) async {

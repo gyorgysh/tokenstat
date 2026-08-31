@@ -226,6 +226,11 @@ private struct ClientChatThread: View {
                     ForEach(model.displayItems) { item in
                         ClientChatEventRow(
                             item: item,
+                            attachmentData: attachmentData(for: item),
+                            defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
+                            agentLabel: { backend in
+                                model.backend(for: backend)?.label ?? backend.capitalized
+                            },
                             isPending: pendingApproval(item),
                             resolve: { approval, choice in
                                 Task { await model.resolve(approval, choice: choice) }
@@ -254,6 +259,11 @@ private struct ClientChatThread: View {
             .onChange(of: chat.running) { _, _ in scrollToLatest(proxy) }
             .onAppear { scrollToLatest(proxy) }
         }
+    }
+
+    private func attachmentData(for item: ChatDisplayItem) -> Data? {
+        guard case let .attachment(attachment) = item.kind else { return nil }
+        return model.responseAttachmentData[attachment.id]
     }
 
     private var setupSheet: some View {
@@ -290,7 +300,7 @@ private struct ClientChatThread: View {
     private var scrollToken: String {
         guard let last = model.displayItems.last else { return "" }
         switch last.kind {
-        case let .assistant(text), let .thinking(text):
+        case let .assistant(text, _), let .thinking(text):
             return "\(last.id)-\(text.count)"
         case let .tool(state):
             return "\(last.id)-\(state.running)-\(state.failed)-\(state.detail?.count ?? 0)"

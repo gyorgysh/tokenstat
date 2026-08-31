@@ -1253,6 +1253,30 @@ struct InspectorChromeBar<Content: View, Accessory: View>: View {
     }
 }
 
+/// Consistent destination label for inspector chrome. SF Symbols keep this
+/// neutral (an inspector is a place, not an agent brand) while the 24pt seat
+/// gives small glyphs enough air beside their title.
+struct InspectorTitle: View {
+    let title: String
+    let symbol: String
+    var tint: Color = Theme.accent
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            Image(systemName: symbol)
+                .font(Theme.font(13, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Text(title)
+                .font(Theme.font(13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.leading, Theme.Space.m)
+    }
+}
+
 extension InspectorChromeBar where Accessory == EmptyView {
     init(onClose: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content) {
         self.init(onClose: onClose, accessory: { EmptyView() }, content: content)

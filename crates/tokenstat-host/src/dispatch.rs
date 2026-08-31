@@ -473,6 +473,7 @@ struct ChatParams {
     allowed_shell_prefixes: Option<Vec<String>>,
     text: Option<String>,
     attachment_ids: Option<Vec<String>>,
+    attachment_id: Option<String>,
     name: Option<String>,
     data: Option<String>,
     media_type: Option<String>,
@@ -1676,6 +1677,11 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         "chat.remove" => {
             Ok(json!({ "removed": store.remove(&p.id.ok_or("chat.remove needs id")?)? }))
         }
+        "chat.removeAll" => Ok(json!({
+            "removed": store.remove_all(
+                &p.workspace_id.ok_or("chat.removeAll needs a workspaceId")?
+            )?
+        })),
         "chat.send" => serde_json::to_value(store.send(
             &p.id.ok_or("chat.send needs id")?,
             &p.text.ok_or("chat.send needs text")?,
@@ -1688,6 +1694,14 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             &p.data.ok_or("chat.attach needs data")?,
             p.media_type,
         )?)
+        .envelope(),
+        "chat.attachment" => serde_json::to_value(
+            store.attachment_data(
+                &p.id.ok_or("chat.attachment needs id")?,
+                &p.attachment_id
+                    .ok_or("chat.attachment needs attachmentId")?,
+            )?,
+        )
         .envelope(),
         "chat.stop" => {
             store.stop(&p.id.ok_or("chat.stop needs id")?)?;

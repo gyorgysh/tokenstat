@@ -60,6 +60,16 @@ pub enum Event {
         removed: u32,
         patch: String,
     },
+    /// A file the agent explicitly linked in its reply. Chat copies the file
+    /// into its own store before emitting this event, so the descriptor works
+    /// for remote workspaces and remains valid if the original is moved.
+    Attachment {
+        id: String,
+        name: String,
+        #[serde(rename = "mediaType")]
+        media_type: Option<String>,
+        size: u64,
+    },
     Usage {
         input: u64,
         output: u64,

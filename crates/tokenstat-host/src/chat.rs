@@ -7,7 +7,7 @@
 //! sync. A chat is one short-lived process per turn; the backend's own session
 //! token is what joins those processes into a conversation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -47,6 +47,8 @@ pub struct Conversation {
     pub autonomy: String,
     #[serde(default)]
     pub resume_token: Option<String>,
+    #[serde(default)]
+    pub resume_tokens: HashMap<String, String>,
     #[serde(default)]
     pub allowed_tools: Vec<String>,
     #[serde(default)]
@@ -89,6 +91,17 @@ pub struct Attachment {
     pub id: String,
     pub name: String,
     pub media_type: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
+}
+
+/// Bytes for an attachment requested by a chat client. Keeping the descriptor
+/// beside them lets the same endpoint serve an inline image or a download.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentData {
+    pub attachment: Attachment,
+    pub data: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -161,6 +174,7 @@ enum StoredEvent {
     Agent {
         event: Event,
         at_ms: i64,
+        backend: String,
     },
     /// An approval belongs in the transcript, not in a disconnected modal.
     /// The queue remains the source of truth for its live decision; this
@@ -186,7 +200,13 @@ pub struct Store {
     /// Per-turn credentials are intentionally memory-only. The 0600 file a
     /// hook reads contains the opaque value, while this map is what binds it
     /// to exactly one live conversation at the daemon boundary.
-    turn_tokens: Mutex<HashMap<String, String>>,
+    turn_tokens: Mutex<HashMap<String, TurnBinding>>,
+}
+
+#[derive(Clone)]
+struct TurnBinding {
+    conversation_id: String,
+    backend: String,
 }
 
 pub fn shared() -> Arc<Store> {
@@ -356,14 +376,14 @@ impl Store {
         preview: &str,
         shell_prefix: Option<String>,
     ) -> Result<Approval, String> {
-        let conversation_id = self
+        let binding = self
             .turn_tokens
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(turn_token)
             .cloned()
             .ok_or("the chat turn credential is invalid or expired")?;
-        self.request_approval(&conversation_id, verb, preview, shell_prefix)
+        self.request_approval(&binding.conversation_id, verb, preview, shell_prefix)
     }
 
     /// Record the outcome reported by a backend post-tool hook. Like an
@@ -376,7 +396,7 @@ impl Store {
         ok: bool,
         detail: Option<String>,
     ) -> Result<(), String> {
-        let conversation_id = self
+        let binding = self
             .turn_tokens
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -387,7 +407,7 @@ impl Store {
             return Err("chat.toolResult needs callId".into());
         }
         self.append(
-            &conversation_id,
+            &binding.conversation_id,
             &StoredEvent::Agent {
                 event: Event::ToolEnd {
                     call_id: call_id.into(),
@@ -395,20 +415,27 @@ impl Store {
                     detail,
                 },
                 at_ms: now_ms(),
+                backend: binding.backend,
             },
         )
     }
 
     /// Give one spawned turn an opaque credential. This is separate from the
     /// conversation id so a hook cannot be replayed after the turn finishes.
-    fn register_turn_token(&self, conversation_id: &str) -> Result<String, String> {
+    fn register_turn_token(&self, conversation_id: &str, backend: &str) -> Result<String, String> {
         let mut bytes = [0u8; 24];
         getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
         let token: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
         self.turn_tokens
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(token.clone(), conversation_id.into());
+            .insert(
+                token.clone(),
+                TurnBinding {
+                    conversation_id: conversation_id.into(),
+                    backend: backend.into(),
+                },
+            );
         Ok(token)
     }
 
@@ -591,6 +618,7 @@ impl Store {
                 .or(input.autonomy)
                 .unwrap_or_else(default_autonomy),
             resume_token: None,
+            resume_tokens: HashMap::new(),
             allowed_tools: Vec::new(),
             allowed_shell_prefixes: Vec::new(),
             budget_seconds: input.budget_seconds.unwrap_or(0),
@@ -628,7 +656,16 @@ impl Store {
             chat.title = title;
         }
         if let Some(backend) = changes.backend {
-            chat.backend = backend;
+            if backend != chat.backend {
+                chat.backend = backend;
+                // A model/effort value and a backend session are backend-
+                // specific. Do not send stale setup or a legacy token to the
+                // newly selected agent. A previously used backend can still
+                // recover its own token from `resume_tokens`.
+                chat.model = None;
+                chat.effort = None;
+                chat.resume_token = chat.resume_tokens.get(&chat.backend).cloned();
+            }
         }
         if let Some(model) = changes.model {
             chat.model = Some(model).filter(|value| !value.trim().is_empty());
@@ -693,6 +730,35 @@ impl Store {
         Ok(removed)
     }
 
+    pub fn remove_all(&self, workspace_id: &str) -> Result<usize, String> {
+        let targets: Vec<String> = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|chat| chat.workspace_id == workspace_id)
+            .map(|chat| chat.id.clone())
+            .collect();
+        let active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
+        if targets.iter().any(|id| active.contains_key(id)) {
+            return Err("stop the running chats before removing them".into());
+        }
+        drop(active);
+        if targets.is_empty() {
+            return Ok(0);
+        }
+        let target_set: HashSet<&str> = targets.iter().map(String::as_str).collect();
+        self.conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|chat| !target_set.contains(chat.id.as_str()));
+        self.save()?;
+        for id in &targets {
+            let _ = fs::remove_dir_all(self.root.join(id));
+        }
+        Ok(targets.len())
+    }
+
     pub fn events(&self, id: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
         self.get(id)?;
         let path = self.events_path(id);
@@ -725,12 +791,36 @@ impl Store {
             id: format!("file-{}", now_ms()),
             name: safe_file_name(name),
             media_type,
+            size: Some(bytes.len() as u64),
         };
         let path = self.attachment_path(id, &attachment.id, &attachment.name);
         fs::create_dir_all(path.parent().ok_or("invalid attachment path")?)
             .map_err(|e| e.to_string())?;
         fs::write(path, bytes).map_err(|e| e.to_string())?;
         Ok(attachment)
+    }
+
+    pub fn attachment_data(&self, id: &str, attachment_id: &str) -> Result<AttachmentData, String> {
+        self.get(id)?;
+        let path = self.single_attachment_path(id, attachment_id)?;
+        let bytes = fs::read(&path).map_err(|_| "the attachment is no longer available")?;
+        if bytes.len() > ATTACHMENT_CAP {
+            return Err("the attachment is too large to transfer".into());
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(safe_file_name)
+            .unwrap_or_else(|| "attachment".into());
+        Ok(AttachmentData {
+            attachment: Attachment {
+                id: attachment_id.into(),
+                media_type: media_type_for_path(&path),
+                size: Some(bytes.len() as u64),
+                name,
+            },
+            data: crate::base64::encode(&bytes),
+        })
     }
 
     pub fn send(
@@ -749,9 +839,27 @@ impl Store {
         }
         let workspace = crate::workspaces::folder(&chat.workspace_id)?;
         let attachments = self.attachment_paths(id, attachment_ids)?;
-        let prompt = prompt_with_attachments(
-            &prompt_with_system_prompt(prompt, &chat.system_prompt),
-            &attachments,
+        let response_output_dir = self.response_output_dir(id);
+        fs::create_dir_all(&response_output_dir).map_err(|e| e.to_string())?;
+        let resume_token = chat
+            .resume_tokens
+            .get(&chat.backend)
+            .map(String::as_str)
+            .or_else(|| {
+                // Existing conversations predate the per-backend map. Their
+                // legacy token is safe only until the first backend switch,
+                // which clears it above.
+                chat.resume_tokens
+                    .is_empty()
+                    .then_some(chat.resume_token.as_deref())
+                    .flatten()
+            });
+        let prompt = prompt_with_response_file_contract(
+            &prompt_with_attachments(
+                &prompt_with_system_prompt(prompt, &chat.system_prompt),
+                &attachments,
+            ),
+            &response_output_dir,
         );
         let hook_command = if chat.autonomy == "standard" {
             std::env::current_exe()
@@ -770,7 +878,7 @@ impl Store {
             chat.effort.as_deref(),
             chat.budget_seconds,
             crate::automations::ChatLaunch {
-                resume: chat.resume_token.as_deref(),
+                resume: resume_token,
                 bypass: chat.autonomy == "bypass",
                 mode: &chat.mode,
                 hook_command: hook_command.as_deref(),
@@ -780,7 +888,7 @@ impl Store {
             },
         )?;
         let turn = if chat.autonomy == "standard" {
-            let token = self.register_turn_token(id)?;
+            let token = self.register_turn_token(id, &chat.backend)?;
             match self.write_turn_file(id, &token) {
                 Ok(file) => Some((token, file)),
                 Err(error) => {
@@ -881,8 +989,16 @@ impl Store {
         let codex_hook_home = codex_hook_home.clone();
         let agy_hook_home = agy_hook_home.clone();
         let opencode_hook_home = opencode_hook_home.clone();
+        let response_output_dir = response_output_dir.clone();
         std::thread::spawn(move || {
-            Arc::clone(&store).drain(&chat_id, &backend, &info.id, &raw_path);
+            Arc::clone(&store).drain(
+                &chat_id,
+                &backend,
+                &info.id,
+                &raw_path,
+                &response_output_dir,
+            );
+            let _ = fs::remove_dir_all(&response_output_dir);
             if let Some(token) = turn_token {
                 store.revoke_turn_token(&token);
             }
@@ -923,11 +1039,19 @@ impl Store {
         Ok(())
     }
 
-    fn drain(self: Arc<Self>, id: &str, backend: &str, pty: &str, raw_path: &PathBuf) {
+    fn drain(
+        self: Arc<Self>,
+        id: &str,
+        backend: &str,
+        pty: &str,
+        raw_path: &PathBuf,
+        response_output_dir: &Path,
+    ) {
         let manager = tokenstat_pty::manager();
         let mut parser = Parser::new(backend);
         let reader = format!("chat:{id}");
         let mut offset = 0;
+        let mut assistant_text = String::new();
         let deadline = self.get(id).ok().and_then(|chat| {
             (chat.budget_seconds > 0)
                 .then(|| Instant::now() + Duration::from_secs(chat.budget_seconds))
@@ -937,7 +1061,9 @@ impl Store {
                 offset = chunk.next_offset;
                 if !chunk.bytes.is_empty() {
                     let _ = append_raw(raw_path, &chunk.bytes);
-                    self.record_events(id, parser.push_events(&chunk.bytes));
+                    let events = parser.push_events(&chunk.bytes);
+                    collect_agent_text(&events, &mut assistant_text);
+                    self.record_events(id, backend, events);
                 }
             }
             if !manager.info(pty).map(|info| info.alive).unwrap_or(false) {
@@ -953,12 +1079,18 @@ impl Store {
             && !chunk.bytes.is_empty()
         {
             let _ = append_raw(raw_path, &chunk.bytes);
-            self.record_events(id, parser.push_events(&chunk.bytes));
+            let events = parser.push_events(&chunk.bytes);
+            collect_agent_text(&events, &mut assistant_text);
+            self.record_events(id, backend, events);
         }
-        self.record_events(id, parser.finish_events());
+        let events = parser.finish_events();
+        collect_agent_text(&events, &mut assistant_text);
+        self.record_events(id, backend, events);
+        self.record_response_attachments(id, backend, &assistant_text, response_output_dir);
         let exit = manager.info(pty).ok().and_then(|info| info.exit_code);
         self.record_events(
             id,
+            backend,
             vec![Event::Done {
                 status: if exit == Some(0) {
                     "ok".into()
@@ -977,16 +1109,78 @@ impl Store {
         let _ = self.set_running(id, false);
     }
 
-    fn record_events(&self, id: &str, events: Vec<Event>) {
+    fn record_events(&self, id: &str, backend: &str, events: Vec<Event>) {
         for event in events {
             if let Event::Session { id: token } = &event {
-                let _ = self.set_resume(id, token);
+                let _ = self.set_resume(id, backend, token);
             }
             let _ = self.append(
                 id,
                 &StoredEvent::Agent {
                     event,
                     at_ms: now_ms(),
+                    backend: backend.into(),
+                },
+            );
+        }
+    }
+
+    /// Turn explicit local-file links in the final reply into durable chat
+    /// attachments. The link is the agent's declaration of intent; arbitrary
+    /// paths mentioned in prose or printed by a tool are never copied.
+    fn record_response_attachments(
+        &self,
+        id: &str,
+        backend: &str,
+        text: &str,
+        response_output_dir: &Path,
+    ) {
+        let Ok(output_root) = fs::canonicalize(response_output_dir) else {
+            return;
+        };
+        for (index, source) in response_file_paths(text).into_iter().enumerate() {
+            let Ok(source) = fs::canonicalize(&source) else {
+                continue;
+            };
+            if source == output_root || !source.starts_with(&output_root) {
+                continue;
+            }
+            let Ok(link_metadata) = fs::symlink_metadata(&source) else {
+                continue;
+            };
+            if !link_metadata.file_type().is_file() {
+                continue;
+            }
+            let Ok(metadata) = fs::metadata(&source) else {
+                continue;
+            };
+            if !metadata.is_file() || metadata.len() == 0 || metadata.len() > ATTACHMENT_CAP as u64
+            {
+                continue;
+            }
+            let Some(source_name) = source.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let name = safe_file_name(source_name);
+            let attachment_id = format!("output-{}-{index}", now_ms());
+            let destination = self.attachment_path(id, &attachment_id, &name);
+            let Some(parent) = destination.parent() else {
+                continue;
+            };
+            if fs::create_dir_all(parent).is_err() || fs::copy(&source, &destination).is_err() {
+                continue;
+            }
+            let _ = self.append(
+                id,
+                &StoredEvent::Agent {
+                    event: Event::Attachment {
+                        id: attachment_id,
+                        name,
+                        media_type: media_type_for_path(&source),
+                        size: metadata.len(),
+                    },
+                    at_ms: now_ms(),
+                    backend: backend.into(),
                 },
             );
         }
@@ -1066,7 +1260,7 @@ impl Store {
         self.save()?;
         Ok(out)
     }
-    fn set_resume(&self, id: &str, token: &str) -> Result<(), String> {
+    fn set_resume(&self, id: &str, backend: &str, token: &str) -> Result<(), String> {
         let mut chats = self
             .conversations
             .lock()
@@ -1075,6 +1269,7 @@ impl Store {
             .iter_mut()
             .find(|chat| chat.id == id)
             .ok_or("no chat with that id")?;
+        chat.resume_tokens.insert(backend.into(), token.into());
         chat.resume_token = Some(token.into());
         chat.updated_at_ms = now_ms();
         drop(chats);
@@ -1089,6 +1284,12 @@ impl Store {
             .join(id)
             .join("raw")
             .join(format!("{turn_started_at_ms}.ndjson"))
+    }
+
+    fn response_output_dir(&self, id: &str) -> PathBuf {
+        std::env::temp_dir()
+            .join("tokenstat-chat-output")
+            .join(safe_file_name(id))
     }
 
     fn write_turn_file(&self, id: &str, token: &str) -> Result<PathBuf, String> {
@@ -1181,24 +1382,26 @@ impl Store {
 
     fn attachment_paths(&self, chat_id: &str, ids: &[String]) -> Result<Vec<PathBuf>, String> {
         ids.iter()
-            .map(|id| {
-                if id.is_empty() || id.contains('/') || id.contains('\\') {
-                    return Err("invalid attachment id".into());
-                }
-                let directory = self.root.join(chat_id).join("files").join(id);
-                let mut files =
-                    fs::read_dir(&directory).map_err(|_| "an attachment is no longer available")?;
-                let file = files
-                    .next()
-                    .ok_or("an attachment is no longer available")?
-                    .map_err(|e| e.to_string())?
-                    .path();
-                if files.next().is_some() {
-                    return Err("invalid attachment directory".into());
-                }
-                Ok(file)
-            })
+            .map(|id| self.single_attachment_path(chat_id, id))
             .collect()
+    }
+
+    fn single_attachment_path(&self, chat_id: &str, id: &str) -> Result<PathBuf, String> {
+        if id.is_empty() || id.contains('/') || id.contains('\\') {
+            return Err("invalid attachment id".into());
+        }
+        let directory = self.root.join(chat_id).join("files").join(id);
+        let mut files =
+            fs::read_dir(&directory).map_err(|_| "an attachment is no longer available")?;
+        let file = files
+            .next()
+            .ok_or("an attachment is no longer available")?
+            .map_err(|e| e.to_string())?
+            .path();
+        if files.next().is_some() || !file.is_file() {
+            return Err("invalid attachment directory".into());
+        }
+        Ok(file)
     }
 
     fn persona(&self, id: &str) -> Result<Persona, String> {
@@ -1281,6 +1484,120 @@ fn prompt_with_attachments(prompt: &str, attachments: &[PathBuf]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!("{prompt}\n\nThe user attached these local files. Read them when useful:\n{paths}")
+}
+
+/// A backend's text stream cannot carry arbitrary bytes. This small contract
+/// gives every supported agent the same way to return a file without coupling
+/// chat to a particular image tool or vendor event schema. The temporary
+/// output folder is chat-owned, so a response link cannot turn into an
+/// arbitrary file read.
+fn prompt_with_response_file_contract(prompt: &str, output_dir: &Path) -> String {
+    let output_dir = output_dir.display().to_string();
+    format!(
+        "{prompt}\n\nIf you create a file the user should receive, copy it into {output_dir} and include a Markdown link to that absolute local path in your final response, for example [report.txt](<{output_dir}/report.txt>). tokenstat will attach linked files to the conversation."
+    )
+}
+
+fn collect_agent_text(events: &[Event], text: &mut String) {
+    for event in events {
+        if let Event::Text { delta } = event {
+            text.push_str(delta);
+        }
+    }
+}
+
+/// Extract only Markdown destinations that unambiguously name a local file.
+/// Plain paths in prose and command output do not count as consent to copy.
+fn response_file_paths(text: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    let mut rest = text;
+    while let Some(open) = rest.find("](") {
+        rest = &rest[open + 2..];
+        let Some(close) = rest.find(')') else { break };
+        let raw = rest[..close].trim();
+        rest = &rest[close + 1..];
+        let destination = if raw.starts_with('<') && raw.ends_with('>') {
+            &raw[1..raw.len() - 1]
+        } else if raw.contains(char::is_whitespace) {
+            // Markdown titles and unwrapped paths with spaces are ambiguous.
+            // The prompt tells agents to use angle brackets for that case.
+            continue;
+        } else {
+            raw
+        };
+        let local = destination
+            .strip_prefix("file://")
+            .or_else(|| destination.strip_prefix("sandbox:"))
+            .unwrap_or(destination);
+        if !local.starts_with('/') {
+            continue;
+        }
+        let decoded = percent_decode_path(local);
+        let path = PathBuf::from(decoded);
+        let key = path.to_string_lossy().to_string();
+        if seen.insert(key) {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+fn percent_decode_path(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let (Some(high), Some(low)) =
+                (hex_digit(bytes[index + 1]), hex_digit(bytes[index + 2]))
+        {
+            output.push(high * 16 + low);
+            index += 3;
+        } else {
+            output.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8_lossy(&output).into_owned()
+}
+
+fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn media_type_for_path(path: &Path) -> Option<String> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(
+        match extension.as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "heic" | "heif" => "image/heic",
+            "svg" => "image/svg+xml",
+            "pdf" => "application/pdf",
+            "txt" | "log" => "text/plain",
+            "md" | "markdown" => "text/markdown",
+            "json" => "application/json",
+            "csv" => "text/csv",
+            "html" | "htm" => "text/html",
+            "mp3" => "audio/mpeg",
+            "wav" => "audio/wav",
+            "m4a" => "audio/mp4",
+            "mp4" => "video/mp4",
+            "mov" => "video/quicktime",
+            "zip" => "application/zip",
+            _ => "application/octet-stream",
+        }
+        .into(),
+    )
 }
 
 fn title_from_prompt(prompt: &str) -> String {
@@ -1387,6 +1704,7 @@ mod tests {
             mode: default_mode(),
             autonomy: default_autonomy(),
             resume_token: None,
+            resume_tokens: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1414,6 +1732,7 @@ mod tests {
             mode: default_mode(),
             autonomy: default_autonomy(),
             resume_token: None,
+            resume_tokens: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1449,6 +1768,7 @@ mod tests {
             mode: default_mode(),
             autonomy: default_autonomy(),
             resume_token: None,
+            resume_tokens: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1472,6 +1792,7 @@ mod tests {
                 &StoredEvent::Agent {
                     event: Event::Text { delta: "Hi".into() },
                     at_ms: 3,
+                    backend: "claude".into(),
                 },
             )
             .unwrap();
@@ -1514,6 +1835,7 @@ mod tests {
             mode: default_mode(),
             autonomy: default_autonomy(),
             resume_token: None,
+            resume_tokens: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1605,6 +1927,113 @@ mod tests {
     }
 
     #[test]
+    fn only_explicit_local_markdown_links_become_response_files() {
+        let paths = response_file_paths(
+            "See [report](</tmp/a report.txt>), [image](file:///tmp/picture%20one.png), \
+             [remote](https://example.com/file.txt), and the unlinked /tmp/secret.txt.",
+        );
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/tmp/a report.txt"),
+                PathBuf::from("/tmp/picture one.png")
+            ]
+        );
+    }
+
+    #[test]
+    fn response_files_are_copied_and_can_be_fetched() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        store.conversations.lock().unwrap().push(Conversation {
+            id: "chat-test".into(),
+            workspace_id: "workspace-a".into(),
+            title: "New chat".into(),
+            backend: "codex".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: default_mode(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            resume_tokens: HashMap::new(),
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        });
+        let source = root.path().join("answer.txt");
+        fs::write(&source, b"hello from the agent").unwrap();
+        let output_dir = store.response_output_dir("chat-test");
+        fs::create_dir_all(&output_dir).unwrap();
+        store.record_response_attachments(
+            "chat-test",
+            "codex",
+            &format!("[secret.txt](<{}>)", source.display()),
+            &output_dir,
+        );
+        assert!(store.events("chat-test", 0).unwrap().0.is_empty());
+        let output = output_dir.join("answer.txt");
+        fs::copy(&source, &output).unwrap();
+        store.record_response_attachments(
+            "chat-test",
+            "codex",
+            &format!("[answer.txt](<{}>)", output.display()),
+            &output_dir,
+        );
+        let (events, _) = store.events("chat-test", 0).unwrap();
+        let event = events.first().unwrap().pointer("/event").unwrap();
+        assert_eq!(event["kind"], "attachment");
+        assert_eq!(event["mediaType"], "text/plain");
+        let id = event["id"].as_str().unwrap();
+        fs::remove_file(source).unwrap();
+        let fetched = store.attachment_data("chat-test", id).unwrap();
+        assert_eq!(
+            crate::base64::decode(&fetched.data).unwrap(),
+            b"hello from the agent"
+        );
+    }
+
+    #[test]
+    fn agent_events_keep_the_backend_that_emitted_them() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        store.conversations.lock().unwrap().push(Conversation {
+            id: "chat-test".into(),
+            workspace_id: "workspace-a".into(),
+            title: "New chat".into(),
+            backend: "codex".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: default_mode(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            resume_tokens: HashMap::new(),
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        });
+        store.record_events(
+            "chat-test",
+            "codex",
+            vec![Event::Text {
+                delta: "hello".into(),
+            }],
+        );
+        let event = store.events("chat-test", 0).unwrap().0.remove(0);
+        assert_eq!(event["backend"], "codex");
+        assert_eq!(event["event"]["kind"], "text");
+    }
+
+    #[test]
     fn setup_changes_apply_a_persona_without_rewriting_a_running_turn() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -1620,6 +2049,7 @@ mod tests {
             mode: default_mode(),
             autonomy: default_autonomy(),
             resume_token: None,
+            resume_tokens: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1627,6 +2057,13 @@ mod tests {
             updated_at_ms: 1,
             running: false,
         });
+        {
+            let mut chats = store.conversations.lock().unwrap();
+            chats[0]
+                .resume_tokens
+                .insert("claude".into(), "claude-thread".into());
+            chats[0].resume_token = Some("claude-thread".into());
+        }
         let updated = store
             .update(
                 "chat-test",
@@ -1642,6 +2079,17 @@ mod tests {
             .unwrap();
         assert_eq!(updated.backend, "grok");
         assert_eq!(updated.model.as_deref(), Some("grok-4.6"));
+        assert!(updated.resume_token.is_none());
+        let switched_back = store
+            .update(
+                "chat-test",
+                Update {
+                    backend: Some("claude".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(switched_back.resume_token.as_deref(), Some("claude-thread"));
         assert_eq!(updated.system_prompt, "Be concise.");
         assert_eq!(updated.persona_id.as_deref(), Some("persona-1"));
         store.conversations.lock().unwrap()[0].running = true;
@@ -1673,6 +2121,7 @@ mod tests {
             mode: default_mode(),
             autonomy: default_autonomy(),
             resume_token: None,
+            resume_tokens: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1680,7 +2129,7 @@ mod tests {
             updated_at_ms: 1,
             running: false,
         });
-        let turn_token = store.register_turn_token("chat-test").unwrap();
+        let turn_token = store.register_turn_token("chat-test", "claude").unwrap();
         let turn_file = store.write_turn_file("chat-test", &turn_token).unwrap();
         #[cfg(unix)]
         {

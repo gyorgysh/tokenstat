@@ -32,11 +32,7 @@ struct SSHInspector: View {
                         .keyboardShortcut(.return, modifiers: [])
                 }
             } content: {
-                Text(title)
-                    .font(Theme.font(13, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .padding(.leading, Theme.Space.m)
+                InspectorTitle(title: title, symbol: section.symbol)
                 Spacer(minLength: 0)
             }
             body(for: model.selection)

@@ -122,12 +122,19 @@ struct RootView: View {
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var workspacePendingRemove: WorkspaceFolder?
+    /// A section-level destructive action. Kept separate from removing the
+    /// workspace itself because this deletes transcripts, not the folder row.
+    @State private var workspacePendingChatRemoval: WorkspaceFolder?
     /// The session a right-click asked to close, held until it is confirmed.
     @State private var sessionPendingClose: TerminalSession?
     /// Folders whose sections are showing. Collapsed is the default: a
     /// sidebar of six folders each listing every section is a wall, and the
     /// question it should answer first is which folder, not which section.
     @State private var expandedWorkspaces: Set<String> = []
+    /// Chat transcripts are children of Chat, not a second global picker in
+    /// the title bar. Keep the longer list opt-in so a busy workspace does
+    /// not turn the sidebar into a transcript index.
+    @State private var expandedChatHistories: Set<String> = []
     /// The section each folder was last left on, so returning to a folder
     /// returns to what you were doing in it.
     @State private var lastSection: [String: WorkspaceSection] = [:]
@@ -581,8 +588,8 @@ struct RootView: View {
                 // animates, or if it changes the hosted column's min/max
                 // during NSSplitView's own constraint pass. Keep the inset,
                 // do not animate it.
-                .padding(.top, isFullScreen ? 0 : -titlebarInset)
-                .animation(nil, value: titlebarInset)
+                .padding(.top, isFullScreen ? 0 : -chromeTopInset)
+                .animation(nil, value: chromeTopInset)
                 .animation(nil, value: isFullScreen)
                 .toolbar(removing: .sidebarToggle)
         }
@@ -901,7 +908,13 @@ struct RootView: View {
     /// back and start where the window's content actually starts.
     private var chromeTopInset: CGFloat {
         #if os(macOS)
-        titlebarInset
+        // AppKit occasionally reports zero for a full-size-content window
+        // after the SwiftUI inspector column is mounted, even though the
+        // traffic-light band is still present. The centre bar is offset by
+        // that band, so keep the inspector on the same baseline with the
+        // normal 30pt window-chrome fallback. Full screen has a real titlebar
+        // outside our content and needs no replacement strip.
+        isFullScreen ? 0 : max(ceil(titlebarInset), 31)
         #else
         0
         #endif
@@ -943,8 +956,20 @@ struct RootView: View {
         @ViewBuilder _ content: @escaping () -> Content
     ) -> some View {
         GeometryReader { proxy in
-            belowTitlebar { content() }
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+            // The detail column is lifted into the traffic-light band when a
+            // normal window is used. The inspector is not. Give its actual
+            // content exactly the room below that band; previously the inner
+            // view received the full height *and* the replacement titlebar
+            // strip was added on top, producing the visibly mismatched pane.
+            belowTitlebar {
+                content()
+                    .frame(
+                        width: proxy.size.width,
+                        height: max(0, proxy.size.height - chromeTopInset),
+                        alignment: .top
+                    )
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
                 .clipped()
         }
     }
@@ -1763,9 +1788,15 @@ struct RootView: View {
                                 WorkspaceSectionRow(
                                     section: section,
                                     count: count(of: section, in: folder),
-                                    isSelected: route == .workspace(id: folder.id, section: section)
+                                    isSelected: route == .workspace(id: folder.id, section: section),
+                                    removeAllChats: section == .chat ? {
+                                        workspacePendingChatRemoval = folder
+                                    } : nil
                                 ) {
                                     openSection(section, in: folder.id)
+                                }
+                                if section == .chat {
+                                    chatHistoryRows(for: folder)
                                 }
                                 if section == .automations {
                                     ForEach(automations.liveJobs(in: folder.id)) { job in
@@ -1876,6 +1907,14 @@ struct RootView: View {
                 folder: $workspacePendingRemove,
                 remove: { folder in
                     Task { await workspaces.remove(folder) }
+                }
+            )
+        }
+        .background {
+            RemoveAllChatsConfirm(
+                folder: $workspacePendingChatRemoval,
+                remove: { folder in
+                    Task { await chat.removeAll(in: folder.id) }
                 }
             )
         }
@@ -2163,14 +2202,7 @@ struct RootView: View {
             ChatView(
                 model: chat,
                 workspaceID: id,
-                workspaceName: workspaces.folders.first { $0.id == id }?.name,
-                onOpenInspector: {
-                    isInspectorPresented = true
-                    if !inspectorFits {
-                        isOverlayVisible = true
-                        overlayHeldByPress = true
-                    }
-                }
+                workspaceName: workspaces.folders.first { $0.id == id }?.name
             )
         case let .workspace(id, .pulls):
             let folder = workspaces.folders.first { $0.id == id }
@@ -2439,6 +2471,54 @@ struct RootView: View {
     }
     #endif
 
+    /// The five most recent chats live with their workspace section. The
+    /// model only holds one workspace at a time, so folders that have not
+    /// been opened in this app session retain their compact Chat row and its
+    /// host-provided count until the user opens them.
+    @ViewBuilder
+    private func chatHistoryRows(for folder: WorkspaceFolder) -> some View {
+        if chat.folderID == folder.id || chat.workspaceID == folder.id {
+            chatHistoryList(for: folder)
+        } else {
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func chatHistoryList(for folder: WorkspaceFolder) -> some View {
+        let visible = expandedChatHistories.contains(folder.id)
+            ? chat.chats
+            : Array(chat.chats.prefix(5))
+        ForEach(visible) { conversation in
+            ChatSidebarConversationRow(
+                conversation: conversation,
+                isSelected: chat.selected?.id == conversation.id,
+                select: {
+                    openSection(.chat, in: folder.id) {
+                        Task { await chat.select(conversation) }
+                    }
+                },
+                remove: {
+                    Task { await chat.remove(conversation) }
+                }
+            )
+        }
+        if chat.chats.count > 5 {
+            Button(expandedChatHistories.contains(folder.id) ? "Show less" : "Show more") {
+                if expandedChatHistories.contains(folder.id) {
+                    expandedChatHistories.remove(folder.id)
+                } else {
+                    expandedChatHistories.insert(folder.id)
+                }
+            }
+            .buttonStyle(.plain)
+            .font(Theme.fit(11, weight: .medium))
+            .foregroundStyle(Theme.accent)
+            .padding(.leading, Theme.Space.xl + Theme.Space.s)
+            .padding(.vertical, 4)
+        }
+    }
+
     /// What a section's badge says. Nil draws nothing: a zero is not news, and
     /// a column of greyed zeroes under every folder is a wall of them.
     private func count(of section: WorkspaceSection, in folder: WorkspaceFolder) -> Int? {
@@ -2560,31 +2640,13 @@ struct RootView: View {
         }
     }
 
-    /// Click the folder card: open it on whatever section it was left on, and
-    /// show its sections.
-    ///
-    /// A second click on a folder already open on its sessions swaps between
-    /// the running surface and the launcher, so a new agent can be started
-    /// without hunting for the + menu.
+    /// The folder card is the way back to its launcher. Section rows remember
+    /// and open their own destinations; making the parent repeat the last one
+    /// left no route back after somebody had opened Chat or Tasks.
     private func selectWorkspace(_ id: String) {
-        let section = lastSection[id] ?? .sessions
-        // Decided here rather than inside the transaction, because
-        // `openSection` puts the sessions surface back on the way in. Asking
-        // `toggleLauncher` afterwards asked what the navigation had just set
-        // rather than what was on screen when the click happened, so every
-        // click opened the launcher and none of them closed it.
-        let wantsLauncher = route.workspaceID == id
-            && section == .sessions
-            && !workspaces.isShowingLauncher(in: id)
-        openSection(section, in: id) {
+        openSection(.sessions, in: id) {
             #if os(macOS)
-            if wantsLauncher {
-                workspaces.showLauncher(in: id)
-            } else {
-                // A first selection shows the folder as it was, not the
-                // launcher it might have been left on.
-                workspaces.exitLauncher(in: id)
-            }
+            workspaces.showLauncher(in: id)
             #endif
         }
     }
@@ -2698,6 +2760,32 @@ private struct RemoveWorkspaceConfirm: View {
                 Text(
                     "Remove \(folder?.name ?? "this folder") from the sidebar? The folder on disk is not deleted."
                 )
+            }
+    }
+}
+
+private struct RemoveAllChatsConfirm: View {
+    @Binding var folder: WorkspaceFolder?
+    var remove: (WorkspaceFolder) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .confirmationDialog(
+                "Remove every chat?",
+                isPresented: Binding(
+                    get: { folder != nil },
+                    set: { if !$0 { folder = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Remove all chats", role: .destructive) {
+                    if let folder { remove(folder) }
+                    folder = nil
+                }
+                Button("Cancel", role: .cancel) { folder = nil }
+            } message: {
+                Text("This permanently deletes every chat transcript in \(folder?.name ?? "this workspace").")
             }
     }
 }
@@ -3351,6 +3439,86 @@ extension SidebarGroupHeader where Trailing == EmptyView {
     }
 }
 
+/// One transcript nested under the workspace Chat section. Destructive
+/// affordances stay quiet until hover, then sit in the row where the pointer
+/// already is. The confirmation is owned by the row so moving the pointer
+/// away cannot dismiss or retarget it.
+private struct ChatSidebarConversationRow: View {
+    let conversation: ChatConversation
+    let isSelected: Bool
+    let select: () -> Void
+    let remove: () -> Void
+
+    @State private var isHovering = false
+    @State private var isTrashHovering = false
+    @State private var confirmsRemoval = false
+
+    var body: some View {
+        HStack(spacing: Theme.Space.xs) {
+            Button(action: select) {
+                HStack(spacing: Theme.Space.s) {
+                    Image(systemName: conversation.running ? "ellipsis.message.fill" : "message")
+                        .font(Theme.fit(10))
+                        .foregroundStyle(conversation.running ? Theme.accent : Color.secondary)
+                        .frame(width: 14)
+                    Text(conversation.title)
+                        .font(Theme.fit(11.5, weight: isSelected ? .medium : .regular))
+                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if conversation.running {
+                        Circle().fill(Theme.accent).frame(width: 5, height: 5)
+                    }
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            if isHovering {
+                Button {
+                    confirmsRemoval = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(Theme.fit(10, weight: .medium))
+                        .foregroundStyle(isTrashHovering ? Theme.accent : Color.secondary)
+                        .frame(width: 20, height: 20)
+                        .background(
+                            isTrashHovering ? Theme.accentSoft : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .onHover { isTrashHovering = $0 }
+                .help("Remove chat")
+                .transition(.opacity)
+            }
+        }
+        .padding(.leading, Theme.Space.xl + Theme.Space.s)
+        .padding(.trailing, Theme.Space.s)
+        .padding(.vertical, 2)
+        .background(isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
+        .contentShape(.rect)
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            Button("Remove chat", .delete, role: .destructive) {
+                confirmsRemoval = true
+            }
+        }
+        .confirmationDialog(
+            "Remove this chat?",
+            isPresented: $confirmsRemoval,
+            titleVisibility: .visible
+        ) {
+            Button("Remove chat", role: .destructive, action: remove)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes the transcript.")
+        }
+        .help(conversation.title)
+    }
+}
+
 /// One of a workspace's sections, indented under its folder card.
 ///
 /// Deliberately lighter than everything around it. The folder card above is a
@@ -3368,6 +3536,7 @@ private struct WorkspaceSectionRow: View {
     /// every folder is a wall of them.
     let count: Int?
     let isSelected: Bool
+    let removeAllChats: (() -> Void)?
     let action: () -> Void
 
     @State private var isHovering = false
@@ -3402,6 +3571,11 @@ private struct WorkspaceSectionRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+        .contextMenu {
+            if let removeAllChats {
+                Button("Remove all chats", .delete, role: .destructive, action: removeAllChats)
+            }
+        }
         .help(section.label)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(count.map { "\(section.label), \($0)" } ?? section.label)

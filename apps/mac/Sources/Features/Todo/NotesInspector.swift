@@ -44,10 +44,7 @@ struct NotesInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                FeatureMark(name: "mark_note", tint: Theme.secondary, size: 16)
-                    .padding(.leading, Theme.Space.m)
-                Text("Note")
-                    .font(Theme.font(13, weight: .semibold))
+                InspectorTitle(title: "Note", symbol: "note.text", tint: Theme.secondary)
                 Spacer(minLength: 0)
             }
             Group {

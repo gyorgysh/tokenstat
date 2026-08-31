@@ -180,24 +180,37 @@ private struct MarkdownCodeBlock: View {
 
     @State private var spans: [SyntaxSpan] = []
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let language {
-                Text(language.uppercased())
-                    .font(Theme.mono(10, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.vertical, Theme.Space.s)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.accentSoft)
-            }
+    private var isDiff: Bool {
+        ["diff", "patch"].contains(language?.lowercased())
+    }
 
-            ScrollView(.horizontal) {
-                highlightedText
-                    .font(Theme.monoText(12, relativeTo: .body))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(Theme.Space.m)
+    var body: some View {
+        Group {
+            if isDiff {
+                ScrollView(.horizontal) {
+                    DiffBody(diff: FileDiff.fromEditPatch(path: "Change", patch: source))
+                        .padding(.vertical, Theme.Space.xs)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let language {
+                        Text(language.uppercased())
+                            .font(Theme.mono(10, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .padding(.horizontal, Theme.Space.m)
+                            .padding(.vertical, Theme.Space.s)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.accentSoft)
+                    }
+
+                    ScrollView(.horizontal) {
+                        highlightedText
+                            .font(Theme.monoText(12, relativeTo: .body))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(Theme.Space.m)
+                    }
+                }
             }
         }
         .background(Theme.panel)
@@ -314,9 +327,23 @@ private struct MarkdownTable: View {
 
 private enum MarkdownSanitizer {
     static func inline(_ source: String) -> String {
-        var safe = replacingImages(in: source)
+        // Local file links are promoted to first-class chat attachments by
+        // the host. Keep only their human label in the prose so an absolute
+        // filesystem path is not duplicated above the attachment card.
+        var safe = replacingLocalAttachmentLinks(in: source)
+        safe = replacingImages(in: safe)
         safe = replacingHTML(in: safe)
         return safe
+    }
+
+    private static func replacingLocalAttachmentLinks(in source: String) -> String {
+        replace(
+            pattern: #"!?\[([^\]]*)\]\((?:<)?(?:file://|sandbox:)?/[^\)\n>]+(?:>)?\)"#,
+            in: source
+        ) { match, string in
+            let label = substring(match.range(at: 1), in: string)
+            return label.isEmpty ? "Attachment" : label
+        }
     }
 
     /// Keep the alt text and destination visible as a normal link. SwiftUI

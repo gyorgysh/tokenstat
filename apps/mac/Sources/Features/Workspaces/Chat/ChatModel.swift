@@ -5,6 +5,15 @@ import SwiftUI
 
 @MainActor @Observable
 final class ChatModel {
+    private struct LaunchChoice: Codable {
+        var backend: String
+        var model: String?
+        var effort: String?
+        var mode: String
+        var autonomy: String
+    }
+
+    private static let launchChoiceKey = "chat.lastLaunchChoice.v1"
     var chats: [ChatConversation] = []
     var selected: ChatConversation?
     var events: [ChatTimelineEvent] = []
@@ -13,6 +22,10 @@ final class ChatModel {
     var attachments: [ChatAttachment] = []
     /// Downsampled JPEG for the composer strip, keyed by attachment id.
     var attachmentPreviews: [String: Data] = [:]
+    /// Agent-returned file bytes, loaded lazily from the chat's owning host.
+    /// The transcript only persists descriptors, so remote files work exactly
+    /// like local ones without exposing a host filesystem path to SwiftUI.
+    var responseAttachmentData: [String: Data] = [:]
     var backends: [ChatBackend] = []
     var personas: [ChatPersona] = []
     var isLoading = false
@@ -28,6 +41,9 @@ final class ChatModel {
     /// that started them may mutate the currently displayed workspace/chat.
     private var loadGeneration: UInt64 = 0
     private var selectionGeneration: UInt64 = 0
+    private var attemptedResponseAttachments: Set<String> = []
+    private var loadingResponseAttachments: Set<String> = []
+    private var responseAttachmentRetryAt: [String: Date] = [:]
 
     func count(in workspaceID: String) -> Int {
         guard folderID == workspaceID || self.workspaceID == workspaceID else { return 0 }
@@ -82,6 +98,10 @@ final class ChatModel {
         selected = chat
         attachments = []
         attachmentPreviews = [:]
+        responseAttachmentData = [:]
+        attemptedResponseAttachments = []
+        loadingResponseAttachments = []
+        responseAttachmentRetryAt = [:]
         approvals = []
         events = []
         offset = 0
@@ -100,12 +120,22 @@ final class ChatModel {
                 guard context == loadGeneration else { return }
                 backends = loaded
             }
-            let chosen = backends.first(where: { $0.id != "sh" }) ?? backends.first
+            let saved = lastLaunchChoice
+            let chosen = backends.first { $0.id == saved?.backend }
+                ?? backends.first { $0.id == "codex" }
+                ?? backends.first(where: { $0.id != "sh" })
+                ?? backends.first
+            let model = chosen?.models.contains(saved?.model ?? "") == true ? saved?.model : nil
+            let effort = chosen?.efforts.contains(saved?.effort ?? "") == true ? saved?.effort : nil
             let chat = try await Bridge.createChat(
                 workspaceID: workspaceID,
                 backend: chosen?.id ?? "claude",
-                mode: "plan",
-                autonomy: chosen?.gateTier == "bypassOnly" ? "bypass" : "standard",
+                mode: saved?.mode ?? "plan",
+                autonomy: chosen?.gateTier == "bypassOnly"
+                    ? "bypass"
+                    : (saved?.autonomy ?? "standard"),
+                model: model,
+                effort: effort,
                 peer: targetPeer
             )
             guard context == loadGeneration else { return }
@@ -178,6 +208,23 @@ final class ChatModel {
             chats.removeAll { $0.id == chat.id }
             if selected?.id == chat.id {
                 await select(chats.first)
+            }
+        } catch {
+            if context == loadGeneration { self.error = error.localizedDescription }
+        }
+    }
+
+    func removeAll(in folderID: String) async {
+        let context = loadGeneration
+        do {
+            // `folderID` may encode a different remote peer than the chat
+            // currently loaded in this model. Let the bridge route the folder
+            // itself instead of borrowing the current conversation's peer.
+            _ = try await Bridge.removeAllChats(workspaceID: folderID)
+            guard context == loadGeneration else { return }
+            if self.folderID == folderID || workspaceID == folderID {
+                chats = []
+                await select(nil)
             }
         } catch {
             if context == loadGeneration { self.error = error.localizedDescription }
@@ -310,7 +357,7 @@ final class ChatModel {
     }
 
     func poll() async {
-        guard let selected, selected.running || hasRunningTool else { return }
+        guard let selected, selected.running || hasRunningTool || hasPendingResponseAttachments else { return }
         let generation = selectionGeneration
         await loadEvents(id: selected.id, reset: false, generation: generation)
         guard selectionMatches(id: selected.id, generation: generation) else { return }
@@ -334,6 +381,13 @@ final class ChatModel {
         displayItems.contains { item in
             if case let .tool(state) = item.kind { return state.running }
             return false
+        }
+    }
+
+    var hasPendingResponseAttachments: Bool {
+        displayItems.contains { item in
+            guard case let .attachment(attachment) = item.kind else { return false }
+            return responseAttachmentData[attachment.id] == nil
         }
     }
 
@@ -361,7 +415,7 @@ final class ChatModel {
     /// ToolEnd lands on the ToolStart it belongs to so the row can show
     /// running, duration and failure without a second line.
     var displayItems: [ChatDisplayItem] {
-        ChatDisplayItem.coalesce(events)
+        ChatDisplayItem.coalesce(events, defaultBackend: selected?.backend)
     }
 
     private func loadEvents(id: String, reset: Bool, generation: UInt64) async {
@@ -376,10 +430,59 @@ final class ChatModel {
                 events.append(contentsOf: chunk.events)
             }
             offset = chunk.nextOffset
+            await loadResponseAttachments(id: id, generation: generation)
         } catch {
             if selectionMatches(id: id, generation: generation) {
                 self.error = error.localizedDescription
             }
+        }
+    }
+
+    private func loadResponseAttachments(id: String, generation: UInt64) async {
+        let descriptors = events.compactMap { timeline -> ChatAttachment? in
+            guard let event = timeline.event,
+                  event.kind == "attachment",
+                  let attachmentID = event.id,
+                  !attemptedResponseAttachments.contains(attachmentID),
+                  !loadingResponseAttachments.contains(attachmentID),
+                  responseAttachmentRetryAt[attachmentID, default: .distantPast] <= Date()
+            else { return nil }
+            return ChatAttachment(
+                id: attachmentID,
+                name: event.name ?? "Attachment",
+                mediaType: event.mediaType,
+                size: event.size
+            )
+        }
+        guard !descriptors.isEmpty else { return }
+        loadingResponseAttachments.formUnion(descriptors.map(\.id))
+        let targetPeer = peer
+        let loaded = await withTaskGroup(of: (String, Data)?.self, returning: [(String, Data)].self) { group in
+            for descriptor in descriptors {
+                group.addTask {
+                    guard let payload = try? await Bridge.chatAttachment(
+                        id: id,
+                        attachmentID: descriptor.id,
+                        peer: targetPeer
+                    ), let data = Data(base64Encoded: payload.data) else { return nil }
+                    return (descriptor.id, data)
+                }
+            }
+            var values: [(String, Data)] = []
+            for await value in group {
+                if let value { values.append(value) }
+            }
+            return values
+        }
+        loadingResponseAttachments.subtract(descriptors.map(\.id))
+        guard selectionMatches(id: id, generation: generation) else { return }
+        let loadedIDs = Set(loaded.map(\.0))
+        for (attachmentID, data) in loaded {
+            responseAttachmentData[attachmentID] = data
+            attemptedResponseAttachments.insert(attachmentID)
+        }
+        for descriptor in descriptors where !loadedIDs.contains(descriptor.id) {
+            responseAttachmentRetryAt[descriptor.id] = Date().addingTimeInterval(2)
         }
     }
 
@@ -409,6 +512,24 @@ final class ChatModel {
             chats.insert(chat, at: 0)
         }
         chats.sort { $0.updatedAtMs > $1.updatedAtMs }
+        saveLaunchChoice(from: chat)
+    }
+
+    private var lastLaunchChoice: LaunchChoice? {
+        guard let data = UserDefaults.standard.data(forKey: Self.launchChoiceKey) else { return nil }
+        return try? JSONDecoder().decode(LaunchChoice.self, from: data)
+    }
+
+    private func saveLaunchChoice(from chat: ChatConversation) {
+        let choice = LaunchChoice(
+            backend: chat.backend,
+            model: chat.model,
+            effort: chat.effort,
+            mode: chat.mode,
+            autonomy: chat.autonomy
+        )
+        guard let data = try? JSONEncoder().encode(choice) else { return }
+        UserDefaults.standard.set(data, forKey: Self.launchChoiceKey)
     }
 }
 
@@ -447,30 +568,38 @@ struct ChatDisplayItem: Identifiable {
 
     enum Kind {
         case user(String)
-        case assistant(String)
+        case assistant(String, backend: String?)
         case thinking(String)
         case tool(ChatToolState)
         case edit(path: String, added: UInt32, removed: UInt32, patch: String)
+        case attachment(ChatAttachment)
         case approval(ChatApproval)
         case usage(input: UInt64, output: UInt64, cost: Double?)
         case failed(String)
     }
 
-    static func coalesce(_ events: [ChatTimelineEvent]) -> [ChatDisplayItem] {
+    static func coalesce(_ events: [ChatTimelineEvent], defaultBackend: String? = nil) -> [ChatDisplayItem] {
         var items: [ChatDisplayItem] = []
         var toolIndex: [String: Int] = [:]
         var text = ""
         var textID = ""
+        var textBackend: String?
         var thinking = ""
         var thinkingID = ""
 
         func flushText() {
             let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !body.isEmpty {
-                items.append(ChatDisplayItem(id: textID, kind: .assistant(body)))
+                items.append(
+                    ChatDisplayItem(
+                        id: textID,
+                        kind: .assistant(body, backend: textBackend ?? defaultBackend)
+                    )
+                )
             }
             text = ""
             textID = ""
+            textBackend = nil
         }
 
         func flushThinking() {
@@ -515,7 +644,10 @@ struct ChatDisplayItem: Identifiable {
             switch agent.kind {
             case "text":
                 flushThinking()
-                if text.isEmpty { textID = "text-\(event.atMs ?? 0)-\(items.count)" }
+                if text.isEmpty {
+                    textID = "text-\(event.atMs ?? 0)-\(items.count)"
+                    textBackend = event.backend ?? defaultBackend
+                }
                 text += agent.delta ?? ""
             case "thinking":
                 flushText()
@@ -578,6 +710,23 @@ struct ChatDisplayItem: Identifiable {
                             added: agent.added ?? 0,
                             removed: agent.removed ?? 0,
                             patch: agent.patch ?? ""
+                        )
+                    )
+                )
+            case "attachment":
+                flushText()
+                flushThinking()
+                guard let id = agent.id else { continue }
+                items.append(
+                    ChatDisplayItem(
+                        id: "attachment-\(id)",
+                        kind: .attachment(
+                            ChatAttachment(
+                                id: id,
+                                name: agent.name ?? "Attachment",
+                                mediaType: agent.mediaType,
+                                size: agent.size
+                            )
                         )
                     )
                 )

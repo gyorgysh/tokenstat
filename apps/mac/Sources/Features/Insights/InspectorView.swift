@@ -21,10 +21,7 @@ struct InspectorView: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                FeatureMark(name: "mark_insights", tint: Theme.accent, size: 16)
-                    .padding(.leading, Theme.Space.m)
-                Text("Insights")
-                    .font(Theme.font(13, weight: .semibold))
+                InspectorTitle(title: "Insights", symbol: "chart.bar.xaxis")
                 Spacer(minLength: 0)
             }
             ScrollView {
