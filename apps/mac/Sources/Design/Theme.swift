@@ -223,6 +223,25 @@ enum Theme {
         #endif
     }
 
+    /// Anatomy of an app-owned task sheet.
+    ///
+    /// In-window chrome stays on `chromeBarMetrics()`, the 40pt metric for
+    /// adjacent bars. A modal is a different object: a two-line heading, a
+    /// close seat that must not crowd the window curve, and a footer that
+    /// holds 30pt buttons with air above and below. Callers that need these
+    /// numbers live in `ThemedSheet`.
+    enum Modal {
+        /// Minimum height of the header. A 40pt chrome bar cannot hold a
+        /// title, a subtitle and a close control without clipping into the
+        /// rounded top.
+        static let headerMinHeight: CGFloat = 72
+        /// Icon seat beside the title. Larger than a chrome glyph, smaller
+        /// than the 48pt mark on a permission sheet.
+        static let iconSeat: CGFloat = 36
+        /// Footer that holds one row of 30pt actions, optically centred.
+        static let footerHeight: CGFloat = 64
+    }
+
     /// Corner radius for cards and panels.
     ///
     /// Matched to the window's own corner rather than picked. A card sitting a

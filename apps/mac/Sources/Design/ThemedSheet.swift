@@ -7,16 +7,16 @@
 
 import SwiftUI
 
-/// A sheet with the same deliberate surface and chrome as the rest of the app.
+/// Shared anatomy of an app-owned task sheet: header, body, optional footer.
 ///
-/// SwiftUI sheets otherwise start on a system material, then every caller has
-/// to remember its own header rule, close mark, and action spacing. Keeping
-/// those decisions here means an operation sheet feels like part of the
-/// workspace it came from in both light and dark appearances.
+/// SwiftUI owns the window radius, shadow, focus, Escape key and
+/// accessibility. tokenstat owns every pixel inside that radius. The header
+/// is not in-window chrome, so it does not use `chromeBarMetrics()`.
 struct ThemedSheet<Content: View, Actions: View>: View {
     let title: String
     let subtitle: String
-    let icon: ActionIcon
+    let icon: ActionIcon?
+    let scrolls: Bool
     let onClose: () -> Void
     @ViewBuilder let content: () -> Content
     @ViewBuilder let actions: () -> Actions
@@ -24,7 +24,8 @@ struct ThemedSheet<Content: View, Actions: View>: View {
     init(
         title: String,
         subtitle: String,
-        icon: ActionIcon,
+        icon: ActionIcon? = nil,
+        scrolls: Bool = false,
         onClose: @escaping () -> Void,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder actions: @escaping () -> Actions
@@ -32,6 +33,7 @@ struct ThemedSheet<Content: View, Actions: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.icon = icon
+        self.scrolls = scrolls
         self.onClose = onClose
         self.content = content
         self.actions = actions
@@ -39,53 +41,163 @@ struct ThemedSheet<Content: View, Actions: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: Theme.Space.m) {
-                Image(systemName: icon.symbol)
-                    .font(Theme.font(18, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 30, height: 30)
-                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(Theme.title3.weight(.semibold))
-                    Text(subtitle)
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.controlGlyph)
-                }
-                Spacer(minLength: 0)
-                InspectorCloseButton(
-                    action: onClose,
-                    help: "Close",
-                    label: "Close \(title.lowercased())"
-                )
-            }
-            .padding(.horizontal, Theme.Space.l)
-            .chromeBarMetrics()
-            .background(Theme.sidebar)
-
+            ModalHeader(
+                title: title,
+                subtitle: subtitle,
+                icon: icon,
+                onClose: onClose
+            )
             ThemeRule()
-
-            content()
-                .padding(Theme.Space.l)
-                // This is the flexible region. It takes the spare height so
-                // the header stays against the rounded top and the action row
-                // stays against the rounded bottom instead of the whole stack
-                // floating in the vertical centre of the sheet window.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-            ThemeRule()
-
-            HStack(spacing: Theme.Space.s) {
-                actions()
+            bodyContent
+            if showsFooter {
+                ThemeRule()
+                ModalFooter(actions: actions)
             }
-            .padding(.horizontal, Theme.Space.l)
-            .padding(.vertical, Theme.Space.m)
-            .frame(maxWidth: .infinity)
-            .background(Theme.sidebar)
         }
-        // The caller chooses the sheet's final size. Fill that proposal before
-        // painting the surface so every pixel belongs to the app's palette.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
+    }
+
+    @ViewBuilder
+    private var bodyContent: some View {
+        if scrolls {
+            ScrollView {
+                content()
+                    .padding(Theme.Space.l)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        } else {
+            content()
+                .padding(Theme.Space.l)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private var showsFooter: Bool {
+        Actions.self != EmptyView.self
+    }
+}
+
+extension ThemedSheet where Actions == EmptyView {
+    init(
+        title: String,
+        subtitle: String,
+        icon: ActionIcon? = nil,
+        scrolls: Bool = false,
+        onClose: @escaping () -> Void,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            icon: icon,
+            scrolls: scrolls,
+            onClose: onClose,
+            content: content,
+            actions: { EmptyView() }
+        )
+    }
+}
+
+/// Title, optional mark, and a close control that sits in the header rather
+/// than against the window curve.
+///
+/// Large sheets that cannot use `ThemedSheet`'s generic body still share this
+/// header so the top of every task window is the same object.
+struct ModalHeader: View {
+    let title: String
+    let subtitle: String
+    var icon: ActionIcon? = nil
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            if let icon {
+                ActionSeat(icon: icon, size: Theme.Modal.iconSeat)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Theme.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Text(subtitle)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            InspectorCloseButton(
+                action: onClose,
+                help: "Close",
+                label: "Close \(title)"
+            )
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.m)
+        .frame(minHeight: Theme.Modal.headerMinHeight)
+        .frame(maxWidth: .infinity)
+        .background {
+            Theme.sidebar.ignoresSafeArea(edges: .top)
+        }
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// One row of actions, Cancel-shaped on the left and the primary action on
+/// the right, on the same sidebar surface as the header.
+struct ModalFooter<Actions: View>: View {
+    @ViewBuilder var actions: () -> Actions
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            actions()
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .frame(maxWidth: .infinity)
+        .frame(height: Theme.Modal.footerHeight)
+        .background {
+            Theme.sidebar.ignoresSafeArea(edges: .bottom)
+        }
+    }
+}
+
+/// A short fact in a sheet body. A themed mark, not a numbered disc, so two
+/// notes cannot be mistaken for a three-step wizard.
+struct ModalInfoRow: View {
+    let icon: ActionIcon
+    let title: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            ActionSeat(icon: icon, size: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(Theme.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(text)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension View {
+    /// Size a Mac task sheet and paint the window, including the rounded
+    /// corners SwiftUI owns. iOS sheets keep their native detents.
+    @ViewBuilder
+    func modalFrame(width: CGFloat, height: CGFloat) -> some View {
+        #if os(macOS)
+        self
+            .frame(width: width, height: height)
+            .background(Theme.background)
+            .presentationBackground(Theme.background)
+        #else
+        self
+        #endif
     }
 }

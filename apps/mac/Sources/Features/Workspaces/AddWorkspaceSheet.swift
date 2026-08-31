@@ -13,11 +13,9 @@ import SwiftUI
 
 /// The onboarding sheet behind "Add workspace…".
 ///
-/// A bare folder picker does not say what a workspace is, so a first-time user
-/// guesses and usually guesses wrong (home directory, a system folder, a file
-/// manager they cannot open). This explains the three things that matter
-/// (what it is, what to pick, what happens next) and only then offers the
-/// folder panel.
+/// The decision is which folder. Everything else is two facts about that
+/// choice: agents work there, and adding it does not upload it. The folder
+/// panel still does the picking.
 struct AddWorkspaceSheet: View {
     @Bindable var model: WorkspacesModel
     @Environment(\.dismiss) private var dismiss
@@ -26,75 +24,57 @@ struct AddWorkspaceSheet: View {
     var body: some View {
         ThemedSheet(
             title: "Add a workspace",
-            subtitle: "A workspace is where your agents work",
+            subtitle: "Choose the project folder your agents should work in.",
             icon: .create,
             onClose: { dismiss() }
         ) {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                step(
-                    number: 1,
-                    title: "What it is",
-                    text: "A workspace is a project folder on this Mac. tokenstat runs agents there (Claude Code, Codex, OpenCode, Grok Build and the rest) and reads the folder's git state so it can show changes, diffs and history."
-                )
-                step(
-                    number: 2,
-                    title: "What to pick",
-                    text: "Choose a repository you actually work in. It is the folder an agent opens when it does work for you. Not your home directory, and not a system folder."
-                )
-                step(
-                    number: 3,
-                    title: "What happens next",
-                    text: "You can open files, browse the folder, and launch any installed agent in it. The agents run as their own processes, and only usage counters ever leave the device."
-                )
+            VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                Text("Pick a repository you actually work in. It is the folder an agent opens, not your home directory and not a system folder.")
+                    .font(Theme.body)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                    ModalInfoRow(
+                        icon: .source,
+                        title: "Agents work in this folder",
+                        text: "They run as their own processes there. tokenstat reads git state so it can show changes, diffs and history."
+                    )
+                    ModalInfoRow(
+                        icon: .security,
+                        title: "Nothing is uploaded",
+                        text: "Adding a workspace does not send the folder anywhere. Only usage counters are eligible for sync."
+                    )
+                }
             }
         } actions: {
-                Button("Not now", .dismiss) { dismiss() }
-                    .buttonStyle(SecondaryButtonStyle())
-                Spacer()
-                Button {
-                    picking = true
-                    Task {
-                        await model.addFolder()
-                        // Added or cancelled, the sheet's job is done: the
-                        // explanation was seen and the panel answered.
-                        picking = false
-                        dismiss()
-                    }
-                } label: {
+            Button("Not now", .dismiss) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button {
+                picking = true
+                Task {
+                    await model.addFolder()
+                    picking = false
+                    dismiss()
+                }
+            } label: {
+                ZStack {
+                    ActionIcon.reveal.label("Choose folder…")
+                        .opacity(picking ? 0 : 1)
                     if picking {
                         ProgressView()
                             .controlSize(.small)
-                    } else {
-                        ActionIcon.reveal.label("Choose folder…")
+                            .tint(Theme.accent)
                     }
                 }
-                .buttonStyle(AccentButtonStyle())
-                .disabled(picking)
-                .keyboardShortcut(.defaultAction)
-        }
-        .frame(width: 460, height: 380)
-    }
-
-    private func step(
-        number: Int,
-        title: String,
-        text: String
-    ) -> some View {
-        HStack(alignment: .top, spacing: Theme.Space.m) {
-            Text("\(number)")
-                .font(Theme.numeric(13, weight: .semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 22, height: 22)
-                .background(Theme.accentSoft, in: Circle())
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(Theme.callout.weight(.semibold))
-                Text(text)
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+            .buttonStyle(AccentButtonStyle())
+            .disabled(picking)
+            .keyboardShortcut(.defaultAction)
         }
+        .modalFrame(width: 520, height: 380)
     }
 }
 #endif
