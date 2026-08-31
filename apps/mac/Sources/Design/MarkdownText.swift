@@ -17,16 +17,24 @@ import SwiftUI
 /// `AttributedString` handles inline emphasis, code spans and links.
 struct MarkdownText: View {
     private let blocks: [MarkdownBlock]
+    private let bodyFont: Font
+    private let codeFont: Font
 
-    init(_ markdown: String) {
+    init(
+        _ markdown: String,
+        bodyFont: Font = Theme.body,
+        codeFont: Font = Theme.monoText(12, relativeTo: .body)
+    ) {
         var parser = MarkdownParser(markdown)
         blocks = parser.blocks()
+        self.bodyFont = bodyFont
+        self.codeFont = codeFont
     }
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
             ForEach(blocks) { block in
-                MarkdownBlockView(block: block)
+                MarkdownBlockView(block: block, bodyFont: bodyFont, codeFont: codeFont)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -57,6 +65,8 @@ private struct MarkdownListItem {
 
 private struct MarkdownBlockView: View {
     let block: MarkdownBlock
+    let bodyFont: Font
+    let codeFont: Font
 
     @ViewBuilder
     var body: some View {
@@ -65,11 +75,11 @@ private struct MarkdownBlockView: View {
             InlineMarkdown(text, font: headingFont(level))
                 .padding(.top, level <= 2 ? Theme.Space.xs : 0)
         case let .paragraph(text):
-            InlineMarkdown(text, font: Theme.body)
+            InlineMarkdown(text, font: bodyFont)
         case let .list(items):
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    MarkdownListRow(item: item)
+                    MarkdownListRow(item: item, bodyFont: bodyFont)
                 }
             }
         case let .quote(text):
@@ -83,7 +93,7 @@ private struct MarkdownBlockView: View {
                         )
                     )
                     .frame(width: 3)
-                InlineMarkdown(text, font: Theme.body)
+                InlineMarkdown(text, font: bodyFont)
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, Theme.Space.xs)
@@ -91,7 +101,7 @@ private struct MarkdownBlockView: View {
             .background(Theme.accentSoft.opacity(0.62))
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius - 4, style: .continuous))
         case let .code(language, text):
-            MarkdownCodeBlock(language: language, source: text)
+            MarkdownCodeBlock(language: language, source: text, font: codeFont)
         case .rule:
             Capsule(style: .continuous)
                 .fill(
@@ -104,7 +114,7 @@ private struct MarkdownBlockView: View {
                 .frame(height: 1)
                 .padding(.vertical, Theme.Space.xs)
         case let .table(header, rows):
-            MarkdownTable(header: header, rows: rows)
+            MarkdownTable(header: header, rows: rows, bodyFont: bodyFont)
         }
     }
 
@@ -120,12 +130,13 @@ private struct MarkdownBlockView: View {
 
 private struct MarkdownListRow: View {
     let item: MarkdownListItem
+    let bodyFont: Font
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             marker
                 .frame(width: 20, alignment: .trailing)
-            InlineMarkdown(item.text, font: Theme.body)
+            InlineMarkdown(item.text, font: bodyFont)
         }
         .padding(.leading, CGFloat(item.depth) * Theme.Space.l)
     }
@@ -177,6 +188,7 @@ private struct InlineMarkdown: View {
 private struct MarkdownCodeBlock: View {
     let language: String?
     let source: String
+    let font: Font
 
     @State private var spans: [SyntaxSpan] = []
 
@@ -205,7 +217,7 @@ private struct MarkdownCodeBlock: View {
 
                     ScrollView(.horizontal) {
                         highlightedText
-                            .font(Theme.monoText(12, relativeTo: .body))
+                            .font(font)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(Theme.Space.m)
@@ -278,6 +290,7 @@ private struct MarkdownCodeBlock: View {
 private struct MarkdownTable: View {
     let header: [String]
     let rows: [[String]]
+    let bodyFont: Font
 
     private var columnCount: Int {
         max(header.count, rows.map(\.count).max() ?? 0)
@@ -306,7 +319,7 @@ private struct MarkdownTable: View {
             ForEach(0..<columnCount, id: \.self) { column in
                 InlineMarkdown(
                     column < values.count ? values[column] : "",
-                    font: header ? Theme.headline : Theme.body
+                    font: header ? Theme.headline : bodyFont
                 )
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)

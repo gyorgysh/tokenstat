@@ -386,6 +386,11 @@ enum Theme {
     static var footnote: Font { font(10, weight: .regular, relativeTo: .footnote) }
     static var caption: Font { font(10, weight: .regular, relativeTo: .caption) }
     static var caption2: Font { font(10, weight: .regular, relativeTo: .caption2) }
+    /// Conversation prose is read for minutes at a time, not scanned as Mac
+    /// chrome. Give it a calmer reading size without inflating every sidebar,
+    /// table and utility label that correctly uses the 13-point body style.
+    static var chatBody: Font { font(15, weight: .regular, relativeTo: .body) }
+    static var chatCode: Font { monoText(13, relativeTo: .body) }
     #else
     static var largeTitle: Font { font(34, weight: .regular, relativeTo: .largeTitle) }
     static var title: Font { font(28, weight: .regular, relativeTo: .title) }
@@ -398,6 +403,8 @@ enum Theme {
     static var footnote: Font { font(13, weight: .regular, relativeTo: .footnote) }
     static var caption: Font { font(12, weight: .regular, relativeTo: .caption) }
     static var caption2: Font { font(11, weight: .regular, relativeTo: .caption2) }
+    static var chatBody: Font { body }
+    static var chatCode: Font { monoText(12, relativeTo: .body) }
     #endif
 
     /// Material for the window's edges: the sidebar and the inspector.

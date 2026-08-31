@@ -85,6 +85,8 @@ struct ChatView: View {
                             scrollTarget = "approval-\(approval.id)"
                         }
                     )
+                    .frame(maxWidth: ChatReadingLayout.laneWidth)
+                    .frame(maxWidth: .infinity)
                 }
             } else {
                 empty
@@ -164,13 +166,20 @@ struct ChatView: View {
                             },
                             faceSeed: model.faceSeed
                         )
+                        .frame(
+                            maxWidth: item.prefersWideReadingRoom
+                                ? .infinity
+                                : ChatReadingLayout.proseWidth,
+                            alignment: .leading
+                        )
+                        .frame(maxWidth: .infinity, alignment: item.readingRoomAlignment)
                     }
                     if let mood = liveMood {
                         ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
                     }
                     TranscriptBottomSentinel()
                 }
-                .frame(maxWidth: 780, alignment: .leading)
+                .frame(maxWidth: ChatReadingLayout.laneWidth, alignment: .leading)
                 .padding(.vertical, Theme.Space.xl)
                 .padding(.horizontal, Theme.Space.l)
                 .frame(maxWidth: .infinity, alignment: .top)
@@ -392,6 +401,40 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Theme.Space.l)
+    }
+}
+
+/// The transcript and composer share one desktop grid. Prose keeps a readable
+/// measure in its centre while structured content can use the full lane.
+enum ChatReadingLayout {
+    #if os(macOS)
+    static let laneWidth: CGFloat = 1040
+    static let proseWidth: CGFloat = 820
+    #else
+    static let laneWidth: CGFloat = 780
+    static let proseWidth: CGFloat = 780
+    #endif
+}
+
+private extension ChatDisplayItem {
+    var prefersWideReadingRoom: Bool {
+        switch kind {
+        case .tool, .edit, .attachment, .approval, .handoff, .turnSeparator, .usage:
+            true
+        case .user, .assistant, .thinking, .failed:
+            false
+        }
+    }
+
+    var readingRoomAlignment: Alignment {
+        switch kind {
+        case .user:
+            .trailing
+        case .assistant, .thinking, .failed:
+            .leading
+        case .tool, .edit, .attachment, .approval, .handoff, .turnSeparator, .usage:
+            .center
+        }
     }
 }
 

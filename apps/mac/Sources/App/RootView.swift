@@ -2585,7 +2585,6 @@ struct RootView: View {
             if let folderID = section.folderID {
                 for ancestor in sshAncestors(of: folderID) { expandedSSHFolders.insert(ancestor) }
             }
-            isInspectorPresented = true
         }
     }
 
@@ -2619,7 +2618,6 @@ struct RootView: View {
             workspaces.selectedID = folderID
             lastSection[folderID] = section
             expandedWorkspaces.insert(folderID)
-            isInspectorPresented = true
             #if os(macOS)
             switch section {
             case .sessions: workspaces.showTerminal(in: folderID)

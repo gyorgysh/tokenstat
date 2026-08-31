@@ -30,7 +30,9 @@ struct ChatComposer: View {
 
     var body: some View {
         well
+            .frame(maxWidth: ChatReadingLayout.laneWidth)
             .padding(.horizontal, Theme.Space.l)
+            .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Space.m)
             .background(Theme.background)
             .overlay(alignment: .top) {

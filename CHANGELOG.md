@@ -58,6 +58,11 @@ desktop and Android builds remain previews. Newest first.
 
 ### Added
 
+- Chat on Mac now uses the pull-request workspace's wider reading room: prose
+  is larger and aligned by speaker at a comfortable measure, while tools,
+  diffs, files, approvals, and the composer can use the desktop's extra width.
+- Moving between workspace or SSH sections no longer reopens a Mac inspector
+  that the person deliberately closed.
 - The Mac's existing notification switch now covers Chat. A conversation can
   banner when it needs an answer or its turn ends, primes without replaying old
   work, stays silent for Stop, and removes a waiting banner when the person
