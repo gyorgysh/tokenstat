@@ -198,11 +198,22 @@ impl Parser {
     fn emit(&mut self, out: &mut String, piece: Piece) {
         match piece {
             Piece::Text(text) => {
+                // Whether the paragraph so far already ends in a space. `out`
+                // starts empty on a fresh drain chunk, so the running block is
+                // the one that knows.
+                let spaced = self
+                    .last_block
+                    .chars()
+                    .last()
+                    .or_else(|| out.chars().last())
+                    .is_some_and(|last| last == ' ');
                 // Grok sends a lone space between tokens (" ship" + " " +
                 // "0.4.0"). Dropping that space glued words. Keep it only
-                // when it continues a paragraph already started.
+                // when it continues a paragraph already started, and only
+                // where there is not already one.
                 if text.trim().is_empty() {
-                    if self.last_was_text {
+                    let only_spaces = !text.is_empty() && text.chars().all(|byte| byte == ' ');
+                    if self.last_was_text && !(only_spaces && spaced) {
                         out.push_str(&text);
                         self.last_block.push_str(&text);
                     }
@@ -214,8 +225,21 @@ impl Parser {
                     return;
                 }
                 if self.last_was_text {
-                    out.push_str(&text);
-                    self.last_block.push_str(&text);
+                    // Grok sends the separator *and* the next token's own
+                    // leading space, so every word after one arrived spaced
+                    // twice ("I'll  run  that"). Only spaces are folded: a
+                    // space after a newline is indentation and belongs to the
+                    // line it starts.
+                    let text = if spaced {
+                        text.trim_start_matches(' ')
+                    } else {
+                        &text
+                    };
+                    if text.is_empty() {
+                        return;
+                    }
+                    out.push_str(text);
+                    self.last_block.push_str(text);
                 } else {
                     append_piece(out, &text, !self.last_block.is_empty());
                     self.last_block = text;
@@ -1903,6 +1927,49 @@ mod tests {
         assert!(out.contains("Read /tmp/a.txt"), "{out}");
         assert!(out.contains("| ok"), "{out}");
         assert!(out.contains(':'), "{out}");
+    }
+
+    #[test]
+    fn a_separator_space_and_a_leading_space_are_one_space() {
+        // Grok sends both, and the renderer used to lay them end to end, so a
+        // reply read "I'll  run  that  command" everywhere it was shown.
+        let out = feed(
+            "grok",
+            r#"{"type":"text","data":"I'll"}
+{"type":"text","data":" "}
+{"type":"text","data":" run"}
+{"type":"text","data":" "}
+{"type":"text","data":" that"}
+{"type":"text","data":" command"}
+"#,
+        );
+        assert_eq!(out.trim(), "I'll run that command");
+    }
+
+    #[test]
+    fn a_separator_space_still_holds_two_words_apart() {
+        // The reason the separator is kept at all: without it these glue.
+        let out = feed(
+            "grok",
+            r#"{"type":"text","data":"ship"}
+{"type":"text","data":" "}
+{"type":"text","data":"0.4.0"}
+"#,
+        );
+        assert_eq!(out.trim(), "ship 0.4.0");
+    }
+
+    #[test]
+    fn indentation_after_a_newline_is_not_a_doubled_space() {
+        // A normal string literal, because the newline has to reach the
+        // parser as the two characters JSON spells it with.
+        let out = feed(
+            "grok",
+            "{\"type\":\"text\",\"data\":\"one:\"}\n\
+             {\"type\":\"text\",\"data\":\"\\n\"}\n\
+             {\"type\":\"text\",\"data\":\"    two\"}\n",
+        );
+        assert_eq!(out.trim_end(), "one:\n    two");
     }
 
     #[test]

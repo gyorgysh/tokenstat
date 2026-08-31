@@ -39,6 +39,9 @@ struct ClientWorkspaceSessionsView: View {
     @State private var isOpeningPort = false
     /// Read-only launcher state for the Chat tile's count and character.
     @State private var chatPreview = ChatModel()
+    /// Open pull requests, for the tile's count. Shared with the section
+    /// list, so both say the same number without asking twice.
+    @State private var pullCounts = PullCountStore.shared
     /// False until the first `pty.list` and catalog answer land. An empty list
     /// and an unasked question look identical and mean opposite things.
     @State private var loaded = false
@@ -252,6 +255,24 @@ struct ClientWorkspaceSessionsView: View {
                     )
                 } label: {
                     ClientLauncherDestinationTile(section: .changes)
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    PullsView(
+                        workspaceID: workspaceID,
+                        peer: peer,
+                        connectionHostName: hostName,
+                        workspaceName: folder.name,
+                        workspaceIsRemote: true
+                    )
+                    .navigationTitle("Pull requests")
+                    .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    ClientLauncherDestinationTile(
+                        section: .pulls,
+                        count: pullCounts.count(workspaceID: workspaceID, peer: peer) ?? 0
+                    )
                 }
                 .buttonStyle(.plain)
 

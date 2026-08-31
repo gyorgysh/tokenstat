@@ -71,9 +71,9 @@ struct PullsView: View {
                             heading
                             content
                         }
-                        .frame(maxWidth: 760, alignment: .leading)
+                        .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
                         .padding(Theme.Space.xl)
-                        .frame(maxWidth: .infinity, alignment: .top)
+                        .frame(maxWidth: .infinity, alignment: ReadingRoom.alignment)
                     }
                     .refreshable { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
                 }

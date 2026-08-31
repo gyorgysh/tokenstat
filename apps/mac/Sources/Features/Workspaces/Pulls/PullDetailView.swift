@@ -52,9 +52,9 @@ struct PullDetailView: View {
                         pullDetailSkeleton
                     }
                 }
-                .frame(maxWidth: 1040, alignment: .leading)
+                .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
                 .padding(Theme.Space.xl)
-                .frame(maxWidth: .infinity, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: ReadingRoom.alignment)
             }
         }
         .background(Theme.background)

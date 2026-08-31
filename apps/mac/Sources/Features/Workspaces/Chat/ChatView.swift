@@ -86,7 +86,7 @@ struct ChatView: View {
                             scrollTarget = "approval-\(approval.id)"
                         }
                     )
-                    .frame(maxWidth: ChatReadingLayout.laneWidth)
+                    .frame(maxWidth: ReadingRoom.laneWidth)
                     .frame(maxWidth: .infinity)
                 }
             } else {
@@ -177,7 +177,7 @@ struct ChatView: View {
                         .frame(
                             maxWidth: item.prefersWideReadingRoom
                                 ? .infinity
-                                : ChatReadingLayout.proseWidth,
+                                : ReadingRoom.proseWidth,
                             alignment: .leading
                         )
                         .frame(maxWidth: .infinity, alignment: item.readingRoomAlignment)
@@ -188,7 +188,7 @@ struct ChatView: View {
                     }
                     TranscriptBottomSentinel()
                 }
-                .frame(maxWidth: ChatReadingLayout.laneWidth, alignment: .leading)
+                .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
                 .padding(.vertical, Theme.Space.xl)
                 .padding(.horizontal, Theme.Space.l)
                 .frame(maxWidth: .infinity, alignment: .top)
@@ -427,16 +427,6 @@ struct ChatView: View {
 
 /// The transcript and composer share one desktop grid. Prose keeps a readable
 /// measure in its centre while structured content can use the full lane.
-enum ChatReadingLayout {
-    #if os(macOS)
-    static let laneWidth: CGFloat = 1040
-    static let proseWidth: CGFloat = 820
-    #else
-    static let laneWidth: CGFloat = 780
-    static let proseWidth: CGFloat = 780
-    #endif
-}
-
 private extension ChatDisplayItem {
     var prefersWideReadingRoom: Bool {
         switch kind {

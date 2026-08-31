@@ -9,6 +9,9 @@ desktop and Android builds remain previews. Newest first.
 
 ### Fixed
 
+- Grok replies read with doubled spaces ("I'll  run  that  command"). It sends
+  a separator space between tokens and the next token's own leading space, and
+  both were laid end to end.
 - Every tool in a chat drew twice. A tool's start and its end are joined by a
   call id, and the id was written under one name and read under another, so no
   end ever found its start: one row sat running until the turn closed it, and
@@ -88,6 +91,12 @@ desktop and Android builds remain previews. Newest first.
   offered on, or remembered from, a line the server is not echoing, so a
   password prompt is left alone. On a phone and an iPad the rows are chosen by
   touch and no key is taken from the shell.
+- Pull requests, on Mac, use the same reading room as everything else: the wide
+  work lane for diffs and checks, and content that starts at the window's
+  leading edge rather than floating in the middle of it. One rule now, shared
+  with Chat, instead of a measurement per screen.
+- Pull requests join the workspace launcher, beside Chat, Files, Browser,
+  Changes and Tasks, with the count of what is open on it.
 - Chat on Mac now uses the pull-request workspace's wider reading room: prose
   is larger and aligned by speaker at a comfortable measure, while tools,
   diffs, files, approvals, and the composer can use the desktop's extra width.
