@@ -6,8 +6,12 @@
 # Inputs are read from the environment rather than interpolated into the script,
 # so a crafted branch name or title cannot inject shell commands.
 #
-#   BASE_SHA   merge base side of the pull request
-#   HEAD_SHA   head commit of the pull request
+# On a push, the range is what the push is adding. An unreachable or absent
+# base (a first push, or a force push) leaves nothing to compare against, and
+# the commits are skipped rather than the job failing on history it cannot see.
+#
+#   BASE_SHA   merge base of the pull request, or the commit before the push
+#   HEAD_SHA   head commit of the pull request, or of the push
 #   PR_TITLE   pull request title, which becomes the squashed commit subject
 
 set -euo pipefail
@@ -64,7 +68,9 @@ if [ -n "${PR_TITLE:-}" ]; then
   check_subject "pull request title" "$PR_TITLE"
 fi
 
-if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
+if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ] \
+  && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] \
+  && git cat-file -e "${BASE_SHA}^{commit}" 2> /dev/null; then
   while IFS= read -r sha; do
     [ -n "$sha" ] || continue
     subject=$(git log -1 --format=%s "$sha")
