@@ -9,6 +9,25 @@ desktop and Android builds remain previews. Newest first.
 
 ### Fixed
 
+- A pull request whose diff contains a diff, such as a patch fixture or a
+  document quoting one, showed a file it does not touch and cut the real file's
+  changes in half.
+- A GitHub connection signed itself out every few hours. When GitHub renewed an
+  authorization without issuing a fresh renewal token, the one already held was
+  overwritten with nothing, and the next renewal had nothing to work with.
+- A dropped network request said "pull requests are not connected" and offered
+  a sign-in, for a connection that was fine.
+- Reading a pull request no longer asks the machine who you are three times
+  over. A credential is resolved once a minute rather than once per request,
+  which on a machine authenticated through git's own credential helper removes
+  a subprocess and a round trip from every read.
+- Creating a branch from a starting point that begins with a dash is refused
+  rather than handed to git as an option. The branch name was already checked;
+  the starting point was not, and `--discard-changes` in that position throws
+  away uncommitted work.
+- The pull-request daemon caches for detail, timeline and diff are pruned. They
+  were only ever added to, so a machine left running kept every diff it had
+  ever shown.
 - Grok replies read with doubled spaces ("I'll  run  that  command"). It sends
   a separator space between tokens and the next token's own leading space, and
   both were laid end to end.

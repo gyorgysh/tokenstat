@@ -346,10 +346,9 @@ fn parse_diff(raw: &str) -> Vec<DiffHunk> {
 /// This is intentionally a pure parser. Opening a pull request must not fetch
 /// refs, create a branch, or move HEAD; the API text is rendered and discarded.
 pub fn split_unified(raw: &str) -> Vec<FileDiff> {
-    raw.split("diff --git ")
-        .skip(1)
-        .filter_map(|body| {
-            let chunk = format!("diff --git {body}");
+    file_chunks(raw)
+        .into_iter()
+        .filter_map(|chunk| {
             let path = chunk
                 .lines()
                 .find_map(|line| line.strip_prefix("+++ b/"))
@@ -377,6 +376,71 @@ pub fn split_unified(raw: &str) -> Vec<FileDiff> {
             })
         })
         .collect()
+}
+
+/// One string per file in a unified diff.
+///
+/// A `diff --git` header always starts a line. Splitting on the bare
+/// substring also matched one inside a file's own *content*: a patch fixture,
+/// or a document with a diff quoted in it, arrives as `+diff --git a/x b/x`
+/// and cut that file's diff in half around a file the change never touched.
+/// Split with `split_inclusive` rather than `lines`, so a CRLF file keeps its
+/// bytes exactly as git wrote them.
+fn file_chunks(raw: &str) -> Vec<String> {
+    let mut chunks: Vec<String> = Vec::new();
+    for line in raw.split_inclusive('\n') {
+        if line.starts_with("diff --git ") {
+            chunks.push(String::new());
+        }
+        if let Some(current) = chunks.last_mut() {
+            current.push_str(line);
+        }
+    }
+    chunks
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::*;
+
+    #[test]
+    fn a_diff_quoted_inside_a_file_does_not_start_a_new_one() {
+        let raw = [
+            "diff --git a/docs/note.md b/docs/note.md",
+            "--- a/docs/note.md",
+            "+++ b/docs/note.md",
+            "@@ -1,2 +1,4 @@",
+            " intro",
+            "+diff --git a/x b/x",
+            "+one more line",
+            "",
+        ]
+        .join("\n");
+        let files = split_unified(&raw);
+        assert_eq!(files.len(), 1, "one file, not two");
+        assert_eq!(files[0].path, "docs/note.md");
+        let lines: usize = files[0].hunks.iter().map(|hunk| hunk.lines.len()).sum();
+        assert_eq!(lines, 3, "the quoted header is content, and stays in it");
+    }
+
+    #[test]
+    fn two_real_files_still_split() {
+        let raw = [
+            "diff --git a/a.txt b/a.txt",
+            "+++ b/a.txt",
+            "diff --git a/b.txt b/b.txt",
+            "+++ b/b.txt",
+            "",
+        ]
+        .join("\n");
+        assert_eq!(
+            split_unified(&raw)
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>(),
+            vec!["a.txt", "b.txt"]
+        );
+    }
 }
 
 /// Pull the two starting line numbers out of `@@ -a,b +c,d @@`.

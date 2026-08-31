@@ -150,7 +150,14 @@ pub fn create_branch(dir: &Path, name: &str, from: Option<&str>) -> GitOutcome {
     if name.is_empty() || !valid_branch(dir, name) {
         return GitOutcome::failed("that is not a valid branch name");
     }
-    match from.filter(|value| !value.is_empty()) {
+    match from.map(str::trim).filter(|value| !value.is_empty()) {
+        // A start point is a revision, not a branch, so `check-ref-format`
+        // cannot judge it. What it must not be is an option: git reads a
+        // leading dash as one, and `--discard-changes` in this position
+        // throws away every uncommitted change in the workspace.
+        Some(start) if start.starts_with('-') => {
+            GitOutcome::failed("that is not a valid starting point")
+        }
         Some(start) => git(dir, &["switch", "-c", name, start]),
         None => git(dir, &["switch", "-c", name]),
     }

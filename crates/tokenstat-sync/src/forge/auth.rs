@@ -1,5 +1,6 @@
 //! GitHub App authorization and local credential discovery.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -186,13 +187,72 @@ fn load_grant(host: &str) -> Result<Option<StoredGrant>, ForgeError> {
 fn store_grant(host: &str, grant: &StoredGrant) -> Result<(), ForgeError> {
     let raw = serde_json::to_string(grant)?;
     keychain::store_token(&storage_key(host), &raw)?;
+    forget_credentials();
     Ok(())
+}
+
+/// How long a resolved credential is reused before the rungs are walked again.
+///
+/// Every forge call asks for one, and a machine authenticated through the git
+/// helper paid a `git credential fill` subprocess and a probe round trip for
+/// each: opening one pull request costs a view, a timeline and a diff, so
+/// three of each before any of the work asked for. A minute is short enough
+/// that signing in elsewhere is picked up promptly, and the two paths that
+/// change a credential here clear this outright.
+const CREDENTIAL_TTL: Duration = Duration::from_secs(60);
+
+struct Remembered {
+    at: std::time::Instant,
+    credential: Option<Credential>,
+}
+
+fn credential_cache() -> &'static std::sync::Mutex<HashMap<String, Remembered>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Remembered>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Forget what was found, because it has just changed.
+fn forget_credentials() {
+    credential_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
 }
 
 /// Find a credential without opening a browser or changing another tool's
 /// credential store. The first usable rung wins.
 pub fn credential(host: &str) -> Option<Credential> {
     let host = normalized_host(host)?;
+    {
+        let cache = credential_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(hit) = cache
+            .get(&host)
+            .filter(|hit| hit.at.elapsed() < CREDENTIAL_TTL)
+        {
+            return hit.credential.clone();
+        }
+    }
+    let found = discover(&host);
+    let mut cache = credential_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache.retain(|_, hit| hit.at.elapsed() < CREDENTIAL_TTL);
+    cache.insert(
+        host,
+        Remembered {
+            at: std::time::Instant::now(),
+            credential: found.clone(),
+        },
+    );
+    found
+}
+
+/// The rungs, walked once.
+fn discover(host: &str) -> Option<Credential> {
+    let host = host.to_string();
     if let Ok(Some(grant)) = load_grant(&host) {
         let expired = grant
             .expires_at
@@ -211,7 +271,7 @@ pub fn credential(host: &str) -> Option<Credential> {
             });
         }
     }
-    if let Some(token) = git_credential(&host).filter(|token| borrowed_token_works(&host, token)) {
+    if let Some(token) = git_credential(&host).filter(|token| borrowed_token_usable(&host, token)) {
         return Some(Credential {
             source: CredentialSource::GitCredential,
             token,
@@ -222,33 +282,57 @@ pub fn credential(host: &str) -> Option<Credential> {
         .filter_map(|name| std::env::var(name).ok())
         .map(|token| token.trim().to_string())
         .filter(|token| !token.is_empty())
-        .find(|token| borrowed_token_works(&host, token))
+        .find(|token| borrowed_token_usable(&host, token))
         .map(|token| Credential {
             source: CredentialSource::Environment,
             token,
         })
 }
 
+/// What a probe of a borrowed token found.
+enum Probe {
+    /// The forge accepted it.
+    Works,
+    /// The forge answered, and said no.
+    Rejected,
+    /// Nothing answered. This says nothing about the token.
+    Unreachable,
+}
+
 /// A helper or environment token belongs to another tool. Probe it without
 /// storing it so a stale or under-scoped credential falls through to the next
 /// rung instead of turning the connection screen into a 401/403 dead end.
-fn borrowed_token_works(host: &str, token: &str) -> bool {
+///
+/// A failure to reach the forge is not an answer about the token. Reading it
+/// as one told somebody with a perfectly good credential that pull requests
+/// were "not connected" every time a request was dropped, and offered them a
+/// sign-in for a problem signing in would not fix.
+fn probe_token(host: &str, token: &str) -> Probe {
     let base = if host == GITHUB_HOST {
         "https://api.github.com".to_string()
     } else {
         format!("https://{host}/api/v3")
     };
-    http_client()
-        .and_then(|client| {
-            client
-                .get(format!("{base}/user"))
-                .header("accept", "application/vnd.github+json")
-                .header("x-github-api-version", "2022-11-28")
-                .bearer_auth(token)
-                .send()
-                .map_err(ForgeError::from)
-        })
-        .is_ok_and(|response| response.status().is_success())
+    let answer = http_client().and_then(|client| {
+        client
+            .get(format!("{base}/user"))
+            .header("accept", "application/vnd.github+json")
+            .header("x-github-api-version", "2022-11-28")
+            .bearer_auth(token)
+            .send()
+            .map_err(ForgeError::from)
+    });
+    match answer {
+        Ok(response) if response.status().is_success() => Probe::Works,
+        Ok(_) => Probe::Rejected,
+        Err(_) => Probe::Unreachable,
+    }
+}
+
+/// Whether a borrowed token is worth using. Unreachable counts: the request
+/// that follows will fail with a network error, which is the honest message.
+fn borrowed_token_usable(host: &str, token: &str) -> bool {
+    !matches!(probe_token(host, token), Probe::Rejected)
 }
 
 fn git_credential(host: &str) -> Option<String> {
@@ -369,6 +453,7 @@ pub fn set_token(host: &str, token: &str) -> Result<(), ForgeError> {
 pub fn sign_out(host: &str) -> Result<(), ForgeError> {
     let host = normalized_host(host).ok_or_else(|| ForgeError::Api("invalid host".into()))?;
     keychain::delete_token(&storage_key(&host))?;
+    forget_credentials();
     Ok(())
 }
 
@@ -404,7 +489,15 @@ fn refresh(host: &str, old: &StoredGrant) -> Result<StoredGrant, ForgeError> {
     if body.error.is_some() {
         return Err(ForgeError::RefreshFailed);
     }
-    let grant = grant_from_token(body, old.source).map_err(|_| ForgeError::RefreshFailed)?;
+    let mut grant = grant_from_token(body, old.source).map_err(|_| ForgeError::RefreshFailed)?;
+    // RFC 6749 section 6: the server *may* issue a new refresh token, and may
+    // not. Taking the answer as the whole truth wrote `None` over the one we
+    // had, so the next expiry had nothing to refresh with and the person was
+    // signed out every few hours for no reason they could see.
+    if grant.refresh_token.is_none() {
+        grant.refresh_token = old.refresh_token.clone();
+        grant.refresh_token_expires_at = old.refresh_token_expires_at;
+    }
     store_grant(host, &grant)?;
     Ok(grant)
 }

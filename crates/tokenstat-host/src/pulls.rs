@@ -85,6 +85,44 @@ struct DetailEntry<T> {
     value: T,
 }
 
+/// How long a detail, timeline page or diff is worth reusing.
+const DETAIL_TTL: Duration = Duration::from_secs(30);
+
+/// Read one of the read caches, if what is in it is still worth having.
+fn cached<K: Eq + std::hash::Hash, V: Clone>(
+    cache: &Mutex<HashMap<K, DetailEntry<V>>>,
+    key: &K,
+) -> Option<V> {
+    cache
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(key)
+        .filter(|entry| entry.at.elapsed() < DETAIL_TTL)
+        .map(|entry| entry.value.clone())
+}
+
+/// Put an answer in one of the read caches, dropping what has gone stale.
+///
+/// The pruning is the point. Reading is filtered by age, so an entry nobody
+/// asks for again is never looked at and was never removed: a daemon that
+/// runs for weeks kept every parsed diff it had ever shown, which for a
+/// repository with large diffs is memory nothing can reclaim.
+fn remember<K: Eq + std::hash::Hash, V>(
+    cache: &Mutex<HashMap<K, DetailEntry<V>>>,
+    key: K,
+    value: V,
+) {
+    let mut cache = cache.lock().unwrap_or_else(PoisonError::into_inner);
+    cache.retain(|_, entry| entry.at.elapsed() < DETAIL_TTL);
+    cache.insert(
+        key,
+        DetailEntry {
+            at: Instant::now(),
+            value,
+        },
+    );
+}
+
 fn detail_cache()
 -> &'static Mutex<HashMap<DetailKey, DetailEntry<tokenstat_sync::forge::PullDetail>>> {
     static CACHE: OnceLock<
@@ -318,29 +356,14 @@ fn view(p: &Params) -> Result<Value, String> {
         workspace_id: p.workspace_id.clone(),
         number,
     };
-    if !p.refresh {
-        if let Some(hit) = detail_cache()
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&key)
-            .filter(|entry| entry.at.elapsed() < Duration::from_secs(30))
-            .cloned()
-        {
-            return serde_json::to_value(hit.value).map_err(|error| error.to_string());
-        }
+    if !p.refresh
+        && let Some(hit) = cached(detail_cache(), &key)
+    {
+        return serde_json::to_value(hit).map_err(|error| error.to_string());
     }
     let value = tokenstat_sync::forge::view(&repo_for(&p.workspace_id, "pulls.view")?, number)
         .map_err(|error| error.to_string())?;
-    detail_cache()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(
-            key,
-            DetailEntry {
-                at: Instant::now(),
-                value: value.clone(),
-            },
-        );
+    remember(detail_cache(), key, value.clone());
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
@@ -351,16 +374,10 @@ fn timeline(p: &Params) -> Result<Value, String> {
         number,
         cursor: p.cursor.clone(),
     };
-    if !p.refresh {
-        if let Some(hit) = timeline_cache()
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&key)
-            .filter(|entry| entry.at.elapsed() < Duration::from_secs(30))
-            .cloned()
-        {
-            return serde_json::to_value(hit.value).map_err(|error| error.to_string());
-        }
+    if !p.refresh
+        && let Some(hit) = cached(timeline_cache(), &key)
+    {
+        return serde_json::to_value(hit).map_err(|error| error.to_string());
     }
     let value = tokenstat_sync::forge::timeline(
         &repo_for(&p.workspace_id, "pulls.timeline")?,
@@ -368,16 +385,7 @@ fn timeline(p: &Params) -> Result<Value, String> {
         p.cursor.as_deref(),
     )
     .map_err(|error| error.to_string())?;
-    timeline_cache()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(
-            key,
-            DetailEntry {
-                at: Instant::now(),
-                value: value.clone(),
-            },
-        );
+    remember(timeline_cache(), key, value.clone());
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
@@ -387,30 +395,15 @@ fn diff(p: &Params) -> Result<Value, String> {
         workspace_id: p.workspace_id.clone(),
         number,
     };
-    if !p.refresh {
-        if let Some(hit) = diff_cache()
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&key)
-            .filter(|entry| entry.at.elapsed() < Duration::from_secs(30))
-            .cloned()
-        {
-            return serde_json::to_value(hit.value).map_err(|error| error.to_string());
-        }
+    if !p.refresh
+        && let Some(hit) = cached(diff_cache(), &key)
+    {
+        return serde_json::to_value(hit).map_err(|error| error.to_string());
     }
     let raw = tokenstat_sync::forge::diff_text(&repo_for(&p.workspace_id, "pulls.diff")?, number)
         .map_err(|error| error.to_string())?;
     let value = tokenstat_workspace::git::split_unified(&raw);
-    diff_cache()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(
-            key,
-            DetailEntry {
-                at: Instant::now(),
-                value: value.clone(),
-            },
-        );
+    remember(diff_cache(), key, value.clone());
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 

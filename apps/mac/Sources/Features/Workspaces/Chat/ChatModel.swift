@@ -32,9 +32,16 @@ final class ChatModel {
     private(set) var earlierCursor: String?
     /// Whether there is anything before what is held.
     private(set) var hasEarlier = false
-    /// An older page is on its way. The transcript shows a quiet mark for it
-    /// rather than an overlay over the conversation.
+    /// An older page is on its way, and the transcript should say so. Quiet
+    /// backfill while a conversation opens does not set this: nobody is
+    /// waiting at the top of a screen that has not been drawn yet.
     private(set) var loadingEarlier = false
+    /// An older page is on its way at all.
+    ///
+    /// Separate from what the transcript shows, and the reason is that two
+    /// loads on one cursor is how a stale cursor gets written back over a
+    /// fresh one. Everything that fetches sets this.
+    private var earlierInFlight = false
     /// Whether the person has actually paged back in this sitting. Until they
     /// have, saying "start of chat" would be announcing the obvious about a
     /// short conversation.
@@ -586,6 +593,7 @@ final class ChatModel {
         earlierCursor = nil
         hasEarlier = false
         loadingEarlier = false
+        earlierInFlight = false
         reachedStart = false
     }
 
@@ -645,11 +653,15 @@ final class ChatModel {
     }
 
     private func loadEarlier(id: String, generation: UInt64, quiet: Bool) async {
-        guard !pagingUnavailable, hasEarlier, !loadingEarlier,
+        guard !pagingUnavailable, hasEarlier, !earlierInFlight,
               let cursor = earlierCursor
         else { return }
+        earlierInFlight = true
         loadingEarlier = !quiet
-        defer { loadingEarlier = false }
+        defer {
+            earlierInFlight = false
+            loadingEarlier = false
+        }
         do {
             let page = try await Bridge.chatEventPage(
                 id: id, cursor: cursor, limit: Self.pageEvents, peer: peer
@@ -670,9 +682,12 @@ final class ChatModel {
                 // the archive, so a repeat is cheap to spot.
                 let oldest = events.first?.seq ?? UInt64.max
                 let fresh = page.events.filter { ($0.seq ?? 0) < oldest }
-                guard !fresh.isEmpty || !page.hasEarlier else { return }
                 events.insert(contentsOf: fresh, at: 0)
             }
+            // Always, even for a page that carried nothing this window can
+            // use. The cursor is how the walk moves: keeping the old one
+            // means asking the same question on every frame of every scroll
+            // and never reaching the beginning.
             earlierCursor = page.cursor
             hasEarlier = page.hasEarlier
             if !hasEarlier { reachedStart = true }
