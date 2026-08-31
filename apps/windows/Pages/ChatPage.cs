@@ -1314,11 +1314,13 @@ internal sealed class ChatPage : Page
     {
         var chats = AppServices.Host.CallAsync("chat.list", new JsonObject { ["workspaceId"] = _workspaceId });
         var backends = AppServices.Host.CallAsync("chat.backends");
-        var personas = AppServices.Host.CallAsync("chat.personas");
+        var personas = AppServices.Host.CallAsync(
+            "chat.personas",
+            new JsonObject { ["workspaceId"] = _workspaceId });
         await Task.WhenAll(chats, backends, personas);
         _chats = AsArray(chats.Result);
         _backends = AsArray(backends.Result);
-        _personas = AsArray(personas.Result);
+        _personas = AsArray(personas.Result, "personas");
     }
 
     private JsonNode? FindChat(string id)

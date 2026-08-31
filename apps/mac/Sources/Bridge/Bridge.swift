@@ -932,7 +932,10 @@ extension Bridge {
         ]
         if let model, !model.isEmpty { params["model"] = model }
         if let effort, !effort.isEmpty { params["effort"] = effort }
-        if let personaID, !personaID.isEmpty { params["personaId"] = personaID }
+        // Nil omits the key so the host applies the workspace default. An
+        // empty string is No persona and has to travel, or it would look like
+        // the same omit.
+        if let personaID { params["personaId"] = personaID }
         return try await chatInvoke(peer: route.peer, "chat.create", params, as: ChatConversation.self)
     }
 
@@ -1063,15 +1066,42 @@ extension Bridge {
         )
     }
 
-    static func chatPersonas(peer: String? = nil) async throws -> [ChatPersona] {
-        try await chatInvoke(peer: peer, "chat.personas", as: [ChatPersona].self)
+    static func chatPersonas(workspaceID: String, peer: String? = nil) async throws -> ChatPersonaList {
+        let route = chatRoute(workspaceID: workspaceID, peer: peer)
+        return try await chatInvoke(
+            peer: route.peer,
+            "chat.personas",
+            ["workspaceId": route.workspaceID],
+            as: ChatPersonaList.self
+        )
     }
 
-    static func saveChatPersona(_ persona: ChatPersona, peer: String? = nil) async throws -> ChatPersona {
-        try await chatInvoke(
-            peer: peer,
+    static func saveChatPersona(
+        _ persona: ChatPersona,
+        workspaceID: String? = nil,
+        peer: String? = nil
+    ) async throws -> ChatPersona {
+        let route = workspaceID.map { chatRoute(workspaceID: $0, peer: peer) }
+        var params: [String: Any] = ["persona": try persona.jsonObject()]
+        if let route { params["workspaceId"] = route.workspaceID }
+        return try await chatInvoke(
+            peer: route?.peer ?? peer,
             "chat.personaSave",
-            ["persona": try persona.jsonObject()],
+            params,
+            as: ChatPersona.self
+        )
+    }
+
+    static func setDefaultChatPersona(
+        workspaceID: String,
+        personaID: String,
+        peer: String? = nil
+    ) async throws -> ChatPersona {
+        let route = chatRoute(workspaceID: workspaceID, peer: peer)
+        return try await chatInvoke(
+            peer: route.peer,
+            "chat.personaDefault",
+            ["workspaceId": route.workspaceID, "personaId": personaID],
             as: ChatPersona.self
         )
     }

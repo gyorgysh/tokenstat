@@ -98,6 +98,10 @@ pub struct Conversation {
 #[serde(rename_all = "camelCase")]
 pub struct Persona {
     pub id: String,
+    /// None is a shared legacy persona, available in every workspace. New
+    /// records created from a workspace are scoped to that workspace.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     pub name: String,
     /// How this persona behaves, in the person's own words. The whole of what
     /// a persona is, beside its name.
@@ -112,6 +116,25 @@ pub struct Persona {
     #[serde(default)]
     pub updated_at_ms: i64,
 }
+
+/// On-disk persona file. Older installs stored a bare array. Every write is
+/// this object, temporary-file plus rename.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersonaIndex {
+    #[serde(default)]
+    personas: Vec<Persona>,
+    #[serde(default)]
+    default_by_workspace: HashMap<String, String>,
+}
+
+const STARTER_NAMES: [&str; 8] = [
+    "Lumen", "Mica", "Nori", "Pico", "Rune", "Sage", "Sora", "Vale",
+];
+
+const STARTER_BRIEF: &str = "You understand the local context before changing \
+anything. Prefer the smallest complete change. Preserve existing work. Explain \
+real tradeoffs. Verify what you change.";
 
 /// A locally staged file. The client only receives this descriptor; bytes
 /// never leave the chat's host data directory except when its agent reads it.
@@ -235,7 +258,7 @@ pub struct Store {
     root: PathBuf,
     conversations: Mutex<Vec<Conversation>>,
     active: Mutex<HashMap<String, String>>,
-    personas: Mutex<Vec<Persona>>,
+    personas: Mutex<PersonaIndex>,
     approvals: Mutex<Vec<Approval>>,
     /// Per-turn credentials are intentionally memory-only. The 0600 file a
     /// hook reads contains the opaque value, while this map is what binds it
@@ -261,7 +284,7 @@ impl Store {
             root,
             conversations: Mutex::new(Vec::new()),
             active: Mutex::new(HashMap::new()),
-            personas: Mutex::new(Vec::new()),
+            personas: Mutex::new(PersonaIndex::default()),
             approvals: Mutex::new(Vec::new()),
             turn_tokens: Mutex::new(HashMap::new()),
         }
@@ -276,7 +299,7 @@ impl Store {
             .and_then(|body| serde_json::from_slice::<Index>(&body).ok())
             .map(|index| index.conversations)
             .unwrap_or_default();
-        let personas = load_personas(&root);
+        let personas = load_persona_index(&root);
         Self {
             root,
             conversations: Mutex::new(conversations),
@@ -333,11 +356,25 @@ impl Store {
         counts
     }
 
-    pub fn personas(&self) -> Vec<Persona> {
-        self.personas
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+    /// Personas visible in this workspace, plus its default.
+    ///
+    /// Shared legacy records (`workspace_id` is none) remain available. New
+    /// records belong to the workspace that created them. The first load of a
+    /// workspace that has no default creates one locally, without calling an
+    /// agent.
+    pub fn personas(&self, workspace_id: &str) -> Result<Value, String> {
+        let default = self.ensure_workspace_persona(workspace_id)?;
+        let index = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
+        let personas: Vec<Persona> = index
+            .personas
+            .iter()
+            .filter(|persona| persona_visible(persona, workspace_id))
+            .cloned()
+            .collect();
+        Ok(json!({
+            "personas": personas,
+            "defaultId": default.id,
+        }))
     }
 
     pub fn approvals(&self, conversation_id: Option<&str>) -> Vec<Approval> {
@@ -588,8 +625,9 @@ impl Store {
             return Err("a persona needs a name".into());
         }
         let now = now_ms();
+        let mut index = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
         if persona.id.is_empty() {
-            persona.id = format!("persona-{now}");
+            persona.id = mint_persona_id(&index.personas);
             persona.created_at_ms = now;
         }
         persona.updated_at_ms = now;
@@ -599,26 +637,56 @@ impl Store {
         if persona.seed == 0 {
             persona.seed = face_seed(&persona.id);
         }
-        let mut personas = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(existing) = personas
+        if let Some(existing) = index
+            .personas
             .iter_mut()
             .find(|existing| existing.id == persona.id)
         {
             *existing = persona.clone();
         } else {
-            personas.push(persona.clone());
+            index.personas.push(persona.clone());
         }
-        drop(personas);
+        drop(index);
+        self.save_personas()?;
+        Ok(persona)
+    }
+
+    /// Point this workspace's default at a persona already available in it.
+    /// Existing conversations are not rewritten.
+    pub fn set_default_persona(
+        &self,
+        workspace_id: &str,
+        persona_id: &str,
+    ) -> Result<Persona, String> {
+        if workspace_id.trim().is_empty() {
+            return Err("chat.personaDefault needs a workspaceId".into());
+        }
+        let persona = self.persona(persona_id)?;
+        if !persona_visible(&persona, workspace_id) {
+            return Err("that persona is not available in this workspace".into());
+        }
+        let mut index = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
+        index
+            .default_by_workspace
+            .insert(workspace_id.to_string(), persona.id.clone());
+        drop(index);
         self.save_personas()?;
         Ok(persona)
     }
 
     pub fn remove_persona(&self, id: &str) -> Result<bool, String> {
-        let mut personas = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
-        let before = personas.len();
-        personas.retain(|persona| persona.id != id);
-        let removed = personas.len() != before;
-        drop(personas);
+        let mut index = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
+        if index
+            .default_by_workspace
+            .values()
+            .any(|default| default == id)
+        {
+            return Err("make another persona the default before deleting this one".into());
+        }
+        let before = index.personas.len();
+        index.personas.retain(|persona| persona.id != id);
+        let removed = index.personas.len() != before;
+        drop(index);
         if removed {
             self.save_personas()?;
         }
@@ -704,11 +772,10 @@ impl Store {
             return Err("chat.create needs a workspaceId".into());
         }
         crate::workspaces::folder(&input.workspace_id)?;
-        let persona = input
-            .persona_id
-            .as_deref()
-            .map(|id| self.persona(id))
-            .transpose()?;
+        // Omitted means the workspace default. An explicit empty id is No
+        // persona. Either way, existing chats are left alone.
+        let persona =
+            self.resolve_create_persona(&input.workspace_id, input.persona_id.as_deref())?;
         // A persona no longer names an agent, so the agent is the caller's
         // choice or the conversation's default. That is what lets one persona
         // be used with any backend, and survive a switch mid-conversation.
@@ -1620,18 +1687,90 @@ impl Store {
         Ok(file)
     }
 
+    fn resolve_create_persona(
+        &self,
+        workspace_id: &str,
+        persona_id: Option<&str>,
+    ) -> Result<Option<Persona>, String> {
+        match persona_id {
+            None => Ok(Some(self.ensure_workspace_persona(workspace_id)?)),
+            Some(id) if id.trim().is_empty() => Ok(None),
+            Some(id) => Ok(Some(self.persona(id)?)),
+        }
+    }
+
     fn persona(&self, id: &str) -> Result<Persona, String> {
         self.personas
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .personas
             .iter()
             .find(|persona| persona.id == id)
             .cloned()
             .ok_or_else(|| "no persona with that id".into())
     }
 
+    /// The workspace default, creating a local starter if this folder has none.
+    ///
+    /// Never calls an agent. The name is picked from a product-owned set from
+    /// the workspace id, and a collision advances through that set.
+    pub fn ensure_workspace_persona(&self, workspace_id: &str) -> Result<Persona, String> {
+        if workspace_id.trim().is_empty() {
+            return Err("chat.personas needs a workspaceId".into());
+        }
+        let mut index = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(id) = index.default_by_workspace.get(workspace_id).cloned() {
+            if let Some(persona) = index
+                .personas
+                .iter()
+                .find(|persona| persona.id == id && persona_visible(persona, workspace_id))
+                .cloned()
+            {
+                return Ok(persona);
+            }
+        }
+        if let Some(persona) = index
+            .personas
+            .iter()
+            .find(|persona| persona.workspace_id.as_deref() == Some(workspace_id))
+            .cloned()
+        {
+            index
+                .default_by_workspace
+                .insert(workspace_id.to_string(), persona.id.clone());
+            drop(index);
+            self.save_personas()?;
+            return Ok(persona);
+        }
+        let taken: HashSet<String> = index
+            .personas
+            .iter()
+            .filter(|persona| persona_visible(persona, workspace_id))
+            .map(|persona| persona.name.clone())
+            .collect();
+        let name = starter_name(workspace_id, &taken);
+        let now = now_ms();
+        let id = mint_persona_id(&index.personas);
+        let persona = Persona {
+            id: id.clone(),
+            workspace_id: Some(workspace_id.to_string()),
+            name: name.to_string(),
+            system_prompt: STARTER_BRIEF.to_string(),
+            seed: face_seed(&id),
+            created_at_ms: now,
+            updated_at_ms: now,
+        };
+        index.personas.push(persona.clone());
+        index
+            .default_by_workspace
+            .insert(workspace_id.to_string(), id);
+        drop(index);
+        self.save_personas()?;
+        Ok(persona)
+    }
+
     fn save_personas(&self) -> Result<(), String> {
-        let personas = self
+        let index = self
             .personas
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1640,7 +1779,7 @@ impl Store {
         let temporary = self.root.join("personas.tmp");
         fs::write(
             &temporary,
-            serde_json::to_vec_pretty(&personas).map_err(|e| e.to_string())?,
+            serde_json::to_vec_pretty(&index).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
         fs::rename(temporary, self.root.join("personas.json")).map_err(|e| e.to_string())
@@ -1847,17 +1986,65 @@ fn title_from_prompt(prompt: &str) -> String {
 /// duplicates of conversation state and there is nothing to preserve. The one
 /// field that has to be filled is the face seed, because a persona saved
 /// before faces existed must not get a different one on every launch.
-fn load_personas(root: &Path) -> Vec<Persona> {
-    let mut personas: Vec<Persona> = fs::read(root.join("personas.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default();
-    for persona in &mut personas {
+///
+/// The file used to be a bare array. Missing `workspace_id` is the shared
+/// legacy case: those records stay available everywhere and are never
+/// reassigned.
+fn load_persona_index(root: &Path) -> PersonaIndex {
+    let bytes = match fs::read(root.join("personas.json")) {
+        Ok(bytes) => bytes,
+        Err(_) => return PersonaIndex::default(),
+    };
+    let mut index = if let Ok(index) = serde_json::from_slice::<PersonaIndex>(&bytes) {
+        index
+    } else if let Ok(personas) = serde_json::from_slice::<Vec<Persona>>(&bytes) {
+        PersonaIndex {
+            personas,
+            default_by_workspace: HashMap::new(),
+        }
+    } else {
+        PersonaIndex::default()
+    };
+    for persona in &mut index.personas {
         if persona.seed == 0 {
             persona.seed = face_seed(&persona.id);
         }
     }
-    personas
+    index
+}
+
+fn persona_visible(persona: &Persona, workspace_id: &str) -> bool {
+    match persona.workspace_id.as_deref() {
+        None => true,
+        Some(owner) => owner == workspace_id,
+    }
+}
+
+fn mint_persona_id(existing: &[Persona]) -> String {
+    let now = now_ms();
+    let mut n = 0u32;
+    loop {
+        let id = if n == 0 {
+            format!("persona-{now}")
+        } else {
+            format!("persona-{now}-{n}")
+        };
+        if !existing.iter().any(|persona| persona.id == id) {
+            return id;
+        }
+        n = n.saturating_add(1);
+    }
+}
+
+fn starter_name(workspace_id: &str, taken: &HashSet<String>) -> &'static str {
+    let start = (crate::chat_turn::stable_hash(workspace_id) as usize) % STARTER_NAMES.len();
+    for offset in 0..STARTER_NAMES.len() {
+        let name = STARTER_NAMES[(start + offset) % STARTER_NAMES.len()];
+        if !taken.contains(name) {
+            return name;
+        }
+    }
+    STARTER_NAMES[start]
 }
 
 /// The number a persona's drawn character comes from.
@@ -2180,6 +2367,7 @@ mod tests {
         let saved = store
             .save_persona(Persona {
                 id: String::new(),
+                workspace_id: None,
                 name: "Careful reviewer".into(),
                 system_prompt: "Review changes carefully.".into(),
                 seed: 0,
@@ -2187,7 +2375,7 @@ mod tests {
                 updated_at_ms: 0,
             })
             .unwrap();
-        assert_eq!(store.personas(), vec![saved.clone()]);
+        assert_eq!(store.personas.lock().unwrap().personas, vec![saved.clone()]);
         assert_ne!(saved.seed, 0, "a persona must have a face");
 
         // A persona brief is standing text, not part of the turn. The
@@ -2245,13 +2433,17 @@ mod tests {
         )
         .unwrap();
 
-        let personas = load_personas(&store);
+        let personas = load_persona_index(&store).personas;
         assert_eq!(personas.len(), 1);
         assert_eq!(personas[0].name, "Careful reviewer");
         assert_eq!(personas[0].system_prompt, "Review changes carefully.");
+        assert!(personas[0].workspace_id.is_none());
         assert_ne!(personas[0].seed, 0);
         // Loaded twice, same face. Otherwise every launch is a new character.
-        assert_eq!(load_personas(&store)[0].seed, personas[0].seed);
+        assert_eq!(
+            load_persona_index(&store).personas[0].seed,
+            personas[0].seed
+        );
     }
 
     /// A model wraps JSON in prose and in fences however clearly it is asked
@@ -2796,5 +2988,161 @@ mod tests {
             )
             .unwrap();
         assert_eq!(broader.decision, None);
+    }
+
+    #[test]
+    fn first_workspace_load_creates_one_starter_and_is_idempotent() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let first = store.ensure_workspace_persona("workspace-a").unwrap();
+        let second = store.ensure_workspace_persona("workspace-a").unwrap();
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.name, second.name);
+        assert_eq!(store.personas.lock().unwrap().personas.len(), 1);
+        assert!(STARTER_NAMES.contains(&first.name.as_str()));
+        assert_eq!(first.system_prompt, STARTER_BRIEF);
+        assert_eq!(first.workspace_id.as_deref(), Some("workspace-a"));
+        let listed = store.personas("workspace-a").unwrap();
+        assert_eq!(listed["defaultId"], first.id);
+        assert_eq!(listed["personas"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn different_workspaces_get_their_own_default() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let a = store.ensure_workspace_persona("workspace-a").unwrap();
+        let b = store.ensure_workspace_persona("workspace-b").unwrap();
+        assert_ne!(a.id, b.id);
+        assert_eq!(a.workspace_id.as_deref(), Some("workspace-a"));
+        assert_eq!(b.workspace_id.as_deref(), Some("workspace-b"));
+        let listed_a = store.personas("workspace-a").unwrap();
+        assert_eq!(listed_a["personas"].as_array().unwrap().len(), 1);
+        assert_eq!(listed_a["defaultId"], a.id);
+    }
+
+    #[test]
+    fn changing_a_default_does_not_rewrite_an_existing_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let first = store.ensure_workspace_persona("workspace-a").unwrap();
+        store.conversations.lock().unwrap().push(Conversation {
+            id: "chat-test".into(),
+            workspace_id: "workspace-a".into(),
+            title: "New chat".into(),
+            backend: "claude".into(),
+            persona_id: Some(first.id.clone()),
+            model: None,
+            effort: None,
+            system_prompt: first.system_prompt.clone(),
+            mode: default_mode(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        });
+        let other = store
+            .save_persona(Persona {
+                id: String::new(),
+                workspace_id: Some("workspace-a".into()),
+                name: "Reviewer".into(),
+                system_prompt: "You review.".into(),
+                seed: 0,
+                created_at_ms: 0,
+                updated_at_ms: 0,
+            })
+            .unwrap();
+        store.set_default_persona("workspace-a", &other.id).unwrap();
+        let chat = store.conversations.lock().unwrap()[0].clone();
+        assert_eq!(chat.persona_id.as_deref(), Some(first.id.as_str()));
+        assert_eq!(chat.system_prompt, first.system_prompt);
+        let listed = store.personas("workspace-a").unwrap();
+        assert_eq!(listed["defaultId"], other.id);
+    }
+
+    #[test]
+    fn omitted_persona_uses_the_default_and_empty_means_none() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let default = store.ensure_workspace_persona("workspace-a").unwrap();
+        let omitted = store
+            .resolve_create_persona("workspace-a", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(omitted.id, default.id);
+        assert!(
+            store
+                .resolve_create_persona("workspace-a", Some(""))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_missing_default_repairs_without_creating_two() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let first = store.ensure_workspace_persona("workspace-a").unwrap();
+        store
+            .personas
+            .lock()
+            .unwrap()
+            .default_by_workspace
+            .insert("workspace-a".into(), "persona-gone".into());
+        let repaired = store.ensure_workspace_persona("workspace-a").unwrap();
+        assert_eq!(repaired.id, first.id);
+        assert_eq!(store.personas.lock().unwrap().personas.len(), 1);
+    }
+
+    #[test]
+    fn removing_the_active_default_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let default = store.ensure_workspace_persona("workspace-a").unwrap();
+        let err = store.remove_persona(&default.id).unwrap_err();
+        assert!(err.contains("default"));
+        assert_eq!(store.personas.lock().unwrap().personas.len(), 1);
+    }
+
+    #[test]
+    fn a_shared_legacy_persona_stays_visible() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let shared = store
+            .save_persona(Persona {
+                id: String::new(),
+                workspace_id: None,
+                name: "Careful reviewer".into(),
+                system_prompt: "Review changes carefully.".into(),
+                seed: 0,
+                created_at_ms: 0,
+                updated_at_ms: 0,
+            })
+            .unwrap();
+        let starter = store.ensure_workspace_persona("workspace-a").unwrap();
+        let listed = store.personas("workspace-a").unwrap();
+        let ids: Vec<&str> = listed["personas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        assert!(ids.contains(&shared.id.as_str()));
+        assert!(ids.contains(&starter.id.as_str()));
+        let other = store.personas("workspace-b").unwrap();
+        let other_ids: Vec<&str> = other["personas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        assert!(other_ids.contains(&shared.id.as_str()));
+        assert!(!other_ids.contains(&starter.id.as_str()));
     }
 }

@@ -455,12 +455,28 @@ enum ClientRemote {
         try await Bridge.resolveChatApproval(id: id, choice: choice, peer: peer)
     }
 
-    static func chatPersonas(peer: String) async throws -> [ChatPersona] {
-        try await Bridge.chatPersonas(peer: peer)
+    static func chatPersonas(peer: String, workspaceID: String) async throws -> ChatPersonaList {
+        try await Bridge.chatPersonas(workspaceID: workspaceID, peer: peer)
     }
 
-    static func saveChatPersona(peer: String, persona: ChatPersona) async throws -> ChatPersona {
-        try await Bridge.saveChatPersona(persona, peer: peer)
+    static func saveChatPersona(
+        peer: String,
+        workspaceID: String,
+        persona: ChatPersona
+    ) async throws -> ChatPersona {
+        try await Bridge.saveChatPersona(persona, workspaceID: workspaceID, peer: peer)
+    }
+
+    static func setDefaultChatPersona(
+        peer: String,
+        workspaceID: String,
+        personaID: String
+    ) async throws -> ChatPersona {
+        try await Bridge.setDefaultChatPersona(
+            workspaceID: workspaceID,
+            personaID: personaID,
+            peer: peer
+        )
     }
 
     static func removeChatPersona(peer: String, id: String) async throws {

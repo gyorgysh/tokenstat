@@ -35,6 +35,8 @@ final class ChatModel {
     private(set) var responseAttachmentRevision: UInt64 = 0
     var backends: [ChatBackend] = []
     var personas: [ChatPersona] = []
+    /// New conversations inherit this persona unless the person picks none.
+    var defaultPersonaID: String?
     var isLoading = false
     var error: String?
     /// The folder id RootView knows, which is `remote:<peer>:<id>` for a
@@ -78,12 +80,13 @@ final class ChatModel {
         self.peer = route.peer
         do {
             async let loadedBackends = Bridge.chatBackends(peer: route.peer)
-            async let loadedPersonas = Bridge.chatPersonas(peer: route.peer)
+            async let loadedPersonas = Bridge.chatPersonas(workspaceID: route.workspaceID, peer: route.peer)
             async let loadedChats = Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
             let loaded = try await (loadedBackends, loadedPersonas, loadedChats)
             guard generation == loadGeneration else { return }
             backends = loaded.0
-            personas = loaded.1
+            personas = loaded.1.personas
+            defaultPersonaID = loaded.1.defaultId
             chats = loaded.2
             if let selected, chats.contains(where: { $0.id == selected.id }) {
                 await select(chats.first(where: { $0.id == selected.id }) ?? selected)
@@ -359,7 +362,11 @@ final class ChatModel {
 
     func savePersona(_ persona: ChatPersona) async -> ChatPersona? {
         do {
-            let saved = try await Bridge.saveChatPersona(persona, peer: peer)
+            let saved = try await Bridge.saveChatPersona(
+                persona,
+                workspaceID: workspaceID,
+                peer: peer
+            )
             if let index = personas.firstIndex(where: { $0.id == saved.id }) {
                 personas[index] = saved
             } else {
@@ -376,6 +383,20 @@ final class ChatModel {
         do {
             try await Bridge.removeChatPersona(id: persona.id, peer: peer)
             personas.removeAll { $0.id == persona.id }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func setDefaultPersona(_ persona: ChatPersona) async {
+        guard let workspaceID else { return }
+        do {
+            let saved = try await Bridge.setDefaultChatPersona(
+                workspaceID: workspaceID,
+                personaID: persona.id,
+                peer: peer
+            )
+            defaultPersonaID = saved.id
         } catch {
             self.error = error.localizedDescription
         }

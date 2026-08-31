@@ -2444,17 +2444,33 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
 /// from.
 struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
     var id: String
+    /// Nil is a shared legacy persona, available in every workspace.
+    var workspaceID: String?
     var name: String
     var systemPrompt: String
     /// Drives `PersonaMark`, and nothing else. Stable across a rename, so a
     /// persona somebody knows by its face keeps that face.
     var seed: UInt64
 
+    enum CodingKeys: String, CodingKey {
+        case id
+        case workspaceID = "workspaceId"
+        case name
+        case systemPrompt
+        case seed
+    }
+
     static func blank() -> ChatPersona {
         // Zero asks the host for the usual seed, derived from the id it is
         // about to mint. A face cannot be settled before the persona exists.
-        ChatPersona(id: "", name: "", systemPrompt: "", seed: 0)
+        ChatPersona(id: "", workspaceID: nil, name: "", systemPrompt: "", seed: 0)
     }
+}
+
+/// The personas a workspace can use, plus which one new chats inherit.
+struct ChatPersonaList: Codable, Sendable {
+    var personas: [ChatPersona]
+    var defaultId: String
 }
 
 /// A generated starting point, before anybody has agreed to keep it.

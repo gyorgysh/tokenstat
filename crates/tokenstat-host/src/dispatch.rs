@@ -1714,9 +1714,24 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         }
         "chat.instructions" => Ok(store.instructions(&p.id.ok_or("chat.instructions needs id")?)?),
         "chat.backends" => Ok(Value::Array(crate::chat::backends())),
-        "chat.personas" => serde_json::to_value(store.personas()).envelope(),
-        "chat.personaSave" => serde_json::to_value(
-            store.save_persona(p.persona.ok_or("chat.personaSave needs persona")?)?,
+        "chat.personas" => {
+            Ok(store.personas(&p.workspace_id.ok_or("chat.personas needs a workspaceId")?)?)
+        }
+        "chat.personaSave" => {
+            let mut persona = p.persona.ok_or("chat.personaSave needs persona")?;
+            if persona.id.is_empty() {
+                if let Some(workspace_id) = p.workspace_id.filter(|id| !id.is_empty()) {
+                    persona.workspace_id = Some(workspace_id);
+                }
+            }
+            serde_json::to_value(store.save_persona(persona)?).envelope()
+        }
+        "chat.personaDefault" => serde_json::to_value(
+            store.set_default_persona(
+                &p.workspace_id
+                    .ok_or("chat.personaDefault needs a workspaceId")?,
+                &p.persona_id.ok_or("chat.personaDefault needs personaId")?,
+            )?,
         )
         .envelope(),
         "chat.personaDraft" => Ok(store.draft_persona(
