@@ -486,7 +486,7 @@ private struct ClientAccountContent: View {
 
     /// Notifications for this phone or iPad.
     ///
-    /// A run finishes on a Mac. With this app closed there is nothing here to
+    /// Work finishes on a Mac. With this app closed there is nothing here to
     /// notice it, so the account asks Apple to wake the device. That is the
     /// whole reason this needs an account when the Mac's own version does not.
     ///
@@ -514,7 +514,7 @@ private struct ClientAccountContent: View {
             .tint(Theme.accent)
             .disabled(!model.signedIn || PushRegistrar.shared.isWorking)
             Text(model.signedIn
-                ? "When an agent run on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work."
+                ? "When an agent run or a chat on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work."
                 : "Sign in first. A notification has to reach this device from your account.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)

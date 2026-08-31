@@ -930,7 +930,7 @@ struct AccountView: View {
         return isThisMachine ? "laptopcomputer" : "desktopcomputer"
     }
 
-    /// Being told when a run ends.
+    /// Being told when a run or chat needs attention.
     ///
     /// Two different mechanisms behind one switch, because they are one
     /// feature to the person using them. The Mac watches its own run list and
@@ -941,14 +941,14 @@ struct AccountView: View {
     private var notificationsCard: some View {
         Card(
             title: "Notifications",
-            subtitle: "When an agent run finishes or stops for a question.",
+            subtitle: "When an agent run or a chat finishes, or stops for a question.",
             mark: "mark_device"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 #if os(macOS)
                 toggleRow(
-                    "Tell me when a run finishes",
-                    detail: "Automations and workflows on this Mac. Nothing leaves the machine: this Mac is watching its own runs.",
+                    "Tell me when work needs attention",
+                    detail: "Chats, automations, and workflows on this Mac. Nothing leaves the machine: this Mac watches its own work.",
                     isOn: Binding(
                         get: { RunNotifications.shared.isOn },
                         set: { RunNotifications.shared.isOn = $0 }
@@ -969,7 +969,7 @@ struct AccountView: View {
                 #else
                 toggleRow(
                     "Notify this device",
-                    detail: "Sent through Apple, so it arrives with the app closed. The notification says which machine and that a run ended, and carries nothing about the work.",
+                    detail: "Sent through Apple, so it arrives with the app closed. The notification says which machine and that a run or a chat ended, and carries nothing about the work.",
                     isOn: Binding(
                         get: { PushRegistrar.shared.isOn },
                         set: { on in
