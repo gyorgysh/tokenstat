@@ -2579,6 +2579,52 @@ struct ChatEventChunk: Codable, Sendable {
     }
 }
 
+/// One bounded page of a conversation's timeline, newest first.
+///
+/// `cursor` asks for the page before this one and is opaque: it names a place
+/// in a file whose shape belongs to the host. A client stores it and hands it
+/// back, and never builds or reads one.
+struct ChatEventPage: Codable, Sendable {
+    var events: [ChatTimelineEvent]
+    /// Where live tailing carries on from. Only the newest page's is useful.
+    var nextOffset: UInt64
+    var cursor: String?
+    var hasEarlier: Bool
+    /// The cursor could not be honoured because the archive was trimmed under
+    /// it, so this is the newest page rather than the one asked for. What is
+    /// held should be replaced, not extended.
+    var reset: Bool
+    /// What the whole conversation has spent, with the newest page only. The
+    /// meter says "this conversation", so it cannot be folded from a window.
+    var usage: ChatUsageTotals?
+
+    enum CodingKeys: String, CodingKey {
+        case events, nextOffset, cursor, hasEarlier, reset, usage
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        nextOffset = try c.decodeIfPresent(UInt64.self, forKey: .nextOffset) ?? 0
+        cursor = try c.decodeIfPresent(String.self, forKey: .cursor)
+        hasEarlier = try c.decodeIfPresent(Bool.self, forKey: .hasEarlier) ?? false
+        reset = try c.decodeIfPresent(Bool.self, forKey: .reset) ?? false
+        usage = try c.decodeIfPresent(ChatUsageTotals.self, forKey: .usage)
+        // One unreadable row must not empty a page, exactly as on the tail.
+        events = (try c.decodeIfPresent([FailableChatEvent].self, forKey: .events) ?? [])
+            .compactMap(\.value)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(events, forKey: .events)
+        try c.encode(nextOffset, forKey: .nextOffset)
+        try c.encodeIfPresent(cursor, forKey: .cursor)
+        try c.encode(hasEarlier, forKey: .hasEarlier)
+        try c.encode(reset, forKey: .reset)
+        try c.encodeIfPresent(usage, forKey: .usage)
+    }
+}
+
 /// Skips a single timeline row that cannot be decoded, so a new backend field
 /// cannot empty the conversation.
 private struct FailableChatEvent: Decodable {
@@ -2591,6 +2637,13 @@ private struct FailableChatEvent: Decodable {
 struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     var kind: String
     var text: String?
+    /// Where this record starts in the conversation's archive.
+    ///
+    /// A name for the row that does not change when an older page is loaded
+    /// in front of it, which is what lets the transcript hold its place and
+    /// VoiceOver hold its focus across a prepend. Absent from a host older
+    /// than paging, and then the old positional identity is used instead.
+    var seq: UInt64?
     var atMs: Int64?
     var backend: String?
     var event: ChatAgentEvent?

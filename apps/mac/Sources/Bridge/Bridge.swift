@@ -1010,6 +1010,24 @@ extension Bridge {
         )
     }
 
+    /// One bounded page of a conversation, newest first.
+    ///
+    /// `cursor` nil asks for the newest page, which is what a conversation
+    /// opens on. The cursor in the answer asks for the page before it. Only
+    /// hosts that know `chat.eventPage` answer this; an older one refuses
+    /// with `unknown_method` and the caller reads the whole timeline the way
+    /// it always did.
+    static func chatEventPage(
+        id: String,
+        cursor: String?,
+        limit: Int,
+        peer: String? = nil
+    ) async throws -> ChatEventPage {
+        var params: [String: Any] = ["id": id, "limit": limit]
+        if let cursor { params["cursor"] = cursor }
+        return try await chatInvoke(peer: peer, "chat.eventPage", params, as: ChatEventPage.self)
+    }
+
     static func chatAttachment(
         id: String,
         attachmentID: String,

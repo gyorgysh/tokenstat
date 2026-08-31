@@ -21,6 +21,20 @@ use serde_json::{Value, json};
 use crate::transcript::{Event, Parser};
 
 const EVENTS_CAP: u64 = 1024 * 1024;
+/// How many events one page carries when the client does not say.
+const PAGE_EVENTS: usize = 300;
+/// The most a client may ask for in one page. A client that wants more than
+/// this wants the whole archive, which is what the cap exists to prevent.
+const PAGE_EVENTS_MAX: usize = 2_000;
+/// How much is read from disk at a time while walking backwards.
+const PAGE_CHUNK: u64 = 64 * 1024;
+/// The most one page may weigh, whatever its event count. A conversation full
+/// of long patches reaches this long before it reaches `PAGE_EVENTS`.
+const PAGE_BYTES: u64 = 256 * 1024;
+/// The most that will be read to find a single record's beginning. A record
+/// longer than this is one nothing can display anyway, and the read stops
+/// rather than pulling the whole archive into memory looking for a newline.
+const PAGE_RECORD_BYTES: u64 = 4 * 1024 * 1024;
 const ATTACHMENT_CAP: usize = 12 * 1024 * 1024;
 /// How long a pending approval stays answerable.
 ///
@@ -1088,17 +1102,68 @@ impl Store {
         }))
     }
 
+    /// Everything written after `offset`, for live tailing.
+    ///
+    /// Only the region asked for is read. This runs on every poll of a
+    /// running turn, and reading the whole archive to hand back the last two
+    /// hundred bytes of it was work paid for four hundred milliseconds at a
+    /// time.
     pub fn events(&self, id: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
         self.get(id)?;
         let path = self.events_path(id);
-        let bytes = fs::read(path).unwrap_or_default();
-        let start = (offset as usize).min(bytes.len());
-        let end = bytes.len();
-        let events = String::from_utf8_lossy(&bytes[start..end])
-            .lines()
-            .filter_map(|line| serde_json::from_str(line).ok())
-            .collect();
-        Ok((events, end as u64))
+        let end = file_len(&path);
+        let start = offset.min(end);
+        let bytes = read_region(&path, start, end).unwrap_or_default();
+        Ok((records(&bytes, start), end))
+    }
+
+    /// One bounded page of the timeline, newest first.
+    ///
+    /// The page a conversation opens on, and every older page behind it. No
+    /// cursor means the end of the file, and the cursor in the answer asks
+    /// for the page before this one. It is opaque on purpose: it names a byte
+    /// boundary and the size the archive was when it was issued, and a client
+    /// that read either of those would be a client this store could no longer
+    /// change.
+    ///
+    /// The archive is capped (see `cap_events`), which rewrites the file from
+    /// the front and moves every offset in it. A cursor issued before that
+    /// cannot be honoured, so the answer is the newest page again with
+    /// `reset` set, rather than an error or a page of the wrong records.
+    pub fn event_page(
+        &self,
+        id: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<EventPage, String> {
+        self.get(id)?;
+        let path = self.events_path(id);
+        let len = file_len(&path);
+        let limit = if limit == 0 {
+            PAGE_EVENTS
+        } else {
+            limit.clamp(1, PAGE_EVENTS_MAX)
+        };
+        let (end, reset) = match cursor {
+            None => (len, false),
+            Some(raw) => match parse_cursor(raw, len) {
+                Some(end) => (end, false),
+                None => (len, true),
+            },
+        };
+        let (start, bytes) = read_back(&path, end, limit)?;
+        Ok(EventPage {
+            events: records(&bytes, start),
+            start,
+            next_offset: end,
+            cursor: (start > 0).then(|| make_cursor(start, len)),
+            has_earlier: start > 0,
+            reset,
+            // Only with the newest page. It is the whole conversation's
+            // figure, it does not change as somebody reads backwards, and it
+            // is the one thing here that has to look past the window.
+            usage: (cursor.is_none() || reset).then(|| usage_totals(&path)),
+        })
     }
 
     /// The handover an incoming backend should be given, if any.
@@ -2403,9 +2468,392 @@ fn grok_allow_rules(chat: &Conversation) -> Vec<String> {
     rules
 }
 
+/// One bounded page of a conversation's timeline.
+pub struct EventPage {
+    pub events: Vec<Value>,
+    /// Byte offset of the first record in this page.
+    pub start: u64,
+    /// Byte offset just past the last record. The newest page's is where live
+    /// tailing carries on from.
+    pub next_offset: u64,
+    /// Asks for the page before this one. Absent at the beginning.
+    pub cursor: Option<String>,
+    pub has_earlier: bool,
+    /// The cursor could not be honoured, because the archive was trimmed
+    /// under it. This page is the newest one, not the one that was asked for,
+    /// and a client should replace what it holds rather than prepend.
+    pub reset: bool,
+    /// What the whole conversation has spent, with the newest page only.
+    pub usage: Option<Value>,
+}
+
+/// Fold every usage record in the archive.
+///
+/// The meter says "this conversation", so it cannot be added up from the page
+/// somebody happens to be looking at: reading backwards would make the number
+/// climb. Counted here once, when a conversation opens.
+///
+/// Cheap despite reading the file, because usage is a few dozen records out
+/// of thousands and a substring test skips the rest without parsing them.
+fn usage_totals(path: &Path) -> Value {
+    let bytes = fs::read(path).unwrap_or_default();
+    let text = String::from_utf8_lossy(&bytes);
+    let (mut input, mut output, mut cache_read, mut cache_write) = (0u64, 0u64, 0u64, 0u64);
+    let mut cost = 0.0f64;
+    let mut count = 0u64;
+    for line in text.lines() {
+        if !line.contains("\"usage\"") {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(event) = value.get("event") else {
+            continue;
+        };
+        if event.get("kind").and_then(Value::as_str) != Some("usage") {
+            continue;
+        }
+        let number = |key: &str| event.get(key).and_then(Value::as_u64).unwrap_or(0);
+        count += 1;
+        input += number("input");
+        output += number("output");
+        cache_read += number("cache_read");
+        cache_write += number("cache_write");
+        cost += event.get("cost_usd").and_then(Value::as_f64).unwrap_or(0.0);
+    }
+    json!({
+        "turns": count,
+        "input": input,
+        "output": output,
+        "cacheRead": cache_read,
+        "cacheWrite": cache_write,
+        "cost": cost,
+    })
+}
+
+fn file_len(path: &Path) -> u64 {
+    fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
+}
+
+/// Read exactly `[start, end)`.
+fn read_region(path: &Path, start: u64, end: u64) -> Option<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    if end <= start {
+        return Some(Vec::new());
+    }
+    let mut file = fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buffer = vec![0u8; (end - start) as usize];
+    file.read_exact(&mut buffer).ok()?;
+    Some(buffer)
+}
+
+/// Parse whole records out of a region, stamping each with where it starts.
+///
+/// `seq` is the byte offset of the record in the archive, which is what gives
+/// a client a name for a row that does not change when an older page is
+/// loaded in front of it. A line that is not an object is skipped: the file
+/// is written one JSON object per line, and anything else in it is damage.
+fn records(bytes: &[u8], base: u64) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut at = base;
+    for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+        let start = at;
+        at += line.len() as u64;
+        let text = std::str::from_utf8(line).unwrap_or_default().trim_end();
+        if text.is_empty() {
+            continue;
+        }
+        let Ok(Value::Object(mut object)) = serde_json::from_str::<Value>(text) else {
+            continue;
+        };
+        object.insert("seq".into(), json!(start));
+        out.push(Value::Object(object));
+    }
+    out
+}
+
+/// Walk backwards from `end` until `limit` whole records are in hand.
+///
+/// Answers where the page starts and the bytes from there to `end`. The walk
+/// is bounded three ways: by the record count, by `PAGE_BYTES`, and by
+/// `PAGE_RECORD_BYTES` for the pathological case of one enormous record. It
+/// never reads the whole archive to hand back the end of it.
+fn read_back(path: &Path, end: u64, limit: usize) -> Result<(u64, Vec<u8>), String> {
+    let mut start = end;
+    let mut buffer: Vec<u8> = Vec::new();
+    loop {
+        if start == 0 {
+            break;
+        }
+        let whole = alignment(&buffer, start)
+            .map(|at| count_records(&buffer[at..]))
+            .unwrap_or(0);
+        if whole >= limit {
+            break;
+        }
+        // The weight bound only applies once there is something to hand
+        // back. A single record longer than a page has to be read to its
+        // beginning or it could never be shown at all.
+        if whole > 0 && buffer.len() as u64 >= PAGE_BYTES {
+            break;
+        }
+        if buffer.len() as u64 >= PAGE_RECORD_BYTES {
+            break;
+        }
+        let chunk = PAGE_CHUNK.min(start);
+        start -= chunk;
+        let mut head = read_region(path, start, start + chunk).unwrap_or_default();
+        head.extend_from_slice(&buffer);
+        buffer = head;
+    }
+    // Everything before the first newline belongs to a record that began
+    // earlier, unless the walk reached the beginning of the file.
+    let at = alignment(&buffer, start).unwrap_or(0);
+    let text = &buffer[at..];
+    if count_records(text) == 0 {
+        // A window with nothing whole in it, which only a record past
+        // `PAGE_RECORD_BYTES` can produce. Answer with where the window
+        // begins so the walk still moves backwards: handing back the offset
+        // it was given would ask the same question again forever.
+        return Ok((start, Vec::new()));
+    }
+    // More records than were asked for, because reading happens in chunks.
+    // Keep the newest `limit` of them.
+    let mut starts = vec![0usize];
+    for (index, byte) in text.iter().enumerate() {
+        if *byte == b'\n' && index + 1 < text.len() {
+            starts.push(index + 1);
+        }
+    }
+    let first = starts.len().saturating_sub(limit);
+    let cut = starts.get(first).copied().unwrap_or(0);
+    Ok((start + at as u64 + cut as u64, text[cut..].to_vec()))
+}
+
+/// Where the first whole record in the buffer begins, if there is one.
+fn alignment(buffer: &[u8], start: u64) -> Option<usize> {
+    if start == 0 {
+        return Some(0);
+    }
+    buffer
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map(|at| at + 1)
+}
+
+fn count_records(bytes: &[u8]) -> usize {
+    bytes
+        .split_inclusive(|byte| *byte == b'\n')
+        .filter(|line| !line.iter().all(|byte| byte.is_ascii_whitespace()))
+        .count()
+}
+
+/// A cursor names a byte boundary and the size the archive was.
+///
+/// The size is the whole of the validation. The archive is only ever appended
+/// to or trimmed from the front, so a file that has not shrunk still holds
+/// the record that offset points at; one that has shrunk was rewritten and
+/// every offset in it moved.
+fn make_cursor(start: u64, len: u64) -> String {
+    format!("e1.{start:x}.{len:x}")
+}
+
+fn parse_cursor(raw: &str, len: u64) -> Option<u64> {
+    let mut parts = raw.split('.');
+    if parts.next()? != "e1" {
+        return None;
+    }
+    let start = u64::from_str_radix(parts.next()?, 16).ok()?;
+    let issued = u64::from_str_radix(parts.next()?, 16).ok()?;
+    if parts.next().is_some() || len < issued || start > len {
+        return None;
+    }
+    Some(start)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A throwaway archive of `count` records, each a little different in
+    /// length and some of them multi-byte, so a page boundary that split a
+    /// character or a record would show up as a missing or broken row.
+    fn archive(name: &str, lines: &[String]) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "tokenstat-chat-page-{}-{}-{}.ndjson",
+            name,
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let mut body = String::new();
+        for line in lines {
+            body.push_str(line);
+            body.push('\n');
+        }
+        fs::write(&path, body).expect("write archive");
+        path
+    }
+
+    fn lines(count: usize) -> Vec<String> {
+        (0..count)
+            .map(|n| {
+                let padding = "é".repeat(n % 17);
+                json!({"kind": "user", "atMs": n, "text": format!("{padding}{n}")}).to_string()
+            })
+            .collect()
+    }
+
+    fn page(path: &Path, end: u64, limit: usize) -> (u64, Vec<Value>) {
+        let (start, bytes) = read_back(path, end, limit).expect("read");
+        (start, records(&bytes, start))
+    }
+
+    #[test]
+    fn a_page_is_the_newest_records_and_nothing_is_split() {
+        let written = lines(500);
+        let path = archive("newest", &written);
+        let len = file_len(&path);
+        let (start, events) = page(&path, len, 80);
+        assert_eq!(events.len(), 80);
+        assert_eq!(events[79]["atMs"], json!(499));
+        assert_eq!(events[0]["atMs"], json!(420));
+        assert_eq!(
+            events[0]["seq"],
+            json!(start),
+            "the first record is stamped with where the page starts"
+        );
+        // Every record's text survived, accents and all.
+        for (index, event) in events.iter().enumerate() {
+            let n = 420 + index;
+            let padding = "é".repeat(n % 17);
+            assert_eq!(event["text"], json!(format!("{padding}{n}")));
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn older_pages_walk_back_to_the_beginning_without_gaps_or_repeats() {
+        let written = lines(437);
+        let path = archive("walk", &written);
+        let len = file_len(&path);
+        let mut end = len;
+        let mut seen: Vec<i64> = Vec::new();
+        loop {
+            let (start, events) = page(&path, end, 60);
+            let mut ours: Vec<i64> = events
+                .iter()
+                .map(|event| event["atMs"].as_i64().expect("stamp"))
+                .collect();
+            ours.append(&mut seen);
+            seen = ours;
+            if start == 0 {
+                break;
+            }
+            end = start;
+        }
+        assert_eq!(seen, (0..437).collect::<Vec<i64>>());
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_page_that_lands_exactly_on_a_boundary_repeats_nothing() {
+        let written = lines(120);
+        let path = archive("boundary", &written);
+        let len = file_len(&path);
+        let (start, first) = page(&path, len, 40);
+        let (_, second) = page(&path, start, 40);
+        assert_eq!(first.len(), 40);
+        assert_eq!(second.len(), 40);
+        assert_eq!(second[39]["atMs"], json!(79));
+        assert_eq!(first[0]["atMs"], json!(80), "no record is in both pages");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn asking_for_more_than_there_is_gives_everything_once() {
+        let path = archive("short", &lines(7));
+        let len = file_len(&path);
+        let (start, events) = page(&path, len, 300);
+        assert_eq!(start, 0);
+        assert_eq!(events.len(), 7);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_empty_or_missing_archive_is_an_empty_page() {
+        let path = archive("empty", &[]);
+        assert_eq!(page(&path, 0, 80), (0, vec![]));
+        let _ = fs::remove_file(&path);
+        assert_eq!(page(&path, 0, 80), (0, vec![]), "missing reads the same");
+    }
+
+    #[test]
+    fn one_record_larger_than_a_page_still_arrives_whole_and_once() {
+        let huge = json!({"kind": "user", "text": "x".repeat(400 * 1024)}).to_string();
+        let mut written = lines(20);
+        written.insert(10, huge);
+        let path = archive("huge", &written);
+        let len = file_len(&path);
+        let mut end = len;
+        let mut seen = 0usize;
+        let mut long = 0usize;
+        let mut pages = 0usize;
+        loop {
+            pages += 1;
+            assert!(pages < 50, "the walk has to reach the beginning");
+            let (start, events) = page(&path, end, 300);
+            seen += events.len();
+            long += events
+                .iter()
+                .filter(|event| event["text"].as_str().map(str::len) == Some(400 * 1024))
+                .count();
+            if start == 0 {
+                break;
+            }
+            assert!(start < end, "every page moves backwards");
+            end = start;
+        }
+        assert_eq!(seen, 21);
+        assert_eq!(long, 1, "the long record arrives whole, exactly once");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_damaged_line_is_skipped_and_the_rest_still_reads() {
+        let mut written = lines(6);
+        written.insert(3, "{not json".into());
+        written.insert(5, "\"a string, not a record\"".into());
+        let path = archive("damaged", &written);
+        let len = file_len(&path);
+        let (_, events) = page(&path, len, 300);
+        assert_eq!(events.len(), 6);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_cursor_survives_growth_and_not_a_trim() {
+        let cursor = make_cursor(4_096, 10_000);
+        assert_eq!(parse_cursor(&cursor, 10_000), Some(4_096));
+        assert_eq!(
+            parse_cursor(&cursor, 40_000),
+            Some(4_096),
+            "an archive that only grew still holds that record"
+        );
+        assert_eq!(
+            parse_cursor(&cursor, 9_000),
+            None,
+            "an archive that shrank was rewritten and every offset moved"
+        );
+        assert_eq!(parse_cursor("e1.ffffffff.10", 16), None, "past the end");
+        assert_eq!(parse_cursor("nonsense", 10_000), None);
+        assert_eq!(parse_cursor("e2.10.20", 10_000), None, "another version");
+        assert_eq!(parse_cursor("e1.10.20.30", 10_000), None);
+    }
 
     #[test]
     fn process_exit_is_the_only_turn_outcome() {
@@ -2570,6 +3018,33 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(next > 0);
         assert!(store.list("workspace-b").is_empty());
+
+        // The same two records, read from the end instead of the beginning.
+        let page = store.event_page("chat-test", None, 1).unwrap();
+        assert_eq!(page.events.len(), 1);
+        assert_eq!(page.next_offset, next, "live tailing carries on from here");
+        assert!(page.has_earlier);
+        assert!(!page.reset);
+        let earlier = store
+            .event_page("chat-test", page.cursor.as_deref(), 10)
+            .unwrap();
+        assert_eq!(earlier.events.len(), 1);
+        assert_eq!(earlier.events[0]["text"], json!("Hello"));
+        assert!(!earlier.has_earlier, "that was the beginning");
+        assert!(earlier.cursor.is_none());
+        assert_eq!(
+            earlier.events[0]["seq"],
+            json!(0),
+            "every record says where it is, so a row keeps its name"
+        );
+
+        // A cursor from an archive that has since been trimmed cannot be
+        // honoured, and the answer says so rather than paging the wrong
+        // records.
+        let stale = make_cursor(0, u64::MAX);
+        let answer = store.event_page("chat-test", Some(&stale), 10).unwrap();
+        assert!(answer.reset);
+        assert_eq!(answer.next_offset, next);
     }
 
     #[test]

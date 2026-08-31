@@ -491,6 +491,11 @@ struct ChatParams {
     ok: Option<bool>,
     detail: Option<String>,
     offset: Option<u64>,
+    /// Opaque, from a previous `chat.eventPage`. Absent asks for the newest
+    /// page. Never built by a client: it names a byte boundary in a file
+    /// whose shape is the store's business.
+    cursor: Option<String>,
+    limit: Option<u32>,
 }
 
 #[cfg(feature = "local-host")]
@@ -1712,6 +1717,26 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 store.events(&p.id.ok_or("chat.events needs id")?, p.offset.unwrap_or(0))?;
             Ok(json!({ "events": events, "nextOffset": next }))
         }
+        // One bounded page of the timeline, newest first, then older pages
+        // by the cursor each answer carries. `chat.events` stays exactly as
+        // it was: it is how a turn is tailed, and how a client that predates
+        // this reads a conversation.
+        "chat.eventPage" => {
+            let page = store.event_page(
+                &p.id.ok_or("chat.eventPage needs id")?,
+                p.cursor.as_deref(),
+                p.limit.unwrap_or(0) as usize,
+            )?;
+            Ok(json!({
+                "events": page.events,
+                "start": page.start,
+                "nextOffset": page.next_offset,
+                "cursor": page.cursor,
+                "hasEarlier": page.has_earlier,
+                "reset": page.reset,
+                "usage": page.usage,
+            }))
+        }
         "chat.instructions" => Ok(store.instructions(&p.id.ok_or("chat.instructions needs id")?)?),
         "chat.backends" => Ok(Value::Array(crate::chat::backends())),
         "chat.personas" => {
@@ -1770,7 +1795,12 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             &p.choice.ok_or("chat.resolveApproval needs choice")?,
         )?)
         .envelope(),
-        other => Err(format!("unknown chat method: {other}").into()),
+        // Coded, so a client can tell "this host is older than that method"
+        // from "that method failed" without reading the sentence.
+        other => Err(DispatchError::new(
+            "unknown_method",
+            format!("unknown chat method: {other}"),
+        )),
     }
 }
 

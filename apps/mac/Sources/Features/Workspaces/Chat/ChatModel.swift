@@ -27,6 +27,30 @@ final class ChatModel {
     /// words. Read so the inspector can show it rather than describe it.
     var instructions: ChatInstructions?
     var offset: UInt64 = 0
+    /// Asks the host for the page before the oldest one held. Nil once the
+    /// beginning of the archive is on screen.
+    private(set) var earlierCursor: String?
+    /// Whether there is anything before what is held.
+    private(set) var hasEarlier = false
+    /// An older page is on its way. The transcript shows a quiet mark for it
+    /// rather than an overlay over the conversation.
+    private(set) var loadingEarlier = false
+    /// Whether the person has actually paged back in this sitting. Until they
+    /// have, saying "start of chat" would be announcing the obvious about a
+    /// short conversation.
+    private(set) var reachedStart = false
+    /// What the whole conversation has spent, as counted by the host over the
+    /// whole archive. Nil on a host that predates paging, and then the meter
+    /// folds what is held, which on that host is everything.
+    private(set) var conversationUsage: ChatUsageTotals?
+    /// Where the host's count stopped. Usage written after this is added on
+    /// top of it, so a turn taken while the conversation is open moves the
+    /// meter without asking the host to read the archive again.
+    private var usageThrough: UInt64 = 0
+    /// This host predates `chat.eventPage`, so the timeline is read whole the
+    /// way it always was. Latched per model, not per call: a host does not
+    /// grow the method while a conversation is open.
+    private var pagingUnavailable = false
     var attachments: [ChatAttachment] = []
     /// Downsampled JPEG for the composer strip, keyed by attachment id.
     var attachmentPreviews: [String: Data] = [:]
@@ -77,7 +101,7 @@ final class ChatModel {
             selected = nil
             events = []
             approvals = []
-            offset = 0
+            forgetWindow()
             selectionGeneration &+= 1
         }
         folderID = workspaceID
@@ -124,12 +148,12 @@ final class ChatModel {
         approvals = []
         instructions = nil
         events = []
-        offset = 0
+        forgetWindow()
         #if os(macOS)
         if let chat { RunNotifications.shared.chatAttentionHandled(id: chat.id) }
         #endif
         guard let chat else { return }
-        await loadEvents(id: chat.id, reset: true, generation: generation)
+        await openEvents(id: chat.id, generation: generation)
         await loadApprovals(id: chat.id, generation: generation)
         await loadInstructions(id: chat.id, generation: generation)
     }
@@ -521,16 +545,26 @@ final class ChatModel {
         backends.first { $0.id == id }
     }
 
+    /// What this conversation has spent.
+    ///
+    /// The host's figure where there is one, because it covers the whole
+    /// archive and this model only holds a window of it. Folding what is
+    /// resident would make the meter climb as somebody read backwards.
     var turnUsage: ChatUsageTotals? {
-        let usages = events.compactMap(\.event).filter { $0.kind == "usage" }
-        guard !usages.isEmpty else { return nil }
-        return ChatUsageTotals(
-            input: usages.reduce(0) { $0 + ($1.input ?? 0) },
-            output: usages.reduce(0) { $0 + ($1.output ?? 0) },
-            cacheRead: usages.reduce(0) { $0 + ($1.cacheRead ?? 0) },
-            cacheWrite: usages.reduce(0) { $0 + ($1.cacheWrite ?? 0) },
-            cost: usages.reduce(0) { $0 + ($1.costUsd ?? 0) }
-        )
+        var totals = conversationUsage ?? .zero
+        for timeline in events {
+            guard let event = timeline.event, event.kind == "usage" else { continue }
+            // With a host figure in hand, only what has been written since it
+            // was counted. Without one, this host reads whole conversations,
+            // so everything held is everything there is.
+            if conversationUsage != nil, (timeline.seq ?? 0) < usageThrough { continue }
+            totals.input += event.input ?? 0
+            totals.output += event.output ?? 0
+            totals.cacheRead += event.cacheRead ?? 0
+            totals.cacheWrite += event.cacheWrite ?? 0
+            totals.cost += event.costUsd ?? 0
+        }
+        return totals.isEmpty ? nil : totals
     }
 
     var hasStarted: Bool {
@@ -544,6 +578,132 @@ final class ChatModel {
         ChatDisplayItem.coalesce(events, defaultBackend: selected?.backend)
     }
 
+    /// Everything a window of the timeline is, forgotten in one place.
+    private func forgetWindow() {
+        offset = 0
+        conversationUsage = nil
+        usageThrough = 0
+        earlierCursor = nil
+        hasEarlier = false
+        loadingEarlier = false
+        reachedStart = false
+    }
+
+    /// Open a conversation on its newest page rather than on its beginning.
+    ///
+    /// A conversation is read from the end because that is where a person
+    /// starts reading it. What comes before is fetched a page at a time as
+    /// they scroll back, so opening a long chat costs one bounded read
+    /// whatever is behind it.
+    ///
+    /// A backend that streams in small pieces can spend a page of records on
+    /// a handful of rows, so a page that coalesces into almost nothing pulls
+    /// the one before it, up to a small bound. Nobody should open a chat and
+    /// find one paragraph in it.
+    private func openEvents(id: String, generation: UInt64) async {
+        guard !pagingUnavailable else {
+            await loadEvents(id: id, reset: true, generation: generation)
+            return
+        }
+        do {
+            let page = try await Bridge.chatEventPage(
+                id: id, cursor: nil, limit: Self.openPageEvents, peer: peer
+            )
+            guard selectionMatches(id: id, generation: generation) else { return }
+            events = page.events
+            offset = page.nextOffset
+            earlierCursor = page.cursor
+            hasEarlier = page.hasEarlier
+            conversationUsage = page.usage
+            usageThrough = page.nextOffset
+            settleNotifications()
+            var pulled = 0
+            while displayItems.count < Self.openDisplayItems,
+                  hasEarlier,
+                  pulled < Self.openExtraPages {
+                pulled += 1
+                await loadEarlier(id: id, generation: generation, quiet: true)
+                guard selectionMatches(id: id, generation: generation) else { return }
+            }
+            await loadResponseAttachments(id: id, generation: generation)
+        } catch {
+            if isUnknownMethod(error) { pagingUnavailable = true }
+            guard selectionMatches(id: id, generation: generation) else { return }
+            // Whatever went wrong, the conversation still has to appear. The
+            // whole-timeline read is the behaviour every host has had.
+            await loadEvents(id: id, reset: true, generation: generation)
+        }
+    }
+
+    /// Pull the page before the oldest one held, and put it in front.
+    ///
+    /// Called by the transcript as the top comes near, so the page is usually
+    /// already there by the time somebody reaches it.
+    func loadEarlier() async {
+        guard let selected else { return }
+        await loadEarlier(id: selected.id, generation: selectionGeneration, quiet: false)
+    }
+
+    private func loadEarlier(id: String, generation: UInt64, quiet: Bool) async {
+        guard !pagingUnavailable, hasEarlier, !loadingEarlier,
+              let cursor = earlierCursor
+        else { return }
+        loadingEarlier = !quiet
+        defer { loadingEarlier = false }
+        do {
+            let page = try await Bridge.chatEventPage(
+                id: id, cursor: cursor, limit: Self.pageEvents, peer: peer
+            )
+            guard selectionMatches(id: id, generation: generation) else { return }
+            if page.reset {
+                // The archive was trimmed while this was in flight, so the
+                // offsets under the cursor no longer mean anything. This page
+                // is the newest one: take it as the whole window rather than
+                // putting it in front of records it now sits after.
+                events = page.events
+                offset = page.nextOffset
+                conversationUsage = page.usage
+                usageThrough = page.nextOffset
+            } else {
+                // Pages do not overlap, but a trim or a retry could still put
+                // a record in two answers. Identity is the record's place in
+                // the archive, so a repeat is cheap to spot.
+                let oldest = events.first?.seq ?? UInt64.max
+                let fresh = page.events.filter { ($0.seq ?? 0) < oldest }
+                guard !fresh.isEmpty || !page.hasEarlier else { return }
+                events.insert(contentsOf: fresh, at: 0)
+            }
+            earlierCursor = page.cursor
+            hasEarlier = page.hasEarlier
+            if !hasEarlier { reachedStart = true }
+            await loadResponseAttachments(id: id, generation: generation)
+        } catch {
+            if isUnknownMethod(error) { pagingUnavailable = true }
+        }
+    }
+
+    /// Whether this host is simply older than the method that was called.
+    ///
+    /// A coded answer where the host has one, and the sentence where it does
+    /// not: a build that predates the code still has to be recognised, and it
+    /// is the only reason this fallback exists at all.
+    private func isUnknownMethod(_ error: Error) -> Bool {
+        if case let BridgeError.core(code, message) = error {
+            return code == "unknown_method" || message.hasPrefix("unknown ")
+        }
+        return false
+    }
+
+    /// How many records a conversation opens on. Records, not rows: streamed
+    /// text arrives in many pieces and becomes one paragraph.
+    private static let openPageEvents = 400
+    /// How many records each older page carries.
+    private static let pageEvents = 300
+    /// The rows an opening window aims to hold before it stops pulling.
+    private static let openDisplayItems = 24
+    /// How many extra pages one opening may pull to reach that.
+    private static let openExtraPages = 3
+
     private func loadEvents(id: String, reset: Bool, generation: UInt64) async {
         let requestedOffset = reset ? 0 : offset
         do {
@@ -552,6 +712,9 @@ final class ChatModel {
             guard reset || requestedOffset == offset else { return }
             if reset {
                 events = chunk.events
+                // The whole timeline, so there is nothing before it.
+                earlierCursor = nil
+                hasEarlier = false
             } else {
                 events.append(contentsOf: chunk.events)
             }
@@ -770,6 +933,17 @@ struct ChatDisplayItem: Identifiable {
         case failed(String)
     }
 
+    /// A name for a row that survives an older page arriving in front of it.
+    ///
+    /// The record's place in the archive when the host reports one, which is
+    /// fixed for the life of that record. Without it the row is named by its
+    /// position in the list, which is what it always was, and what makes a
+    /// prepend re-identify every row below it.
+    private static func stamp(_ event: ChatTimelineEvent, _ position: Int) -> String {
+        if let seq = event.seq { return "s\(seq)" }
+        return "\(event.atMs ?? 0)-\(position)"
+    }
+
     static func coalesce(_ events: [ChatTimelineEvent], defaultBackend: String? = nil) -> [ChatDisplayItem] {
         var items: [ChatDisplayItem] = []
         var toolIndex: [String: Int] = [:]
@@ -822,7 +996,7 @@ struct ChatDisplayItem: Identifiable {
                 flushThinking()
                 items.append(
                     ChatDisplayItem(
-                        id: "user-\(event.atMs ?? 0)-\(items.count)",
+                        id: "user-\(stamp(event, items.count))",
                         kind: .user(event.text ?? "")
                     )
                 )
@@ -833,7 +1007,7 @@ struct ChatDisplayItem: Identifiable {
                 flushThinking()
                 items.append(
                     ChatDisplayItem(
-                        id: "handoff-\(event.atMs ?? 0)-\(items.count)",
+                        id: "handoff-\(stamp(event, items.count))",
                         kind: .handoff(to: event.to ?? "", brief: event.brief ?? "")
                     )
                 )
@@ -865,7 +1039,7 @@ struct ChatDisplayItem: Identifiable {
                 flushThinking()
                 items.append(
                     ChatDisplayItem(
-                        id: "turn-\(event.atMs ?? 0)-\(items.count)",
+                        id: "turn-\(stamp(event, items.count))",
                         kind: .turnSeparator(eventBackend)
                     )
                 )
@@ -875,18 +1049,18 @@ struct ChatDisplayItem: Identifiable {
             case "text":
                 flushThinking()
                 if text.isEmpty {
-                    textID = "text-\(event.atMs ?? 0)-\(items.count)"
+                    textID = "text-\(stamp(event, items.count))"
                     textBackend = event.backend ?? defaultBackend
                 }
                 text += agent.delta ?? ""
             case "thinking":
                 flushText()
-                if thinking.isEmpty { thinkingID = "think-\(event.atMs ?? 0)-\(items.count)" }
+                if thinking.isEmpty { thinkingID = "think-\(stamp(event, items.count))" }
                 thinking += agent.delta ?? ""
             case "toolStart":
                 flushText()
                 flushThinking()
-                let callId = agent.callId ?? "tool-\(event.atMs ?? 0)-\(items.count)"
+                let callId = agent.callId ?? "tool-\(stamp(event, items.count))"
                 let state = ChatToolState(
                     callId: callId,
                     verb: agent.verb ?? "Tool",
@@ -910,7 +1084,7 @@ struct ChatDisplayItem: Identifiable {
                     state.endedAtMs = event.atMs
                     items[index] = ChatDisplayItem(id: items[index].id, kind: .tool(state))
                 } else {
-                    let fallback = callId.isEmpty ? "end-\(event.atMs ?? 0)-\(items.count)" : callId
+                    let fallback = callId.isEmpty ? "end-\(stamp(event, items.count))" : callId
                     items.append(
                         ChatDisplayItem(
                             id: "tool-\(fallback)",
@@ -934,7 +1108,7 @@ struct ChatDisplayItem: Identifiable {
                 flushThinking()
                 items.append(
                     ChatDisplayItem(
-                        id: "edit-\(agent.callId ?? agent.path ?? "\(items.count)")",
+                        id: "edit-\(agent.callId ?? agent.path ?? stamp(event, items.count))",
                         kind: .edit(
                             path: agent.path ?? "File",
                             added: agent.added ?? 0,
@@ -965,7 +1139,7 @@ struct ChatDisplayItem: Identifiable {
                 flushThinking()
                 items.append(
                     ChatDisplayItem(
-                        id: "usage-\(event.atMs ?? 0)-\(items.count)",
+                        id: "usage-\(stamp(event, items.count))",
                         kind: .usage(
                             input: agent.input ?? 0,
                             output: agent.output ?? 0,
@@ -979,7 +1153,7 @@ struct ChatDisplayItem: Identifiable {
                 closeRunningTools(failed: true, at: event.atMs, detail: agent.text)
                 items.append(
                     ChatDisplayItem(
-                        id: "failed-\(event.atMs ?? 0)-\(items.count)",
+                        id: "failed-\(stamp(event, items.count))",
                         kind: .failed(agent.text ?? "The turn failed")
                     )
                 )

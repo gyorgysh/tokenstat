@@ -58,6 +58,14 @@ desktop and Android builds remain previews. Newest first.
 
 ### Added
 
+- A long conversation opens on its newest page instead of on its beginning,
+  and reads backwards a page at a time as you scroll. The page before the
+  oldest message is fetched as you approach it and slotted in without moving
+  the line you were reading, and the top of the transcript says plainly
+  whether there is more or whether that is where the conversation starts.
+  Chats also stop re-reading their whole history four times a second while an
+  agent is working. The cost card still covers the whole conversation, counted
+  once when it opens rather than folded from the part on screen.
 - An SSH session suggests as you type. A short panel appears under the cursor
   holding the folders and files the server itself reports for the path being
   written, and the saved commands that match what is on the line. Press Down

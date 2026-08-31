@@ -3,7 +3,12 @@
 import SwiftUI
 
 /// Folded usage for one conversation: every `Usage` event added together.
-struct ChatUsageTotals: Equatable, Sendable {
+///
+/// Counted by the host over the whole archive rather than by the client over
+/// what it happens to hold, because a conversation is read a page at a time
+/// and a total that climbed as somebody scrolled backwards would be wrong in
+/// every position but one.
+struct ChatUsageTotals: Codable, Equatable, Sendable {
     var input: UInt64
     var output: UInt64
     var cacheRead: UInt64
@@ -11,6 +16,11 @@ struct ChatUsageTotals: Equatable, Sendable {
     var cost: Double
 
     var cache: UInt64 { cacheRead + cacheWrite }
+    var isEmpty: Bool { input == 0 && output == 0 && cache == 0 && cost == 0 }
+
+    static let zero = ChatUsageTotals(
+        input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0
+    )
 }
 
 /// Quiet token and cost card for the inspector and the phone setup sheet.

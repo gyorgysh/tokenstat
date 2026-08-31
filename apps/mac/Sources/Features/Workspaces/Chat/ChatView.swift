@@ -19,6 +19,7 @@ struct ChatView: View {
     /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
     @State private var follow = TranscriptFollowState()
+    @State private var window = TranscriptWindowState()
     @State private var settleMood: PersonaMood?
     @State private var paneDropTargeted = false
     @State private var composerDropTargeted = false
@@ -151,6 +152,13 @@ struct ChatView: View {
                     if model.displayItems.isEmpty, !chat.running {
                         emptyConversation
                     }
+                    TranscriptEarlierHeader(model: model) {
+                        Task {
+                            await loadEarlier(
+                                model, window: $window, proxy: proxy, force: true
+                            )
+                        }
+                    }
                     ForEach(model.displayItems) { item in
                         ChatEventRow(
                             item: item,
@@ -173,6 +181,7 @@ struct ChatView: View {
                             alignment: .leading
                         )
                         .frame(maxWidth: .infinity, alignment: item.readingRoomAlignment)
+                        .transcriptRowFrame(item.id, watched: watchedRows.contains(item.id))
                     }
                     if let mood = liveMood {
                         ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
@@ -196,10 +205,13 @@ struct ChatView: View {
             }
             .onPreferenceChange(ChatScrollContentKey.self) { frame in
                 follow.noteContent(frame)
+                window.note(content: frame)
             }
             .onPreferenceChange(ChatScrollViewportKey.self) { height in
                 follow.noteViewport(height: height)
+                window.note(viewport: height)
             }
+            .transcriptEarlierPages(model, window: $window, proxy: proxy)
             .onChange(of: structureToken) { _, _ in
                 pinToLatest(proxy, animated: true)
             }
@@ -262,6 +274,15 @@ struct ChatView: View {
             waiting: !model.approvals.isEmpty,
             settle: settleMood
         )
+    }
+
+    /// The rows near the beginning, which are the only ones that can hold
+    /// the reader's place while an older page arrives above them.
+    private var watchedRows: Set<String> {
+        // Nothing before this, so nothing to hold a place against, and no
+        // reason to measure a row on every frame of every scroll.
+        guard model.hasEarlier else { return [] }
+        return Set(model.displayItems.prefix(TranscriptWindowState.watched).map(\.id))
     }
 
     private var structureToken: String {
