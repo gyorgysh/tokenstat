@@ -34,6 +34,14 @@ const POLL: Duration = Duration::from_millis(400);
 /// that has gone wrong, and the wizard says so rather than waiting on it.
 const DRAFT_TIMEOUT: Duration = Duration::from_secs(90);
 static APPROVAL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+/// Separates records made inside the same millisecond.
+///
+/// A timestamp is useful when looking through the on-disk chat directory, but
+/// it is not an identifier: dropping two files or opening two chats quickly
+/// enough used to give them the same name and let the latter overwrite the
+/// former. The sequence is process-wide, so it also covers simultaneous
+/// clients without making an id depend on a filesystem round trip.
+static RECORD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -855,7 +863,7 @@ impl Store {
         if backend.trim().is_empty() {
             return Err("chat.create needs a backend".into());
         }
-        let id = format!("chat-{}", now_ms());
+        let id = mint_record_id("chat");
         let now = now_ms();
         let chat = Conversation {
             id,
@@ -1131,7 +1139,7 @@ impl Store {
             return Err("an attachment is limited to 12 MB".into());
         }
         let attachment = Attachment {
-            id: format!("file-{}", now_ms()),
+            id: mint_record_id("file"),
             name: safe_file_name(name),
             media_type,
             size: Some(bytes.len() as u64),
@@ -1579,7 +1587,7 @@ impl Store {
                 continue;
             };
             let name = safe_file_name(source_name);
-            let attachment_id = format!("output-{}-{index}", now_ms());
+            let attachment_id = format!("{}-{index}", mint_record_id("output"));
             let destination = self.attachment_path(id, &attachment_id, &name);
             let Some(parent) = destination.parent() else {
                 continue;
@@ -2158,6 +2166,12 @@ fn mint_persona_id(existing: &[Persona]) -> String {
         }
         n = n.saturating_add(1);
     }
+}
+
+/// A human-sortable, process-unique id for chat records that become paths.
+fn mint_record_id(prefix: &str) -> String {
+    let sequence = RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}-{}-{sequence}", now_ms())
 }
 
 fn starter_name(workspace_id: &str, taken: &HashSet<String>) -> &'static str {
@@ -3075,6 +3089,15 @@ mod tests {
         let event = store.events("chat-test", 0).unwrap().0.remove(0);
         assert_eq!(event["backend"], "codex");
         assert_eq!(event["event"]["kind"], "text");
+    }
+
+    #[test]
+    fn chat_record_ids_do_not_collide_inside_one_millisecond() {
+        let first = mint_record_id("file");
+        let second = mint_record_id("file");
+        assert_ne!(first, second);
+        assert!(first.starts_with("file-"));
+        assert!(second.starts_with("file-"));
     }
 
     #[test]
