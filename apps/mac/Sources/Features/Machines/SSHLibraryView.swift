@@ -480,7 +480,7 @@ struct SSHLibraryView: View {
                 Button("Add \(section.rawValue.dropLast().lowercased())") { open(addRoute) }
                 if section == .hosts {
                     Button("Add folder") { open(.newFolder(parent: nil)) }
-                    Divider()
+                    ThemeRule()
                     Button("Import from ssh config") { open(.importConfig) }
                     Button("Import cloud servers") { open(.importCloud) }
                     Button("Trusted servers") { open(.knownHosts) }

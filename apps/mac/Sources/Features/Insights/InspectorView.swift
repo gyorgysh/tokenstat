@@ -111,7 +111,7 @@ struct InspectorView: View {
             )
 
             if let block = model.activeBlock {
-                Divider()
+                ThemeRule()
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     HStack(spacing: Theme.Space.xs) {
                         Circle().fill(Theme.secondary).frame(width: 6, height: 6)

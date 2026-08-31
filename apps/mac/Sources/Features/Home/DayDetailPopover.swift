@@ -131,7 +131,7 @@ struct DayDetailPopover: View {
                 .foregroundStyle(.secondary)
 
             if !detail.rows.isEmpty {
-                Divider()
+                ThemeRule()
                 rows(detail)
                 if detail.rows.count > Self.maxRows {
                     Text("+\(detail.rows.count - Self.maxRows) more")

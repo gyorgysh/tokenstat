@@ -10,6 +10,8 @@
 # Fails on:
 #   - `Color.blue` and `.accentColor`, which are the system's colour, not ours
 #   - a `.tint(…)` modifier whose argument is not a `Theme.` colour
+#   - `Divider()`, whose line colour comes from the platform material rather
+#     than the app palette. Use `ThemeRule` instead.
 #
 # The action-icon guard is the precedent. A convention nobody can enforce by
 # remembering is a convention that comes back.
@@ -41,6 +43,7 @@ TINT = re.compile(r"^\s*\.tint\(([^)]*)\)")
 BANNED = [
     ("Color.blue", "system blue"),
     (".accentColor", "the system accent"),
+    ("Divider()", "a system divider"),
 ]
 
 

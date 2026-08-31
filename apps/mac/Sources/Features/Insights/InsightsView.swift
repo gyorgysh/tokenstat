@@ -323,7 +323,7 @@ private struct BreakdownTable: View {
                     )
                     .contentShape(.rect)
                     .onTapGesture { selected = selected?.key == row.key ? nil : row }
-                    Divider().opacity(0.3)
+                    ThemeRule().opacity(0.3)
                 }
                 if hidden > 0 {
                     revealMore

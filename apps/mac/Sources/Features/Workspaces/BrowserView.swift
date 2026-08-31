@@ -42,7 +42,7 @@ struct BrowserView: View {
                     .padding(.horizontal, Theme.Space.s)
                     .padding(.vertical, Theme.Space.xs)
             }
-            Divider()
+            ThemeRule()
             if loadedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 emptyState
             } else {

@@ -163,7 +163,7 @@ struct SSHRecoveryWordsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             header
-            Divider()
+            ThemeRule()
             switch step {
             case .read: readStep
             case .confirm: confirmStep
@@ -384,7 +384,7 @@ struct SSHVaultSetupSheet: View {
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault setup")
             }
-            Divider()
+            ThemeRule()
             if stale {
                 staleBody
             } else if exists {

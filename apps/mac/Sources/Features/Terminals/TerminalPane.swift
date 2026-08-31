@@ -128,7 +128,7 @@ struct TerminalPane: View {
         VStack(spacing: 0) {
             if folder.exists {
                 strip
-                Divider()
+                ThemeRule()
                 surface
                 if showsTerminal {
                     hostLines
@@ -445,7 +445,7 @@ struct TerminalPane: View {
                 } label: {
                     Label("Files", systemImage: "folder")
                 }
-                Divider()
+                ThemeRule()
                 ForEach(launcherProfiles) { profile in
                     Button {
                         start(profile)
@@ -461,7 +461,7 @@ struct TerminalPane: View {
                     }
                 }
                 if peer != nil {
-                    Divider()
+                    ThemeRule()
                     Button {
                         showingPort = true
                     } label: {

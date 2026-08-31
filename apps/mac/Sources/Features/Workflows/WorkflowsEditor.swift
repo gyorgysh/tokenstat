@@ -40,12 +40,12 @@ struct WorkflowsEditor: View {
                         .padding(.horizontal, Theme.Space.m)
                         .padding(.top, Theme.Space.s)
                 }
-                Divider()
+                ThemeRule()
                 HStack(spacing: 0) {
                     if paletteOpen && roomForPalette {
                         WorkflowPalette(model: model)
                             .frame(width: 220)
-                        Divider()
+                        ThemeRule.vertical
                     }
                     WorkflowCanvas(
                         model: model,

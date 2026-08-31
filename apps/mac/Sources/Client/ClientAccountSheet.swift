@@ -322,7 +322,7 @@ private struct ClientAccountContent: View {
                 VStack(spacing: 0) {
                     ForEach(Array(account.machines.enumerated()), id: \.element.id) { index, machine in
                         if index > 0 {
-                            Divider().padding(.vertical, Theme.Space.s)
+                            ThemeRule().padding(.vertical, Theme.Space.s)
                         }
                         deviceRow(machine, isThis: machine.machineID == account.thisMachineID)
                     }
@@ -456,7 +456,7 @@ private struct ClientAccountContent: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             ClientSectionTitle(title: "Terms and privacy", mark: "mark_license")
             legalLink("Privacy policy", url: ClientWebPages.privacy())
-            Divider()
+            ThemeRule()
             legalLink("Terms of service", url: ClientWebPages.terms())
         }
         .padding(Theme.Space.m)

@@ -46,7 +46,7 @@ struct WorkspacesView: View {
                     remoteMachine(folder, peer: peer)
                 }
                 #endif
-                Divider()
+                ThemeRule()
                 // Remote workspaces run the same terminal surface as local
                 // ones: the host forwards every pty call to the machine that
                 // owns the folder, so sessions spawn, stream and close there

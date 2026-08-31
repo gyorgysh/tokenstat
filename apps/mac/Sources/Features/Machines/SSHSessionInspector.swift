@@ -211,7 +211,7 @@ struct SSHSessionInspector: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(snippet.command, forType: .string)
             }
-            Divider()
+            ThemeRule()
             Button("Edit", .edit) { editing = .snippet(snippet.id) }
             // Deleting from here used to mean opening the editor and finding
             // the button in its footer, which is a long way round for a card

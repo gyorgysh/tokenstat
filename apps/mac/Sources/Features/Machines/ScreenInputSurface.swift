@@ -623,13 +623,13 @@ struct ScreenKeyBar: View {
                             Button(String(format: "%.1fx", pointer.zoom)) { pointer.resetZoom() }
                                 .buttonStyle(ScreenKeyStyle(active: true))
                         }
-                        Divider().frame(height: 20)
+                        ThemeRule.vertical.frame(height: 20)
                     }
                     ForEach(sticky, id: \.0) { name, flag in
                         Button(name) { modifiers ^= flag }
                             .buttonStyle(ScreenKeyStyle(active: modifiers & flag != 0))
                     }
-                    Divider().frame(height: 20)
+                    ThemeRule.vertical.frame(height: 20)
                     ForEach(specials) { special in
                         Button {
                             send(special.code, modifiers)

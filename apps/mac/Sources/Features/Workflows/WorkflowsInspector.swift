@@ -398,7 +398,7 @@ private struct WorkflowNodeInspector: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let node = model.selectedNode, let step = step(for: node) {
-                Divider()
+                ThemeRule()
                 HStack {
                     StatusPill(status: step.status, text: step.endedLabel)
                     Spacer(minLength: 0)
@@ -409,7 +409,7 @@ private struct WorkflowNodeInspector: View {
                 .padding(.vertical, Theme.Space.s)
             }
             if let node = model.selectedNode, showsTranscript(for: node) {
-                Divider()
+                ThemeRule()
                 FollowTranscript(
                     text: model.transcriptText,
                     empty: stepIsLive(step(for: node)) ? "Waiting for output…" : "",
@@ -420,7 +420,7 @@ private struct WorkflowNodeInspector: View {
                 .clipped()
             }
             if model.selectedNode != nil {
-                Divider()
+                ThemeRule()
                 HStack {
                     Button("Delete node", .delete, role: .destructive) {
                         model.deleteSelection()

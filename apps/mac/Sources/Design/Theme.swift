@@ -717,12 +717,7 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
             }
         }
         .padding(.horizontal, Theme.Space.m)
-        // Keep the controls a few points clear of the shared hairline. The
-        // bar's fixed height and border stay put; only the contents get this
-        // small internal breathing room.
-        .padding(.bottom, DetailChromeBottomSpacing)
-        .frame(maxWidth: .infinity)
-        .frame(height: Self.height)
+        .chromeBarMetrics()
         .background(Theme.tabStrip)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
@@ -737,6 +732,55 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
 /// Shared height for `DetailChromeBar` and matching chrome rows.
 let DetailChromeBarHeight: CGFloat = 40
 let DetailChromeBottomSpacing: CGFloat = 3
+
+/// The inside geometry every destination chrome row shares.
+///
+/// The bottom breathing room is intentionally part of the metric rather than
+/// a local adjustment. A 40pt bar with 3pt of bottom inset centres its visible
+/// content 1.5pt higher, which is what lets adjacent headers meet on the same
+/// optical baseline.
+private struct ChromeBarMetrics: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.bottom, DetailChromeBottomSpacing)
+            .frame(maxWidth: .infinity)
+            .frame(height: DetailChromeBarHeight)
+    }
+}
+
+extension View {
+    /// Apply the fixed height and baseline correction shared by app chrome.
+    func chromeBarMetrics() -> some View {
+        modifier(ChromeBarMetrics())
+    }
+}
+
+/// A hairline drawn from tokenstat's palette, never the platform material.
+///
+/// `Divider` resolves through the surrounding system surface, which is why a
+/// sheet or a dark panel could grow an unrelated grey line. Rules in ordinary
+/// content are horizontal by default; the few split panes say `.vertical` so
+/// their axis remains deliberate and readable in source.
+struct ThemeRule: View {
+    enum Axis {
+        case horizontal
+        case vertical
+    }
+
+    var axis: Axis = .horizontal
+
+    static var vertical: ThemeRule { ThemeRule(axis: .vertical) }
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.border)
+            .frame(
+                maxWidth: axis == .horizontal ? .infinity : 1,
+                maxHeight: axis == .vertical ? .infinity : 1
+            )
+            .accessibilityHidden(true)
+    }
+}
 
 /// A flat tab strip, in place of the reference layout's row of agent tabs.
 ///
@@ -1244,13 +1288,10 @@ struct InspectorChromeBar<Content: View, Accessory: View>: View {
             InspectorCloseButton(action: onClose)
                 .padding(.trailing, Theme.Space.s)
         }
-        // The same height as `DetailChromeBar`, which is the bar immediately
-        // to the left of this one. It used to be whatever the close button
-        // made it, 30pt, so the two headers of one window sat at different
-        // heights and their bottom hairlines did not meet at the column
-        // divider. Nothing in here is taller than this, so the content simply
-        // centres.
-        .frame(height: DetailChromeBarHeight)
+        // The same optical baseline as `DetailChromeBar`, immediately to its
+        // left. The shared modifier owns the 40pt frame and its 3pt correction
+        // so a later inspector cannot drift a point or two by accident.
+        .chromeBarMetrics()
         .background(Theme.sidebar)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)

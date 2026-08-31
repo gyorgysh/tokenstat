@@ -1537,7 +1537,7 @@ struct RootView: View {
             Button("Close all sessions", .delete, role: .destructive) {
                 sshHostPendingClose = host
             }
-            Divider()
+            ThemeRule()
             Button(isExpanded ? "Collapse" : "Expand", .collapse) {
                 if isExpanded {
                     expandedSSHHosts.remove(host.id)
@@ -1744,7 +1744,7 @@ struct RootView: View {
                             if !folder.isRemote {
                                 Button("Reveal in Finder", .reveal) { workspaces.revealInFinder(folder) }
                             }
-                            Divider()
+                            ThemeRule()
                             // "Remove" and not "Delete": the folder stays.
                             Button("Remove from tokenstat", .delete, role: .destructive) {
                                 workspacePendingRemove = folder
@@ -1769,7 +1769,7 @@ struct RootView: View {
                         ) { selectWorkspace(folder.id) }
                         .help(folder.path)
                         .contextMenu {
-                            Divider()
+                            ThemeRule()
                             // "Remove" and not "Delete": the folder stays.
                             Button("Remove from tokenstat", .delete, role: .destructive) {
                                 workspacePendingRemove = folder
@@ -2058,18 +2058,18 @@ struct RootView: View {
             Button("Account settings", .settings) { navigate(to: .global(.account)) }
             Button("Sync now", .refresh) { Task { await account.sync() } }
                 .disabled(account.isSyncing || account.syncCooldownUntil != nil)
-            Divider()
+            ThemeRule()
             updateItem
-            Divider()
+            ThemeRule()
             Button("Sign out", .signOut) { Task { await account.signOut() } }
         } else {
             Button("Sign in to tokenstat.ai", .signIn) {
                 navigate(to: .global(.account))
                 account.signIn()
             }
-            Divider()
+            ThemeRule()
             Button("Account", .account) { navigate(to: .global(.account)) }
-            Divider()
+            ThemeRule()
             updateItem
         }
     }

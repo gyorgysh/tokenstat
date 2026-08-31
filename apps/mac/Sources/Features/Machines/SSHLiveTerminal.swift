@@ -557,7 +557,7 @@ struct SSHLiveTerminalScreen: View {
             }
             .padding(Theme.Space.s)
             if siblings.count > 1 { tabs }
-            Divider()
+            ThemeRule()
             SSHNativeTerminal(session: session)
             #if !os(macOS)
             // The same bar the agent terminals have. A phone keyboard has no
@@ -712,7 +712,7 @@ struct SSHSnippetRunSheet: View {
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close snippet")
             }
-            Divider()
+            ThemeRule()
             ForEach(names, id: \.self) { name in
                 SSHEditorField(label: name) {
                     TextField(name, text: Binding(

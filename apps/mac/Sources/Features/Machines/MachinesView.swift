@@ -271,7 +271,7 @@ struct MachinesView: View {
                 ForEach(model.listedAccountMachines) { machine in
                     lockedMachineRow(machine)
                     if machine.id != model.listedAccountMachines.last?.id {
-                        Divider()
+                        ThemeRule()
                     }
                 }
             }
@@ -398,7 +398,7 @@ struct MachinesView: View {
                     }
                     .transition(.opacity)
                 }
-                Divider()
+                ThemeRule()
                 serving
                 Text(
                     model.accountMachines.isEmpty
@@ -908,7 +908,7 @@ struct MachinesView: View {
                     )
                     .contentShape(.rect)
                     .onTapGesture { model.selectAccount(machine) }
-                    if machine.id != model.listedAccountMachines.last?.id { Divider() }
+                    if machine.id != model.listedAccountMachines.last?.id { ThemeRule() }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -1171,7 +1171,7 @@ private struct DevicePermissionCard: View {
                         Spacer()
                         Button("Choose folder", .reveal) { chooseTransferDestination() }
                     }
-                    Divider()
+                    ThemeRule()
                     permissionRow(.screenRecording, granted: access.screenRecording)
                     if access.needsRelaunch {
                         HStack(alignment: .top) {

@@ -101,7 +101,7 @@ struct LocalModelControl: View {
                 Label(defaultLabel, systemImage: selectedKey.isEmpty ? "checkmark" : "")
             }
             if !choices.isEmpty {
-                Divider()
+                ThemeRule()
                 ForEach(choices, id: \.key) { choice in
                     Button {
                         select(choice.key)
@@ -114,13 +114,13 @@ struct LocalModelControl: View {
                 }
             }
             if !statusRows.isEmpty {
-                Divider()
+                ThemeRule()
                 ForEach(statusRows, id: \.self) { row in
                     Text(row)
                 }
             }
             if let errorMessage {
-                Divider()
+                ThemeRule()
                 Text("Could not read local models: \(errorMessage)")
             }
             Button("Refresh", .refresh) { Task { await load() } }

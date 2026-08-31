@@ -63,8 +63,7 @@ struct PersonaEditor: View {
                 .buttonStyle(SecondaryButtonStyle(small: true))
         }
         .padding(.horizontal, Theme.Space.m)
-        .padding(.bottom, DetailChromeBottomSpacing)
-        .frame(height: DetailChromeBarHeight)
+        .chromeBarMetrics()
         .background(Theme.sidebar)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
@@ -185,7 +184,7 @@ struct PersonaEditor: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Divider().overlay(Theme.border)
+                ThemeRule()
 
                 HStack(spacing: Theme.Space.s) {
                     AppMenuPicker(

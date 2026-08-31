@@ -111,7 +111,7 @@ struct GettingStartedCard: View {
     /// The shape of the answer, where the answer will be.
     private var waiting: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Divider().overlay(Theme.border)
+            ThemeRule()
             Text("Then the year fills in")
                 .font(Theme.headline)
             GettingStartedGhostGrid(weeks: 30)

@@ -24,49 +24,32 @@ struct AddWorkspaceSheet: View {
     @State private var picking = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(spacing: Theme.Space.m) {
-                Image(systemName: "folder.badge.plus")
-                    .font(Theme.font(30, weight: .light))
-                    .foregroundStyle(Theme.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Add a workspace")
-                        .font(Theme.title3.weight(.semibold))
-                    Text("A workspace is where your agents work")
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                InspectorCloseButton(
-                    action: { dismiss() },
-                    help: "Close",
-                    label: "Close add workspace"
+        ThemedSheet(
+            title: "Add a workspace",
+            subtitle: "A workspace is where your agents work",
+            icon: .create,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                step(
+                    number: 1,
+                    title: "What it is",
+                    text: "A workspace is a project folder on this Mac. tokenstat runs agents there (Claude Code, Codex, OpenCode, Grok Build and the rest) and reads the folder's git state so it can show changes, diffs and history."
+                )
+                step(
+                    number: 2,
+                    title: "What to pick",
+                    text: "Choose a repository you actually work in. It is the folder an agent opens when it does work for you. Not your home directory, and not a system folder."
+                )
+                step(
+                    number: 3,
+                    title: "What happens next",
+                    text: "You can open files, browse the folder, and launch any installed agent in it. The agents run as their own processes, and only usage counters ever leave the device."
                 )
             }
-
-            Divider()
-
-            step(
-                number: 1,
-                title: "What it is",
-                text: "A workspace is a project folder on this Mac. tokenstat runs agents there (Claude Code, Codex, OpenCode, Grok Build and the rest) and reads the folder's git state so it can show changes, diffs and history."
-            )
-            step(
-                number: 2,
-                title: "What to pick",
-                text: "Choose a repository you actually work in. It is the folder an agent opens when it does work for you. Not your home directory, and not a system folder."
-            )
-            step(
-                number: 3,
-                title: "What happens next",
-                text: "You can open files, browse the folder, and launch any installed agent in it. The agents run as their own processes, and only usage counters ever leave the device."
-            )
-
-            Spacer(minLength: Theme.Space.m)
-
-            HStack(spacing: Theme.Space.s) {
+        } actions: {
                 Button("Not now", .dismiss) { dismiss() }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(SecondaryButtonStyle())
                 Spacer()
                 Button {
                     picking = true
@@ -88,9 +71,7 @@ struct AddWorkspaceSheet: View {
                 .buttonStyle(AccentButtonStyle())
                 .disabled(picking)
                 .keyboardShortcut(.defaultAction)
-            }
         }
-        .padding(Theme.Space.l)
         .frame(width: 460, height: 380)
     }
 

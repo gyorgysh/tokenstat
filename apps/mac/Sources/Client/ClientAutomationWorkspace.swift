@@ -38,17 +38,17 @@ struct ClientAutomationWorkspace: View {
             HStack(spacing: 0) {
                 list
                     .frame(width: min(280, geo.size.width * 0.32))
-                Divider()
+                ThemeRule.vertical
                 if stackRun {
                     VStack(spacing: 0) {
                         jobPane
-                        Divider()
+                        ThemeRule()
                         runColumn
                             .frame(minHeight: 220)
                     }
                 } else {
                     jobPane
-                    Divider()
+                    ThemeRule.vertical
                     runColumn
                         .frame(width: min(320, geo.size.width * 0.34))
                 }

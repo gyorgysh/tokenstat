@@ -65,7 +65,7 @@ struct SSHTerminalPane: View {
     var body: some View {
         VStack(spacing: 0) {
             strip
-            Divider()
+            ThemeRule()
             if mine.isEmpty {
                 empty
             } else {
@@ -188,9 +188,8 @@ struct SSHTerminalPane: View {
             }
         }
         .padding(.horizontal, Theme.Space.m)
-        // The same height as every other destination's chrome row, so the
-        // content below starts on the same line whichever screen you are on.
-        .frame(height: DetailChromeBarHeight)
+        // The same optical baseline as every other destination's chrome row.
+        .chromeBarMetrics()
         .background(Theme.tabStrip)
     }
 

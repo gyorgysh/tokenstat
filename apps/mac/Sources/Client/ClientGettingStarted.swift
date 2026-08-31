@@ -91,7 +91,7 @@ struct ClientGettingStarted: View {
     /// waiting: the grid appears where the real one will be.
     private var waiting: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Divider().overlay(Theme.border)
+            ThemeRule()
             Text("Then there is nothing left to run")
                 .font(ClientType.label.weight(.semibold))
             Text("The first window of counters arrives on its own and fills this screen.")

@@ -442,7 +442,7 @@ struct AutomationsView: View {
                                   isSelected: model.selectedJobID == job.id,
                                   onSelect: { model.selectJob(job.id) },
                                   onViewRun: { model.selectRun($0) })
-                    if job.id != jobs.last?.id { Divider() }
+                    if job.id != jobs.last?.id { ThemeRule() }
                 }
             }
             .padding(.horizontal, Theme.Space.s)
@@ -461,7 +461,7 @@ struct AutomationsView: View {
             VStack(spacing: 0) {
                 ForEach(Array(model.scopedRuns.prefix(5))) { run in
                     runRow(run)
-                    if run.id != model.scopedRuns.prefix(5).last?.id { Divider() }
+                    if run.id != model.scopedRuns.prefix(5).last?.id { ThemeRule() }
                 }
             }
         }
@@ -846,7 +846,7 @@ private struct AutomationHistorySheet: View {
                                     .buttonStyle(.borderless)
                             }
                             .padding(.vertical, Theme.Space.s)
-                            Divider()
+                            ThemeRule()
                         }
                     }
                 }
@@ -1202,7 +1202,7 @@ struct NewAutomationSheet: View {
                 }
 
                 if scheduleKind == .interval {
-                    Divider()
+                    ThemeRule()
                     frequencyRow("Every") {
                         Menu {
                             ForEach(intervalMenuMinutes, id: \.self) { minutes in
@@ -1225,7 +1225,7 @@ struct NewAutomationSheet: View {
                 }
 
                 if scheduleKind == .weekly {
-                    Divider()
+                    ThemeRule()
                     frequencyRow("On") {
                         Menu {
                             ForEach(weekdays, id: \.0) { day in
@@ -1248,7 +1248,7 @@ struct NewAutomationSheet: View {
                 }
 
                 if scheduleKind == .custom {
-                    Divider()
+                    ThemeRule()
                     frequencyRow("On") {
                         HStack(spacing: 4) {
                             ForEach(0..<7, id: \.self) { bit in
@@ -1285,7 +1285,7 @@ struct NewAutomationSheet: View {
                     || scheduleKind == .weekdays
                     || scheduleKind == .weekly
                     || scheduleKind == .custom {
-                    Divider()
+                    ThemeRule()
                     frequencyRow("At") {
                         DatePicker("Time", selection: $scheduleTime, displayedComponents: .hourAndMinute)
                             .labelsHidden()
@@ -1293,7 +1293,7 @@ struct NewAutomationSheet: View {
                 }
 
                 if scheduleKind == .once {
-                    Divider()
+                    ThemeRule()
                     Text("Runs only when you press Run now. Nothing is scheduled.")
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)

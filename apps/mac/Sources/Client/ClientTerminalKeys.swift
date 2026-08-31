@@ -75,7 +75,7 @@ struct ClientTerminalKeys: View {
             HStack(spacing: 6) {
                 if let leading {
                     leading
-                    Divider().frame(height: 20)
+                    ThemeRule.vertical.frame(height: 20)
                 }
                 // Reading is half of what a phone does with a terminal, and
                 // the keyboard covers half the screen. This is the way out of

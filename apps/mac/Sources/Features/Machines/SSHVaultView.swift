@@ -249,7 +249,7 @@ struct SSHVaultScreen: View {
             }
             .padding(Theme.Space.l)
 
-            Divider()
+            ThemeRule()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.l) {
@@ -392,7 +392,7 @@ struct SSHVaultScreen: View {
                     // password, no code and no key, so nothing about it
                     // belonged behind an unlock.
                     if vault.created || vault.unreachable != nil {
-                        Divider()
+                        ThemeRule()
                         action(
                             title: "Delete the vault and start over",
                             detail: startOverDetail,
@@ -589,7 +589,7 @@ struct SSHVaultDeleteSheet: View {
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault deletion")
             }
-            Divider()
+            ThemeRule()
             if deleted { afterBody } else { beforeBody }
             if let error = vault.error {
                 Text(FriendlyError.from(error).message)
@@ -757,7 +757,7 @@ struct SSHVaultPasswordSheet: View {
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close password change")
             }
-            Divider()
+            ThemeRule()
             SecureField("Current password", text: $current)
                 .themedFieldBox()
             SecureField("New password", text: $next)

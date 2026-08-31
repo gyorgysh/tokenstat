@@ -138,7 +138,7 @@ private struct BranchPickerContent: View {
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.bottom, Theme.Space.s)
 
-            Divider()
+            ThemeRule()
 
             Group {
                 if isLoading {
@@ -181,10 +181,10 @@ private struct BranchPickerContent: View {
                 }
                 .padding(Theme.Space.s)
                 .background(Theme.warning.opacity(0.10))
-                .overlay(alignment: .top) { Divider() }
+                .overlay(alignment: .top) { ThemeRule() }
             }
 
-            Divider()
+            ThemeRule()
             createRow
         }
         .background(Theme.panel)

@@ -125,6 +125,15 @@ jobs:
       - name: Every control takes its colour from the theme
         run: bash scripts/check-accent-colour.sh
 
+  chrome-bars:
+    name: chrome bars
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Adjacent headers share one optical baseline
+        run: bash scripts/check-chrome-bars.sh
+
   # And again: a control in the wrong typeface is a third rule, and three
   # rules sharing one red check is one check that says nothing.
   fonts:

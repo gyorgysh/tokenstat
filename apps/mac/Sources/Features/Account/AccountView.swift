@@ -323,7 +323,7 @@ struct AccountView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(account.machines.enumerated()), id: \.element.id) { index, machine in
                         if index > 0 {
-                            Divider().padding(.vertical, Theme.Space.xs)
+                            ThemeRule().padding(.vertical, Theme.Space.xs)
                         }
                         machineRow(machine, isThisMachine: machine.machineID == account.thisMachineID)
                     }
@@ -444,7 +444,7 @@ struct AccountView: View {
                     VStack(spacing: 0) {
                         ForEach(Array(model.limitsProviders.enumerated()), id: \.element.id) { index, provider in
                             if index > 0 {
-                                Divider().padding(.vertical, Theme.Space.xs)
+                                ThemeRule().padding(.vertical, Theme.Space.xs)
                             }
                             planLimitRow(provider)
                         }
@@ -562,7 +562,7 @@ struct AccountView: View {
                         set: { TerminalPreferences.exposesToVoiceOver = $0 }
                     )
                 )
-                Divider()
+                ThemeRule()
                 toggleRow(
                     "Disable colours",
                     detail: "New terminals start with NO_COLOR, for apps that switch to monochrome when it is set.",

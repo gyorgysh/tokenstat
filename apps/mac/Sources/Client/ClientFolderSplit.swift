@@ -111,7 +111,7 @@ struct ClientFolderSplit: View {
             }
             .frame(width: Self.sectionsColumn)
             .background(Theme.background)
-            Divider()
+            ThemeRule.vertical
             detail(width: detailWidth)
         }
     }

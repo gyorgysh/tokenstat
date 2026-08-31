@@ -440,7 +440,7 @@ struct WorkflowsView: View {
                             onViewRun: { model.selectRun($0) },
                             onDelete: { confirmingDelete = graph }
                         )
-                        if graph.id != graphs.last?.id { Divider() }
+                        if graph.id != graphs.last?.id { ThemeRule() }
                     }
                 }
                 .padding(.horizontal, Theme.Space.s)
@@ -460,7 +460,7 @@ struct WorkflowsView: View {
             VStack(spacing: 0) {
                 ForEach(Array(model.scopedRuns.prefix(6))) { run in
                     runRow(run)
-                    if run.id != model.scopedRuns.prefix(6).last?.id { Divider() }
+                    if run.id != model.scopedRuns.prefix(6).last?.id { ThemeRule() }
                 }
             }
         }

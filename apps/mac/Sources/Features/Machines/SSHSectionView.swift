@@ -100,7 +100,7 @@ struct SSHSectionView: View {
             Menu {
                 Button("Add host", .create) { model.selection = .newHost(folder: section.folderID) }
                 Button("Add folder", .create) { model.selection = .newFolder(parent: section.folderID) }
-                Divider()
+                ThemeRule()
                 Button("Import from ssh config", .download) { model.selection = .importConfig }
                 Button("Import cloud servers", .download) { model.selection = .importCloud }
             } label: {
@@ -280,7 +280,7 @@ struct SSHSectionView: View {
             Button("Rename folder") { model.selection = .folder(folder.id) }
             Button("Add server here") { model.selection = .newHost(folder: folder.id) }
             Button("Add sub-folder") { model.selection = .newFolder(parent: folder.id) }
-            Divider()
+            ThemeRule()
             Button("Delete folder", role: .destructive) {
                 Task { await model.delete(folder: folder) }
             }
@@ -310,7 +310,7 @@ struct SSHSectionView: View {
                     Task { _ = await model.save(host: updated) }
                 }
                 Button("Edit") { model.selection = .host(host.id) }
-                Divider()
+                ThemeRule()
                 Button("Delete", role: .destructive) { Task { await model.delete(host: host) } }
             }
     }

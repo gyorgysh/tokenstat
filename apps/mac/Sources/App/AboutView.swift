@@ -41,7 +41,7 @@ struct AboutView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Divider()
+            ThemeRule()
                 .padding(.vertical, 2)
 
             author

@@ -679,7 +679,7 @@ private struct CardView: View {
             if card.column == "archive" {
                 Button("Restore to Done", .restore) { Task { await model.move(card, to: "done") } }
             }
-            Divider()
+            ThemeRule()
             if !card.isNote {
                 Button("Run…", .run) {
                     delegating = true
