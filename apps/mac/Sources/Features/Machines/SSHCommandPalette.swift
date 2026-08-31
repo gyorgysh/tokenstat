@@ -85,10 +85,10 @@ private struct SSHSuggestionRowView: View {
                     .foregroundStyle(focused ? Theme.accent : Theme.controlGlyph)
                     .frame(width: 14)
                 Text(row.title)
-                    .font(row.isSnippet ? Theme.font(12) : Theme.mono(12))
+                    .font(row.readsAsCode ? Theme.mono(12) : Theme.font(12))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if row.isSnippet {
+                if showsDetail {
                     Spacer(minLength: Theme.Space.s)
                     Text(row.detail)
                         .font(Theme.mono(10))
@@ -116,10 +116,19 @@ private struct SSHSuggestionRowView: View {
         return hovering ? Theme.rowHighlight : .clear
     }
 
+    /// The second line, where it says something the title does not. A folder
+    /// listed in the path being written is already named by what was typed;
+    /// one this session visited is somewhere else and has to say where.
+    private var showsDetail: Bool {
+        !row.detail.isEmpty && row.detail != row.title
+    }
+
     private var symbol: String {
         switch row.kind {
         case "directory": return "folder"
+        case "visited": return "clock"
         case "snippet": return "text.append"
+        case "history": return "clock.arrow.circlepath"
         default: return "doc"
         }
     }
@@ -127,7 +136,9 @@ private struct SSHSuggestionRowView: View {
     private var label: String {
         switch row.kind {
         case "directory": return "Folder \(row.title)"
+        case "visited": return "Folder you have been in, \(row.detail)"
         case "snippet": return "Saved command \(row.title), \(row.detail)"
+        case "history": return "Command you ran, \(row.title)"
         default: return "File \(row.title)"
         }
     }

@@ -326,12 +326,33 @@ struct SSHSuggestion: Codable, Sendable, Hashable, Identifiable {
     /// `{{placeholder}}` names, asked for before a snippet is inserted.
     var variables: [String] = []
 
+    /// Spelled out rather than synthesized, and the reason is worth keeping.
+    ///
+    /// A default value on a stored property does **not** make its key
+    /// optional to a synthesized `Decodable`: the key is still required and
+    /// its absence throws. The host omitted `variables` on a row that has
+    /// none, so every answer failed to decode, the failure was swallowed by
+    /// the `try?` this sits behind, and the palette silently never appeared.
+    /// The host writes the key now, and this reads it either way.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(String.self, forKey: .kind)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? ""
+        insert = try c.decode(String.self, forKey: .insert)
+        replace = try c.decodeIfPresent(Int.self, forKey: .replace) ?? 0
+        variables = try c.decodeIfPresent([String].self, forKey: .variables) ?? []
+    }
+
     /// The kind and what it types. Two rows that would type the same thing
     /// never both arrive, so this is unique within one answer.
     var id: String { "\(kind)\u{1}\(insert)" }
 
     var isSnippet: Bool { kind == "snippet" }
     var isDirectory: Bool { kind == "directory" }
+    /// Read character by character: a path, or a command line. A snippet is
+    /// the one row whose title is a name somebody wrote for themselves.
+    var readsAsCode: Bool { kind != "snippet" }
 }
 
 struct SSHSuggestions: Codable, Sendable, Hashable {
@@ -341,6 +362,13 @@ struct SSHSuggestions: Codable, Sendable, Hashable {
     var rows: [SSHSuggestion]
     /// A directory listing is on its way. Ask again shortly.
     var pending: Bool
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fragment = try c.decodeIfPresent(String.self, forKey: .fragment) ?? ""
+        rows = try c.decodeIfPresent([SSHSuggestion].self, forKey: .rows) ?? []
+        pending = try c.decodeIfPresent(Bool.self, forKey: .pending) ?? false
+    }
 }
 
 struct SSHKeyMaterial: Codable, Sendable, Hashable {

@@ -2768,6 +2768,21 @@ extension Bridge {
         )
     }
 
+    /// Tell the host a line was actually submitted.
+    ///
+    /// Only ever called for a line the far end was seen echoing, which is
+    /// what keeps a password out of it. The host keeps these in memory for
+    /// the life of the session, to offer back and to follow a `cd` with.
+    /// Nothing is written to disk and SSH sessions are local-only.
+    static func sshSessionRan(id: String, command: String, directory: String?) async {
+        struct Recorded: Codable, Sendable { var recorded: Bool }
+        var params: [String: Any] = ["id": id, "fragment": command]
+        if let directory { params["directory"] = directory }
+        _ = try? await background(
+            "ssh.session.ran", params, patience: Patience.interactive, as: Recorded.self
+        )
+    }
+
     static func closeSSHSession(id: String) async {
         struct Closed: Codable, Sendable { var closed: Bool }
         _ = try? await background("ssh.session.close", ["id": id], as: Closed.self)

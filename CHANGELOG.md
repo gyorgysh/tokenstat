@@ -74,17 +74,20 @@ desktop and Android builds remain previews. Newest first.
   agent is working. The cost card still covers the whole conversation, counted
   once when it opens rather than folded from the part on screen.
 - An SSH session suggests as you type. A short panel appears under the cursor
-  holding the folders and files the server itself reports for the path being
-  written, and the saved commands that match what is on the line. Press Down
-  to step into it, then Tab or Return to type that row at the prompt, and
-  Escape to put it away for the rest of the line. Until you step in, Up is
-  still the shell's history, Tab is still the shell's own completion, and
-  Return still runs the line. Choosing a row finishes the line and leaves it
-  for you to read: nothing is ever run for you. A saved command with
-  placeholders asks for them first, and the values are still never stored.
-  Nothing is offered on a line the server is not echoing, so a password prompt
-  is left alone. On a phone and an iPad the rows are chosen by touch and no
-  key is taken from the shell.
+  with the folders and files the server itself reports for the path being
+  written, the folders this session has already been in, the commands it has
+  already run, and the saved commands that match the line. A bare `cd ` offers
+  what is in the folder you are standing in. Press Down to step into the list,
+  then Tab or Return to type that row at the prompt, and Escape to put it away
+  for the rest of the line. Until you step in, Up is still the shell's history,
+  Tab is still the shell's own completion, and Return still runs the line.
+  Choosing a row finishes the line and leaves it for you to read: nothing is
+  ever run for you. A saved command with placeholders asks for them first, and
+  the values are still never stored. What a session remembers of itself lives
+  in memory until it closes and is never written anywhere, and nothing is
+  offered on, or remembered from, a line the server is not echoing, so a
+  password prompt is left alone. On a phone and an iPad the rows are chosen by
+  touch and no key is taken from the shell.
 - Chat on Mac now uses the pull-request workspace's wider reading room: prose
   is larger and aligned by speaker at a comfortable measure, while tools,
   diffs, files, approvals, and the composer can use the desktop's extra width.

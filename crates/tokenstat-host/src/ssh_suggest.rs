@@ -25,7 +25,10 @@ pub(crate) const MAX_ROWS: usize = 6;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Row {
-    /// `directory`, `file` or `snippet`. The client draws a glyph from this.
+    /// What this row came from, and the glyph the client draws for it:
+    /// `directory` and `file` are names the server reported, `visited` is a
+    /// folder this session has been in, `history` is a command run in it, and
+    /// `snippet` is one somebody saved.
     pub kind: &'static str,
     /// The short name a person reads.
     pub title: String,
@@ -37,8 +40,9 @@ pub(crate) struct Row {
     /// counted from the end. The client sends that many backspaces first.
     pub replace: usize,
     /// `{{placeholder}}` names in a snippet, so the client can ask for them
-    /// before the command is inserted. Empty for a path.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// before the command is inserted. Empty for a path, and always written:
+    /// a strict decoder on the other end reads a missing key as a broken
+    /// answer rather than as an empty list.
     pub variables: Vec<String>,
 }
 
@@ -195,8 +199,19 @@ fn unescape(text: &str) -> String {
 /// give it, so relative completion stays quiet rather than silently
 /// completing against the home directory.
 pub(crate) fn path_query(token: &Token, base: Option<&str>) -> Option<PathQuery> {
-    if token.first || token.open_quote || token.text.is_empty() {
+    if token.first || token.open_quote {
         return None;
+    }
+    // A word not started yet, after a command that has one. `cd ` means "what
+    // is in here", which is only answerable where the session's own directory
+    // is known.
+    if token.text.is_empty() {
+        let base = base?;
+        return Some(PathQuery {
+            dir: base.to_string(),
+            prefix: String::new(),
+            head: String::new(),
+        });
     }
     if token.text.starts_with('-') {
         return None;
@@ -279,6 +294,173 @@ fn joined(query: &PathQuery, entry: &Entry) -> String {
     path
 }
 
+/// What one session has done, as watched from this side.
+///
+/// Only lines the far end was seen echoing reach here, which is the same test
+/// that keeps a password from being drawn on screen: a prompt with echo off
+/// never confirms, so nothing typed into one is ever remembered. Held in
+/// memory for the life of the session and never written anywhere. This is not
+/// the shell's history file, and nothing here is read from the server.
+#[derive(Debug, Default)]
+pub(crate) struct SessionHistory {
+    /// Where the session is, as far as this side can tell: seeded from the
+    /// directory the session was opened in, moved by the `cd` lines watched
+    /// since, and replaced outright whenever the server says so itself.
+    pub cwd: Option<String>,
+    /// The one before this, for `cd -`.
+    previous: Option<String>,
+    /// Directories this session has been in, most recent first.
+    pub directories: Vec<String>,
+    /// Command lines run in it, most recent first.
+    pub commands: Vec<String>,
+}
+
+/// How many directories a session remembers.
+const KEPT_DIRECTORIES: usize = 60;
+/// How many command lines a session remembers.
+const KEPT_COMMANDS: usize = 200;
+/// The longest command line worth remembering. A pasted file is not a command
+/// somebody will want offered back to them.
+const LONGEST_COMMAND: usize = 512;
+
+/// Commands after which this side no longer knows where the session is.
+///
+/// Each of these can leave the person somewhere else entirely: on another
+/// machine, as another user, inside a container, or in a shell whose
+/// directory this one never saw. Guessing after one of them is how a
+/// completion ends up naming a directory that is not there.
+const LOSES_THE_PLACE: [&str; 14] = [
+    "ssh", "su", "sudo", "doas", "docker", "podman", "kubectl", "chroot", "bash", "sh", "zsh",
+    "fish", "screen", "tmux",
+];
+
+impl SessionHistory {
+    /// Start where the session was opened. The client asked for that
+    /// directory and this side sent the `cd` that went there, so it is known
+    /// rather than assumed.
+    pub fn opened_in(&mut self, directory: &str) {
+        let directory = directory.trim();
+        if directory.is_empty() {
+            return;
+        }
+        self.arrive(directory.to_string());
+    }
+
+    /// What the server itself says, which beats anything worked out here.
+    pub fn reported(&mut self, directory: &str) {
+        if directory.trim().is_empty() || self.cwd.as_deref() == Some(directory) {
+            return;
+        }
+        self.arrive(directory.to_string());
+    }
+
+    /// One command line, as the person submitted it.
+    pub fn ran(&mut self, command: &str) {
+        let command = command.trim();
+        if command.is_empty() || command.len() > LONGEST_COMMAND {
+            return;
+        }
+        remember(&mut self.commands, command.to_string(), KEPT_COMMANDS);
+        self.follow(command);
+    }
+
+    /// Move the working directory the way this line would have.
+    fn follow(&mut self, command: &str) {
+        let token = last_token(command);
+        let mut words = command.split_whitespace();
+        let Some(head) = words.next() else { return };
+        // The name as typed, so `/usr/bin/ssh` counts as `ssh`.
+        let name = head.rsplit('/').next().unwrap_or(head);
+        if name != "cd" {
+            if LOSES_THE_PLACE.contains(&name) {
+                self.previous = self.cwd.take();
+            }
+            return;
+        }
+        // `cd` with more than one word after it is not a plain change of
+        // directory, and neither is one this side cannot read.
+        let argument = words.next().unwrap_or("~");
+        if words.next().is_some() || token.open_quote {
+            self.previous = self.cwd.take();
+            return;
+        }
+        let argument = unescape(argument);
+        if argument == "-" {
+            std::mem::swap(&mut self.cwd, &mut self.previous);
+            if let Some(now) = self.cwd.clone() {
+                remember(&mut self.directories, now, KEPT_DIRECTORIES);
+            }
+            return;
+        }
+        let Some(target) = self.resolve(&argument) else {
+            self.previous = self.cwd.take();
+            return;
+        };
+        self.arrive(target);
+    }
+
+    /// Where an argument to `cd` would put the session.
+    fn resolve(&self, argument: &str) -> Option<String> {
+        if argument.starts_with('/') || argument == "~" || argument.starts_with("~/") {
+            return Some(normalize(argument));
+        }
+        // Relative, so it only means something from somewhere known.
+        let cwd = self.cwd.as_deref()?;
+        Some(normalize(&format!(
+            "{}/{argument}",
+            cwd.trim_end_matches('/')
+        )))
+    }
+
+    fn arrive(&mut self, directory: String) {
+        if self.cwd.as_deref() == Some(directory.as_str()) {
+            return;
+        }
+        self.previous = self.cwd.replace(directory.clone());
+        remember(&mut self.directories, directory, KEPT_DIRECTORIES);
+    }
+}
+
+/// Most recent first, no repeats, bounded.
+fn remember(list: &mut Vec<String>, value: String, keep: usize) {
+    list.retain(|held| held != &value);
+    list.insert(0, value);
+    list.truncate(keep);
+}
+
+/// Fold `.` and `..` away without touching the disk.
+///
+/// Textual on purpose: this runs against a path on another machine, so there
+/// is nothing here to ask. A `..` through a symlink therefore lands where the
+/// text says rather than where the link does, and the listing that follows is
+/// what settles whether it exists at all.
+fn normalize(path: &str) -> String {
+    let rooted = path.starts_with('/');
+    let home = path == "~" || path.starts_with("~/");
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => continue,
+            ".." => {
+                if parts.last().is_some_and(|last| *last != "~") {
+                    parts.pop();
+                } else if !rooted && !home {
+                    parts.push("..");
+                }
+            }
+            other => parts.push(other),
+        }
+    }
+    let joined = parts.join("/");
+    if rooted {
+        format!("/{joined}")
+    } else if joined.is_empty() {
+        "/".into()
+    } else {
+        joined
+    }
+}
+
 /// Order the rows a palette shows, best first.
 ///
 /// The order is meant to be predictable rather than clever:
@@ -297,6 +479,7 @@ pub(crate) fn rank(
     query: Option<&PathQuery>,
     entries: &[Entry],
     snippets: &[Snippet],
+    history: &SessionHistory,
 ) -> Vec<Row> {
     let mut rows: Vec<Row> = Vec::new();
     let typed = fragment.trim_start();
@@ -347,23 +530,96 @@ pub(crate) fn rank(
         }
     }
 
-    // 3. Saved commands found by name.
+    // 3. A line already run in this session, being typed again. Somebody
+    // repeating themselves is the commonest thing at a prompt, and this is
+    // the one source that knows what they repeat. After the directory,
+    // because when a path is being written the path is the answer.
+    //
+    // Three characters of it, so `cd ` does not offer back every `cd` this
+    // session has run in front of what is actually in the folder.
+    if typed.trim().chars().count() >= 3 {
+        for command in &history.commands {
+            if starts_with_fold(command, typed) && command.len() > typed.len() {
+                rows.push(Row {
+                    kind: "history",
+                    title: command.clone(),
+                    detail: String::new(),
+                    insert: command.clone(),
+                    replace: replace_all,
+                    variables: Vec::new(),
+                });
+            }
+        }
+    }
+
+    // 4. Somewhere this session has already been. Offered whenever a path is
+    // being written, including the moment after `cd `, because the folder
+    // somebody wants next is usually one they have been in before.
+    if query.is_some() {
+        let wanted = token.literal();
+        for directory in &history.directories {
+            if history.cwd.as_deref() == Some(directory.as_str()) {
+                continue;
+            }
+            if !wanted.is_empty() && !starts_with_fold(directory, &wanted) {
+                continue;
+            }
+            let mut path = directory.clone();
+            if !path.ends_with('/') {
+                path.push('/');
+            }
+            let Some(insert) = escape_path(&path) else {
+                continue;
+            };
+            rows.push(Row {
+                kind: "visited",
+                title: directory
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(directory)
+                    .to_string(),
+                detail: directory.clone(),
+                insert,
+                replace: replace_token,
+                variables: Vec::new(),
+            });
+        }
+    }
+
+    // 5. Saved commands found by name.
     //
     // Three characters, not one: `cd` and `ls` appear inside half the
     // commands anybody saves, and a palette that opened on the command word
     // of every line would be in the way rather than in reach.
-    if typed.chars().count() >= 3 {
+    let wanted = typed.trim();
+    if wanted.chars().count() >= 3 {
         let mut found: Vec<Row> = Vec::new();
         for snippet in snippets {
-            if contains_fold(&snippet.title, typed)
-                || snippet.tags.iter().any(|tag| contains_fold(tag, typed))
-                || contains_fold(&snippet.command, typed)
+            if contains_fold(&snippet.title, wanted)
+                || snippet.tags.iter().any(|tag| contains_fold(tag, wanted))
+                || contains_fold(&snippet.command, wanted)
             {
                 found.push(snippet_row(snippet, replace_all));
             }
         }
         sort_scoped(&mut found, snippets);
         rows.append(&mut found);
+
+        // 6. And a line run in this session with the typed text anywhere in
+        // it, which is how somebody finds the long command they half
+        // remember.
+        for command in &history.commands {
+            if contains_fold(command, wanted) {
+                rows.push(Row {
+                    kind: "history",
+                    title: command.clone(),
+                    detail: String::new(),
+                    insert: command.clone(),
+                    replace: replace_all,
+                    variables: Vec::new(),
+                });
+            }
+        }
     }
 
     let mut seen: Vec<String> = Vec::new();
@@ -663,7 +919,14 @@ mod tests {
     fn a_saved_command_being_typed_out_leads() {
         let fragment = "sudo systemctl";
         let t = token(fragment);
-        let rows = rank(fragment, &t, None, &[], &snippets());
+        let rows = rank(
+            fragment,
+            &t,
+            None,
+            &[],
+            &snippets(),
+            &SessionHistory::default(),
+        );
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].kind, "snippet");
         assert_eq!(rows[0].title, "Restart web");
@@ -697,7 +960,14 @@ mod tests {
                 directory: true,
             },
         ];
-        let rows = rank(fragment, &t, Some(&query), &entries, &[]);
+        let rows = rank(
+            fragment,
+            &t,
+            Some(&query),
+            &entries,
+            &[],
+            &SessionHistory::default(),
+        );
         let titles: Vec<&str> = rows.iter().map(|row| row.title.as_str()).collect();
         assert_eq!(titles, vec!["proj", "profile.txt", "Photos"]);
         assert_eq!(rows[0].insert, "/opt/proj/");
@@ -719,16 +989,146 @@ mod tests {
         let fragment = "cd ~/";
         let t = token(fragment);
         let query = path_query(&t, None).expect("path");
-        let rows = rank(fragment, &t, Some(&query), &entries, &[]);
+        let rows = rank(
+            fragment,
+            &t,
+            Some(&query),
+            &entries,
+            &[],
+            &SessionHistory::default(),
+        );
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].title, "src");
 
         let fragment = "cd ~/.";
         let t = token(fragment);
         let query = path_query(&t, None).expect("path");
-        let rows = rank(fragment, &t, Some(&query), &entries, &[]);
+        let rows = rank(
+            fragment,
+            &t,
+            Some(&query),
+            &entries,
+            &[],
+            &SessionHistory::default(),
+        );
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].title, ".config");
+    }
+
+    fn history(commands: &[&str], opened_in: &str) -> SessionHistory {
+        let mut past = SessionHistory::default();
+        past.opened_in(opened_in);
+        for command in commands {
+            past.ran(command);
+        }
+        past
+    }
+
+    #[test]
+    fn a_session_follows_the_cd_lines_it_watched() {
+        let past = history(
+            &["ls -l", "cd /opt", "cd pueev_web", "cd ../digitalocean"],
+            "~",
+        );
+        assert_eq!(past.cwd.as_deref(), Some("/opt/digitalocean"));
+        assert_eq!(
+            past.directories,
+            vec!["/opt/digitalocean", "/opt/pueev_web", "/opt", "~"],
+            "most recent first, no repeats"
+        );
+    }
+
+    #[test]
+    fn cd_with_no_argument_is_home_and_cd_dash_goes_back() {
+        let past = history(&["cd /opt", "cd", "cd -"], "~");
+        assert_eq!(past.cwd.as_deref(), Some("/opt"));
+    }
+
+    #[test]
+    fn a_command_that_could_move_the_session_ends_the_guessing() {
+        for line in ["ssh other-server", "sudo -i", "docker exec -it web sh"] {
+            let past = history(&["cd /opt", line], "~");
+            assert!(
+                past.cwd.is_none(),
+                "{line} could leave the session anywhere, so nothing is claimed"
+            );
+        }
+        let past = history(&["cd /opt", "grep -r ssh ."], "~");
+        assert_eq!(
+            past.cwd.as_deref(),
+            Some("/opt"),
+            "a word that merely mentions one of them is not one of them"
+        );
+    }
+
+    #[test]
+    fn a_relative_cd_from_an_unknown_place_stays_unknown() {
+        let mut past = SessionHistory::default();
+        past.ran("cd src");
+        assert!(past.cwd.is_none());
+    }
+
+    #[test]
+    fn the_server_saying_where_it_is_wins() {
+        let mut past = history(&["cd /opt"], "~");
+        past.reported("/srv/app");
+        assert_eq!(past.cwd.as_deref(), Some("/srv/app"));
+    }
+
+    #[test]
+    fn an_empty_argument_offers_what_is_in_the_current_directory() {
+        let past = history(&["cd /opt"], "~");
+        let fragment = "cd ";
+        let t = token(fragment);
+        let query = path_query(&t, past.cwd.as_deref()).expect("the session knows where it is");
+        assert_eq!(query.dir, "/opt");
+        assert_eq!(query.prefix, "");
+        let entries = vec![Entry {
+            name: "pueev_web".into(),
+            directory: true,
+        }];
+        let rows = rank(fragment, &t, Some(&query), &entries, &[], &past);
+        let titles: Vec<&str> = rows.iter().map(|row| row.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec!["pueev_web", "~"],
+            "what is in here, then where this session has been"
+        );
+        assert_eq!(rows[0].kind, "directory");
+        assert_eq!(rows[1].kind, "visited");
+        assert_eq!(rows[1].insert, "~/");
+    }
+
+    #[test]
+    fn a_line_already_run_is_offered_back_before_anything_else() {
+        let past = history(&["systemctl restart nginx", "cd /opt"], "~");
+        let fragment = "systemctl re";
+        let t = token(fragment);
+        let rows = rank(fragment, &t, None, &[], &snippets(), &past);
+        assert_eq!(rows[0].kind, "history");
+        assert_eq!(rows[0].title, "systemctl restart nginx");
+        assert_eq!(rows[0].replace, fragment.chars().count());
+    }
+
+    #[test]
+    fn the_current_directory_is_not_offered_as_somewhere_to_go() {
+        let past = history(&["cd /opt"], "~");
+        let fragment = "cd /o";
+        let t = token(fragment);
+        let query = path_query(&t, past.cwd.as_deref()).expect("path");
+        let rows = rank(fragment, &t, Some(&query), &[], &[], &past);
+        assert!(
+            !rows.iter().any(|row| row.kind == "visited"),
+            "standing in /opt, offering /opt as somewhere to go is offering nothing"
+        );
+    }
+
+    #[test]
+    fn a_password_is_never_remembered_because_it_never_arrives() {
+        // The client only reports a line the far end echoed, so this is the
+        // whole of the guarantee here: what is not handed over is not kept.
+        let past = SessionHistory::default();
+        assert!(past.commands.is_empty());
     }
 
     #[test]
@@ -742,14 +1142,31 @@ mod tests {
             variables: vec![],
             scoped: true,
         }];
-        assert!(rank(fragment, &t, None, &[], &snippets).is_empty());
+        assert!(
+            rank(
+                fragment,
+                &t,
+                None,
+                &[],
+                &snippets,
+                &SessionHistory::default()
+            )
+            .is_empty()
+        );
     }
 
     #[test]
     fn a_snippet_for_this_server_leads_one_kept_for_every_server() {
         let fragment = "sudo";
         let t = token(fragment);
-        let rows = rank(fragment, &t, None, &[], &snippets());
+        let rows = rank(
+            fragment,
+            &t,
+            None,
+            &[],
+            &snippets(),
+            &SessionHistory::default(),
+        );
         assert_eq!(rows[0].title, "Restart web", "scoped first");
         assert_eq!(rows[1].title, "Tail syslog");
     }
@@ -766,7 +1183,7 @@ mod tests {
         });
         let fragment = "sudo systemctl";
         let t = token(fragment);
-        let rows = rank(fragment, &t, None, &[], &list);
+        let rows = rank(fragment, &t, None, &[], &list, &SessionHistory::default());
         assert_eq!(rows.len(), 1);
     }
 
@@ -781,8 +1198,44 @@ mod tests {
         let fragment = "cd /opt/p";
         let t = token(fragment);
         let query = path_query(&t, None).expect("path");
-        let rows = rank(fragment, &t, Some(&query), &entries, &snippets());
+        let rows = rank(
+            fragment,
+            &t,
+            Some(&query),
+            &entries,
+            &snippets(),
+            &SessionHistory::default(),
+        );
         assert_eq!(rows.len(), MAX_ROWS);
+    }
+
+    #[test]
+    fn every_row_carries_every_field_it_promises() {
+        let fragment = "cd /opt/p";
+        let t = token(fragment);
+        let query = path_query(&t, None).expect("path");
+        let entries = vec![Entry {
+            name: "proj".into(),
+            directory: true,
+        }];
+        let rows = rank(
+            fragment,
+            &t,
+            Some(&query),
+            &entries,
+            &[],
+            &SessionHistory::default(),
+        );
+        let wire = serde_json::to_value(&rows[0]).expect("serialize");
+        let object = wire.as_object().expect("object");
+        // A row with no placeholders still says so. A strict decoder on the
+        // other end reads a missing key as a broken answer rather than as an
+        // empty list, and a palette that never appears is what that looks
+        // like from the outside.
+        for key in ["kind", "title", "detail", "insert", "replace", "variables"] {
+            assert!(object.contains_key(key), "{key} is missing from {wire}");
+        }
+        assert_eq!(object["variables"], serde_json::json!([]));
     }
 
     #[test]
@@ -800,7 +1253,14 @@ mod tests {
         let fragment = "cat /tmp/o";
         let t = token(fragment);
         let query = path_query(&t, None).expect("path");
-        let rows = rank(fragment, &t, Some(&query), &entries, &[]);
+        let rows = rank(
+            fragment,
+            &t,
+            Some(&query),
+            &entries,
+            &[],
+            &SessionHistory::default(),
+        );
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].title, "ordinary");
     }

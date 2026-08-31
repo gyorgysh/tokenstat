@@ -224,6 +224,21 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 return
             }
             typedLine.removeLast()
+        case 0x0d, 0x0a:
+            // Submitted. Hand it to the host so the session can offer it back
+            // and follow a `cd` with it, but only if this line proved it
+            // echoes: a prompt with echo off never confirms, so a password is
+            // never one of these.
+            if lineEchoes, !lineSilent, !typedLine.trimmingCharacters(in: .whitespaces).isEmpty {
+                let handle = handle
+                let line = typedLine
+                let directory = remoteDirectory
+                Task {
+                    await Bridge.sshSessionRan(id: handle, command: line, directory: directory)
+                }
+            }
+            forgetLine()
+            return
         default:
             forgetLine()
             return
@@ -290,7 +305,15 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 )
                 guard !Task.isCancelled, self.suggestGeneration == generation else { return }
                 guard let answer, answer.fragment == fragment else { return }
-                self.show(answer.rows)
+                // A directory the host has not read yet answers with what it
+                // does have, which is usually nothing. Drawing that would
+                // take the palette off the screen and put it back a moment
+                // later, on every keystroke, which is what "it flickers and
+                // then never appears" actually is. Wait for the settled
+                // answer and leave what is showing alone.
+                if !answer.pending || !answer.rows.isEmpty {
+                    self.show(answer.rows)
+                }
                 guard answer.pending else { return }
                 try? await Task.sleep(for: .milliseconds(Self.suggestRetryMs))
             }
@@ -450,13 +473,17 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     }
 
     /// How long the typing has to pause before the host is asked.
-    private static let suggestDelayMs = 140
+    ///
+    /// Short. The host answers a directory it already knows in about a
+    /// millisecond, so this is the whole of the delay somebody feels between
+    /// a keystroke and the list.
+    private static let suggestDelayMs = 60
     /// How long to wait before asking again while a listing is still coming.
-    private static let suggestRetryMs = 220
-    /// How many times one pause will ask. Two waits is long enough for a
-    /// directory on a slow link and short enough that a server which never
-    /// answers costs nothing.
-    private static let suggestAttempts = 3
+    private static let suggestRetryMs = 150
+    /// How many times one pause will ask. Enough to sit through a cold
+    /// directory on a server across an ocean, and bounded so a server that
+    /// never answers costs a fixed amount and then stops.
+    private static let suggestAttempts = 8
 
     // MARK: - Local echo
 

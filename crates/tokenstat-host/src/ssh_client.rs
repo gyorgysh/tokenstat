@@ -28,13 +28,20 @@ const LIST_ENTRIES: usize = 2_000;
 /// How long a listing may take before it is abandoned.
 const LIST_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// How long a listing stays usable. Short, because a person who has just made
-/// a directory expects to be able to complete it.
-const LIST_FRESH_MS: i64 = 5_000;
+/// How long a listing stays usable.
+///
+/// Long enough that reading a folder, thinking, and typing the next path does
+/// not start cold again: a cold directory costs a round trip the person waits
+/// through, and five seconds meant almost every pause paid it. Short enough
+/// that a directory somebody has just created turns up without a reconnect.
+const LIST_FRESH_MS: i64 = 45_000;
 
-/// How long a failure is remembered. Longer, so a server with no `ls`, or a
-/// directory nobody may read, is asked once rather than on every keystroke.
-const LIST_FAILED_MS: i64 = 30_000;
+/// How long a failure is remembered.
+///
+/// Longer than an answer, so a server with no `ls`, or a directory nobody may
+/// read, is asked once rather than over and over. A path that does not exist
+/// does not usually start existing while somebody is still typing it.
+const LIST_FAILED_MS: i64 = 120_000;
 
 #[derive(Clone)]
 struct HostKeyCheck {
@@ -82,6 +89,9 @@ struct LiveSession {
     handle: Arc<client::Handle<HostKeyCheck>>,
     /// What the far end last said was in a directory, per directory.
     directories: Arc<Mutex<DirCache>>,
+    /// Where this session has been and what has been run in it. In memory,
+    /// for the life of the session, and never written anywhere.
+    history: Arc<Mutex<crate::ssh_suggest::SessionHistory>>,
     /// What the client called this, and which saved record it came from.
     ///
     /// Carried so `ssh.session.list` can answer with something a person
@@ -345,17 +355,32 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             if p.fragment.len() > 4096 {
                 return Ok(json!({"fragment": "", "rows": [], "pending": false}));
             }
-            let (handle, directories, host_id) = {
+            let (handle, directories, history, host_id) = {
                 let guard = sessions().lock().map_err(|e| e.to_string())?;
                 let live = guard.get(&p.id).ok_or("SSH session no longer exists")?;
                 (
                     Arc::clone(&live.handle),
                     Arc::clone(&live.directories),
+                    Arc::clone(&live.history),
                     live.meta.host_id.clone(),
                 )
             };
+            {
+                // The server saying where it is, when it says so at all,
+                // beats anything worked out from what was typed.
+                let mut guard = history.lock().map_err(|e| e.to_string())?;
+                if let Some(directory) = p.directory.as_deref() {
+                    guard.reported(directory);
+                }
+            }
+            let base = history
+                .lock()
+                .map_err(|e| e.to_string())?
+                .cwd
+                .clone()
+                .or_else(|| p.directory.clone());
             let token = crate::ssh_suggest::last_token(&p.fragment);
-            let query = crate::ssh_suggest::path_query(&token, p.directory.as_deref());
+            let query = crate::ssh_suggest::path_query(&token, base.as_deref());
             let mut entries = Vec::new();
             let mut pending = false;
             if let Some(query) = &query {
@@ -365,11 +390,41 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
                 }
             }
             let snippets = crate::ssh_records::snippets_for(host_id.as_deref())?;
-            let rows =
-                crate::ssh_suggest::rank(&p.fragment, &token, query.as_ref(), &entries, &snippets);
+            let past = history.lock().map_err(|e| e.to_string())?;
+            let rows = crate::ssh_suggest::rank(
+                &p.fragment,
+                &token,
+                query.as_ref(),
+                &entries,
+                &snippets,
+                &past,
+            );
+            drop(past);
             // The fragment comes back so a client can throw away an answer
             // that arrived after the person typed something else.
             Ok(json!({"fragment": p.fragment, "rows": rows, "pending": pending}))
+        }
+        // One line the person actually submitted, so the session can offer it
+        // back and follow where a `cd` took them.
+        //
+        // The client only calls this for a line the far end was seen echoing,
+        // which is the same test that keeps a password off the screen. A
+        // prompt with echo off never confirms, so nothing typed into one is
+        // ever recorded here, and nothing recorded here is ever written to
+        // disk or leaves this machine.
+        "ssh.session.ran" => {
+            let p: SuggestParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let history = {
+                let guard = sessions().lock().map_err(|e| e.to_string())?;
+                let live = guard.get(&p.id).ok_or("SSH session no longer exists")?;
+                Arc::clone(&live.history)
+            };
+            let mut guard = history.lock().map_err(|e| e.to_string())?;
+            if let Some(directory) = p.directory.as_deref() {
+                guard.reported(directory);
+            }
+            guard.ran(&p.fragment);
+            Ok(json!({"recorded": true, "directory": guard.cwd}))
         }
         "ssh.session.close" => {
             let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
@@ -665,6 +720,10 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
             .await
             .map_err(|e| e.to_string())?;
     }
+    // Where the session starts is known rather than assumed: this side just
+    // sent the `cd` that put it there.
+    let mut history = crate::ssh_suggest::SessionHistory::default();
+    history.opened_in(if directory.is_empty() { "~" } else { directory });
     let (tx, mut rx) = mpsc::unbounded_channel();
     let output = Arc::new(Mutex::new(Output {
         bytes: Vec::new(),
@@ -703,6 +762,7 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
         output,
         handle,
         directories: Arc::new(Mutex::new(DirCache::default())),
+        history: Arc::new(Mutex::new(history)),
         meta,
     })
 }
