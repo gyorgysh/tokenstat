@@ -219,9 +219,14 @@ final class ChatModel {
 
     /// Ask an agent for a starting point, from a sentence about what the
     /// persona should be good at. Returns a draft for a form, never a save.
-    func draftPersona(brief: String, backend: String) async -> ChatPersonaDraft? {
+    func draftPersona(brief: String, backend: String, name: String? = nil) async -> ChatPersonaDraft? {
         do {
-            return try await Bridge.draftChatPersona(brief: brief, backend: backend, peer: peer)
+            return try await Bridge.draftChatPersona(
+                brief: brief,
+                backend: backend,
+                name: name,
+                peer: peer
+            )
         } catch {
             self.error = error.localizedDescription
             return nil

@@ -64,7 +64,7 @@ ALLOWED = [
     # Whole-surface controls: the tag is the label. A starting point fills the
     # field it sits under, and "Show more" reveals the rows below it, so in
     # both cases a glyph would name an action the surface already is.
-    ("Features/Workspaces/Chat/PersonaEditor.swift", "wish = point.1"),
+    ("Features/Workspaces/Chat/PersonaEditor.swift", "draft.systemPrompt = point.1"),
     ("App/RootView.swift", "expandedChatHistories"),
     # The busy variant of the editor footer's action. It carries a glyph when
     # it is idle; while a request is in flight the spinner stands in for it.

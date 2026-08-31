@@ -1052,9 +1052,13 @@ extension Bridge {
     static func draftChatPersona(
         brief: String,
         backend: String,
+        name: String? = nil,
         peer: String? = nil
     ) async throws -> ChatPersonaDraft {
-        let params: [String: Any] = ["text": brief, "backend": backend]
+        var params: [String: Any] = ["text": brief, "backend": backend]
+        if let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            params["name"] = name
+        }
         if let peer {
             return try await onPeer(peer, "chat.personaDraft", params, as: ChatPersonaDraft.self)
         }

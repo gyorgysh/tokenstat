@@ -271,7 +271,6 @@ private struct ClientChatThread: View {
         }
         .sheet(isPresented: $showingPersonas) {
             PersonaEditor(model: model, onClose: { showingPersonas = false })
-                .presentationBackground(Theme.background)
         }
         .task {
             if let chat = model.chats.first(where: { $0.id == chatID }) {

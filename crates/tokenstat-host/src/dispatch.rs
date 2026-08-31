@@ -1737,6 +1737,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         "chat.personaDraft" => Ok(store.draft_persona(
             &p.text.ok_or("chat.personaDraft needs text")?,
             &p.backend.ok_or("chat.personaDraft needs a backend")?,
+            p.name.as_deref(),
         )?),
         "chat.personaRemove" => Ok(
             json!({ "removed": store.remove_persona(&p.id.ok_or("chat.personaRemove needs id")?)? }),

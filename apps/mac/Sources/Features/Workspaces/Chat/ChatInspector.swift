@@ -63,7 +63,6 @@ struct ChatInspector: View {
         .background(Theme.background)
         .sheet(isPresented: $showingPersonas) {
             PersonaEditor(model: model, onClose: { showingPersonas = false })
-                .presentationBackground(Theme.background)
         }
         .confirmationDialog("Delete this chat?", isPresented: $pendingDelete, titleVisibility: .visible) {
             Button("Delete chat", role: .destructive) {

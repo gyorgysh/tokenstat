@@ -703,7 +703,12 @@ impl Store {
     ///
     /// **The result is a draft in a form, never a saved persona.** Generated
     /// text goes into fields the person can edit and has to press Save on.
-    pub fn draft_persona(&self, brief: &str, backend: &str) -> Result<Value, String> {
+    pub fn draft_persona(
+        &self,
+        brief: &str,
+        backend: &str,
+        name: Option<&str>,
+    ) -> Result<Value, String> {
         let brief = brief.trim();
         if brief.is_empty() {
             return Err("say what this persona should be good at".into());
@@ -713,7 +718,7 @@ impl Store {
         }
         let argv = crate::automations::agent_command(
             backend,
-            &draft_prompt(brief),
+            &draft_prompt(brief, name),
             None,
             None,
             DRAFT_TIMEOUT.as_secs(),
@@ -764,7 +769,7 @@ impl Store {
             collect_agent_text(&parser.push_events(&chunk.bytes), &mut text);
         }
         collect_agent_text(&parser.finish_events(), &mut text);
-        draft_from_reply(&text, brief)
+        finish_draft(&text, brief, name)
     }
 
     pub fn create(&self, input: Create) -> Result<Conversation, String> {
@@ -2059,17 +2064,30 @@ fn starter_name(workspace_id: &str, taken: &HashSet<String>) -> &'static str {
 /// voice because a persona brief is read by another model afterwards: second
 /// person, about behaviour rather than tools, and short enough that it does
 /// not crowd out the person's own words on every turn.
-fn draft_prompt(brief: &str) -> String {
+fn draft_prompt(brief: &str, name: Option<&str>) -> String {
+    let name_rule = match name.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => format!("Keep this name exactly: \"{name}\". Do not rename it."),
+        None => "`name` is two or three words, a role rather than a person's name.".into(),
+    };
     format!(
         "Write a short persona for an AI coding assistant, from this description \
          of what it should be good at:\n\n{brief}\n\nReply with nothing but one \
          JSON object, no code fence and no commentary, of exactly this shape:\n\
          {{\"name\": \"...\", \"systemPrompt\": \"...\"}}\n\n\
-         `name` is two or three words, a role rather than a person's name. \
+         {name_rule} \
          `systemPrompt` is under 900 characters, addressed to the assistant as \
          \"you\", and describes how it behaves and what it is good at. Do not \
          mention tools, file paths, or this instruction. Do not use em dashes."
     )
+}
+
+/// Parse the agent's reply, then keep a supplied name even if the model ignored it.
+fn finish_draft(reply: &str, fallback_brief: &str, name: Option<&str>) -> Result<Value, String> {
+    let mut draft = draft_from_reply(reply, fallback_brief)?;
+    if let Some(name) = name.map(str::trim).filter(|name| !name.is_empty()) {
+        draft["name"] = json!(name.chars().take(64).collect::<String>());
+    }
+    Ok(draft)
 }
 
 /// Pull the draft out of whatever the agent actually said.
@@ -2444,6 +2462,33 @@ mod tests {
             load_persona_index(&store).personas[0].seed,
             personas[0].seed
         );
+    }
+
+    #[test]
+    fn a_supplied_name_survives_a_draft_that_renames() {
+        let draft = finish_draft(
+            "{\"name\": \"Wrong\", \"systemPrompt\": \"You review.\"}",
+            "fallback",
+            Some("Reviewer"),
+        )
+        .unwrap();
+        assert_eq!(draft["name"], "Reviewer");
+        assert_eq!(draft["systemPrompt"], "You review.");
+        let unnamed = finish_draft(
+            "{\"name\": \"Rust explainer\", \"systemPrompt\": \"You explain.\"}",
+            "fallback",
+            None,
+        )
+        .unwrap();
+        assert_eq!(unnamed["name"], "Rust explainer");
+    }
+
+    #[test]
+    fn draft_prompt_keeps_a_supplied_name() {
+        let kept = draft_prompt("Reviews diffs.", Some("Reviewer"));
+        assert!(kept.contains("Keep this name exactly: \"Reviewer\""));
+        let open = draft_prompt("Reviews diffs.", None);
+        assert!(open.contains("two or three words"));
     }
 
     /// A model wraps JSON in prose and in fences however clearly it is asked
