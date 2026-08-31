@@ -35,6 +35,28 @@ enum TranscriptFollow {
         return "\(items.count)-\(last)-\(mood)"
     }
 
+    /// What the live seat's character is doing.
+    ///
+    /// One function for both transcripts, because a chat on the Mac and the
+    /// same chat on a phone should not disagree about whether the agent is
+    /// thinking or already answering. Streaming prose is `.speaking`, not
+    /// `.thinking`: the difference is the whole reason the seat has a face on
+    /// it rather than a spinner.
+    static func liveMood(
+        items: [ChatDisplayItem],
+        busy: Bool,
+        runningTool: Bool,
+        waiting: Bool,
+        settle: PersonaMood?
+    ) -> PersonaMood? {
+        if let settle { return settle }
+        if waiting { return .waiting }
+        guard busy else { return nil }
+        if runningTool { return .working }
+        if case let .assistant(text, _) = items.last?.kind, !text.isEmpty { return .speaking }
+        return .thinking
+    }
+
     /// Growing prose. Used to pin without animation.
     static func streamExtent(_ items: [ChatDisplayItem]) -> Int {
         guard let last = items.last else { return 0 }

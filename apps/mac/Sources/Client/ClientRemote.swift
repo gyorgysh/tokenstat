@@ -467,11 +467,12 @@ enum ClientRemote {
         try await Bridge.saveChatPersona(persona, workspaceID: workspaceID, peer: peer)
     }
 
+    /// Nil when the workspace chose to have no default at all.
     static func setDefaultChatPersona(
         peer: String,
         workspaceID: String,
         personaID: String
-    ) async throws -> ChatPersona {
+    ) async throws -> ChatPersona? {
         try await Bridge.setDefaultChatPersona(
             workspaceID: workspaceID,
             personaID: personaID,

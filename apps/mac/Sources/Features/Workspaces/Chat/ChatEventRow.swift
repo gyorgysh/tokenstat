@@ -218,7 +218,15 @@ struct ChatWorkingIndicator: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
-            PersonaMark(seed: seed, size: 26, state: mood)
+            // Thinking is the one state that can last a minute, and one loop
+            // held that long stops reading as thought and starts reading as a
+            // hang. So the character keeps changing what thinking looks like.
+            // Everything else here is short and says exactly one thing.
+            if mood == .thinking {
+                PersonaPastime(seed: seed, size: 26, doing: .thought, pokeable: false)
+            } else {
+                PersonaMark(seed: seed, size: 26, state: mood)
+            }
             Text(label)
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
@@ -231,15 +239,9 @@ struct ChatWorkingIndicator: View {
         .accessibilityLabel(label)
     }
 
-    private var label: String {
-        switch mood {
-        case .working: return "Working"
-        case .waiting: return "Waiting"
-        case .ok: return "Done"
-        case .failed: return "Failed"
-        default: return "Thinking"
-        }
-    }
+    /// The mood names itself. One list, so a state added to the character
+    /// cannot arrive in the transcript still calling itself "Thinking".
+    private var label: String { mood.label }
 }
 
 /// Path and +n −m, expanding into the shared DiffBody rather than a second

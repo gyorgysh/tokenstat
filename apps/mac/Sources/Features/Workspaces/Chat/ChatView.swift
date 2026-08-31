@@ -228,10 +228,13 @@ struct ChatView: View {
     #endif
 
     private var liveMood: PersonaMood? {
-        if let settleMood { return settleMood }
-        if !model.approvals.isEmpty { return .waiting }
-        guard model.busy else { return nil }
-        return model.isRunningTool ? .working : .thinking
+        TranscriptFollow.liveMood(
+            items: model.displayItems,
+            busy: model.busy,
+            runningTool: model.isRunningTool,
+            waiting: !model.approvals.isEmpty,
+            settle: settleMood
+        )
     }
 
     private var structureToken: String {
@@ -341,7 +344,7 @@ struct ChatView: View {
 
     private var emptyConversation: some View {
         VStack(spacing: Theme.Space.m) {
-            ChatScene(reduceMotion: reduceMotion)
+            ChatScene(seed: model.defaultFaceSeed)
             Text("Ask about \(workspaceName ?? "this folder")")
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
@@ -355,7 +358,7 @@ struct ChatView: View {
     private var empty: some View {
         VStack(spacing: Theme.Space.l) {
             Spacer()
-            ChatScene(reduceMotion: reduceMotion)
+            ChatScene(seed: model.defaultFaceSeed)
             Text("Start a chat")
                 .font(Theme.title2.weight(.semibold))
             Text("Ask an agent to explore, plan, or work in this folder.")

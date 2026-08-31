@@ -3478,29 +3478,37 @@ private struct ChatSidebarConversationRow: View {
             }
             .buttonStyle(.plain)
 
-            if isHovering {
-                Button {
-                    confirmsRemoval = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(Theme.fit(10, weight: .medium))
-                        .foregroundStyle(isTrashHovering ? Theme.accent : Color.secondary)
-                        .frame(width: 20, height: 20)
-                        .background(
-                            isTrashHovering ? Theme.accentSoft : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        )
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .onHover { isTrashHovering = $0 }
-                .help("Remove chat")
-                .transition(.opacity)
+            // Always in the layout, and only sometimes visible. Inserting it
+            // on hover made the row taller and narrower at the moment the
+            // pointer arrived, so every row under it jumped and the title
+            // re-truncated. The seat is reserved instead: hovering changes
+            // colour and nothing else.
+            Button {
+                confirmsRemoval = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(Theme.fit(10, weight: .medium))
+                    .foregroundStyle(isTrashHovering ? Theme.accent : Color.secondary)
+                    .frame(width: 20, height: 20)
+                    .background(
+                        isTrashHovering ? Theme.accentSoft : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    )
+                    .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .onHover { isTrashHovering = $0 }
+            .help("Remove chat")
+            .opacity(isHovering ? 1 : 0)
+            // A control nobody can see is a control nobody can press.
+            .allowsHitTesting(isHovering)
         }
         .padding(.leading, Theme.Space.xl + Theme.Space.s)
         .padding(.trailing, Theme.Space.s)
         .padding(.vertical, 2)
+        // The height the row has when the trash is showing, held at all
+        // times, so the list cannot move under the pointer.
+        .frame(minHeight: 24)
         .background(isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
         .contentShape(.rect)
         .onHover { isHovering = $0 }

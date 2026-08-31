@@ -71,6 +71,8 @@ struct PersonaEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             improveAgentRow
+            ThemeRule()
+            workspaceDefaultRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear(perform: openDefault)
@@ -92,12 +94,77 @@ struct PersonaEditor: View {
         }
     }
 
+    /// Which persona new chats in this folder inherit, including none.
+    ///
+    /// A row rather than a "Make default" button on whichever persona happens
+    /// to be open. A button can only ever say yes to the persona in front of
+    /// it, so there was no way to say "none of them", and choosing no persona
+    /// in a conversation lasted exactly that conversation.
+    private var workspaceDefaultRow: some View {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("New chats here")
+                    .font(Theme.callout.weight(.medium))
+                Text("Existing conversations keep whatever they already have.")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Theme.Space.s)
+            AppMenuPicker(
+                title: "",
+                options: defaultOptions,
+                selection: defaultBinding
+            )
+            .frame(maxWidth: 200)
+            .disabled(improving)
+        }
+    }
+
+    private var defaultOptions: [(value: String, label: String)] {
+        var options: [(value: String, label: String)] = [(value: "", label: "No persona")]
+        for persona in model.personas {
+            options.append((value: persona.id, label: persona.name))
+        }
+        return options
+    }
+
+    private var defaultBinding: Binding<String> {
+        Binding(
+            get: { model.defaultPersonaID ?? "" },
+            set: { id in
+                failure = nil
+                Task {
+                    await model.setDefaultPersona(model.personas.first { $0.id == id })
+                    consumeError()
+                }
+            }
+        )
+    }
+
+    /// Whether this persona belongs to this folder or to all of them.
+    ///
+    /// A persona with no folder of its own is visible in every one, which the
+    /// host has always supported and nothing ever surfaced. Starters made for
+    /// a folder belong to it; one written by hand is usually a way of working
+    /// rather than a fact about a project, so a new one starts shared.
+    private var sharedBinding: Binding<Bool> {
+        Binding(
+            get: { draft.workspaceID == nil },
+            set: { shared in draft.workspaceID = shared ? nil : model.workspaceID }
+        )
+    }
+
     private var identityRow: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
+            // Pokeable here and nowhere else. This is the one screen where the
+            // character is the subject rather than a label on a row, so a
+            // click that shoves it is a click on the thing being edited.
             PersonaMark(
                 seed: faceSeed,
                 size: 36,
-                state: improving ? .thinking : .idle
+                state: improving ? .thinking : .idle,
+                pokeable: true
             )
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField("Name", text: $draft.name)
@@ -115,6 +182,14 @@ struct PersonaEditor: View {
                             .padding(.vertical, 4)
                             .background(Theme.accentSoft, in: Capsule())
                     }
+                    Spacer(minLength: 0)
+                    Toggle("Every folder", isOn: sharedBinding)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                        .disabled(improving)
+                        .help("Off, this persona belongs to this folder. On, every folder can pick it.")
                 }
             }
         }
@@ -200,11 +275,6 @@ struct PersonaEditor: View {
                 .disabled(improving)
         }
         Spacer()
-        if canMakeDefault {
-            Button("Make default", .claim) { makeDefault() }
-                .buttonStyle(SecondaryButtonStyle(small: true))
-                .disabled(improving)
-        }
         Button("Improve with agent", .persona) { improve() }
             .buttonStyle(SecondaryButtonStyle(small: true))
             .disabled(!canImprove)
@@ -223,11 +293,6 @@ struct PersonaEditor: View {
                         .disabled(improving)
                 }
                 Spacer(minLength: 0)
-                if canMakeDefault {
-                    Button("Make default", .claim) { makeDefault() }
-                        .buttonStyle(SecondaryButtonStyle())
-                        .disabled(improving)
-                }
             }
             HStack(spacing: Theme.Space.s) {
                 Button("Improve with agent", .persona) { improve() }
@@ -255,10 +320,6 @@ struct PersonaEditor: View {
     }
 
     private var canDelete: Bool {
-        !isNew && !draft.id.isEmpty && !isDefault
-    }
-
-    private var canMakeDefault: Bool {
         !isNew && !draft.id.isEmpty && !isDefault
     }
 
@@ -371,16 +432,6 @@ struct PersonaEditor: View {
             } else {
                 consumeError()
             }
-        }
-    }
-
-    private func makeDefault() {
-        guard !draft.id.isEmpty else { return }
-        let persona = draft
-        failure = nil
-        Task {
-            await model.setDefaultPersona(persona)
-            consumeError()
         }
     }
 

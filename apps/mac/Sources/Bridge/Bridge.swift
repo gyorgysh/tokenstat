@@ -1096,17 +1096,22 @@ extension Bridge {
         )
     }
 
+    /// Point a workspace's default at a persona, or at nothing.
+    ///
+    /// An empty id means no persona, and comes back as nil rather than as an
+    /// error: a workspace is allowed to decide that new chats here have no
+    /// voice of their own.
     static func setDefaultChatPersona(
         workspaceID: String,
         personaID: String,
         peer: String? = nil
-    ) async throws -> ChatPersona {
+    ) async throws -> ChatPersona? {
         let route = chatRoute(workspaceID: workspaceID, peer: peer)
         return try await chatInvoke(
             peer: route.peer,
             "chat.personaDefault",
             ["workspaceId": route.workspaceID, "personaId": personaID],
-            as: ChatPersona.self
+            as: ChatPersona?.self
         )
     }
 

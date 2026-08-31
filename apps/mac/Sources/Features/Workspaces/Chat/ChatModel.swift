@@ -11,6 +11,11 @@ final class ChatModel {
         var effort: String?
         var mode: String
         var autonomy: String
+        /// The persona the last conversation ended up with. Three states, and
+        /// they are all different: absent means nothing has been recorded yet
+        /// and the workspace default applies, empty means the person chose no
+        /// persona, and an id means that one.
+        var personaID: String?
     }
 
     private static let launchChoiceKey = "chat.lastLaunchChoice.v1"
@@ -86,7 +91,10 @@ final class ChatModel {
             guard generation == loadGeneration else { return }
             backends = loaded.0
             personas = loaded.1.personas
-            defaultPersonaID = loaded.1.defaultId
+            // The host says "" for a workspace that has chosen no persona.
+            // Nil here means the same thing, and every reader already handles
+            // it, so the empty string never gets past this line.
+            defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
             chats = loaded.2
             if let selected, chats.contains(where: { $0.id == selected.id }) {
                 await select(chats.first(where: { $0.id == selected.id }) ?? selected)
@@ -149,6 +157,7 @@ final class ChatModel {
                     : (saved?.autonomy ?? "standard"),
                 model: model,
                 effort: effort,
+                personaID: rememberedPersonaID(saved),
                 peer: targetPeer
             )
             guard context == loadGeneration else { return }
@@ -393,15 +402,20 @@ final class ChatModel {
         }
     }
 
-    func setDefaultPersona(_ persona: ChatPersona) async {
+    /// Choose the persona new chats in this workspace inherit, or none.
+    ///
+    /// Nil is a real choice and it persists. Before, "no persona" lasted one
+    /// conversation: the host read a workspace with no default as one nobody
+    /// had set up yet and made a fresh persona for the next chat.
+    func setDefaultPersona(_ persona: ChatPersona?) async {
         guard let workspaceID else { return }
         do {
             let saved = try await Bridge.setDefaultChatPersona(
                 workspaceID: workspaceID,
-                personaID: persona.id,
+                personaID: persona?.id ?? "",
                 peer: peer
             )
-            defaultPersonaID = saved.id
+            defaultPersonaID = saved?.id
         } catch {
             self.error = error.localizedDescription
         }
@@ -450,6 +464,26 @@ final class ChatModel {
     /// persona yet.
     var faceSeed: UInt64 {
         selected.map(faceSeed(for:)) ?? personaSeed(for: "chat")
+    }
+
+    /// The face for a chat that does not exist yet.
+    ///
+    /// The workspace's default persona, because that is the character the next
+    /// conversation in this folder will actually have. An empty screen showing
+    /// some other creature would be introducing somebody who never turns up.
+    ///
+    /// Falls back to the first persona there is, and then to a face derived
+    /// from the workspace itself, so a folder whose personas have not loaded
+    /// yet still has a character rather than a gap.
+    var defaultFaceSeed: UInt64 {
+        if let defaultPersonaID,
+           let persona = personas.first(where: { $0.id == defaultPersonaID }) {
+            return persona.seed
+        }
+        if let first = personas.first {
+            return first.seed
+        }
+        return personaSeed(for: workspaceID ?? folderID ?? "chat")
     }
 
     /// The face a conversation carries when it is shown somewhere other than
@@ -619,6 +653,27 @@ final class ChatModel {
         saveLaunchChoice(from: chat)
     }
 
+    /// The persona a new chat should start with, or nil to take the
+    /// workspace default.
+    ///
+    /// Every other setup control is carried over from the last conversation.
+    /// The persona was not, so choosing no persona and then pressing plus
+    /// handed you a persona again, and the choice looked like it had not
+    /// saved.
+    ///
+    /// The remembered id is checked against this workspace's list before it is
+    /// used. One choice is stored for the app rather than one per folder, and
+    /// a persona belonging to another folder is not available here, so an
+    /// unrecognised id falls back to this folder's own answer. "No persona"
+    /// needs no such check: it is a choice about this person, not about a
+    /// folder, and it travels.
+    private func rememberedPersonaID(_ saved: LaunchChoice?) -> String? {
+        guard let remembered = saved?.personaID else { return nil }
+        if remembered.isEmpty { return "" }
+        guard personas.contains(where: { $0.id == remembered }) else { return nil }
+        return remembered
+    }
+
     private var lastLaunchChoice: LaunchChoice? {
         guard let data = UserDefaults.standard.data(forKey: Self.launchChoiceKey) else { return nil }
         return try? JSONDecoder().decode(LaunchChoice.self, from: data)
@@ -630,7 +685,10 @@ final class ChatModel {
             model: chat.model,
             effort: chat.effort,
             mode: chat.mode,
-            autonomy: chat.autonomy
+            autonomy: chat.autonomy,
+            // Empty, not nil: a conversation with no persona is a choice worth
+            // carrying, and nil already means "nothing recorded".
+            personaID: chat.personaID ?? ""
         )
         guard let data = try? JSONEncoder().encode(choice) else { return }
         UserDefaults.standard.set(data, forKey: Self.launchChoiceKey)

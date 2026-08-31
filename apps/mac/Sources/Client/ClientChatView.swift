@@ -35,7 +35,7 @@ struct ClientChatView: View {
             isLoaded: loaded,
             isEmpty: model.chats.isEmpty,
             emptyText: "Start a chat",
-            emptyArt: .chat,
+            emptyArt: .chat(seed: model.defaultFaceSeed),
             emptyMessage: "Ask an agent to explore, plan, or work in \(place).",
             emptyActionTitle: "New chat",
             emptyActionIcon: .create,
@@ -232,7 +232,7 @@ private struct ClientChatThread: View {
                     kind: .nothingYet,
                     title: "This chat is gone",
                     message: "It was deleted on \(hostName.isEmpty ? "the computer" : hostName).",
-                    art: .chat
+                    art: .chat(seed: model.defaultFaceSeed)
                 )
                 .padding(Theme.Space.m)
             }
@@ -410,10 +410,13 @@ private struct ClientChatThread: View {
     }
 
     private var liveMood: PersonaMood? {
-        if let settleMood { return settleMood }
-        if !model.approvals.isEmpty { return .waiting }
-        guard model.busy else { return nil }
-        return model.isRunningTool ? .working : .thinking
+        TranscriptFollow.liveMood(
+            items: model.displayItems,
+            busy: model.busy,
+            runningTool: model.isRunningTool,
+            waiting: !model.approvals.isEmpty,
+            settle: settleMood
+        )
     }
 
     private var structureToken: String {

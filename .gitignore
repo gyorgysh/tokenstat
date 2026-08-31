@@ -88,6 +88,9 @@ desktop.ini
 # Gradle puts each module's build output inside the module, so the Android
 # app's is one level deeper than the Xcode one above.
 /apps/android/**/build/
+# Swift Package Manager's output, for the persona motion lab. It builds with
+# `swift build` rather than Xcode, so neither rule above catches it.
+/apps/mac/PersonaLab/.build/
 xcuserdata/
 *.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
 

@@ -31,8 +31,10 @@ enum EmptyArtKind {
     case screen
     /// Another computer has not let this device open its work yet.
     case workspaceAccess
-    /// A folder with no chats yet.
-    case chat
+    /// A folder with no chats yet. Carries the face the next conversation in
+    /// it will have, so the character on the empty screen is the one that
+    /// actually turns up.
+    case chat(seed: UInt64)
 }
 
 /// The picture over an empty state.
@@ -64,7 +66,7 @@ struct ClientEmptyArt: View {
             case .vault: VaultScene(reduceMotion: reduceMotion)
             case .screen: ScreenScene(reduceMotion: reduceMotion)
             case .workspaceAccess: WorkspaceAccessScene(reduceMotion: reduceMotion)
-            case .chat: ChatEmptyScene(reduceMotion: reduceMotion)
+            case let .chat(seed): ChatEmptyScene(seed: seed)
             }
         }
         .frame(width: Self.size.width, height: Self.size.height)
@@ -629,65 +631,15 @@ private struct WorkspaceAccessScene: View {
 
 /// The Mac chat empty picture, scaled to the client art canvas.
 ///
-/// A bubble and the agents that would answer it. Same marks as `ChatScene`,
-/// smaller so it sits in the 128x84 frame every other empty screen uses.
+/// One character, sized for the 128x84 frame every other empty screen uses.
+/// The bubble with three pulsing dots that used to be here was a picture of
+/// waiting, and the four harness marks around it named agents nobody has to
+/// choose between on this screen.
 private struct ChatEmptyScene: View {
-    var reduceMotion: Bool
-    @State private var drifting = false
-
-    private static let orbit: [(id: String, angle: Double)] = [
-        ("claude_code", 210),
-        ("grok", 330),
-        ("antigravity", 30),
-        ("cursor", 150),
-    ]
+    var seed: UInt64
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Ink.lead.opacity(0.75), style: Ink.style)
-                .frame(width: 54, height: 34)
-                .overlay {
-                    HStack(spacing: 5) {
-                        ForEach(0..<3, id: \.self) { index in
-                            Circle()
-                                .fill(index == 1 ? Ink.second : Ink.lead)
-                                .frame(width: 5, height: 5)
-                                .opacity(reduceMotion || drifting ? 1 : 0.35)
-                                .animation(
-                                    reduceMotion
-                                        ? nil
-                                        : .easeInOut(duration: 0.9)
-                                            .repeatForever(autoreverses: true)
-                                            .delay(Double(index) * 0.16),
-                                    value: drifting
-                                )
-                        }
-                    }
-                }
-            ForEach(Array(Self.orbit.enumerated()), id: \.offset) { index, item in
-                HarnessMark(id: item.id, size: 18)
-                    .offset(offset(for: item.angle))
-                    .opacity(drifting ? 1 : 0.72)
-                    .animation(
-                        reduceMotion
-                            ? nil
-                            : .easeInOut(duration: 2.4 + Double(index) * 0.35)
-                                .repeatForever(autoreverses: true),
-                        value: drifting
-                    )
-            }
-        }
-        .onAppear {
-            guard !reduceMotion else { return }
-            drifting = true
-        }
-    }
-
-    private func offset(for angle: Double) -> CGSize {
-        let radians = angle * .pi / 180
-        let radius: CGFloat = drifting ? 42 : 36
-        return CGSize(width: cos(radians) * radius, height: sin(radians) * radius * 0.58)
+        PersonaPastime(seed: seed, size: 84, doing: .leisure)
     }
 }
 

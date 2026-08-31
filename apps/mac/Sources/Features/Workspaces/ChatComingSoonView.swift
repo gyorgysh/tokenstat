@@ -19,12 +19,10 @@ struct ChatComingSoonView: View {
     /// feature in general.
     var folderName: String?
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
         VStack(spacing: Theme.Space.m) {
             Spacer(minLength: 0)
-            ChatScene(reduceMotion: reduceMotion)
+            ChatScene(seed: personaSeed(for: folderName ?? "chat"))
             Text("Chat is on the way")
                 .font(Theme.title3.weight(.semibold))
             Text(message)
@@ -51,79 +49,25 @@ struct ChatComingSoonView: View {
     }
 }
 
-/// Four harness marks drifting around a chat bubble.
+/// This folder's character, with nothing else in the picture.
 ///
-/// The rules `ClientEmptyArt` sets, kept here because both platforms draw this
-/// one: brand strokes at one weight, one small loop, and a resting frame that
-/// Reduce Motion lands on and stays at.
+/// It used to be a chat bubble with three pulsing dots and the four harness
+/// marks orbiting it. The bubble was a picture of waiting, and nobody on this
+/// screen is waiting yet: this is what somebody looks at while deciding
+/// whether to start. The marks went with it. Naming four agents on an empty
+/// screen is a decision nobody has to make here, and four things drifting
+/// around a character that is already moving is two animations arguing.
+///
+/// So it is one creature, left to get on with something, and what that is
+/// differs every time the screen is opened.
 struct ChatScene: View {
-    var reduceMotion: Bool
-
-    /// The marks, and where each one rests. Angles rather than points, so the
-    /// ring stays a ring at any size.
-    private static let orbit: [(id: String, angle: Double)] = [
-        ("claude_code", 210),
-        ("grok", 330),
-        ("antigravity", 30),
-        ("cursor", 150),
-    ]
-
-    @State private var drifting = false
+    /// The character. Seeded from the folder, so a person's projects each keep
+    /// their own, the same one every time they open it.
+    var seed: UInt64 = personaSeed(for: "chat")
 
     var body: some View {
-        ZStack {
-            bubble
-            ForEach(Array(Self.orbit.enumerated()), id: \.offset) { index, item in
-                HarnessMark(id: item.id, size: 26)
-                    .offset(offset(for: item.angle))
-                    // Each mark on its own phase, so the four breathe against
-                    // each other rather than pulsing as one object.
-                    .opacity(drifting ? 1 : 0.72)
-                    .animation(
-                        reduceMotion
-                            ? nil
-                            : .easeInOut(duration: 2.4 + Double(index) * 0.35)
-                                .repeatForever(autoreverses: true),
-                        value: drifting
-                    )
-            }
-        }
-        .frame(width: 168, height: 120)
-        .accessibilityHidden(true)
-        .onAppear {
-            guard !reduceMotion else { return }
-            drifting = true
-        }
-    }
-
-    private var bubble: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .strokeBorder(Theme.accent.opacity(0.7), lineWidth: 1.7)
-            .frame(width: 62, height: 40)
-            .overlay(alignment: .center) {
-                HStack(spacing: 5) {
-                    ForEach(0..<3, id: \.self) { dot in
-                        Circle()
-                            .fill(dot == 1 ? Theme.secondary : Theme.accent)
-                            .frame(width: 5, height: 5)
-                            .opacity(drifting ? 1 : 0.35)
-                            .animation(
-                                reduceMotion
-                                    ? nil
-                                    : .easeInOut(duration: 0.9)
-                                        .repeatForever(autoreverses: true)
-                                        .delay(Double(dot) * 0.18),
-                                value: drifting
-                            )
-                    }
-                }
-            }
-    }
-
-    /// Where one mark sits, at rest and at the far end of its drift.
-    private func offset(for angle: Double) -> CGSize {
-        let radians = angle * .pi / 180
-        let radius: CGFloat = drifting ? 56 : 50
-        return CGSize(width: cos(radians) * radius, height: sin(radians) * radius * 0.62)
+        PersonaPastime(seed: seed, size: 116, doing: .leisure)
+            .frame(width: 168, height: 132)
+            .accessibilityHidden(true)
     }
 }

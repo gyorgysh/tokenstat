@@ -107,6 +107,13 @@ pub struct Parser {
     /// last assistant payload so structured chat events can drop that summary
     /// copy while retaining result-only output from older CLI versions.
     last_claude_assistant: Option<String>,
+    /// The session this stream has already reported.
+    ///
+    /// Some CLIs announce the session once, others stamp it on every line.
+    /// Both are fine to parse from, as long as only the first reaches the
+    /// caller: a `Session` event writes the conversation index to disk, and
+    /// one per line would be one save per line.
+    last_session: Option<String>,
 }
 
 impl Parser {
@@ -118,6 +125,7 @@ impl Parser {
             last_was_text: false,
             open_tools: Vec::new(),
             last_claude_assistant: None,
+            last_session: None,
         }
     }
 
@@ -300,6 +308,13 @@ impl Parser {
         let mut out = Vec::with_capacity(events.len() + self.open_tools.len());
         for event in events {
             match &event {
+                Event::Session { id } => {
+                    if self.last_session.as_deref() == Some(id.as_str()) {
+                        continue;
+                    }
+                    self.last_session = Some(id.clone());
+                    out.push(event);
+                }
                 Event::ToolStart { call_id, .. } => {
                     if !self.open_tools.iter().any(|id| id == call_id) {
                         self.open_tools.push(call_id.clone());
@@ -646,13 +661,18 @@ fn events_codex(value: &Value) -> Vec<Event> {
 }
 
 fn events_opencode(value: &Value) -> Vec<Event> {
-    match value.get("type").and_then(Value::as_str) {
-        Some("session") | Some("session.created") => value
-            .pointer("/session/id")
-            .or_else(|| value.get("sessionID"))
-            .and_then(Value::as_str)
-            .map(|id| vec![Event::Session { id: id.into() }])
-            .unwrap_or_default(),
+    // Every line carries `sessionID`, and there is no `session` line at all,
+    // so waiting for one meant never learning the session and re-briefing a
+    // fresh agent on every turn. Read it from wherever it appears; the parser
+    // reports a session once and then stays quiet about it.
+    let session = value
+        .pointer("/session/id")
+        .or_else(|| value.get("sessionID"))
+        .and_then(Value::as_str)
+        .map(|id| Event::Session { id: id.into() });
+    let mut events: Vec<Event> = session.into_iter().collect();
+    events.extend(match value.get("type").and_then(Value::as_str) {
+        Some("session") | Some("session.created") => Vec::new(),
         Some("text") => event_text(
             value
                 .pointer("/part/text")
@@ -703,13 +723,23 @@ fn events_opencode(value: &Value) -> Vec<Event> {
             None,
         )],
         _ => Vec::new(),
-    }
+    });
+    events
 }
 
 fn events_agy(value: &Value) -> Vec<Event> {
     match value.get("event").and_then(Value::as_str) {
+        // The id sits beside `init`, not inside it:
+        // `{"event":"init","conversation_id":"…","init":{"cwd":…}}`. It was
+        // read from inside only, so no conversation ever recorded a resume
+        // token, `--conversation` was never passed, and every turn started an
+        // agent with no memory that then had to be handed the whole summary
+        // again. Both shapes are accepted, because one of them is what the
+        // fixture and an older CLI say.
         Some("init") => value
-            .pointer("/init/conversation_id")
+            .get("conversation_id")
+            .or_else(|| value.get("session_id"))
+            .or_else(|| value.pointer("/init/conversation_id"))
             .or_else(|| value.pointer("/init/session_id"))
             .and_then(Value::as_str)
             .map(|id| vec![Event::Session { id: id.into() }])
@@ -1584,6 +1614,54 @@ mod tests {
                 Some(Event::Failed { text }) if text.contains("can only use Auto")
             ),
             "{cursor_events:?}"
+        );
+    }
+
+    /// Both CLIs announce their session somewhere other than where this
+    /// parser used to look, so neither ever produced a `Session` event. With
+    /// no session recorded, no resume flag was passed, every turn started an
+    /// agent with no memory of the conversation, and the transcript filled
+    /// with handovers to the agent that was already there.
+    #[test]
+    fn a_session_is_found_where_each_cli_actually_puts_it() {
+        // Antigravity puts the id beside `init`, not inside it.
+        let mut agy = Parser::new("agy");
+        let events = agy.push_events(
+            br#"{"event":"init","conversation_id":"agy-1","init":{"permission_mode":"ask"}}
+"#,
+        );
+        assert!(
+            matches!(events.first(), Some(Event::Session { id }) if id == "agy-1"),
+            "{events:?}"
+        );
+
+        // opencode has no session line at all. Every line is stamped with it.
+        let mut opencode = Parser::new("opencode2");
+        let events = opencode.push_events(
+            br#"{"type":"step_start","sessionID":"ses_1","part":{"type":"step-start"}}
+"#,
+        );
+        assert!(
+            matches!(events.first(), Some(Event::Session { id }) if id == "ses_1"),
+            "{events:?}"
+        );
+
+        // And it is reported once, not once per line: each one writes the
+        // conversation index to disk.
+        let more = opencode.push_events(
+            br#"{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"hi"}}
+"#,
+        );
+        assert!(
+            !more
+                .iter()
+                .any(|event| matches!(event, Event::Session { .. })),
+            "{more:?}"
+        );
+        assert!(
+            more.iter()
+                .any(|event| matches!(event, Event::Text { delta } if delta == "hi")),
+            "{more:?}"
         );
     }
 

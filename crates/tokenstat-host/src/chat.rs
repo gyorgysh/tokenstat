@@ -128,8 +128,22 @@ struct PersonaIndex {
     default_by_workspace: HashMap<String, String>,
 }
 
-const STARTER_NAMES: [&str; 8] = [
-    "Lumen", "Mica", "Nori", "Pico", "Rune", "Sage", "Sora", "Vale",
+/// Names for a workspace's first persona.
+///
+/// One register on purpose: short, soft, and drawn from materials, weather and
+/// landscape rather than from people. A persona is a voice, not a colleague,
+/// and a list of first names would invite everybody to wonder who Daniel is.
+///
+/// Long enough that somebody with a folder per project sees a new one each
+/// time. `starter_name` walks the list from a hash of the workspace id and
+/// steps forward past any name already in use, so a repeat needs more open
+/// workspaces than there are names here.
+const STARTER_NAMES: [&str; 48] = [
+    "Alder", "Alto", "Amber", "Arbor", "Ash", "Aster", "Basil", "Birch", "Cairn", "Cedar",
+    "Cinder", "Clay", "Cove", "Delta", "Dune", "Ember", "Fern", "Flint", "Glade", "Harbour",
+    "Haven", "Indigo", "Iris", "Ivy", "Juniper", "Lark", "Linden", "Lumen", "Meadow", "Mesa",
+    "Mica", "Nimbus", "Nori", "Onyx", "Opal", "Pico", "Pine", "Quill", "Reed", "Ridge", "Rune",
+    "Sage", "Slate", "Sora", "Thistle", "Umber", "Vale", "Wren",
 ];
 
 const STARTER_BRIEF: &str = "You understand the local context before changing \
@@ -246,6 +260,28 @@ enum StoredEvent {
         brief: String,
         at_ms: i64,
     },
+}
+
+/// What an incoming backend is told, and whether the person is told about it.
+struct Handover {
+    brief: String,
+    /// True only when the previous turn ran on a different agent.
+    announce: bool,
+}
+
+/// Which agent ran the previous turn, read off the timeline.
+///
+/// Only `Agent` events carry a backend, so this is the last agent that
+/// actually produced anything, which is the thing a handover is measured
+/// against. `None` means nothing has run yet, and a first turn hands over
+/// nothing.
+fn last_backend(events: &[Value]) -> Option<String> {
+    events.iter().rev().find_map(|event| {
+        event
+            .get("backend")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    })
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -373,7 +409,9 @@ impl Store {
             .collect();
         Ok(json!({
             "personas": personas,
-            "defaultId": default.id,
+            // Empty means this workspace has chosen to have none, which is a
+            // different answer from "we have not looked yet".
+            "defaultId": default.map(|persona| persona.id).unwrap_or_default(),
         }))
     }
 
@@ -651,15 +689,30 @@ impl Store {
         Ok(persona)
     }
 
-    /// Point this workspace's default at a persona already available in it.
-    /// Existing conversations are not rewritten.
+    /// Point this workspace's default at a persona available in it, or at
+    /// nothing. Existing conversations are not rewritten.
+    ///
+    /// An empty id means "no persona", and it is stored rather than ignored.
+    /// Without that, choosing no persona lasted exactly one conversation:
+    /// `ensure_workspace_persona` saw a workspace with no default, decided
+    /// that meant nobody had looked yet, and minted one again for the next
+    /// chat. A workspace that wants no voice has to be able to say so.
     pub fn set_default_persona(
         &self,
         workspace_id: &str,
         persona_id: &str,
-    ) -> Result<Persona, String> {
+    ) -> Result<Option<Persona>, String> {
         if workspace_id.trim().is_empty() {
             return Err("chat.personaDefault needs a workspaceId".into());
+        }
+        if persona_id.trim().is_empty() {
+            let mut index = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
+            index
+                .default_by_workspace
+                .insert(workspace_id.to_string(), String::new());
+            drop(index);
+            self.save_personas()?;
+            return Ok(None);
         }
         let persona = self.persona(persona_id)?;
         if !persona_visible(&persona, workspace_id) {
@@ -671,7 +724,7 @@ impl Store {
             .insert(workspace_id.to_string(), persona.id.clone());
         drop(index);
         self.save_personas()?;
-        Ok(persona)
+        Ok(Some(persona))
     }
 
     pub fn remove_persona(&self, id: &str) -> Result<bool, String> {
@@ -985,12 +1038,13 @@ impl Store {
 
     /// The handover an incoming backend should be given, if any.
     ///
-    /// Due exactly when this conversation has history and the backend about to
-    /// run has no session of its own to resume. That covers the case this
-    /// exists for (somebody switched agent mid-conversation) and excludes the
-    /// two it must not fire on: a first turn, which has nothing to hand over,
-    /// and an ordinary resume, where the agent already remembers.
-    fn handoff_brief(&self, chat: &Conversation) -> Result<Option<String>, String> {
+    /// Due whenever this conversation has history and the backend about to run
+    /// has no session of its own to resume. That is not the same question as
+    /// whether the conversation changed hands, which is why `announce` is
+    /// separate: an agent that cannot resume itself needs the summary on every
+    /// turn, and saying "handed to" every turn described a switch that never
+    /// happened.
+    fn handover(&self, chat: &Conversation) -> Result<Option<Handover>, String> {
         if chat.resume_tokens.contains_key(&chat.backend) {
             return Ok(None);
         }
@@ -999,7 +1053,14 @@ impl Store {
             .map(|workspace| workspace.path.display().to_string())
             .unwrap_or_default();
         let brief = crate::chat_brain::brief(&events, &folder, crate::chat_brain::BUDGET);
-        Ok((!brief.is_empty()).then_some(brief))
+        if brief.is_empty() {
+            return Ok(None);
+        }
+        let previous = last_backend(&events);
+        Ok(Some(Handover {
+            announce: previous.is_some_and(|name| name != chat.backend),
+            brief,
+        }))
     }
 
     /// Keep the handover on disk beside the timeline it was folded from.
@@ -1108,16 +1169,16 @@ impl Store {
         // exactly once, to the agent that has just been handed a conversation
         // it did not have.
         let standing_due = standing_is_due(&chat, &composed.standing_fingerprint);
-        let handoff = self.handoff_brief(&chat)?;
+        let handover = self.handover(&chat)?;
         let mut instructions = String::new();
         if standing_due {
             instructions.push_str(&composed.standing_text);
         }
-        if let Some(brief) = &handoff {
+        if let Some(handover) = &handover {
             if !instructions.is_empty() {
                 instructions.push_str("\n\n");
             }
-            instructions.push_str(brief);
+            instructions.push_str(&handover.brief);
         }
         let system_append = (!instructions.is_empty()).then_some(instructions.as_str());
         let prompt = composed.user_text.as_str();
@@ -1261,17 +1322,23 @@ impl Store {
         }
         // The handover goes on the timeline, brief and all. It is text
         // tokenstat put in front of somebody's agent, so their conversation is
-        // where it should be readable.
-        if let Some(brief) = &handoff {
-            self.write_brain(id, brief)?;
-            self.append(
-                id,
-                &StoredEvent::Handoff {
-                    to: chat.backend.clone(),
-                    brief: brief.clone(),
-                    at_ms: now_ms(),
-                },
-            )?;
+        // where it should be readable. Only when the conversation actually
+        // changed hands, though: the same agent being handed its own history
+        // again is plumbing, and a row saying so after every reply reads as
+        // the chat talking to itself. `brain.md` is still written either way,
+        // so what the agent was told is always on disk.
+        if let Some(handover) = &handover {
+            self.write_brain(id, &handover.brief)?;
+            if handover.announce {
+                self.append(
+                    id,
+                    &StoredEvent::Handoff {
+                        to: chat.backend.clone(),
+                        brief: handover.brief.clone(),
+                        at_ms: now_ms(),
+                    },
+                )?;
+            }
         }
         self.append(
             id,
@@ -1698,7 +1765,7 @@ impl Store {
         persona_id: Option<&str>,
     ) -> Result<Option<Persona>, String> {
         match persona_id {
-            None => Ok(Some(self.ensure_workspace_persona(workspace_id)?)),
+            None => self.ensure_workspace_persona(workspace_id),
             Some(id) if id.trim().is_empty() => Ok(None),
             Some(id) => Ok(Some(self.persona(id)?)),
         }
@@ -1715,23 +1782,29 @@ impl Store {
             .ok_or_else(|| "no persona with that id".into())
     }
 
-    /// The workspace default, creating a local starter if this folder has none.
+    /// The workspace default, creating a local starter if this folder has
+    /// never had one. `None` when the workspace has chosen to have none.
     ///
     /// Never calls an agent. The name is picked from a product-owned set from
     /// the workspace id, and a collision advances through that set.
-    pub fn ensure_workspace_persona(&self, workspace_id: &str) -> Result<Persona, String> {
+    pub fn ensure_workspace_persona(&self, workspace_id: &str) -> Result<Option<Persona>, String> {
         if workspace_id.trim().is_empty() {
             return Err("chat.personas needs a workspaceId".into());
         }
         let mut index = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(id) = index.default_by_workspace.get(workspace_id).cloned() {
+            // A stored empty id is a decision, not a gap. Nothing is minted
+            // and nothing is adopted: this workspace wants no persona.
+            if id.is_empty() {
+                return Ok(None);
+            }
             if let Some(persona) = index
                 .personas
                 .iter()
                 .find(|persona| persona.id == id && persona_visible(persona, workspace_id))
                 .cloned()
             {
-                return Ok(persona);
+                return Ok(Some(persona));
             }
         }
         if let Some(persona) = index
@@ -1745,7 +1818,7 @@ impl Store {
                 .insert(workspace_id.to_string(), persona.id.clone());
             drop(index);
             self.save_personas()?;
-            return Ok(persona);
+            return Ok(Some(persona));
         }
         let taken: HashSet<String> = index
             .personas
@@ -1771,7 +1844,7 @@ impl Store {
             .insert(workspace_id.to_string(), id);
         drop(index);
         self.save_personas()?;
-        Ok(persona)
+        Ok(Some(persona))
     }
 
     fn save_personas(&self) -> Result<(), String> {
@@ -2574,7 +2647,7 @@ mod tests {
         store.conversations.lock().unwrap().push(chat.clone());
 
         // Nothing has happened yet, so there is nothing to hand over.
-        assert_eq!(store.handoff_brief(&chat).unwrap(), None);
+        assert!(store.handover(&chat).unwrap().is_none());
 
         store
             .append(
@@ -2605,20 +2678,163 @@ mod tests {
         // Claude has run and holds its own session, so it needs no summary.
         chat.resume_tokens
             .insert("claude".into(), "session-1".into());
-        assert_eq!(store.handoff_brief(&chat).unwrap(), None);
+        assert!(store.handover(&chat).unwrap().is_none());
 
         // Switching to an agent with no session of its own is the whole point.
         chat.backend = "codex".into();
-        let brief = store
-            .handoff_brief(&chat)
+        let handover = store
+            .handover(&chat)
             .unwrap()
             .expect("an incoming agent must be told what happened");
-        assert!(brief.contains("Add a retry to the uploader"));
-        assert!(brief.contains("src/upload.rs +12 −3"));
+        assert!(handover.brief.contains("Add a retry to the uploader"));
+        assert!(handover.brief.contains("src/upload.rs +12 −3"));
+        assert!(
+            handover.announce,
+            "a real change of agent belongs on the timeline"
+        );
 
         // And once codex has its own session, it stops being handed one.
         chat.resume_tokens.insert("codex".into(), "thread-1".into());
-        assert_eq!(store.handoff_brief(&chat).unwrap(), None);
+        assert!(store.handover(&chat).unwrap().is_none());
+    }
+
+    /// An agent that cannot resume itself is handed its own history on every
+    /// turn, and that is correct. Saying "handed to" about it is not: nothing
+    /// changed hands, and the transcript filled with rows describing a switch
+    /// that never happened.
+    #[test]
+    fn re_briefing_the_same_agent_is_not_announced() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let chat = Conversation {
+            id: "chat-rebrief".into(),
+            workspace_id: "ws".into(),
+            title: "Rebrief".into(),
+            backend: "agy".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: "execute".into(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        };
+        store.conversations.lock().unwrap().push(chat.clone());
+        store
+            .append(
+                "chat-rebrief",
+                &StoredEvent::User {
+                    text: "Add a retry to the uploader".into(),
+                    at_ms: 1,
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "chat-rebrief",
+                &StoredEvent::Agent {
+                    event: Event::Text {
+                        delta: "Done.".into(),
+                    },
+                    at_ms: 2,
+                    backend: "agy".into(),
+                },
+            )
+            .unwrap();
+
+        let handover = store
+            .handover(&chat)
+            .unwrap()
+            .expect("an agent with no session still needs its history");
+        assert!(handover.brief.contains("Add a retry to the uploader"));
+        assert!(
+            !handover.announce,
+            "the same agent being re-briefed is plumbing, not a handover"
+        );
+    }
+
+    /// Choosing no persona has to survive the next chat.
+    ///
+    /// It did not: a workspace with no default read as one nobody had set up,
+    /// so the next conversation minted a starter and the choice was gone.
+    #[test]
+    fn a_workspace_may_choose_to_have_no_persona() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+
+        let starter = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
+        assert_eq!(store.set_default_persona("workspace-a", "").unwrap(), None);
+
+        // The decision sticks, and nothing is minted to replace it.
+        assert_eq!(store.ensure_workspace_persona("workspace-a").unwrap(), None);
+        assert_eq!(store.ensure_workspace_persona("workspace-a").unwrap(), None);
+        let listed = store.personas("workspace-a").unwrap();
+        assert_eq!(listed["defaultId"], "");
+        assert_eq!(listed["personas"].as_array().unwrap().len(), 1);
+
+        // And it can be taken back.
+        let again = store
+            .set_default_persona("workspace-a", &starter.id)
+            .unwrap()
+            .expect("naming a persona returns it");
+        assert_eq!(again.id, starter.id);
+        assert_eq!(
+            store
+                .ensure_workspace_persona("workspace-a")
+                .unwrap()
+                .map(|persona| persona.id),
+            Some(starter.id)
+        );
+    }
+
+    /// A persona with no folder of its own belongs to all of them. The host
+    /// has always allowed it; nothing surfaced it until the editor did.
+    #[test]
+    fn a_persona_without_a_folder_is_visible_in_every_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let shared = store
+            .save_persona(Persona {
+                id: String::new(),
+                workspace_id: None,
+                name: "Reviewer".into(),
+                system_prompt: "You review.".into(),
+                seed: 0,
+                created_at_ms: 0,
+                updated_at_ms: 0,
+            })
+            .unwrap();
+
+        for workspace in ["workspace-a", "workspace-b"] {
+            let listed = store.personas(workspace).unwrap();
+            let names: Vec<String> = listed["personas"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|persona| persona["name"].as_str().unwrap().to_string())
+                .collect();
+            assert!(names.contains(&"Reviewer".to_string()), "{names:?}");
+        }
+
+        // And either folder may adopt it as its own default.
+        assert_eq!(
+            store
+                .set_default_persona("workspace-b", &shared.id)
+                .unwrap()
+                .map(|persona| persona.id),
+            Some(shared.id)
+        );
     }
 
     #[test]
@@ -3039,8 +3255,14 @@ mod tests {
     fn first_workspace_load_creates_one_starter_and_is_idempotent() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
-        let first = store.ensure_workspace_persona("workspace-a").unwrap();
-        let second = store.ensure_workspace_persona("workspace-a").unwrap();
+        let first = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
+        let second = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
         assert_eq!(first.id, second.id);
         assert_eq!(first.name, second.name);
         assert_eq!(store.personas.lock().unwrap().personas.len(), 1);
@@ -3056,8 +3278,14 @@ mod tests {
     fn different_workspaces_get_their_own_default() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
-        let a = store.ensure_workspace_persona("workspace-a").unwrap();
-        let b = store.ensure_workspace_persona("workspace-b").unwrap();
+        let a = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
+        let b = store
+            .ensure_workspace_persona("workspace-b")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
         assert_ne!(a.id, b.id);
         assert_eq!(a.workspace_id.as_deref(), Some("workspace-a"));
         assert_eq!(b.workspace_id.as_deref(), Some("workspace-b"));
@@ -3070,7 +3298,10 @@ mod tests {
     fn changing_a_default_does_not_rewrite_an_existing_chat() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
-        let first = store.ensure_workspace_persona("workspace-a").unwrap();
+        let first = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
         store.conversations.lock().unwrap().push(Conversation {
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
@@ -3115,7 +3346,10 @@ mod tests {
     fn omitted_persona_uses_the_default_and_empty_means_none() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
-        let default = store.ensure_workspace_persona("workspace-a").unwrap();
+        let default = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
         let omitted = store
             .resolve_create_persona("workspace-a", None)
             .unwrap()
@@ -3133,14 +3367,20 @@ mod tests {
     fn a_missing_default_repairs_without_creating_two() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
-        let first = store.ensure_workspace_persona("workspace-a").unwrap();
+        let first = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
         store
             .personas
             .lock()
             .unwrap()
             .default_by_workspace
             .insert("workspace-a".into(), "persona-gone".into());
-        let repaired = store.ensure_workspace_persona("workspace-a").unwrap();
+        let repaired = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
         assert_eq!(repaired.id, first.id);
         assert_eq!(store.personas.lock().unwrap().personas.len(), 1);
     }
@@ -3149,7 +3389,10 @@ mod tests {
     fn removing_the_active_default_is_refused() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
-        let default = store.ensure_workspace_persona("workspace-a").unwrap();
+        let default = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
         let err = store.remove_persona(&default.id).unwrap_err();
         assert!(err.contains("default"));
         assert_eq!(store.personas.lock().unwrap().personas.len(), 1);
@@ -3170,7 +3413,10 @@ mod tests {
                 updated_at_ms: 0,
             })
             .unwrap();
-        let starter = store.ensure_workspace_persona("workspace-a").unwrap();
+        let starter = store
+            .ensure_workspace_persona("workspace-a")
+            .unwrap()
+            .expect("a workspace with no choice recorded gets a starter");
         let listed = store.personas("workspace-a").unwrap();
         let ids: Vec<&str> = listed["personas"]
             .as_array()

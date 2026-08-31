@@ -7,6 +7,29 @@ desktop and Android builds remain previews. Newest first.
 
 ## [0.7.3] - Unreleased
 
+### Fixed
+
+- Choosing no persona lasted exactly one conversation. A workspace with no
+  default read as one nobody had set up yet, so the next chat quietly made a
+  fresh persona and inherited it. A workspace can now say it wants none, and
+  that answer is kept. Personas has a "New chats here" row that shows which
+  persona new conversations inherit and offers "No persona" alongside them,
+  replacing the "Make default" button, which could only ever say yes to
+  whichever persona happened to be open.
+- A chat in the sidebar no longer jumps when the pointer reaches it. The
+  remove button used to be inserted into the row on hover, which made the row
+  taller and the title narrower at that moment and shifted every row under it.
+  The space is always there now.
+- A conversation with an agent that cannot resume its own session said "Handed
+  to <agent>" after every single reply, describing a switch that never
+  happened. Two causes, both fixed. Antigravity and opencode do report a
+  session, but each puts it somewhere tokenstat was not looking, so no
+  conversation ever recorded one and every turn started an agent with no
+  memory of what had been said. And a summary handed to the same agent again is
+  plumbing rather than a handover, so it no longer appears on the timeline: the
+  row is for a conversation that actually changed hands. What an agent was told
+  is still written beside the conversation either way.
+
 ### Added
 
 - A Git-enabled workspace gains a Pull requests section that begins with its
@@ -68,10 +91,40 @@ desktop and Android builds remain previews. Newest first.
 - Every persona and every conversation has a face: a small character drawn from
   its own identity, so it exists the moment the persona does and stays the same
   through renames and edits. It is one creature in different moods rather than
-  a set of icons, and it replaces the three dots that used to mean "working":
-  it squashes while an agent thinks, narrows its eyes while a tool runs, and
-  goes wide-eyed in amber when a turn is waiting on you. Colours are sampled
-  from tokenstat's own accent range, so a row of personas reads as one family.
+  a set of icons, and it replaces the three dots that used to mean "working".
+  The character has weight. It breathes at rest, churns and looks up while an
+  agent thinks, narrows its eyes and hammers away while a tool runs, talks
+  while a reply streams in, goes wide-eyed in amber when a turn is waiting on
+  you, jumps when one lands, and melts into a puddle when one fails. It can
+  also bounce, keep a ball in the air, dance, and fall asleep. Because it is
+  simulated rather than drawn frame by frame, a change of mood carries the
+  motion across instead of cutting, and it never leaves the seat it sits in,
+  so a streaming transcript stays where you left it. Two personas do not move
+  alike: how firm the body is and where it dents come from the same identity
+  as its colour, which is sampled from tokenstat's own accent range so a row
+  of personas still reads as one family. In the persona editor you can poke
+  it. Everything stops for Reduce Motion and whenever the window is not in
+  front.
+- A persona can belong to every folder instead of the one it was made in.
+  The switch is on the persona itself, beside its name.
+- A new folder's starting persona is drawn from a much longer list of names,
+  so folders stop arriving as the same handful of characters.
+- An empty chat shows the character of the persona that folder's next
+  conversation will actually have, and nothing else, rather than a bubble with
+  three pulsing dots ringed by four agent marks. It has things to
+  do: it reads the paper, plays something handheld, bounces off the walls,
+  dances, keeps a ball up, walks the floor, and every so often gives up and has
+  a nap. What it picks, and for how long, is different every time, so the
+  screen you look at while deciding whether to start is never the same loop
+  twice. A long wait gets the same treatment: thinking is a creature turning
+  something over on the spot or walking the floor, not one pose held for a
+  minute.
+- One activity becomes the next rather than replacing it. Both are running for
+  half a second: the forces on the body crossfade, the expression crossfades
+  with them, whatever was being held shrinks away before the next thing grows
+  in, and the character blinks as it changes its mind. Falling asleep and then
+  waking up to dance is one continuous movement, with nothing in it that reads
+  as a cut.
 - Changing agent mid-conversation no longer starts from nothing. The incoming
   agent is handed a summary folded from the conversation itself: what was
   asked, which files changed, which commands ran, what you refused, and where
