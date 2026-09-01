@@ -5,9 +5,20 @@ and MCP server, which develop together under one version number. Stable
 releases currently contain every CLI target and the macOS desktop app; Windows
 desktop and Android builds remain previews. Newest first.
 
+The Unreleased section is always the complete, person-facing delta from the
+latest `v<version>` tag to `main`. Work that has not appeared in a shipped app
+still belongs there. When a release is tagged, close that delta under its
+version and begin the next one, rather than reconstructing release notes from
+commits at the end.
+
 ## [0.7.3] - Unreleased
 
 ### Fixed
+
+- A newer phone that opens Chat or Pull requests on an older desktop now says
+  which computer needs an update and shows a calm animated waiting state. It
+  no longer starts loading a feature the host cannot answer and leaves an
+  "unknown method" error behind.
 
 - A pull request whose diff contains a diff, such as a patch fixture or a
   document quoting one, showed a file it does not touch and cut the real file's
@@ -251,6 +262,16 @@ desktop and Android builds remain previews. Newest first.
   plan-covered turn is not drawn as money charged.
 
 ### Changed
+
+- Insights now arrives in one snapshot rather than nine separate requests,
+  reducing bridge work and making the charts settle together. Slow host calls
+  and slow Insights aggregates leave private local timing records, with method
+  and elapsed time only, so a real slow machine can be investigated without
+  recording projects, prompts, paths, or report values.
+- Scans and workspace status checks now take a share of the computer's own CPU
+  capacity instead of using one fixed concurrency limit. Older laptops retain
+  room for the app and active agents, while newer Macs can use their available
+  parallelism.
 
 - Pull-request list and detail screens use the same fixed app chrome as the
   rest of the Mac: folder scope and sidebar control on the left, contextual
