@@ -216,13 +216,15 @@ struct ClientWorkspaceSessionsView: View {
                 spacing: Theme.Space.s
             ) {
                 NavigationLink {
-                    ClientChatView(
-                        peer: peer,
-                        workspaceID: workspaceID,
-                        folderName: folder.name,
-                        hostName: hostName,
-                        openConversationOnAppear: true
-                    )
+                    RemoteHostFeatureGate(feature: .chat, peer: peer, hostName: hostName) {
+                        ClientChatView(
+                            peer: peer,
+                            workspaceID: workspaceID,
+                            folderName: folder.name,
+                            hostName: hostName,
+                            openConversationOnAppear: true
+                        )
+                    }
                 } label: {
                     let recent = chatPreview.mostRecent
                     ClientLauncherDestinationTile(

@@ -48,7 +48,8 @@ struct PullsView: View {
     private var canConnectHere: Bool { connectionHostName == nil }
 
     var body: some View {
-        Group {
+        RemoteHostFeatureGate(feature: .pulls, peer: peer, hostName: connectionHostName) {
+            Group {
             if let selectedPull {
                 PullDetailView(
                     workspaceID: workspaceID,
@@ -78,16 +79,17 @@ struct PullsView: View {
                     .refreshable { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
                 }
             }
+            }
+            .background(Theme.background)
+            .task(id: workspaceID) { await model.load(workspaceID: workspaceID, peer: peer) }
+            .onChange(of: model.scope) { _, _ in
+                Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
+            }
+            .onChange(of: model.state) { _, _ in
+                Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
+            }
+            .sheet(isPresented: loginPresented) { loginSheet }
         }
-        .background(Theme.background)
-        .task(id: workspaceID) { await model.load(workspaceID: workspaceID, peer: peer) }
-        .onChange(of: model.scope) { _, _ in
-            Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
-        }
-        .onChange(of: model.state) { _, _ in
-            Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
-        }
-        .sheet(isPresented: loginPresented) { loginSheet }
     }
 
     private var scopeChip: ScopeChip? {

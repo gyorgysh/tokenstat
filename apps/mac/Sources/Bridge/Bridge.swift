@@ -2522,6 +2522,24 @@ extension Bridge {
         try await onPeer(peer, "host.stats", as: HostStats.self)
     }
 
+    /// The wire version spoken by a paired host.
+    ///
+    /// `protocol` is sessionless, so this is safe to ask before mounting a
+    /// feature that an older desktop cannot answer. A version is a capability
+    /// boundary, not a release number: a newer phone can explain what needs an
+    /// update instead of making a feature call that only returns unknown method.
+    static func peerProtocolVersion(_ peer: String) async throws -> Int {
+        struct Spoken: Codable, Sendable { let protocolVersion: String }
+        let spoken = try await onPeer(peer, "protocol", as: Spoken.self)
+        guard let version = Int(spoken.protocolVersion), version > 0 else {
+            throw BridgeError.core(
+                code: "invalid_protocol",
+                message: "The paired computer returned an invalid protocol version."
+            )
+        }
+        return version
+    }
+
     static func screenPermissions() async throws -> [ScreenPermission] {
         try await background("screen.policy.list", as: [ScreenPermission].self)
     }

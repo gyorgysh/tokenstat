@@ -147,7 +147,9 @@ struct ClientWorkspaceDetailView: View {
             // written out rather than driven from `WorkspaceSection.allCases`,
             // which is why adding the case alone left the phone without it.
             NavigationLink {
-                ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name, hostName: hostName)
+                RemoteHostFeatureGate(feature: .chat, peer: peer, hostName: hostName) {
+                    ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name, hostName: hostName)
+                }
             } label: {
                 ClientSectionRow(section: .chat, count: counts.chats)
             }
