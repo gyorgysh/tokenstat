@@ -866,7 +866,7 @@ final class ChatModel {
     /// several small pages read as nothing where one large page reads as a
     /// stutter. The transcript keeps three and a half screens of runway ahead
     /// of the reader on macOS, which is what makes a small page safe.
-    private static let pageEvents = 80
+    private static let pageEvents = 50
     /// The rows an opening window aims to hold before it stops pulling.
     private static let openDisplayItems = 24
     /// How many extra pages one opening may pull to reach that.

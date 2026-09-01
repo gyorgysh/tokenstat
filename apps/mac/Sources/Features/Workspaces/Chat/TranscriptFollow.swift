@@ -540,8 +540,21 @@ final class TranscriptWindow {
 
     /// How many height changes a held place survives. Prepended rows are
     /// inserted at estimated heights and measured over the frames that
-    /// follow, so the place has to be put back on each of them.
-    private static let holdFrames = 10
+    /// follow, so the place has to be put back on more than one of them.
+    ///
+    /// Small, because each one that fires is a programmatic scroll, and a
+    /// programmatic scroll during a flick stops the flick. The frames that
+    /// find the row already where it belongs cost nothing, so the budget only
+    /// has to cover the ones that do not.
+    private static let holdFrames = 6
+
+    /// How far the held row may have drifted before it is worth moving.
+    ///
+    /// Nothing here is free: `scrollTo` sets the offset, and setting the
+    /// offset under somebody's finger ends their scroll. A page that landed
+    /// two points off is not worth stopping a gesture for, and after the
+    /// first correction most frames are already right.
+    private static let holdSlack: CGFloat = 3
 
     /// And how long, whether or not those frames were spent.
     ///
@@ -604,11 +617,17 @@ final class TranscriptWindow {
         if let held, changed {
             heldFrames -= 1
             if heldFrames <= 0 { release() }
-            restore?(held)
-            // A frame spent putting the reader back is not a frame to judge
-            // the boundary from: the offset it reports is the one being
-            // corrected.
-            return
+            // Where the row actually is now. Already reported, because it is
+            // one of the rows on screen, so this costs a dictionary lookup
+            // rather than another measurement.
+            let drifted = rowFrames[held.id].map { abs($0.minY - held.top) > Self.holdSlack }
+            if drifted != false {
+                restore?(held)
+                // A frame spent putting the reader back is not a frame to
+                // judge the boundary from: the offset it reports is the one
+                // being corrected.
+                return
+            }
         }
         // Anchor evaluation is the only O(n) work here. Throttle it to every
         // second frame or when the viewport actually moved.
