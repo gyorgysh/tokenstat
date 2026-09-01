@@ -108,6 +108,34 @@ const PI_ALLOW: &[&str] = &[
     "message.usage.cost.total",
 ];
 
+/// Keys a Muse fixture may keep.
+///
+/// `payload.record.workspace_root` is deliberately absent, for the same reason
+/// Pi's `cwd` is: it is an absolute path to somebody's work, the parser only
+/// ever takes its last component, and a fixture does not need a real one to
+/// prove that. The records that carry it are dropped whole by `keeps` anyway.
+const MUSE_ALLOW: &[&str] = &[
+    "schema_version",
+    "id",
+    "sequence",
+    "recorded_at",
+    "record_type",
+    "payload_type",
+    "payload_schema_version",
+    "stream.kind",
+    "stream.id",
+    "payload.event.kind",
+    "payload.event.model",
+    "payload.event.duration_ms",
+    "payload.event.finish_reason",
+    "payload.event.usage.input_tokens",
+    "payload.event.usage.output_tokens",
+    "payload.event.usage.cached_tokens",
+    "payload.event.usage.cache_write_tokens",
+    "payload.event.usage.cache_read_tokens",
+    "payload.event.usage.reasoning_tokens",
+];
+
 /// Keys a DeepSeek Harness fixture may keep.
 ///
 /// The session header is dropped whole (see `keeps`), so `cwd` never reaches a
@@ -136,6 +164,7 @@ enum Profile {
     ClaudeCode,
     Pi,
     Dsh,
+    Muse,
 }
 
 impl Profile {
@@ -144,7 +173,10 @@ impl Profile {
             "claude" | "claude_code" => Ok(Self::ClaudeCode),
             "pi" => Ok(Self::Pi),
             "dsh" => Ok(Self::Dsh),
-            other => anyhow::bail!("unknown redaction profile: {other} (claude_code, pi, dsh)"),
+            "muse" => Ok(Self::Muse),
+            other => {
+                anyhow::bail!("unknown redaction profile: {other} (claude_code, pi, dsh, muse)")
+            }
         }
     }
 
@@ -153,6 +185,7 @@ impl Profile {
             Self::ClaudeCode => CLAUDE_ALLOW,
             Self::Pi => PI_ALLOW,
             Self::Dsh => DSH_ALLOW,
+            Self::Muse => MUSE_ALLOW,
         }
     }
 
@@ -173,6 +206,20 @@ impl Profile {
             // counters, and a fixture carrying both would teach the parser's
             // test that double counting is correct.
             Self::Dsh => obj.get("type").and_then(Value::as_str) == Some("assistant/message"),
+            // The one record that carries counters. `goal_usage_attribution`
+            // restates the same spend against a goal and
+            // `subagent.control.runtime_observed` restates a child's running
+            // total, so a fixture carrying either would teach the parser's
+            // test that double counting is correct.
+            Self::Muse => {
+                obj.get("payload")
+                    .and_then(Value::as_object)
+                    .and_then(|p| p.get("event"))
+                    .and_then(Value::as_object)
+                    .and_then(|e| e.get("kind"))
+                    .and_then(Value::as_str)
+                    == Some("model_completed")
+            }
         }
     }
 }

@@ -39,7 +39,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tokenstat_core::model::{BillingMode, Counters, EventId, SourceId};
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
 use tokenstat_core::sources::{
-    antigravity_cli, claude_code, codex, dsh, grok, hermes, kilo, opencode, pi,
+    antigravity_cli, claude_code, codex, dsh, grok, hermes, kilo, muse, opencode, pi,
 };
 use tokenstat_core::{Catalog, UsageEvent};
 
@@ -80,6 +80,7 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
         "hermes" => hermes_events(cwd, started_at_ms)?,
         "pi" => pi_events(cwd)?,
         "dsh" => dsh_events(cwd)?,
+        "muse" => muse_events(cwd)?,
         "antigravity" => antigravity_events(cwd)?,
         _ => return None,
     };
@@ -376,6 +377,7 @@ pub(crate) fn can_meter(command: &str) -> bool {
         "hermes" => hermes::discover(&home).is_some(),
         "pi" => pi::discover(&home).is_some(),
         "dsh" => dsh::discover(&home).is_some(),
+        "muse" => muse::discover(&home).is_some(),
         "antigravity" => antigravity_cli::discover(&home).is_some(),
         _ => false,
     }
@@ -396,6 +398,7 @@ fn harness_name(command: &str) -> Option<&'static str> {
         "hermes" => Some("hermes"),
         "pi" => Some("pi"),
         "dsh" => Some("dsh"),
+        "muse" => Some("muse"),
         "agy" => Some("antigravity"),
         _ => None,
     }
@@ -426,6 +429,31 @@ fn codex_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
             })
     })?;
     cached_events(&path, |contents| codex::parse_file(&path, contents).events)
+}
+
+/// The Muse log for this folder, newest session first.
+///
+/// Muse files by date and uuid rather than by folder, so the folder has to be
+/// read out of each candidate rather than encoded in a path. Same shape as
+/// Codex above, and same reason for the cap and the memo: this answers a poll
+/// four times a second and a session log runs to tens of megabytes.
+///
+/// Subagent logs are candidates too, and correctly so: they carry the same
+/// `workspace_root` and their spend is the folder's spend.
+fn muse_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+    let path = resolve_log("muse", cwd, || {
+        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        let sessions = muse::discover(&home)?;
+        newest_first(muse::shards(&sessions))
+            .into_iter()
+            .take(SCAN_LIMIT)
+            .find(|path| {
+                read_head(path)
+                    .and_then(|head| muse::session_workspace(&head))
+                    .is_some_and(|dir| dir == cwd)
+            })
+    })?;
+    cached_events(&path, |contents| muse::parse_file(&path, contents).events)
 }
 
 /// How many logs a locator will look at before giving up.

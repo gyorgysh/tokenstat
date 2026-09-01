@@ -9,7 +9,7 @@ use crate::model::SourceId;
 use crate::sources::claude_stats::Reconciliation;
 use crate::sources::{
     antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, dsh,
-    grok, hermes, kilo, openclaw, opencode, pi, zed,
+    grok, hermes, kilo, muse, openclaw, opencode, pi, zed,
 };
 use crate::store::Store;
 use crate::watermark;
@@ -58,6 +58,7 @@ from_parsed!(
     pi::ParseOutput,
     hermes::ParseOutput,
     dsh::ParseOutput,
+    muse::ParseOutput,
 );
 
 impl FileOutcome {
@@ -365,6 +366,20 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
                     pi::parse_file(p, &sessions, text).into()
                 })
             })
+            .collect();
+        absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
+    }
+
+    // Muse: JSONL event log, one per session and one per subagent, appended
+    // to. Read from the last offset like Pi's. The project lives in the head
+    // of the file, which a tail read never sees, so the parser reads that
+    // itself rather than being handed the whole log again on every append.
+    if let Some(sessions) = muse::discover(&home) {
+        let files = muse::shards(&sessions);
+        report.files_found += files.len() as u64;
+        let parsed: Vec<_> = files
+            .par_iter()
+            .map(|path| read_shard(path, &marks, |p, text| muse::parse_file(p, text).into()))
             .collect();
         absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
     }

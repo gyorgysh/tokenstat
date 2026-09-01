@@ -43,6 +43,9 @@ pub enum SourceId {
     Kilo,
     /// DeepSeek Harness. Compressed JSONL sessions, one folder per session.
     Dsh,
+    /// Muse. One JSONL event log per session, plus one per subagent, under a
+    /// date-partitioned sessions root.
+    Muse,
 }
 
 impl SourceId {
@@ -64,6 +67,7 @@ impl SourceId {
             SourceId::Hermes => "hermes",
             SourceId::Kilo => "kilo",
             SourceId::Dsh => "dsh",
+            SourceId::Muse => "muse",
         }
     }
 
@@ -85,6 +89,7 @@ impl SourceId {
             SourceId::Hermes => "Hermes Agent",
             SourceId::Kilo => "Kilo Code",
             SourceId::Dsh => "DeepSeek Harness",
+            SourceId::Muse => "Muse",
         }
     }
 
@@ -134,6 +139,7 @@ impl SourceId {
             "hermes" => Some(Self::Hermes),
             "kilo" => Some(Self::Kilo),
             "dsh" => Some(Self::Dsh),
+            "muse" => Some(Self::Muse),
             _ => None,
         }
     }
