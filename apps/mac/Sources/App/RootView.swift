@@ -24,6 +24,17 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var route: Route = .global(.home)
+    /// The folder whose chat pane is mounted, on macOS.
+    ///
+    /// Set on the first visit and kept. Chat is the one non-workspace screen
+    /// with a scroll position worth a person's place in it, and rebuilding it
+    /// on every visit meant reading the archive back and landing above the
+    /// latest turn, with the empty state's character on screen in between.
+    @State private var mountedChatFolder: String?
+    /// The folder whose pull requests are mounted, for the same reason. A
+    /// list that reloads from GitHub on every visit is a skeleton every visit,
+    /// and the filters and the open pull go back to their defaults with it.
+    @State private var mountedPullsFolder: String?
     @State private var model = InsightsModel()
     @State private var home = HomeModel()
     @State private var account = AccountModel()
@@ -2153,6 +2164,27 @@ struct RootView: View {
         }
     }
 
+    /// Whether the mounted chat pane is the screen in front.
+    private var showsChat: Bool { route.workspaceSection == .chat }
+
+    /// The folder the mounted chat pane is for.
+    ///
+    /// The route wins while Chat is in front, so this pane can never be the
+    /// wrong folder's, and the remembered one keeps it alive after leaving.
+    private var chatFolder: String? {
+        if case let .workspace(id, .chat) = route { return id }
+        return mountedChatFolder
+    }
+
+    /// Whether the mounted pull-request pane is the screen in front.
+    private var showsPulls: Bool { route.workspaceSection == .pulls }
+
+    /// The folder the mounted pull-request pane is for.
+    private var pullsFolder: String? {
+        if case let .workspace(id, .pulls) = route { return id }
+        return mountedPullsFolder
+    }
+
     @ViewBuilder
     private var detail: some View {
         #if os(macOS)
@@ -2180,6 +2212,44 @@ struct RootView: View {
             .accessibilityHidden(!showsWorkspaceSurface)
             .zIndex(showsWorkspaceSurface ? 1 : 0)
 
+            // Same rule as the surface above, for the same reason: hide the
+            // chat pane, do not destroy it.
+            if let id = chatFolder {
+                let folder = workspaces.folders.first { $0.id == id }
+                ChatView(
+                    model: chat,
+                    workspaceID: id,
+                    workspaceName: folder?.name,
+                    git: folder?.git,
+                    onBranchChanged: { await workspaces.refresh() },
+                    isActive: showsChat
+                )
+                .opacity(showsChat ? 1 : 0)
+                .allowsHitTesting(showsChat)
+                .accessibilityHidden(!showsChat)
+                .zIndex(showsChat ? 2 : 0)
+            }
+
+            if let id = pullsFolder {
+                let folder = workspaces.folders.first { $0.id == id }
+                PullsView(
+                    workspaceID: id,
+                    connectionHostName: folder?.isRemote == true
+                        ? "the workspace's computer"
+                        : nil,
+                    workspaceName: folder.map {
+                        $0.isRemote
+                            ? "\($0.machineLabel ?? "Remote") / \($0.name)"
+                            : $0.name
+                    },
+                    workspaceIsRemote: folder?.isRemote == true
+                )
+                .opacity(showsPulls ? 1 : 0)
+                .allowsHitTesting(showsPulls)
+                .accessibilityHidden(!showsPulls)
+                .zIndex(showsPulls ? 2 : 0)
+            }
+
             if !showsWorkspaceSurface {
                 nonWorkspaceDetail
                     .zIndex(1)
@@ -2203,6 +2273,10 @@ struct RootView: View {
              .workspace(_, .files), .workspace(_, .browser):
             EmptyView()
         case let .workspace(id, .chat):
+            #if os(macOS)
+            // Drawn by the mounted pane above, which outlives this switch.
+            EmptyView()
+            #else
             let folder = workspaces.folders.first { $0.id == id }
             ChatView(
                 model: chat,
@@ -2211,7 +2285,12 @@ struct RootView: View {
                 git: folder?.git,
                 onBranchChanged: { await workspaces.refresh() }
             )
+            #endif
         case let .workspace(id, .pulls):
+            #if os(macOS)
+            // Drawn by the mounted pane above, which outlives this switch.
+            EmptyView()
+            #else
             let folder = workspaces.folders.first { $0.id == id }
             PullsView(
                 workspaceID: id,
@@ -2225,6 +2304,7 @@ struct RootView: View {
                 },
                 workspaceIsRemote: folder?.isRemote == true
             )
+            #endif
         case .global(.home):
             HomeView(
                 model: home,
@@ -2667,6 +2747,13 @@ struct RootView: View {
         transaction.animation = nil
         withTransaction(transaction) {
             route = next
+            #if os(macOS)
+            // The chat pane is mounted for the life of the window once a
+            // folder's chat has been opened, so claim the folder here rather
+            // than letting the view claim it as it appears.
+            if case let .workspace(id, .chat) = next { mountedChatFolder = id }
+            if case let .workspace(id, .pulls) = next { mountedPullsFolder = id }
+            #endif
             applyScope(from: next)
             update?()
         }

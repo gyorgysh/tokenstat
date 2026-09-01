@@ -19,11 +19,13 @@ struct MarkdownText: View {
     private let blocks: [MarkdownBlock]
     private let bodyFont: Font
     private let codeFont: Font
+    private let style: MarkdownStyle
 
     init(
         _ markdown: String,
         bodyFont: Font = Theme.body,
-        codeFont: Font = Theme.monoText(12, relativeTo: .body)
+        codeFont: Font = Theme.monoText(12, relativeTo: .body),
+        style: MarkdownStyle = .document
     ) {
         blocks = MarkdownCache.blocks.value(for: markdown) {
             var parser = MarkdownParser(markdown)
@@ -31,16 +33,41 @@ struct MarkdownText: View {
         }
         self.bodyFont = bodyFont
         self.codeFont = codeFont
+        self.style = style
     }
 
+    // A plain stack, deliberately. One message is a handful of blocks, and a
+    // lazy stack inside the transcript's own lazy stack is measured against
+    // an unbounded proposal by a parent that is itself still deciding how
+    // tall it is. That is not laziness, it is a layout the engine has to keep
+    // re-solving, and a long conversation of them is how the chat pane hung.
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             ForEach(blocks) { block in
-                MarkdownBlockView(block: block, bodyFont: bodyFont, codeFont: codeFont)
+                MarkdownBlockView(
+                    block: block,
+                    bodyFont: bodyFont,
+                    codeFont: codeFont,
+                    style: style
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// Whether this markdown is the point of the screen or a note beside it.
+///
+/// `document` is an answer: a document's own title scale, and wide content
+/// gets its own sideways scroller so a table or a long line keeps its shape.
+///
+/// `aside` is reasoning, drawn small and grey. Headings come back to the
+/// surrounding text's size, because `##` at 22pt would make a footnote the
+/// largest thing on screen, and wide content wraps in place rather than
+/// nesting another scroll view inside the transcript's.
+enum MarkdownStyle {
+    case document
+    case aside
 }
 
 /// Parsed markdown, kept between draws.
@@ -84,13 +111,17 @@ private final class ParsedTextCache<Value> {
 }
 
 private enum MarkdownCache {
-    /// One entry per assistant message, roughly. A long conversation reads
-    /// back a few hundred of them.
-    static let blocks = ParsedTextCache<[MarkdownBlock]>(limit: 400)
+    // Sized for a conversation being read back, not for one being read. A
+    // reader who pages to the beginning and scrolls forward again crosses
+    // every row twice, and a cache that evicted on the way up parses the
+    // whole conversation a second time on the way down. These hold structs,
+    // and `NSCache` gives the memory back under pressure.
+    /// One entry per assistant message and per thinking block, roughly.
+    static let blocks = ParsedTextCache<[MarkdownBlock]>(limit: 1500)
     /// One entry per paragraph, list row and table cell, so several per block.
-    static let inline = ParsedTextCache<AttributedString>(limit: 2000)
+    static let inline = ParsedTextCache<AttributedString>(limit: 6000)
     /// Syntax spans, which cost a round trip to the host rather than a parse.
-    static let highlights = ParsedTextCache<[SyntaxSpan]>(limit: 400)
+    static let highlights = ParsedTextCache<[SyntaxSpan]>(limit: 800)
 }
 
 private struct MarkdownBlock: Identifiable {
@@ -119,6 +150,7 @@ private struct MarkdownBlockView: View {
     let block: MarkdownBlock
     let bodyFont: Font
     let codeFont: Font
+    var style: MarkdownStyle = .document
 
     @ViewBuilder
     var body: some View {
@@ -153,7 +185,7 @@ private struct MarkdownBlockView: View {
             .background(Theme.accentSoft.opacity(0.62))
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius - 4, style: .continuous))
         case let .code(language, text):
-            MarkdownCodeBlock(language: language, source: text, font: codeFont)
+            MarkdownCodeBlock(language: language, source: text, font: codeFont, style: style)
         case .rule:
             Capsule(style: .continuous)
                 .fill(
@@ -171,11 +203,16 @@ private struct MarkdownBlockView: View {
     }
 
     private func headingFont(_ level: Int) -> Font {
-        switch level {
-        case 1: return Theme.title
-        case 2: return Theme.title2
-        case 3: return Theme.title3
-        default: return Theme.headline
+        switch style {
+        case .aside:
+            return bodyFont.weight(level <= 2 ? .bold : .semibold)
+        case .document:
+            switch level {
+            case 1: return Theme.title
+            case 2: return Theme.title2
+            case 3: return Theme.title3
+            default: return Theme.headline
+            }
         }
     }
 }
@@ -243,6 +280,7 @@ private struct MarkdownCodeBlock: View {
     let language: String?
     let source: String
     let font: Font
+    var style: MarkdownStyle = .document
 
     @State private var spans: [SyntaxSpan] = []
 
@@ -253,7 +291,7 @@ private struct MarkdownCodeBlock: View {
     var body: some View {
         Group {
             if isDiff {
-                ScrollView(.horizontal) {
+                MarkdownSideways {
                     DiffBody(diff: FileDiff.fromEditPatch(path: "Change", patch: source))
                         .padding(.vertical, Theme.Space.xs)
                 }
@@ -269,12 +307,24 @@ private struct MarkdownCodeBlock: View {
                             .background(Theme.accentSoft)
                     }
 
-                    ScrollView(.horizontal) {
+                    // An aside wraps its code instead of scrolling it. The
+                    // fixed size below is what makes the line keep its shape
+                    // inside a scroller, and it is also what would propose an
+                    // unbounded width to the transcript around it.
+                    if style == .aside {
                         highlightedText
                             .font(font)
                             .textSelection(.enabled)
-                            .fixedSize(horizontal: true, vertical: false)
                             .padding(Theme.Space.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        ScrollView(.horizontal) {
+                            highlightedText
+                                .font(font)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .padding(Theme.Space.m)
+                        }
                     }
                 }
             }
@@ -298,6 +348,13 @@ private struct MarkdownCodeBlock: View {
                 spans = cached
                 return
             }
+            // A fence somebody is scrolling past is not a fence anybody is
+            // reading. Scrolling back through a long conversation builds
+            // dozens of these in a second, and each one is a host round trip
+            // and a second draw when the answer lands. Cancellation does the
+            // rest: a row that leaves before this wakes never asks.
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
             let result = try? await Bridge.highlight(path: path, text: source)
             guard !Task.isCancelled else { return }
             spans = result?.spans ?? []
@@ -350,6 +407,25 @@ private struct MarkdownCodeBlock: View {
     }
 }
 
+/// A sideways scroller for content that cannot wrap.
+///
+/// A scroll view inside the transcript's scrolling stack is measured against
+/// an unbounded proposal by a parent that has not settled its own height yet,
+/// and a conversation full of them is a layout the engine keeps re-solving.
+/// That is why an aside's code fences wrap in place instead.
+///
+/// A table and a diff cannot wrap, though, so they keep theirs whatever the
+/// style. Clipping them was the alternative and it hid the right-hand columns
+/// of a table with no way to reach them. They are rare inside reasoning,
+/// which is what makes keeping them affordable.
+private struct MarkdownSideways<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ScrollView(.horizontal) { content }
+    }
+}
+
 private struct MarkdownTable: View {
     let header: [String]
     let rows: [[String]]
@@ -360,7 +436,7 @@ private struct MarkdownTable: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal) {
+        MarkdownSideways {
             VStack(alignment: .leading, spacing: 0) {
                 tableRow(header, header: true)
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in

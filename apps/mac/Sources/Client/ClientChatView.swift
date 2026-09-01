@@ -274,9 +274,13 @@ private struct ClientChatThread: View {
             PersonaEditor(model: model, onClose: { showingPersonas = false })
         }
         .task {
-            if let chat = model.chats.first(where: { $0.id == chatID }) {
-                await model.select(chat)
-            }
+            guard let chat = model.chats.first(where: { $0.id == chatID }) else { return }
+            // Already open, with rows on screen. Re-selecting would empty the
+            // transcript and read it back, which is this screen blanking and
+            // re-scrolling every time it is pushed, including straight after
+            // the launcher picked the conversation for you.
+            guard model.selected?.id != chat.id || model.displayItems.isEmpty else { return }
+            await model.select(chat)
         }
         .task(id: chatID) {
             while !Task.isCancelled {
@@ -321,7 +325,7 @@ private struct ClientChatThread: View {
                             faceSeed: model.faceSeed
                         )
                         .equatable()
-                        .transcriptRowFrame(item.id, watched: watchedRows.contains(item.id))
+                        .transcriptRowFrame(item.id, watched: model.hasEarlier)
                     }
                     if let mood = liveMood {
                         ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
@@ -335,6 +339,13 @@ private struct ClientChatThread: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .clientHideScrollEdgeEffect()
+            .opacity(transcriptReady ? 1 : 0)
+            .overlay {
+                if !transcriptReady {
+                    TranscriptSkeleton()
+                }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
             .chatScrollMetrics { metrics in
                 follow.note(metrics)
                 window.note(metrics)
@@ -343,7 +354,7 @@ private struct ClientChatThread: View {
                 if follow.showJump && model.approvals.isEmpty {
                     JumpToLatestButton {
                         follow.jump()
-                        pinToLatest(proxy, animated: true)
+                        Task { await chaseLatest(proxy) }
                     }
                 }
             }
@@ -370,17 +381,26 @@ private struct ClientChatThread: View {
             }
             .onAppear {
                 follow.suppressed = !model.approvals.isEmpty
+                installRepin(proxy)
                 pinToLatest(proxy, animated: false)
             }
             .task(id: model.selected?.id) {
                 // A lazy stack does not know its own height until it has drawn
                 // the rows, so the first scroll to the end lands on estimates.
-                // Settle it over the next few frames rather than opening a
-                // conversation somewhere above its latest turn.
-                for _ in 0..<8 {
+                // Hold the end across the frames the real heights take to
+                // arrive: every one of those says the end is far below, and
+                // believing one is how a long chat opened in its middle.
+                follow.settle(true)
+                defer { follow.settle(false) }
+                // Same as the Mac: hold the end until the conversation has
+                // stopped arriving, not for a fixed count of frames.
+                var quiet = 0
+                for _ in 0..<40 {
                     try? await Task.sleep(for: .milliseconds(50))
-                    guard follow.pinned, model.approvals.isEmpty else { return }
+                    guard !Task.isCancelled, model.approvals.isEmpty else { return }
                     pinToLatest(proxy, animated: false)
+                    quiet = model.openingConversation ? 0 : quiet + 1
+                    if follow.arrived, quiet >= 3 { return }
                 }
             }
             .task(id: settleMood) {
@@ -438,15 +458,6 @@ private struct ClientChatThread: View {
         )
     }
 
-    /// The rows near the beginning, which are the only ones that can hold
-    /// the reader's place while an older page arrives above them.
-    private var watchedRows: Set<String> {
-        // Nothing before this, so nothing to hold a place against, and no
-        // reason to measure a row on every frame of every scroll.
-        guard model.hasEarlier else { return [] }
-        return Set(model.displayItems.prefix(TranscriptWindow.watched).map(\.id))
-    }
-
     private var structureToken: String {
         TranscriptFollow.structureToken(
             items: model.displayItems,
@@ -478,6 +489,45 @@ private struct ClientChatThread: View {
             return model.approvals.contains { $0.id == approval.id }
         }
         return false
+    }
+
+    /// Whether the transcript may be looked at. Same rule as the Mac: the
+    /// wireframe covers the frames between picking a conversation and the
+    /// settle task starting, as well as the settle itself.
+    private var transcriptReady: Bool {
+        follow.arrived && !model.openingConversation
+    }
+
+
+    /// Keep asking for the end until the view is actually there.
+    ///
+    /// One scroll is not enough from far away: a lazy stack answers on
+    /// estimated heights and corrects them as it builds the rows in between.
+    /// This stops as soon as the scroll callback reports the end steady, so
+    /// a short hop costs two frames.
+    private func chaseLatest(_ proxy: ScrollViewProxy) async {
+        follow.chase(true)
+        defer { follow.chase(false) }
+        for _ in 0..<Self.chaseFrames {
+            pinToLatest(proxy, animated: false)
+            try? await Task.sleep(for: .milliseconds(40))
+            guard !Task.isCancelled, !follow.abandoned else { return }
+            if follow.steadyFrames >= 2 { return }
+        }
+    }
+
+    /// How many frames one press of Jump to latest may spend arriving.
+    private static let chaseFrames = 24
+
+    /// Let the scroll callback put the viewport back on the end. Weak on the
+    /// state, which owns the closure.
+    private func installRepin(_ proxy: ScrollViewProxy) {
+        let state = follow
+        let model = model
+        state.repin = { [weak state] in
+            guard let state, state.pinned, model.approvals.isEmpty else { return }
+            proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
+        }
     }
 
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {

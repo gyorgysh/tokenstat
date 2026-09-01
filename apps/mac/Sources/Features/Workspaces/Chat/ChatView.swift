@@ -14,6 +14,13 @@ struct ChatView: View {
     /// Refresh the folder after a checkout, so the chip and everything else
     /// reading git agree about where the folder now is.
     var onBranchChanged: (() async -> Void)? = nil
+    /// Whether this pane is the one in front.
+    ///
+    /// The Mac keeps it mounted behind other screens so a transcript and the
+    /// place somebody had read to survive a trip to Insights and back. A pane
+    /// nobody can see does not poll, and it does not hold the shared model to
+    /// a folder that has since been left: it reloads when it comes forward.
+    var isActive = true
     @State private var draft = ""
     @State private var draftSelection = NSRange(location: 0, length: 0)
     /// A row the transcript should jump to, set by the pending-approval bar.
@@ -89,13 +96,20 @@ struct ChatView: View {
                     .frame(maxWidth: ReadingRoom.laneWidth)
                     .frame(maxWidth: .infinity)
                 }
-            } else {
+            } else if model.isReady(for: workspaceID), model.chats.isEmpty {
                 empty
                     .overlay {
                         if dropExperienceVisible {
                             dropExperience
                         }
                     }
+            } else {
+                // Either nothing has been asked yet, or this folder's
+                // conversations are known and one is about to be picked.
+                // "Start a chat" belongs to neither: it is a promise about a
+                // folder nobody has looked in, and it was being made every
+                // time this pane was rebuilt.
+                ChatPaneOpening()
             }
         }
         .background(Theme.background)
@@ -123,8 +137,12 @@ struct ChatView: View {
             }
         }
         #endif
-        .task(id: workspaceID) { await model.load(workspaceID: workspaceID) }
-        .task(id: model.selected?.id) {
+        .task(id: "\(workspaceID)-\(isActive)") {
+            guard isActive else { return }
+            await model.load(workspaceID: workspaceID)
+        }
+        .task(id: "\(model.selected?.id ?? "")-\(isActive)") {
+            guard isActive else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(400))
                 await model.poll()
@@ -153,7 +171,7 @@ struct ChatView: View {
                         conversationMenu
                     }
                     #endif
-                    if model.displayItems.isEmpty, !chat.running {
+                    if model.displayItems.isEmpty, !chat.running, !model.openingConversation {
                         emptyConversation
                     }
                     TranscriptEarlierHeader(model: model) {
@@ -182,7 +200,7 @@ struct ChatView: View {
                             alignment: .leading
                         )
                         .frame(maxWidth: .infinity, alignment: item.readingRoomAlignment)
-                        .transcriptRowFrame(item.id, watched: watchedRows.contains(item.id))
+                        .transcriptRowFrame(item.id, watched: model.hasEarlier)
                     }
                     if let mood = liveMood {
                         ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
@@ -195,6 +213,18 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
                 .chatScrollContent()
             }
+            // Nobody watches a conversation assemble itself from the top and
+            // then jump. It builds behind the wireframe and appears where the
+            // reading is.
+            .opacity(transcriptReady ? 1 : 0)
+            .overlay {
+                if !transcriptReady {
+                    TranscriptSkeleton()
+                        .frame(maxWidth: ReadingRoom.laneWidth)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
             .chatScrollMetrics { metrics in
                 follow.note(metrics)
                 window.note(metrics)
@@ -203,7 +233,7 @@ struct ChatView: View {
                 if follow.showJump && model.approvals.isEmpty {
                     JumpToLatestButton {
                         follow.jump()
-                        pinToLatest(proxy, animated: true)
+                        Task { await chaseLatest(proxy) }
                     }
                 }
             }
@@ -237,17 +267,30 @@ struct ChatView: View {
             }
             .onAppear {
                 follow.suppressed = !model.approvals.isEmpty
+                installRepin(proxy)
                 pinToLatest(proxy, animated: false)
             }
             .task(id: model.selected?.id) {
                 // A lazy stack does not know its own height until it has drawn
                 // the rows, so the first scroll to the end lands on estimates.
-                // Settle it over the next few frames rather than opening a
-                // conversation somewhere above its latest turn.
-                for _ in 0..<8 {
+                // Hold the end across the frames it takes the real heights to
+                // arrive: the intermediate ones all say the end is far below,
+                // and believing one of them is how a long conversation used to
+                // open in its middle.
+                follow.settle(true)
+                defer { follow.settle(false) }
+                // Hold the end until the conversation has stopped arriving,
+                // and then for a few frames while the last rows measure
+                // themselves. A fixed count was a guess at how long the
+                // opening backfill takes, and the pages that landed after it
+                // ran out are what left the view in the middle.
+                var quiet = 0
+                for _ in 0..<Self.settleFrames {
                     try? await Task.sleep(for: .milliseconds(50))
-                    guard follow.pinned, model.approvals.isEmpty else { return }
+                    guard !Task.isCancelled, model.approvals.isEmpty else { return }
                     pinToLatest(proxy, animated: false)
+                    quiet = model.openingConversation ? 0 : quiet + 1
+                    if follow.arrived, quiet >= 3 { return }
                 }
             }
             .task(id: settleMood) {
@@ -255,6 +298,58 @@ struct ChatView: View {
                 try? await Task.sleep(for: .milliseconds(480))
                 settleMood = nil
             }
+        }
+    }
+
+    /// Whether the transcript may be looked at.
+    ///
+    /// Both halves, because they cover different frames. `openingConversation`
+    /// is true from the instant a conversation is picked, before the settle
+    /// task has run, which is the second of half-built rows that used to show
+    /// before the wireframe replaced them. `arrived` covers the rest, until
+    /// the end is under the viewport and steady.
+    private var transcriptReady: Bool {
+        follow.arrived && !model.openingConversation
+    }
+
+    /// The longest the opening pin holds, in fifty-millisecond frames. It
+    /// stops once the conversation has arrived and the end has been steady
+    /// for a moment, so this is the ceiling on a slow host and not what an
+    /// open costs.
+    private static let settleFrames = 40
+
+
+    /// Keep asking for the end until the view is actually there.
+    ///
+    /// One scroll is not enough from far away: a lazy stack answers on
+    /// estimated heights and corrects them as it builds the rows in between.
+    /// This stops as soon as the scroll callback reports the end steady, so
+    /// a short hop costs two frames.
+    private func chaseLatest(_ proxy: ScrollViewProxy) async {
+        follow.chase(true)
+        defer { follow.chase(false) }
+        for _ in 0..<Self.chaseFrames {
+            pinToLatest(proxy, animated: false)
+            try? await Task.sleep(for: .milliseconds(40))
+            guard !Task.isCancelled, !follow.abandoned else { return }
+            if follow.steadyFrames >= 2 { return }
+        }
+    }
+
+    /// How many frames one press of Jump to latest may spend arriving.
+    private static let chaseFrames = 24
+
+    /// Let the scroll callback put the viewport back on the end.
+    ///
+    /// Weak, because the state owns the closure and the closure would
+    /// otherwise own the state. The proxy and the model are both fine to hold:
+    /// neither is owned by what is holding this.
+    private func installRepin(_ proxy: ScrollViewProxy) {
+        let state = follow
+        let model = model
+        state.repin = { [weak state] in
+            guard let state, state.pinned, model.approvals.isEmpty else { return }
+            proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
         }
     }
 
@@ -281,15 +376,6 @@ struct ChatView: View {
             waiting: !model.approvals.isEmpty,
             settle: settleMood
         )
-    }
-
-    /// The rows near the beginning, which are the only ones that can hold
-    /// the reader's place while an older page arrives above them.
-    private var watchedRows: Set<String> {
-        // Nothing before this, so nothing to hold a place against, and no
-        // reason to measure a row on every frame of every scroll.
-        guard model.hasEarlier else { return [] }
-        return Set(model.displayItems.prefix(TranscriptWindow.watched).map(\.id))
     }
 
     private var structureToken: String {
@@ -429,6 +515,28 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Theme.Space.l)
+    }
+}
+
+/// The pane between arriving and knowing.
+///
+/// It says nothing at first, because most opens are quicker than a spinner is
+/// worth and a spinner that appears for one frame is itself the flicker. A
+/// slow host still gets to admit it is waiting.
+private struct ChatPaneOpening: View {
+    @State private var waited = false
+
+    var body: some View {
+        VStack {
+            if waited {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task {
+            try? await Task.sleep(for: .milliseconds(350))
+            waited = true
+        }
     }
 }
 

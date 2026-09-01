@@ -121,10 +121,107 @@ final class TranscriptFollowState {
     @ObservationIgnored var suppressed = false {
         didSet { if suppressed { set(jump: false) } }
     }
+    /// A conversation that has just opened is still finding its real heights,
+    /// and every one of those frames says the end is far below. Taking that
+    /// as a reader who scrolled away is what left a long chat open in its
+    /// middle: the first estimate unpinned the view, and the settle that was
+    /// meant to correct it stopped because the view was no longer pinned.
+    @ObservationIgnored private(set) var settling = false
+    /// Whether the transcript has actually reached the latest turn.
+    ///
+    /// A lazy stack builds from the top and finds its real height as it goes,
+    /// so an opening conversation is visibly assembled and then yanked to the
+    /// end. The transcript stays behind its wireframe until this turns true,
+    /// which is the difference between watching that happen and arriving
+    /// where the reading is.
+    private(set) var arrived = false
+    /// Put the viewport back on the end. Installed by the transcript, which
+    /// is the only thing holding a scroll proxy.
+    ///
+    /// Called from the scroll callback rather than from a view update,
+    /// because the growth this answers is a lazy row finding its real height
+    /// and no view update is owed for that. Without it the pin was only ever
+    /// applied when a row arrived or a stream grew, and everything else that
+    /// changes a transcript's height (rows measuring themselves, a page the
+    /// opening backfill was still fetching, an image decoding) left the
+    /// viewport wherever it happened to be.
+    @ObservationIgnored var repin: (() -> Void)?
     @ObservationIgnored private var lastContentHeight: CGFloat = 0
     @ObservationIgnored private var lastOffset: CGFloat = 0
+    @ObservationIgnored private var lastDistanceFromBottom: CGFloat = 0
+    /// Somebody scrolled away while the end was being chased. Read by the
+    /// chase, which stops rather than argue.
+    @ObservationIgnored private(set) var abandoned = false
+
+    /// Hold the end while the transcript settles, whatever the geometry of a
+    /// half-measured lazy stack claims.
+    ///
+    /// Leaving the settle always reveals, whether the end was reached or the
+    /// frames simply ran out. A wireframe that can outlast its content is
+    /// worse than the build-up it hides.
+    func settle(_ active: Bool) {
+        chase(active)
+        set(arrived: !active)
+    }
+
+    /// Hold the end without hiding anything.
+    ///
+    /// What `settle` does minus the wireframe. An opening conversation has
+    /// nothing worth looking at yet; a press of Jump to latest has the
+    /// conversation on screen already and only needs the end to be reached.
+    /// It needs the same insistence, though: one scroll to the end of a lazy
+    /// stack from far above it lands on estimated heights, builds rows on the
+    /// way that correct those estimates, and stops short. That is why the
+    /// button took several presses.
+    func chase(_ active: Bool) {
+        settling = active
+        steadyFrames = 0
+        abandoned = false
+        if active {
+            pinned = true
+            set(jump: false)
+        }
+    }
+
+    /// Whether the end is under the viewport *and* the content has stopped
+    /// changing size.
+    ///
+    /// Both halves matter. A half-measured lazy stack reports a content
+    /// height it has estimated, so "distance from the bottom is zero" can be
+    /// true of a transcript with most of its rows still unmeasured, and
+    /// believing it is how the conversation was revealed in its middle.
+    @ObservationIgnored private(set) var steadyFrames = 0
 
     func note(_ metrics: TranscriptMetrics) {
+        let grew = metrics.contentHeight > lastContentHeight + 0.5
+        let shrank = metrics.contentHeight < lastContentHeight - 0.5
+        let moved = abs(metrics.distanceFromTop - lastOffset) > 0.5
+
+        if settling {
+            // Moving away from the end, on a frame where nothing grew, is a
+            // hand on the trackpad. Nothing here may out-argue that: the
+            // chase after Jump to latest would otherwise drag somebody back
+            // for the length of its budget.
+            let retreated = moved
+                && !grew
+                && !shrank
+                && metrics.distanceFromBottom > lastDistanceFromBottom + 8
+            lastContentHeight = metrics.contentHeight
+            lastOffset = metrics.distanceFromTop
+            lastDistanceFromBottom = metrics.distanceFromBottom
+            if retreated {
+                abandoned = true
+                set(jump: false)
+                return
+            }
+            let atEnd = metrics.contentHeight > 0
+                && metrics.distanceFromBottom <= TranscriptFollow.threshold
+            steadyFrames = (atEnd && !grew && !shrank) ? steadyFrames + 1 : 0
+            if steadyFrames >= Self.steadyToArrive { set(arrived: true) }
+            set(jump: false)
+            return
+        }
+        lastDistanceFromBottom = metrics.distanceFromBottom
         if suppressed {
             set(jump: false)
             return
@@ -134,11 +231,18 @@ final class TranscriptFollowState {
         // must not unpin the view. Content that grew while the offset also
         // moved is a lazy row finding its real height under a reader who is
         // scrolling, and that frame still says where they are.
-        let grew = metrics.contentHeight > lastContentHeight + 0.5
-        let moved = abs(metrics.distanceFromTop - lastOffset) > 0.5
         lastContentHeight = metrics.contentHeight
         lastOffset = metrics.distanceFromTop
-        if grew, !moved { return }
+        if grew, !moved {
+            // Growth nobody scrolled for. It must not unpin the view, and if
+            // the view was following the end it has to be put back on it:
+            // the height changed under a viewport that did not move, so the
+            // end is now further down than it was a frame ago.
+            if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold {
+                repin?()
+            }
+            return
+        }
         if metrics.distanceFromBottom > TranscriptFollow.threshold {
             pinned = false
             set(jump: true)
@@ -159,6 +263,16 @@ final class TranscriptFollowState {
         guard showJump != value else { return }
         showJump = value
     }
+
+    private func set(arrived value: Bool) {
+        guard arrived != value else { return }
+        arrived = value
+    }
+
+    /// Frames at the end, with the content size unchanged, before a
+    /// transcript counts as arrived. Three at a sixtieth each is imperceptible
+    /// and is the difference between an estimate and a measurement.
+    private static let steadyToArrive = 3
 }
 
 struct ChatScrollContentKey: PreferenceKey {
@@ -180,6 +294,57 @@ struct TranscriptBottomSentinel: View {
         Color.clear
             .frame(height: 1)
             .id(TranscriptFollow.bottomID)
+    }
+}
+
+/// What a transcript shows while it is finding its end.
+///
+/// Shaped like a conversation rather than a spinner: turns alternating sides,
+/// a couple of tool rows between them, weighted to the bottom because that is
+/// where the reading starts. It is over in a few frames, and its job is that
+/// those frames look like the thing that is about to appear.
+struct TranscriptSkeleton: View {
+    /// Roughly how tall each stand-in turn is, in bars.
+    private static let turns: [(mine: Bool, lines: Int)] = [
+        (false, 3), (true, 1), (false, 4), (true, 2), (false, 2),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Spacer(minLength: 0)
+            ForEach(Array(Self.turns.enumerated()), id: \.offset) { index, turn in
+                HStack(spacing: 0) {
+                    if turn.mine { Spacer(minLength: 48) }
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        ForEach(0..<turn.lines, id: \.self) { line in
+                            Skeleton.Bar(
+                                width: nil,
+                                height: 10,
+                                phase: Double(index) * 0.09 + Double(line) * 0.04
+                            )
+                            .frame(maxWidth: width(index: index, line: line), alignment: .leading)
+                        }
+                    }
+                    .padding(Theme.Space.m)
+                    .background(
+                        turn.mine ? Theme.accentSoft : Theme.panel.opacity(0.72),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    )
+                    if !turn.mine { Spacer(minLength: 48) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .padding(.vertical, Theme.Space.xl)
+        .padding(.horizontal, Theme.Space.l)
+        .accessibilityLabel("Loading the conversation")
+        .allowsHitTesting(false)
+    }
+
+    /// Ragged, so it reads as prose rather than as a progress bar.
+    private func width(index: Int, line: Int) -> CGFloat {
+        let widths: [CGFloat] = [420, 360, 290, 240, 330]
+        return widths[(index * 2 + line) % widths.count]
     }
 }
 
@@ -289,6 +454,7 @@ extension View {
     func chatScrollMetrics(_ note: @escaping (TranscriptMetrics) -> Void) -> some View {
         modifier(TranscriptScrollMetrics(note: note))
     }
+
 }
 
 
@@ -312,10 +478,16 @@ final class TranscriptWindow {
     /// How far the top of the loaded conversation is above the viewport.
     /// Large at the bottom of a long chat, zero at the very beginning.
     var distanceFromTop: CGFloat = .greatestFiniteMagnitude
-    /// Where the first few rows are, in the viewport's own coordinates. Only
-    /// the rows near the beginning are watched: they are the only ones that
-    /// can be the anchor, and measuring every row of a transcript on every
-    /// frame would be paying for the whole list to save a scroll position.
+    /// Where the rows are, in the viewport's own coordinates.
+    ///
+    /// Every row reports, and that is cheap for the reason the stack is lazy:
+    /// a row that is not on screen has no body, so it has no geometry reader
+    /// either. What arrives here is roughly what is visible, which is also
+    /// exactly the set the anchor has to come from. Watching the first two
+    /// dozen rows of the *window* instead looked cheaper and was worse: once
+    /// the reader was a screen below them those rows were not being built, so
+    /// this held whatever they last reported, and the anchor was computed
+    /// from where rows used to be.
     var rowFrames: [String: CGRect] = [:]
     /// A page has been asked for and the answer has not arrived. Claimed at
     /// the moment of asking rather than when the request starts, so a scroll
@@ -329,29 +501,94 @@ final class TranscriptWindow {
     /// Fetch the page before the oldest row held. Installed by the transcript,
     /// which is the only thing that holds a scroll proxy.
     var requestEarlier: (() -> Void)?
-
-    /// How many rows at the beginning report where they are.
+    /// Put a row back where it was. Installed beside `requestEarlier`.
+    var restore: ((TranscriptAnchor) -> Void)?
+    /// The row holding the reader's place across an insertion, and how many
+    /// more changes of content height it should survive.
     ///
-    /// Only these can be the anchor, and the anchor is only ever needed when
-    /// the reader is near them. Measuring every row of a transcript on every
-    /// frame would be paying for the whole list to save a scroll position.
-    static let watched = 16
+    /// One correction is not enough. The rows a page brings are inserted with
+    /// estimated heights and measured over the next few frames, so a single
+    /// restore lands on the geometry of a stack that is still settling, and
+    /// what the reader sees is the correction being wrong by a little and
+    /// staying wrong. Each frame that changes the height re-applies it, which
+    /// costs nothing when the height is already right because the scroll is
+    /// then a no-op.
+    private var held: TranscriptAnchor?
+    private var heldFrames = 0
+    private var heldUntil: Date = .distantPast
+    private var lastContentHeight: CGFloat = 0
+
+    /// Hold this row's place across the insertion that is about to happen.
+    ///
+    /// Claimed **before** the page is asked for, not after it lands. The
+    /// scroll callback is what applies it, and the first height change the
+    /// insertion causes is the one that matters: arming afterwards meant the
+    /// first frame of the new content was drawn at the old offset, which is
+    /// the jump, and the correction chased it from there.
+    func hold(_ anchor: TranscriptAnchor) {
+        held = anchor
+        heldFrames = Self.holdFrames
+        heldUntil = Date().addingTimeInterval(Self.holdSeconds)
+    }
+
+    /// Stop holding, for a page that changed nothing.
+    func release() {
+        held = nil
+        heldFrames = 0
+        heldUntil = .distantPast
+    }
+
+    /// How many height changes a held place survives. Prepended rows are
+    /// inserted at estimated heights and measured over the frames that
+    /// follow, so the place has to be put back on each of them.
+    private static let holdFrames = 10
+
+    /// And how long, whether or not those frames were spent.
+    ///
+    /// An insertion often settles in two or three height changes, which
+    /// leaves the rest of the budget sitting there. Without a deadline the
+    /// next thing to change the height, a streamed reply at the bottom an
+    /// hour later, would be taken for part of that page and put the reader
+    /// back where a row was during a load that finished long ago.
+    private static let holdSeconds: TimeInterval = 0.6
 
     /// How close to the top of what is loaded counts as approaching it.
     ///
-    /// More than a screen, so the request usually finishes inside the scroll
-    /// that asked for it and the reader never waits at a boundary.
-    static let reach: CGFloat = 1.2
+    /// Two and a half screens. The anchor is whatever is on screen now, so
+    /// how early this fires no longer decides whether the page can be
+    /// absorbed, and the only thing left to trade is round trips against
+    /// runway. A reader flicking back through a long history covers a screen
+    /// in a few hundred milliseconds and should never meet the end of what is
+    /// loaded.
+    static let reach: CGFloat = 2.5
 
     func note(_ metrics: TranscriptMetrics) {
         viewportHeight = metrics.viewportHeight
         distanceFromTop = metrics.distanceFromTop
+        let changed = abs(metrics.contentHeight - lastContentHeight) > 0.5
+        lastContentHeight = metrics.contentHeight
+        if held != nil, Date() > heldUntil { release() }
+        if let held, changed {
+            heldFrames -= 1
+            if heldFrames <= 0 { release() }
+            restore?(held)
+            // A frame spent putting the reader back is not a frame to judge
+            // the boundary from: the offset it reports is the one being
+            // corrected.
+            return
+        }
         ask(force: false)
     }
 
     /// Whether the page before the oldest row held should be asked for now.
+    ///
+    /// Near the top *and* holding a row that can be put back. Fetching
+    /// earlier than that buys lead time and spends it on a lurch, because the
+    /// page lands with nothing on screen to measure the correction against.
     var wantsEarlier: Bool {
-        viewportHeight > 0 && distanceFromTop < viewportHeight * Self.reach
+        viewportHeight > 0
+            && distanceFromTop < viewportHeight * Self.reach
+            && anchor != nil
     }
 
     /// Ask for the page before the oldest row held.
@@ -366,12 +603,19 @@ final class TranscriptWindow {
 
     /// The row to hold still: the first one at or below the viewport's top
     /// edge, and failing that the last one above it.
+    /// Nil when no row is on screen at or below the top of the viewport.
+    ///
+    /// A row above the viewport cannot be put back where it was.
+    /// `scrollTo(_:anchor:)` can only line a row's own point up with the
+    /// container's, so the furthest it can go is the row's top at the
+    /// viewport's top: offset zero. A row that was two hundred points above
+    /// the viewport gets clamped there, and the conversation lurches by two
+    /// hundred points in the middle of the gesture this feature exists to
+    /// keep smooth. Refusing to answer is the honest result, and
+    /// `wantsEarlier` uses it to fetch only when the page can be absorbed.
     var anchor: TranscriptAnchor? {
         let below = rowFrames.filter { $0.value.minY >= -1 }
-        let picked =
-            below.min { $0.value.minY < $1.value.minY }
-            ?? rowFrames.max { $0.value.minY < $1.value.minY }
-        guard let picked else { return nil }
+        guard let picked = below.min(by: { $0.value.minY < $1.value.minY }) else { return nil }
         return TranscriptAnchor(
             id: picked.key,
             top: picked.value.minY,
@@ -413,6 +657,15 @@ struct TranscriptEarlierHeader: View {
     let model: ChatModel
     let load: () -> Void
 
+    /// One height for all three states. A row at the top of the transcript
+    /// that changes size as a page arrives moves everything below it, which
+    /// is the jump the whole paging path exists to avoid.
+    ///
+    /// A floor rather than a fixed size, because the button inside it grows
+    /// with the reader's text size and a fixed frame would clip its own
+    /// label. What matters is that the three states agree, not the number.
+    private static let height: CGFloat = 30
+
     var body: some View {
         if model.hasEarlier {
             HStack(spacing: Theme.Space.s) {
@@ -426,6 +679,7 @@ struct TranscriptEarlierHeader: View {
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             }
+            .frame(minHeight: Self.height)
             .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityLabel("Load earlier messages")
         } else if model.reachedStart {
@@ -437,6 +691,7 @@ struct TranscriptEarlierHeader: View {
                     .fixedSize()
                 ThemeRule()
             }
+            .frame(minHeight: Self.height)
         }
     }
 }
@@ -449,7 +704,9 @@ struct TranscriptRowFrameKey: PreferenceKey {
 }
 
 extension View {
-    /// Report where this row is, for the rows that could be the anchor.
+    /// Report where this row is, while the conversation has anything before
+    /// it to page in. A lazy stack only builds what is near the screen, so
+    /// this runs for what is visible rather than for the window.
     func transcriptRowFrame(_ id: String, watched: Bool) -> some View {
         background {
             if watched {
@@ -476,17 +733,28 @@ extension View {
         proxy: ScrollViewProxy
     ) -> some View {
         let request: () -> Void = {
-            Task { await loadEarlier(model, window: window, proxy: proxy) }
+            Task { await loadEarlier(model, window: window) }
+        }
+        let restore: (TranscriptAnchor) -> Void = { anchor in
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy.scrollTo(anchor.id, anchor: anchor.unitPoint(in: window.viewportHeight))
+            }
         }
         return onPreferenceChange(TranscriptRowFrameKey.self) { frames in
             window.rowFrames = frames
         }
-        // The proxy belongs to this reader, so the closure that uses it is
+        // The proxy belongs to this reader, so the closures that use it are
         // installed here and renewed whenever the conversation changes.
-        .onAppear { window.requestEarlier = request }
+        .onAppear {
+            window.requestEarlier = request
+            window.restore = restore
+        }
         .onChange(of: model.selected?.id) { _, _ in
             window.fetching = false
             window.requestEarlier = request
+            window.restore = restore
         }
         .onChange(of: model.hasEarlier, initial: true) { _, more in
             window.canAskEarlier = more
@@ -502,31 +770,30 @@ extension View {
 /// here, so the two paths into this (the scroll and the button) cannot run
 /// side by side and write a spent cursor back.
 @MainActor
-func loadEarlier(_ model: ChatModel, window: TranscriptWindow, proxy: ScrollViewProxy) async {
+func loadEarlier(_ model: ChatModel, window: TranscriptWindow) async {
     guard model.hasEarlier else {
         window.fetching = false
         return
     }
-    let anchor = window.anchor
     let before = model.displayItems.count
+    // Armed before the request, so the reader's place is already claimed when
+    // the rows land. The scroll callback corrects on every frame the
+    // insertion changes the height, including the first one.
+    //
+    // The automatic path only asks when there is an anchor. The button at the
+    // top of the transcript asks whatever the geometry says, and if it says
+    // nothing is on screen to hold, the page still has to arrive: pressing it
+    // is somebody looking at the boundary, so the rows landing under their
+    // eyes is the answer they asked for.
+    if let anchor = window.anchor { window.hold(anchor) } else { window.release() }
     await model.loadEarlier()
     window.fetching = false
-    guard model.displayItems.count > before, let anchor else {
+    guard model.displayItems.count > before else {
         // A page of records that folded into no new rows changes nothing on
         // screen, so no scroll and no growth will ask again on its own. Keep
         // walking, and stop where the archive does.
+        window.release()
         window.ask(force: false)
         return
-    }
-    // A frame for the prepended rows to be laid out in. Scrolling to a row
-    // SwiftUI has not measured yet lands on the geometry it had before the
-    // page arrived, which is the jump this is here to prevent.
-    await Task.yield()
-    try? await Task.sleep(for: .milliseconds(16))
-    let height = window.viewportHeight
-    var transaction = Transaction()
-    transaction.disablesAnimations = true
-    withTransaction(transaction) {
-        proxy.scrollTo(anchor.id, anchor: anchor.unitPoint(in: height))
     }
 }

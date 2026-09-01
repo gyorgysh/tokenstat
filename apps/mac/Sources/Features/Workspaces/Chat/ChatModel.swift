@@ -74,6 +74,13 @@ final class ChatModel {
     /// New conversations inherit this persona unless the person picks none.
     var defaultPersonaID: String?
     var isLoading = false
+    /// The selected conversation's first page is still on its way.
+    ///
+    /// Separate from `isLoading`, which is about the folder's list. A chat
+    /// that has been picked but not yet read back has no rows, and an empty
+    /// transcript and an unread one look identical while meaning opposite
+    /// things.
+    private(set) var openingConversation = false
     var error: String?
     /// The folder id RootView knows, which is `remote:<peer>:<id>` for a
     /// workspace on another machine. Host methods use `workspaceID` instead.
@@ -89,6 +96,14 @@ final class ChatModel {
     private var attemptedResponseAttachments: Set<String> = []
     private var loadingResponseAttachments: Set<String> = []
     private var responseAttachmentRetryAt: [String: Date] = [:]
+
+    /// Whether this model has answered for the folder on screen.
+    ///
+    /// Nothing may draw "no conversations here" before this is true: the
+    /// pane would promise an empty folder and then contradict itself.
+    func isReady(for workspaceID: String) -> Bool {
+        folderID == workspaceID && !isLoading
+    }
 
     func count(in workspaceID: String) -> Int {
         guard folderID == workspaceID || self.workspaceID == workspaceID else { return 0 }
@@ -127,8 +142,14 @@ final class ChatModel {
             // it, so the empty string never gets past this line.
             defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
             chats = loaded.2
-            if let selected, chats.contains(where: { $0.id == selected.id }) {
-                await select(chats.first(where: { $0.id == selected.id }) ?? selected)
+            if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
+                // This conversation is already open. Re-selecting it would
+                // empty the transcript and read it back, which is a blank
+                // pane, a persona where the last turn was, and a lost scroll
+                // position every time somebody leaves this screen and comes
+                // back to it. Take the fresh record and keep the rows.
+                if fresh != selected { self.selected = fresh }
+                await refreshOpen(id: fresh.id)
             } else if selectFirst {
                 await select(chats.first)
             } else {
@@ -159,10 +180,45 @@ final class ChatModel {
         #if os(macOS)
         if let chat { RunNotifications.shared.chatAttentionHandled(id: chat.id) }
         #endif
-        guard let chat else { return }
+        guard let chat else {
+            openingConversation = false
+            return
+        }
+        openingConversation = true
+        defer {
+            if selectionGeneration == generation { openingConversation = false }
+        }
         await openEvents(id: chat.id, generation: generation)
         await loadApprovals(id: chat.id, generation: generation)
         await loadInstructions(id: chat.id, generation: generation)
+    }
+
+    /// Bring an already open conversation up to date without emptying it.
+    ///
+    /// The counterpart to `select`, for the case where the conversation on
+    /// screen is the one being asked for. Everything here adds to what is
+    /// held: no reset, so no row that is already drawn is drawn again.
+    private func refreshOpen(id: String) async {
+        let generation = selectionGeneration
+        if events.isEmpty {
+            // No rows held, so this is an opening whatever it is called from,
+            // and the transcript has to know: revealing an empty transcript
+            // and then filling it is the build-up the wireframe exists to
+            // cover.
+            openingConversation = true
+            defer {
+                if selectionGeneration == generation { openingConversation = false }
+            }
+            await openEvents(id: id, generation: generation)
+        } else {
+            await loadEvents(id: id, reset: false, generation: generation)
+        }
+        guard selectionMatches(id: id, generation: generation) else { return }
+        await loadApprovals(id: id, generation: generation)
+        guard selectionMatches(id: id, generation: generation) else { return }
+        if instructions == nil {
+            await loadInstructions(id: id, generation: generation)
+        }
     }
 
     func create() async {
@@ -755,13 +811,26 @@ final class ChatModel {
 
     /// How many records a conversation opens on. Records, not rows: streamed
     /// text arrives in many pieces and becomes one paragraph.
-    private static let openPageEvents = 400
+    ///
+    /// Small on purpose, and grown by the loop above until the window holds
+    /// enough rows. A page of four hundred records can coalesce into well
+    /// over a hundred rows on a backend that does not stream, and opening on
+    /// that many rows of markdown is a second of layout before anybody sees
+    /// anything, then a scroll to an end that keeps moving while the rows
+    /// measure themselves.
+    private static let openPageEvents = 150
     /// How many records each older page carries.
-    private static let pageEvents = 300
+    ///
+    /// Smaller than the opening page. The insertion is the one moment paging
+    /// back can be felt, and what is felt is a frame's worth of layout, so
+    /// several small pages read as nothing where one large page reads as a
+    /// stutter. The transcript keeps two and a half screens of runway ahead
+    /// of the reader, which is what makes a small page safe.
+    private static let pageEvents = 100
     /// The rows an opening window aims to hold before it stops pulling.
     private static let openDisplayItems = 24
     /// How many extra pages one opening may pull to reach that.
-    private static let openExtraPages = 3
+    private static let openExtraPages = 4
 
     private func loadEvents(id: String, reset: Bool, generation: UInt64) async {
         let requestedOffset = reset ? 0 : offset

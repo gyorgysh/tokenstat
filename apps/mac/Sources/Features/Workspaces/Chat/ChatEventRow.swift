@@ -58,12 +58,20 @@ struct ChatEventRow: View {
             }
             .accessibilityLabel("New turn with \(agentLabel(backend))")
         case let .thinking(text):
-            Text(text)
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 2)
+            // Agents write their reasoning in markdown like everything else,
+            // so a plain Text left `##` and `**` on screen as punctuation.
+            // Quiet headings, because this is an aside and has to keep
+            // reading as one.
+            MarkdownText(
+                text,
+                bodyFont: Theme.caption,
+                codeFont: Theme.monoText(10, relativeTo: .caption),
+                style: .aside
+            )
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 2)
         case let .tool(state):
             ToolRow(
                 verb: state.verb,

@@ -55,11 +55,16 @@ struct ClientChatEventRow: View {
             }
             .accessibilityLabel("New turn with \(agentLabel(backend))")
         case let .thinking(text):
-            Text(text)
-                .font(ClientType.caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Same as the Mac: reasoning is markdown, and it stays an aside.
+            MarkdownText(
+                text,
+                bodyFont: ClientType.caption,
+                codeFont: Theme.monoText(10, relativeTo: .caption),
+                style: .aside
+            )
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
         case let .tool(state):
             ToolRow(
                 verb: state.verb,
