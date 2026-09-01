@@ -2448,6 +2448,11 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var budgetSeconds: UInt64
     var createdAtMs: Int64
     var updatedAtMs: Int64
+    /// Last actual human/agent event. Setup edits move `updatedAtMs` but do
+    /// not make a conversation unread.
+    var lastMessageAtMs: Int64?
+    /// `user` or `agent`; optional for hosts predating recent chats.
+    var lastMessageAuthor: String?
     var running: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -2457,7 +2462,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case personaID = "personaId"
         case model, effort, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
-        case createdAtMs, updatedAtMs, running
+        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running
     }
 
     init(from decoder: Decoder) throws {
@@ -2478,6 +2483,8 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         budgetSeconds = try c.decodeIfPresent(UInt64.self, forKey: .budgetSeconds) ?? 0
         createdAtMs = try c.decodeIfPresent(Int64.self, forKey: .createdAtMs) ?? 0
         updatedAtMs = try c.decodeIfPresent(Int64.self, forKey: .updatedAtMs) ?? 0
+        lastMessageAtMs = try c.decodeIfPresent(Int64.self, forKey: .lastMessageAtMs)
+        lastMessageAuthor = try c.decodeIfPresent(String.self, forKey: .lastMessageAuthor)
         running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
     }
 
@@ -2499,6 +2506,8 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         try c.encode(budgetSeconds, forKey: .budgetSeconds)
         try c.encode(createdAtMs, forKey: .createdAtMs)
         try c.encode(updatedAtMs, forKey: .updatedAtMs)
+        try c.encodeIfPresent(lastMessageAtMs, forKey: .lastMessageAtMs)
+        try c.encodeIfPresent(lastMessageAuthor, forKey: .lastMessageAuthor)
         try c.encode(running, forKey: .running)
     }
 }

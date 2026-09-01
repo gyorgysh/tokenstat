@@ -154,7 +154,7 @@ struct ClientChatView: View {
 }
 
 /// One conversation: setup, transcript, glass composer.
-private struct ClientChatThread: View {
+struct ClientChatThread: View {
     @Bindable var model: ChatModel
     let chatID: String
     let folderName: String
@@ -284,12 +284,18 @@ private struct ClientChatThread: View {
             // transcript and read it back, which is this screen blanking and
             // re-scrolling every time it is pushed, including straight after
             // the launcher picked the conversation for you.
-            guard model.selected?.id != chat.id || model.displayItems.isEmpty else { return }
-            await model.select(chat)
+            if model.selected?.id != chat.id || model.displayItems.isEmpty {
+                await model.select(chat)
+            }
+            guard !Task.isCancelled else { return }
+            if let current = model.chats.first(where: { $0.id == chatID }) {
+                ClientChatReadState.shared.markRead(peer: model.peer, chat: current)
+            }
         }
         .task(id: chatID) {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(400))
+                guard !Task.isCancelled else { return }
                 await model.poll()
             }
         }

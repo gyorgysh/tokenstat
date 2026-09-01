@@ -11,57 +11,71 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one, rather than reconstructing release notes from
 commits at the end.
 
-## [0.7.3] - Unreleased
+## [0.7.3] - 2026-09-01
 
-This release focuses on a faster, clearer workspace for conversations, code review,
-and remote work across Mac, iPhone, iPad, and Windows preview.
+Chat comes to the Mac, along with the pull requests around a folder and the
+branches and files they touch.
 
 ### Added
 
-- Workspace Chat is available across the desktop and mobile clients. Conversations
-  persist, resume with the selected agent, support attachments and approvals, and
-  can notify you when a turn needs attention or finishes.
-- Personas give each conversation a reusable name, instructions, and animated
-  identity. You can choose no persona, share one across folders, and hand a
-  conversation to another agent with its working context intact.
-- Pull requests are a native workspace: connect GitHub or Enterprise, choose
-  repositories, browse and review changes, inspect checks and conversations, and
-  take explicit actions such as approve, request changes, merge, or check out a
-  branch. Mac, mobile, and Windows preview clients are supported.
-- SSH sessions provide safe, in-memory suggestions for paths, saved commands,
-  and recent session locations while you type. Suggestions never run commands
-  or retain passwords.
-- Workspace launchers now include Chat, Pull requests, Browser, Files, Changes,
-  Tasks, Workflows, and Automations with cached counts where useful.
+- Every workspace has conversations. Choose the agent and the mode before the
+  first turn, and the conversation still has them when you come back to it days
+  later. The transcript draws tool calls, diffs and markdown instead of pasting
+  them in as text, each tool carrying how long it took and whether it failed,
+  and a meter says what the conversation has spent.
+- A long conversation opens on the latest turn with history behind it, and holds
+  your place while older messages load in above.
+- A tool that needs permission stops the turn and asks in place, showing what it
+  wants to do. Nothing runs on an answer you did not give, and a request nobody
+  answers expires. You can see what an agent is allowed to do before you choose
+  it.
+- Personas: a name, a brief, and a face. A persona is yours, not one chat's, so
+  you can give a workspace a default one, reuse it across folders, or have none.
+  The face is a small physical character, so it leans, lands and follows through
+  as the conversation moves.
+- Drop or paste files anywhere in a conversation, or attach them from the
+  composer. Images go to the backends that take them natively.
+- Hand a conversation to another agent with its working context intact. The
+  transcript records the handoff.
+- The Mac says when a conversation needs an answer and when a turn has finished.
+  Those notifications are local. Nothing about the folder, the prompt or the
+  command leaves the machine.
+- Pull requests are a workspace of their own. Connect GitHub or GitHub
+  Enterprise, choose the repositories you care about, then read changes, checks
+  and conversation, and approve, request changes, merge, or check the branch out
+  without leaving the app.
+- An SSH session suggests paths on the far machine, your saved commands, and
+  where recent sessions were working, while you type. It keeps them in memory
+  only. Nothing is run to produce them and no password is kept.
+- Muse and Devin CLI usage now appears in your reports, and Devin has its own
+  mark in the app.
+- Recent conversations sit above folders on iPhone and iPad, with their last
+  activity and a per-device unread mark, and open straight into the thread.
+- Patron and Legend are available monthly as well as yearly.
 
 ### Changed
 
-- Long conversations open at the newest messages, load older pages as you scroll,
-  preserve your reading position, and render only the rows and Markdown on screen.
-- Insights loads its charts from one consistent snapshot. Slow bridge and host
-  calls record method and elapsed time locally without recording prompts, paths,
-  or report contents.
-- Background scans and workspace status checks scale to the host's available CPU,
-  leaving older Macs responsive while allowing newer Macs to use more capacity.
-- Workspace screens share a wider reading room, consistent action chrome, branch
-  context, themed controls, and adaptive layouts across Mac and mobile.
-- Monthly and yearly plan choices, StoreKit products, and paywall copy now agree
-  on the same tiers and pricing.
+- Reports and background scanning no longer wait on each other, and scanning
+  takes what the machine has. An older Mac stays responsive while a newer one
+  finishes sooner.
+- Sheets across the app look like each other: headers line up, colours match,
+  and there is room around what they are asking.
+- Committing and pushing say what happened in words. You no longer get the
+  command's own output to read.
 
 ### Fixed
 
-- Newer mobile clients now explain when a paired desktop must be updated before
-  Chat or Pull requests can load, instead of showing an unknown-method error.
-- Chat tool rows, durations, token totals, turn outcomes, agent handoffs, and
-  attachments now remain accurate while a response streams or finishes.
-- GitHub authorization keeps its existing refresh token when a renewal response
-  omits a replacement, preventing unexpected sign-outs.
-- Pull-request diffs handle quoted or nested patch text correctly; credentials and
-  detail caches are reused and pruned safely.
-- Git operations reject option-shaped branch inputs, and commit/push feedback is
-  written for people rather than copied directly from command-line output.
-- Full-screen transitions, sidebar navigation, text fields, action footers, and
-  mobile connection errors now behave consistently across supported clients.
+- Text fields are on the app's own surface again. Sixteen had reverted to the
+  platform bezel, which on a dark panel is a flat grey that matches nothing else
+  in the app.
+- Entering or leaving full screen from the traffic lights no longer aborts the
+  app on the newest macOS.
+- The paywall no longer promises "Switch at next renewal" for a plan change
+  Apple charges on the spot, and it offers a free trial only to people Apple
+  will actually give one to.
+- A branch name shaped like a command-line option is refused rather than passed
+  to git.
+
 ## [0.7.2] - 2026-08-28
 
 ### Added

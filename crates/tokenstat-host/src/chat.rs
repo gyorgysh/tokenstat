@@ -116,6 +116,14 @@ pub struct Conversation {
     pub budget_seconds: u64,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+    /// The last human or agent event, separate from `updated_at_ms`: changing
+    /// a title or setup must not make a conversation look unread.
+    #[serde(default)]
+    pub last_message_at_ms: Option<i64>,
+    /// `"user"` or `"agent"`. A client only marks an unseen agent message
+    /// unread; its own most recent prompt is not news.
+    #[serde(default)]
+    pub last_message_author: Option<String>,
     #[serde(default)]
     pub running: bool,
 }
@@ -285,7 +293,7 @@ pub struct Update {
     pub persona_id: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum StoredEvent {
     User {
@@ -389,13 +397,26 @@ impl Store {
         let root = tokenstat_paths::data_dir()
             .map(|path| path.join("chat"))
             .unwrap_or_else(|| PathBuf::from("chat"));
-        let conversations = fs::read(root.join("conversations.json"))
+        let mut conversations = fs::read(root.join("conversations.json"))
             .ok()
             .and_then(|body| serde_json::from_slice::<Index>(&body).ok())
             .map(|index| index.conversations)
             .unwrap_or_default();
+        let mut migrated = false;
+        for chat in &mut conversations {
+            if chat.last_message_at_ms.is_some() {
+                continue;
+            }
+            if let Some((at_ms, author)) =
+                last_message_in(&root.join(safe_file_name(&chat.id)).join("events.ndjson"))
+            {
+                chat.last_message_at_ms = Some(at_ms);
+                chat.last_message_author = Some(author.into());
+                migrated = true;
+            }
+        }
         let personas = load_persona_index(&root);
-        Self {
+        let store = Self {
             root,
             conversations: Mutex::new(conversations),
             active: Mutex::new(HashMap::new()),
@@ -403,7 +424,11 @@ impl Store {
             personas: Mutex::new(personas),
             approvals: Mutex::new(Vec::new()),
             turn_tokens: Mutex::new(HashMap::new()),
+        };
+        if migrated {
+            let _ = store.save();
         }
+        store
     }
 
     fn save(&self) -> Result<(), String> {
@@ -432,6 +457,25 @@ impl Store {
             .cloned()
             .collect();
         rows.sort_by_key(|chat| std::cmp::Reverse(chat.updated_at_ms));
+        rows
+    }
+
+    /// The conversations most recently spoken in, across every workspace.
+    ///
+    /// One pass over the in-memory index. The transcript is not opened here:
+    /// old indexes are hydrated once at daemon startup, and new turns update
+    /// the two message fields when they are written.
+    pub fn recent(&self, limit: usize) -> Vec<Conversation> {
+        let mut rows: Vec<_> = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|chat| chat.last_message_at_ms.is_some())
+            .cloned()
+            .collect();
+        rows.sort_by_key(|chat| std::cmp::Reverse(chat.last_message_at_ms.unwrap_or_default()));
+        rows.truncate(limit.min(50));
         rows
     }
 
@@ -939,6 +983,8 @@ impl Store {
             budget_seconds: input.budget_seconds.unwrap_or(0),
             created_at_ms: now,
             updated_at_ms: now,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         };
         self.conversations
@@ -1498,13 +1544,15 @@ impl Store {
                 )?;
             }
         }
+        let user_at = now_ms();
         self.append(
             id,
             &StoredEvent::User {
                 text: text.trim().into(),
-                at_ms: now_ms(),
+                at_ms: user_at,
             },
         )?;
+        self.mark_last_message(id, user_at, "user")?;
         self.retitle_if_untitled(id, text.trim())?;
         self.active
             .lock()
@@ -1646,6 +1694,7 @@ impl Store {
                 exit_code: exit,
             }],
         );
+        let _ = self.mark_last_message(id, now_ms(), "agent");
         if let Some(reason) = chat_notification(status) {
             tokenstat_sync::push::notify_in_background(reason);
         }
@@ -1808,6 +1857,21 @@ impl Store {
         drop(chats);
         self.save()?;
         Ok(out)
+    }
+    fn mark_last_message(&self, id: &str, at_ms: i64, author: &str) -> Result<(), String> {
+        let mut chats = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let chat = chats
+            .iter_mut()
+            .find(|chat| chat.id == id)
+            .ok_or("no chat with that id")?;
+        chat.last_message_at_ms = Some(at_ms);
+        chat.last_message_author = Some(author.into());
+        chat.updated_at_ms = chat.updated_at_ms.max(at_ms);
+        drop(chats);
+        self.save()
     }
     fn set_resume(&self, id: &str, backend: &str, token: &str) -> Result<(), String> {
         let mut chats = self
@@ -2441,6 +2505,22 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Recover message metadata for an index written before those fields existed.
+/// Event archives are capped, so this is a bounded startup read performed once
+/// per legacy conversation and persisted back into the index immediately.
+fn last_message_in(path: &Path) -> Option<(i64, &'static str)> {
+    let bytes = fs::read(path).ok()?;
+    let text = std::str::from_utf8(&bytes).ok()?;
+    text.lines().rev().find_map(|line| {
+        let event: StoredEvent = serde_json::from_str(line).ok()?;
+        match event {
+            StoredEvent::User { at_ms, .. } => Some((at_ms, "user")),
+            StoredEvent::Agent { at_ms, .. } => Some((at_ms, "agent")),
+            StoredEvent::Approval { .. } | StoredEvent::Handoff { .. } => None,
+        }
+    })
+}
+
 pub fn backends() -> Vec<Value> {
     crate::automations::backends()
         .into_iter()
@@ -3024,6 +3104,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: true,
         });
         store.stop("chat-test").unwrap();
@@ -3053,6 +3135,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         };
         store.conversations.lock().unwrap().extend([
@@ -3064,6 +3148,28 @@ mod tests {
         assert_eq!(counts.get("workspace-a"), Some(&2));
         assert_eq!(counts.get("workspace-b"), Some(&1));
         assert_eq!(counts.get("workspace-c"), None);
+
+        {
+            let mut chats = store.conversations.lock().unwrap();
+            chats[0].last_message_at_ms = Some(3);
+            chats[0].last_message_author = Some("user".into());
+            // A setup-only conversation stays out of recents.
+            chats[1].updated_at_ms = 99;
+            chats[2].last_message_at_ms = Some(5);
+            chats[2].last_message_author = Some("agent".into());
+        }
+        let recent = store.recent(20);
+        assert_eq!(
+            recent
+                .iter()
+                .map(|chat| chat.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["chat-b1", "chat-a1"]
+        );
+        assert_eq!(
+            store.recent(1)[0].last_message_author.as_deref(),
+            Some("agent")
+        );
     }
 
     #[test]
@@ -3090,6 +3196,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         };
         store.conversations.lock().unwrap().push(chat);
@@ -3112,6 +3220,10 @@ mod tests {
                 },
             )
             .unwrap();
+        assert_eq!(
+            last_message_in(&store.events_path("chat-test")),
+            Some((3, "agent"))
+        );
         let (events, next) = store.events("chat-test", 0).unwrap();
         assert_eq!(events.len(), 2);
         assert!(next > 0);
@@ -3185,6 +3297,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         });
         let attachment = store
@@ -3406,6 +3520,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         };
         store.conversations.lock().unwrap().push(chat.clone());
@@ -3516,6 +3632,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         };
         store.conversations.lock().unwrap().push(chat.clone());
@@ -3651,6 +3769,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         };
         store.conversations.lock().unwrap().push(chat.clone());
@@ -3749,6 +3869,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         });
         let source = root.path().join("answer.txt");
@@ -3806,6 +3928,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         });
         store.record_events(
@@ -3852,6 +3976,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         });
         {
@@ -3925,6 +4051,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         });
         let turn_token = store.register_turn_token("chat-test", "claude").unwrap();
@@ -4123,6 +4251,8 @@ mod tests {
             budget_seconds: 0,
             created_at_ms: 1,
             updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
             running: false,
         });
         let other = store

@@ -87,6 +87,13 @@ struct ClientHostWorkspacesView: View {
                     )
                 }
 
+                ClientRecentChatsSection(
+                    peer: peerKey,
+                    hostName: hostName,
+                    folders: model.folders,
+                    chats: model.recentChats
+                )
+
                 if !model.folders.isEmpty {
                     ClientSectionTitle(title: "Folders", mark: "mark_archive")
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,6 +157,7 @@ struct ClientHostWorkspacesView: View {
 final class ClientHostWorkspacesModel {
     private(set) var folders: [WorkspaceFolder] = []
     private(set) var sessions: [PtySessionInfo] = []
+    private(set) var recentChats: [ChatConversation] = []
     private(set) var errorMessage: String?
     private(set) var isConnecting = false
     /// Whether a call to this host has come back. Nil until one has, so the
@@ -189,6 +197,7 @@ final class ClientHostWorkspacesModel {
             guard allowed else {
                 folders = []
                 sessions = []
+                recentChats = []
                 // Opening this screen is somebody saying they want in, so the
                 // asking happens without a second press. The button stays, for
                 // asking again once a request has gone stale.
@@ -198,12 +207,17 @@ final class ClientHostWorkspacesModel {
                 watchForAccess(peerKey: peerKey, name: name)
                 return
             }
-            folders = try await Bridge.remoteWorkspaces(peer: peer)
-            sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
+            async let loadedFolders = Bridge.remoteWorkspaces(peer: peer)
+            async let loadedSessions = ClientRemote.ptyList(peer: peer.key)
+            async let loadedChats = ClientRemote.recentChats(peer: peer.key)
+            folders = try await loadedFolders
+            sessions = (try? await loadedSessions) ?? []
+            recentChats = (try? await loadedChats) ?? []
         } catch {
             errorMessage = error.localizedDescription
             folders = []
             sessions = []
+            recentChats = []
             reachedHost = false
             // Unknown again, not refused. A host that could not be reached
             // this time must not be described as having turned this device

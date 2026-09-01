@@ -231,6 +231,11 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "workspace.summary", as: [WorkspaceSummary].self)
     }
 
+    /// The newest conversations on this host, across its folders.
+    static func recentChats(peer: String, limit: Int = 20) async throws -> [ChatConversation] {
+        try await Bridge.recentChats(peer: peer, limit: limit)
+    }
+
     // MARK: - A folder's work, on the machine that owns it
 
     /// The peer's whole board, list and all. Filtering to one folder happens

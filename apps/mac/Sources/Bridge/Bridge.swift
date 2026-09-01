@@ -956,6 +956,18 @@ extension Bridge {
         )
     }
 
+    /// Recently messaged conversations across every workspace on one host.
+    /// The host answers from its in-memory index; no transcript crosses the
+    /// tunnel until somebody opens one of these rows.
+    static func recentChats(peer: String, limit: Int = 20) async throws -> [ChatConversation] {
+        try await chatInvoke(
+            peer: peer,
+            "chat.recent",
+            ["limit": min(max(limit, 1), 50)],
+            as: [ChatConversation].self
+        )
+    }
+
     static func createChat(
         workspaceID: String,
         backend: String,

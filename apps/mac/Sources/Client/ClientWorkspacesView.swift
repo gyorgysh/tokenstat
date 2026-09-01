@@ -107,6 +107,16 @@ struct ClientWorkspacesView: View {
                     )
 
                     if model.connectedKey != nil {
+                        if let peer = model.connectedKey,
+                           let host = model.hosts.first(where: { $0.peerKey == peer }) {
+                            ClientRecentChatsSection(
+                                peer: peer,
+                                hostName: host.name,
+                                folders: model.folders,
+                                chats: model.recentChats
+                            )
+                        }
+
                         if !model.folders.isEmpty {
                             ClientSectionTitle(title: "Folders", mark: "mark_archive")
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -324,6 +334,7 @@ final class ClientWorkspacesModel {
     private(set) var hosts: [ClientHost] = []
     private(set) var folders: [WorkspaceFolder] = []
     private(set) var sessions: [PtySessionInfo] = []
+    private(set) var recentChats: [ChatConversation] = []
     private(set) var connectedKey: String?
     private(set) var isConnecting: String?
     private(set) var errorMessage: String?
@@ -411,6 +422,7 @@ final class ClientWorkspacesModel {
                 connectedKey = nil
                 folders = []
                 sessions = []
+                recentChats = []
             }
             return
         }
@@ -458,13 +470,18 @@ final class ClientWorkspacesModel {
                         connectedKey = nil
                         folders = []
                         sessions = []
+                        recentChats = []
                     }
                     watchForAccess(host)
                     return
                 }
                 stopWatchingForAccess()
-                folders = try await Bridge.remoteWorkspaces(peer: peer)
-                sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
+                async let loadedFolders = Bridge.remoteWorkspaces(peer: peer)
+                async let loadedSessions = ClientRemote.ptyList(peer: peer.key)
+                async let loadedChats = ClientRemote.recentChats(peer: peer.key)
+                folders = try await loadedFolders
+                sessions = (try? await loadedSessions) ?? []
+                recentChats = (try? await loadedChats) ?? []
                 connectedKey = host.peerKey
                 errorMessage = nil
                 infoMessage = nil
@@ -479,6 +496,7 @@ final class ClientWorkspacesModel {
                         connectedKey = nil
                         folders = []
                         sessions = []
+                        recentChats = []
                     }
                     return
                 }
@@ -496,6 +514,7 @@ final class ClientWorkspacesModel {
                     connectedKey = nil
                     folders = []
                     sessions = []
+                    recentChats = []
                 }
                 return
             }
@@ -552,6 +571,7 @@ final class ClientWorkspacesModel {
         connectedKey = nil
         folders = []
         sessions = []
+        recentChats = []
     }
 
     func openSession(_ info: PtySessionInfo) {
@@ -581,6 +601,7 @@ final class ClientWorkspacesModel {
         }
         folders = (try? await Bridge.remoteWorkspaces(peer: peer)) ?? folders
         sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? sessions
+        recentChats = (try? await ClientRemote.recentChats(peer: peer.key)) ?? recentChats
     }
 }
 

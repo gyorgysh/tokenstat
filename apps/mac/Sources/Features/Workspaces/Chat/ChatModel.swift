@@ -191,6 +191,11 @@ final class ChatModel {
         await openEvents(id: chat.id, generation: generation)
         await loadApprovals(id: chat.id, generation: generation)
         await loadInstructions(id: chat.id, generation: generation)
+        #if !os(macOS)
+        if !Task.isCancelled, selectionMatches(id: chat.id, generation: generation) {
+            ClientChatReadState.shared.markRead(peer: peer, chat: selected ?? chat)
+        }
+        #endif
     }
 
     /// Bring an already open conversation up to date without emptying it.
@@ -555,6 +560,11 @@ final class ChatModel {
             chats = latest
             if let current = latest.first(where: { $0.id == selected.id }) {
                 self.selected = current
+                #if !os(macOS)
+                if !Task.isCancelled {
+                    ClientChatReadState.shared.markRead(peer: peer, chat: current)
+                }
+                #endif
             }
             settleNotifications()
         } catch {}
