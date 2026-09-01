@@ -117,12 +117,11 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
     // Parsing logs is CPU, memory, and storage intensive at the same time.
     // Rayon defaults to every logical CPU, which makes a two- or four-core
     // Intel laptop feel frozen while a background scan competes with SwiftUI,
-    // SQLite, Spotlight, and the agent that is still writing its logs. Keep at
-    // least one core for the machine and cap the scan at four workers; current
-    // Macs still parse independent shards in parallel without turning an I/O
-    // burst into system-wide contention.
+    // SQLite, Spotlight, and the agent that is still writing its logs. Reserve
+    // one quarter of the capacity, rounded up, instead of a fixed cap: an old
+    // laptop stays responsive and a newer Mac keeps the parallelism it has.
     let workers = std::thread::available_parallelism()
-        .map(|n| n.get().saturating_sub(1).clamp(1, 4))
+        .map(|n| scan_worker_count(n.get()))
         .unwrap_or(2);
     match rayon::ThreadPoolBuilder::new().num_threads(workers).build() {
         Ok(pool) => pool.install(|| scan_inner(store, tz)),
@@ -130,6 +129,16 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
         // per-scan pool ever fails under extreme resource pressure.
         Err(_) => scan_inner(store, tz),
     }
+}
+
+/// The share of logical CPUs a scan may use.
+///
+/// The operating system's availability already accounts for an affinity or
+/// container limit. Holding back a quarter gives rendering, SQLite and the
+/// active agent headroom without imposing an artificial ceiling on newer Macs.
+fn scan_worker_count(logical_cpus: usize) -> usize {
+    let reserve = logical_cpus.saturating_add(3) / 4;
+    logical_cpus.saturating_sub(reserve).max(1)
 }
 
 fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, CoreError> {
@@ -904,6 +913,15 @@ fn vendor_daily_tokens(store: &Store) -> Result<Vec<DailyModelTokens>, CoreError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_workers_keep_a_quarter_of_each_machine_available() {
+        assert_eq!(scan_worker_count(1), 1);
+        assert_eq!(scan_worker_count(2), 1);
+        assert_eq!(scan_worker_count(4), 3);
+        assert_eq!(scan_worker_count(8), 6);
+        assert_eq!(scan_worker_count(16), 12);
+    }
 
     /// A WAL-only write has to be visible to the watermark.
     ///

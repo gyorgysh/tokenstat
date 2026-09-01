@@ -807,10 +807,20 @@ fn avatar_url(host: &str, raw: &Value) -> Option<String> {
 /// paid three git process spawns per folder again.
 #[cfg(feature = "local-host")]
 const WORKSPACE_STATUS_TTL: Duration = Duration::from_millis(400);
-/// Git status starts several subprocesses per workspace. Bound the fan-out so
-/// a large workspace list does not turn an older laptop into a process storm.
+/// Git status starts several subprocesses per workspace. Give each status
+/// worker roughly two logical CPUs, so a four-core laptop runs two at a time
+/// while a newer machine can use more of its available headroom.
 #[cfg(feature = "local-host")]
-const WORKSPACE_STATUS_WORKERS: usize = 4;
+fn workspace_status_workers() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| workspace_status_worker_count(n.get()))
+        .unwrap_or(2)
+}
+
+#[cfg(feature = "local-host")]
+fn workspace_status_worker_count(logical_cpus: usize) -> usize {
+    (logical_cpus.saturating_add(1) / 2).max(1)
+}
 
 #[cfg(feature = "local-host")]
 struct WorkspaceStatusCache {
@@ -2349,10 +2359,11 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 .cloned()
                 .collect();
             // Concurrent enough to hide one slow repository, but deliberately
-            // bounded: each description starts several Git processes and one
-            // thread per registered folder overwhelmed older Intel machines.
+            // capacity-aware: each description starts several Git processes,
+            // so an older Intel machine needs room for its foreground work
+            // while a newer Mac need not be held to the same fixed ceiling.
             let dtos: Vec<WorkspaceDto> = folders
-                .chunks(WORKSPACE_STATUS_WORKERS)
+                .chunks(workspace_status_workers())
                 .flat_map(|batch| {
                     std::thread::scope(|scope| {
                         let handles: Vec<_> = batch
@@ -3781,6 +3792,16 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn workspace_workers_follow_machine_capacity() {
+        assert_eq!(workspace_status_worker_count(0), 1);
+        assert_eq!(workspace_status_worker_count(1), 1);
+        assert_eq!(workspace_status_worker_count(4), 2);
+        assert_eq!(workspace_status_worker_count(8), 4);
+        assert_eq!(workspace_status_worker_count(16), 8);
+    }
 
     /// A clock alone is not unique enough: two threads entering within the same
     /// tick would build the same path and fight over one SQLite file.
