@@ -17,6 +17,38 @@ enum ClientStoreInterval: String {
 
 /// App Store plans. Same rungs and prices as the website, billed by
 /// Apple. The Mac target must not compile this file into a purchase path.
+///
+/// **The group order in App Store Connect is not the price order, and the
+/// difference is deliberate.** Levels decide whether a change is charged today
+/// or waits for the renewal, so each yearly plan is stacked with the monthly
+/// plan of the tier *above* it rather than with its own:
+///
+///     1  Legend yearly
+///     2  Patron yearly, Legend monthly
+///     3  Supporter yearly, Patron monthly
+///
+/// No two products of one duration share a level, so same-duration moves are
+/// the plain tier ladder: a climb is immediate, a drop waits. The offset is
+/// what makes every mixed-duration move behave: monthly to yearly is a level
+/// climb, so it is immediate, and yearly to monthly is a level drop or a
+/// same-level crossgrade, so it always waits.
+///
+/// Apple's own example pairs each tier's two durations at one level. That
+/// reads tidier and is wrong for this ladder: it puts Legend monthly above
+/// Patron yearly, which turns "Patron yearly to Legend monthly" into an
+/// immediate upgrade, and Apple then refunds almost the whole unused year. A
+/// paid annual plan becomes a way out with the money back. The website blocks
+/// that same move outright (`changeKind`, `yearly_to_monthly_upgrade`). It also
+/// makes monthly to yearly wait, so the annual charge is delayed by up to a
+/// month.
+///
+/// Only Supporter yearly to Legend monthly is still immediate, and nothing is
+/// lost there: both are $10, so it is an upgrade at list price.
+///
+/// `Tokenstat.storekit` carries the same order for local testing. Nothing in
+/// the app hardcodes these numbers, `planChange` reads `groupLevel` from
+/// StoreKit, but a reorder in App Store Connect silently changes what every
+/// button does, so move all three together.
 enum ClientStoreProduct: String, CaseIterable, Identifiable {
     case supporter = "ai.tokenstat.supporter.yearly"
     case patron = "ai.tokenstat.patron.yearly"
@@ -57,7 +89,9 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Same ladder as the website and the StoreKit group.
+    /// The tier ladder, as the website ranks it. Not the App Store group
+    /// level: those disagree on purpose, and only `planChange` may answer
+    /// whether a move is charged now.
     var rank: Int {
         switch self {
         case .supporter: return 1
@@ -120,6 +154,18 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
     }
 }
 
+/// What the App Store will do when somebody moves between two plans in the
+/// group. The rules are Apple's: a move up a level happens at once and refunds
+/// the unused time, a move down waits for the renewal date, and a move within
+/// one level depends on whether the duration changes.
+enum ClientPlanChange {
+    case current
+    /// Charged now, with the time already paid for refunded prorated.
+    case immediate
+    /// Takes effect on the renewal date. Nothing is charged today.
+    case atRenewal
+}
+
 /// StoreKit 2 purchases for the iOS client.
 ///
 /// After Apple confirms a transaction, the signed JWS is posted to the
@@ -141,6 +187,12 @@ final class ClientStore {
     var autoRenewProductID: String?
     var willAutoRenew = true
     var expirationDate: Date?
+    /// Whether this Apple ID may still take the group's introductory offer.
+    /// One per subscription group per Apple ID, which is a different question
+    /// from the account's own `trialUsed`: somebody can be new here and have
+    /// spent the offer long ago under another account. Offering a trial they
+    /// are not eligible for puts the full price in Apple's sheet instead.
+    var isIntroEligible = false
 
     /// Written by the root so a successful purchase updates the same account
     /// model the rest of the app is already reading.
@@ -158,6 +210,32 @@ final class ClientStore {
 
     func product(for item: ClientStoreProduct) -> Product? {
         products.first { $0.id == item.rawValue }
+    }
+
+    /// Group level and duration decide this, and both come from the store, so
+    /// a button here cannot promise something App Store Connect will not do.
+    func planChange(from current: Product, to next: Product) -> ClientPlanChange {
+        guard current.id != next.id else { return .current }
+        guard let from = current.subscription, let to = next.subscription else {
+            return .immediate
+        }
+        if to.groupLevel != from.groupLevel {
+            return to.groupLevel < from.groupLevel ? .immediate : .atRenewal
+        }
+        return to.subscriptionPeriod == from.subscriptionPeriod ? .immediate : .atRenewal
+    }
+
+    func planChange(from current: ClientStoreProduct?, to item: ClientStoreProduct) -> ClientPlanChange {
+        guard let current else { return .immediate }
+        guard current != item else { return .current }
+        guard let from = product(for: current), let to = product(for: item) else {
+            // Prices have not arrived. A climb at the same duration is the one
+            // case the ladder alone answers correctly; everything else waits.
+            return item.rank > current.rank && item.interval == current.interval
+                ? .immediate
+                : .atRenewal
+        }
+        return planChange(from: from, to: to)
     }
 
     func start() {
@@ -198,6 +276,7 @@ final class ClientStore {
             products = try await Product.products(for: ids)
                 .sorted { $0.price < $1.price }
             errorMessage = nil
+            await refreshIntroEligibility()
             await refreshSubscriptionStatus()
         } catch {
             errorMessage = "Could not load App Store plans."
@@ -306,6 +385,7 @@ final class ClientStore {
         let account = try await Bridge.appleActivate(signedTransaction: result.jwsRepresentation)
         onAccountChange?(account)
         await transaction.finish()
+        await refreshIntroEligibility()
         await refreshSubscriptionStatus()
     }
 
@@ -325,6 +405,14 @@ final class ClientStore {
                 }
             }
         }
+    }
+
+    func refreshIntroEligibility() async {
+        guard let group = products.first?.subscription?.subscriptionGroupID else {
+            isIntroEligible = false
+            return
+        }
+        isIntroEligible = await Product.SubscriptionInfo.isEligibleForIntroOffer(for: group)
     }
 
     func refreshSubscriptionStatus() async {

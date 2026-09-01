@@ -171,7 +171,12 @@ struct ClientPaywallView: View {
         let product = store.product(for: item)
         let trialUsed = account?.billing?.trialUsed == true
         let intro = product?.subscription?.introductoryOffer
-        let showTrial = item == .patron && item.interval == .year && current == nil && !trialUsed && intro != nil
+        // Two separate gates, and both have to hold. `trialUsed` is the
+        // account's, `isIntroEligible` is the Apple ID's: one person can be new
+        // here and have spent the group's offer under a previous account, and
+        // promising them three free days puts the full price in Apple's sheet.
+        let showTrial = item == .patron && item.interval == .year && current == nil
+            && !trialUsed && intro != nil && store.isIntroEligible
         let busy = store.purchasingProductID == item.rawValue
         let isCurrent = current == item
         let isQueued = queued == item && current != item
@@ -270,6 +275,7 @@ struct ClientPaywallView: View {
         busy: Bool
     ) -> some View {
         let appleLive = account?.billing?.isApple == true && account?.billing?.blocksOtherStore == true
+        let change = store.planChange(from: current, to: item)
         if current == item {
             actionButton("Your current plan", .currentPlan, accent: false, busy: false, enabled: false) {}
             actionButton("Manage on the App Store", .appStore, accent: false, busy: false, enabled: true) {
@@ -289,20 +295,6 @@ struct ClientPaywallView: View {
                 guard let product, let account else { return }
                 Task { await store.purchase(product, account: account) }
             }
-        } else if let current, item.rank > current.rank,
-                  !(current.interval == .year && item.interval == .month) {
-            // Same duration, or monthly to yearly. Yearly to monthly of a
-            // higher plan is an Apple duration change, not a mid-period climb.
-            actionButton(
-                "Upgrade to \(item.title)",
-                .plans,
-                accent: true,
-                busy: busy,
-                enabled: product != nil && !store.isBusy
-            ) {
-                guard let product, let account else { return }
-                Task { await store.purchase(product, account: account) }
-            }
         } else if queued == item {
             actionButton("Switches next renewal", .scheduled, accent: false, busy: false, enabled: false) {}
             if let keep = store.product(for: current ?? item) {
@@ -318,15 +310,27 @@ struct ClientPaywallView: View {
                 }
             }
         } else if appleLive || current != nil {
+            // What the button says is what the App Store will do, because both
+            // read the same group order. Guessing it from the tier ladder
+            // promised "next renewal" for a switch Apple charges on the spot.
+            let climb = current.map { item.rank > $0.rank } ?? false
+            let now = change == .immediate
             actionButton(
-                "Switch at next renewal",
-                .scheduled,
-                accent: false,
+                now ? (climb ? "Upgrade to \(item.title)" : "Switch to \(item.title) now")
+                    : "Switch at next renewal",
+                now ? .plans : .scheduled,
+                accent: now && climb,
                 busy: busy,
                 enabled: product != nil && !store.isBusy
             ) {
                 guard let product, let account else { return }
                 Task { await store.purchase(product, account: account) }
+            }
+            if now {
+                Text("Charged today. Apple refunds the time you have already paid for.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -566,7 +570,7 @@ struct ClientPaywallView: View {
     }
 
     private var renewNote: some View {
-        Text("Plans renew automatically unless you turn auto-renew off at least 24 hours before the period ends. Payment is charged to your Apple ID. A duration change at the same plan takes effect at the next Apple renewal. Manage or cancel in Apple ID subscriptions.")
+        Text("Plans renew automatically unless you turn auto-renew off at least 24 hours before the period ends. Payment is charged to your Apple ID. Each plan change says whether it happens today or at your next renewal. Manage or cancel in Apple ID subscriptions.")
             .font(ClientType.caption)
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)

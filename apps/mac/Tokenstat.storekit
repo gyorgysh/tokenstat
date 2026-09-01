@@ -114,7 +114,7 @@
           ],
           "displayPrice" : "5.00",
           "familyShareable" : false,
-          "groupNumber" : 2,
+          "groupNumber" : 3,
           "internalID" : "A1000005",
           "introductoryOffer" : null,
           "localizations" : [
@@ -139,7 +139,7 @@
           ],
           "displayPrice" : "10.00",
           "familyShareable" : false,
-          "groupNumber" : 1,
+          "groupNumber" : 2,
           "internalID" : "A1000006",
           "introductoryOffer" : null,
           "localizations" : [
