@@ -124,6 +124,32 @@ private enum MarkdownCache {
     static let highlights = ParsedTextCache<[SyntaxSpan]>(limit: 800)
 }
 
+private actor MarkdownHighlightLimiter {
+    static let shared = MarkdownHighlightLimiter(limit: 2)
+    private let limit: Int
+    private var inFlight = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func wait() async {
+        if inFlight < limit {
+            inFlight += 1
+            return
+        }
+        await withCheckedContinuation { c in waiters.append(c) }
+    }
+
+    func signal() {
+        if let next = waiters.first {
+            waiters.removeFirst()
+            next.resume()
+        } else {
+            inFlight = max(0, inFlight - 1)
+        }
+    }
+}
+
 private struct MarkdownBlock: Identifiable {
     enum Kind {
         case heading(level: Int, text: String)
@@ -340,22 +366,25 @@ private struct MarkdownCodeBlock: View {
                 spans = []
                 return
             }
-            // Highlighting is a round trip to the host. A lazily drawn
-            // transcript builds this row again every time it scrolls back
-            // into view, and the answer for a fence that has not changed is
-            // the answer it gave the first time.
             if let cached = MarkdownCache.highlights.stored(for: highlightKey) {
                 spans = cached
                 return
             }
-            // A fence somebody is scrolling past is not a fence anybody is
-            // reading. Scrolling back through a long conversation builds
-            // dozens of these in a second, and each one is a host round trip
-            // and a second draw when the answer lands. Cancellation does the
-            // rest: a row that leaves before this wakes never asks.
+            // A flick through a long conversation builds dozens of fences in
+            // a second. Cap concurrent highlights so the scroll, not the
+            // host, gets the thread.
+            await MarkdownHighlightLimiter.shared.wait()
+            guard !Task.isCancelled else {
+                await MarkdownHighlightLimiter.shared.signal()
+                return
+            }
             try? await Task.sleep(for: .milliseconds(140))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                await MarkdownHighlightLimiter.shared.signal()
+                return
+            }
             let result = try? await Bridge.highlight(path: path, text: source)
+            await MarkdownHighlightLimiter.shared.signal()
             guard !Task.isCancelled else { return }
             spans = result?.spans ?? []
             MarkdownCache.highlights.store(spans, for: highlightKey)

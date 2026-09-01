@@ -168,16 +168,23 @@ private struct ChatResponseAttachment: View {
         .disabled(data == nil)
         .onHover { hovering = $0 }
         .help(data == nil ? "Loading attachment" : "Open \(attachment.name)")
+        .task(id: data) {
+            decodedImage = nil
+            guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
+            #if os(macOS)
+            // Decode off the main thread: NSImage(data:) can be tens of
+            // milliseconds for a 12MB file and was hitching scroll decel.
+            if let nsImage = await Task.detached(priority: .userInitiated, operation: { NSImage(data: data) }).value {
+                decodedImage = Image(nsImage: nsImage)
+            }
+            #endif
+        }
     }
 
+    @State private var decodedImage: Image?
+
     private var image: Image? {
-        guard attachment.mediaType?.hasPrefix("image/") == true, let data else { return nil }
-        #if os(macOS)
-        guard let image = NSImage(data: data) else { return nil }
-        return Image(nsImage: image)
-        #else
-        return nil
-        #endif
+        decodedImage
     }
 
     private var fileDetail: String {

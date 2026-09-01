@@ -554,13 +554,23 @@ final class TranscriptWindow {
 
     /// How close to the top of what is loaded counts as approaching it.
     ///
-    /// Two and a half screens. The anchor is whatever is on screen now, so
-    /// how early this fires no longer decides whether the page can be
+    /// Three and a half screens on macOS where viewports are tall and flicks
+    /// are fast, two and a half elsewhere. The anchor is whatever is on screen
+    /// now, so how early this fires no longer decides whether the page can be
     /// absorbed, and the only thing left to trade is round trips against
     /// runway. A reader flicking back through a long history covers a screen
     /// in a few hundred milliseconds and should never meet the end of what is
     /// loaded.
+    #if os(macOS)
+    static let reach: CGFloat = 3.5
+    #else
     static let reach: CGFloat = 2.5
+    #endif
+
+    // Throttle anchor math: scroll callbacks fire every frame, and the anchor
+    // filter+suffix runs over up to 20 reported frames each time.
+    private var lastAnchorCheck = Date.distantPast
+    private var lastDistanceFromTopForAnchor: CGFloat = .greatestFiniteMagnitude
 
     func note(_ metrics: TranscriptMetrics) {
         viewportHeight = metrics.viewportHeight
@@ -577,7 +587,16 @@ final class TranscriptWindow {
             // corrected.
             return
         }
-        ask(force: false)
+        // Anchor evaluation is the only O(n) work here. Throttle it to every
+        // second frame or when the viewport actually moved.
+        let moved = abs(metrics.distanceFromTop - lastDistanceFromTopForAnchor) > 8
+        let now = Date()
+        let shouldEvaluate = moved || now.timeIntervalSince(lastAnchorCheck) > 0.032
+        if shouldEvaluate {
+            lastAnchorCheck = now
+            lastDistanceFromTopForAnchor = metrics.distanceFromTop
+            ask(force: false)
+        }
     }
 
     /// Whether the page before the oldest row held should be asked for now.
@@ -699,14 +718,23 @@ struct TranscriptEarlierHeader: View {
 struct TranscriptRowFrameKey: PreferenceKey {
     static var defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
-        value.merge(nextValue()) { _, next in next }
+        // One dict per frame after batching in the view layer, so this is a
+        // single merge rather than one per row. Keep last writer wins.
+        let next = nextValue()
+        if value.isEmpty {
+            value = next
+        } else {
+            value.merge(next) { _, next in next }
+        }
     }
 }
 
 extension View {
     /// Report where this row is, while the conversation has anything before
     /// it to page in. A lazy stack only builds what is near the screen, so
-    /// this runs for what is visible rather than for the window.
+    /// this runs for what is visible rather than for the window. Only the
+    /// anchor candidates near the top need to report: the hang in 0.7.3 was
+    /// every visible row walking ViewTransform on every frame.
     func transcriptRowFrame(_ id: String, watched: Bool) -> some View {
         background {
             if watched {
@@ -718,6 +746,14 @@ extension View {
                 }
             }
         }
+    }
+
+    /// Windowed variant: only the first N rows of the window report. The
+    /// anchor is always near the top of the viewport, so watching the whole
+    /// conversation is paying ViewTransform tax for rows that can never be
+    /// chosen.
+    func transcriptRowFrame(_ id: String, index: Int, watched: Bool, window: Int = 20) -> some View {
+        transcriptRowFrame(id, watched: watched && index < window)
     }
 
     /// Fetch the page before the oldest row held as the top comes near, and

@@ -309,7 +309,7 @@ private struct ClientChatThread: View {
                     TranscriptEarlierHeader(model: model) {
                         window.ask(force: true)
                     }
-                    ForEach(model.displayItems) { item in
+                    ForEach(Array(model.displayItems.enumerated()), id: \.element.id) { index, item in
                         ClientChatEventRow(
                             item: item,
                             attachmentData: attachmentData(for: item),
@@ -325,7 +325,7 @@ private struct ClientChatThread: View {
                             faceSeed: model.faceSeed
                         )
                         .equatable()
-                        .transcriptRowFrame(item.id, watched: model.hasEarlier)
+                        .transcriptRowFrame(item.id, index: index, watched: model.hasEarlier, window: 20)
                     }
                     if let mood = liveMood {
                         ChatWorkingIndicator(seed: model.faceSeed, mood: mood)

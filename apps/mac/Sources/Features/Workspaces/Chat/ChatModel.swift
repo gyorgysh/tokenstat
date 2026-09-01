@@ -543,10 +543,28 @@ final class ChatModel {
     }
 
     var hasRunningTool: Bool {
-        displayItems.contains { item in
+        // Memoized via the same DisplayKey as displayItems itself: scanning
+        // displayItems on every poll (400ms) and on every onChange was the
+        // second per-frame cost after coalescing.
+        hasRunningToolCache(for: displayKey) ?? computeHasRunningTool()
+    }
+
+    @ObservationIgnored private var hasRunningToolCacheKey: DisplayKey?
+    @ObservationIgnored private var hasRunningToolCacheValue = false
+
+    private func hasRunningToolCache(for key: DisplayKey?) -> Bool? {
+        guard let key, key == hasRunningToolCacheKey else { return nil }
+        return hasRunningToolCacheValue
+    }
+
+    private func computeHasRunningTool() -> Bool {
+        let value = displayItems.contains { item in
             if case let .tool(state) = item.kind { return state.running }
             return false
         }
+        hasRunningToolCacheKey = displayKey
+        hasRunningToolCacheValue = value
+        return value
     }
 
     var hasPendingResponseAttachments: Bool {
@@ -824,9 +842,9 @@ final class ChatModel {
     /// Smaller than the opening page. The insertion is the one moment paging
     /// back can be felt, and what is felt is a frame's worth of layout, so
     /// several small pages read as nothing where one large page reads as a
-    /// stutter. The transcript keeps two and a half screens of runway ahead
-    /// of the reader, which is what makes a small page safe.
-    private static let pageEvents = 100
+    /// stutter. The transcript keeps three and a half screens of runway ahead
+    /// of the reader on macOS, which is what makes a small page safe.
+    private static let pageEvents = 80
     /// The rows an opening window aims to hold before it stops pulling.
     private static let openDisplayItems = 24
     /// How many extra pages one opening may pull to reach that.

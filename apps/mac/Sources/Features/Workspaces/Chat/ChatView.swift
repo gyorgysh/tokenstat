@@ -177,7 +177,7 @@ struct ChatView: View {
                     TranscriptEarlierHeader(model: model) {
                         window.ask(force: true)
                     }
-                    ForEach(model.displayItems) { item in
+                    ForEach(Array(model.displayItems.enumerated()), id: \.element.id) { index, item in
                         ChatEventRow(
                             item: item,
                             defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
@@ -200,7 +200,7 @@ struct ChatView: View {
                             alignment: .leading
                         )
                         .frame(maxWidth: .infinity, alignment: item.readingRoomAlignment)
-                        .transcriptRowFrame(item.id, watched: model.hasEarlier)
+                        .transcriptRowFrame(item.id, index: index, watched: model.hasEarlier, window: 20)
                     }
                     if let mood = liveMood {
                         ChatWorkingIndicator(seed: model.faceSeed, mood: mood)

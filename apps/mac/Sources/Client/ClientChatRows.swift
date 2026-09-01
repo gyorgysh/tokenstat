@@ -119,7 +119,12 @@ private struct ClientChatResponseAttachment: View {
                 content
             }
         }
-        .task(id: data) { exportURL = stage() }
+        .task(id: data) {
+            exportURL = stage()
+            decodedImage = nil
+            guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
+            decodedImage = await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
+        }
     }
 
     private var content: some View {
@@ -161,10 +166,8 @@ private struct ClientChatResponseAttachment: View {
         }
     }
 
-    private var image: UIImage? {
-        guard attachment.mediaType?.hasPrefix("image/") == true, let data else { return nil }
-        return UIImage(data: data)
-    }
+    @State private var decodedImage: UIImage?
+    private var image: UIImage? { decodedImage }
 
     private var detail: String {
         let type = attachment.mediaType ?? "File"
