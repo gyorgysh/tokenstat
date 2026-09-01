@@ -25,8 +25,10 @@ struct MarkdownText: View {
         bodyFont: Font = Theme.body,
         codeFont: Font = Theme.monoText(12, relativeTo: .body)
     ) {
-        var parser = MarkdownParser(markdown)
-        blocks = parser.blocks()
+        blocks = MarkdownCache.blocks.value(for: markdown) {
+            var parser = MarkdownParser(markdown)
+            return parser.blocks()
+        }
         self.bodyFont = bodyFont
         self.codeFont = codeFont
     }
@@ -39,6 +41,56 @@ struct MarkdownText: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// Parsed markdown, kept between draws.
+///
+/// Both parses here are pure functions of the source text, and a transcript
+/// rebuilds its rows whenever anything about the conversation changes. Parsing
+/// the same paragraph again on every draw is the largest single cost in
+/// showing a long chat, and the answer never differs.
+///
+/// `NSCache` because it is thread safe and gives the memory back under
+/// pressure, which matters when the text being held is a whole conversation.
+private final class ParsedTextCache<Value> {
+    private final class Held {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+
+    private let cache = NSCache<NSString, Held>()
+
+    init(limit: Int) {
+        cache.countLimit = limit
+    }
+
+    func value(for source: String, parse: () -> Value) -> Value {
+        let key = source as NSString
+        if let held = cache.object(forKey: key) { return held.value }
+        let parsed = parse()
+        cache.setObject(Held(parsed), forKey: key)
+        return parsed
+    }
+
+    /// For an answer that cannot be produced here, such as one that has to be
+    /// asked for.
+    func stored(for source: String) -> Value? {
+        cache.object(forKey: source as NSString)?.value
+    }
+
+    func store(_ value: Value, for source: String) {
+        cache.setObject(Held(value), forKey: source as NSString)
+    }
+}
+
+private enum MarkdownCache {
+    /// One entry per assistant message, roughly. A long conversation reads
+    /// back a few hundred of them.
+    static let blocks = ParsedTextCache<[MarkdownBlock]>(limit: 400)
+    /// One entry per paragraph, list row and table cell, so several per block.
+    static let inline = ParsedTextCache<AttributedString>(limit: 2000)
+    /// Syntax spans, which cost a round trip to the host rather than a parse.
+    static let highlights = ParsedTextCache<[SyntaxSpan]>(limit: 400)
 }
 
 private struct MarkdownBlock: Identifiable {
@@ -167,12 +219,14 @@ private struct InlineMarkdown: View {
 
     init(_ source: String, font: Font) {
         self.font = font
-        let safe = MarkdownSanitizer.inline(source)
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace,
-            failurePolicy: .returnPartiallyParsedIfPossible
-        )
-        attributed = (try? AttributedString(markdown: safe, options: options)) ?? AttributedString(source)
+        attributed = MarkdownCache.inline.value(for: source) {
+            let safe = MarkdownSanitizer.inline(source)
+            let options = AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace,
+                failurePolicy: .returnPartiallyParsedIfPossible
+            )
+            return (try? AttributedString(markdown: safe, options: options)) ?? AttributedString(source)
+        }
     }
 
     var body: some View {
@@ -236,9 +290,18 @@ private struct MarkdownCodeBlock: View {
                 spans = []
                 return
             }
+            // Highlighting is a round trip to the host. A lazily drawn
+            // transcript builds this row again every time it scrolls back
+            // into view, and the answer for a fence that has not changed is
+            // the answer it gave the first time.
+            if let cached = MarkdownCache.highlights.stored(for: highlightKey) {
+                spans = cached
+                return
+            }
             let result = try? await Bridge.highlight(path: path, text: source)
             guard !Task.isCancelled else { return }
             spans = result?.spans ?? []
+            MarkdownCache.highlights.store(spans, for: highlightKey)
         }
     }
 

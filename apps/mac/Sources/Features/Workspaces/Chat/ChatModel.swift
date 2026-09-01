@@ -388,8 +388,13 @@ final class ChatModel {
         do {
             let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
             guard selectionMatches(id: selected.id, generation: generation) else { return }
-            chats = latest
-            if let current = latest.first(where: { $0.id == selected.id }) {
+            // Only when it actually moved. Observation notifies on the write,
+            // not on the difference, and this runs four hundred milliseconds
+            // at a time: an unconditional assignment redraws every open
+            // transcript twice a second for nothing.
+            if chats != latest { chats = latest }
+            if let current = latest.first(where: { $0.id == selected.id }),
+               current != self.selected {
                 self.selected = current
             }
             settleNotifications()
@@ -581,12 +586,49 @@ final class ChatModel {
     /// Consecutive text and thinking deltas become one block each, and a
     /// ToolEnd lands on the ToolStart it belongs to so the row can show
     /// running, duration and failure without a second line.
+    ///
+    /// Answered from the last result while the records behind it are the same
+    /// ones. Every view of a conversation reads this several times per draw
+    /// (the rows themselves, whether a tool is running, what the live seat is
+    /// doing, which rows to measure), and folding a window of several hundred
+    /// records into rows that many times per frame is what made a long chat
+    /// impossible to scroll.
     var displayItems: [ChatDisplayItem] {
-        ChatDisplayItem.coalesce(events, defaultBackend: selected?.backend)
+        // Reading `events` here is also what tells Observation that a view
+        // depends on it, so the cheap path must still touch it.
+        let key = DisplayKey(
+            epoch: eventsEpoch,
+            count: events.count,
+            firstSeq: events.first?.seq,
+            lastSeq: events.last?.seq,
+            backend: selected?.backend
+        )
+        if key == displayKey { return displayCache }
+        displayCache = ChatDisplayItem.coalesce(events, defaultBackend: key.backend)
+        displayKey = key
+        return displayCache
     }
+
+    /// What the cached rows were folded from. Cheap to build, and every way
+    /// the window can change moves at least one field of it.
+    private struct DisplayKey: Equatable {
+        var epoch: UInt64
+        var count: Int
+        var firstSeq: UInt64?
+        var lastSeq: UInt64?
+        var backend: String?
+    }
+
+    @ObservationIgnored private var displayCache: [ChatDisplayItem] = []
+    @ObservationIgnored private var displayKey: DisplayKey?
+    /// Bumped whenever the window is replaced rather than grown. A host older
+    /// than `seq` gives its records no identity of their own, and two
+    /// different windows of the same size would otherwise look like one.
+    @ObservationIgnored private var eventsEpoch: UInt64 = 0
 
     /// Everything a window of the timeline is, forgotten in one place.
     private func forgetWindow() {
+        eventsEpoch &+= 1
         offset = 0
         conversationUsage = nil
         usageThrough = 0
@@ -618,6 +660,7 @@ final class ChatModel {
                 id: id, cursor: nil, limit: Self.openPageEvents, peer: peer
             )
             guard selectionMatches(id: id, generation: generation) else { return }
+            eventsEpoch &+= 1
             events = page.events
             offset = page.nextOffset
             earlierCursor = page.cursor
@@ -672,6 +715,7 @@ final class ChatModel {
                 // offsets under the cursor no longer mean anything. This page
                 // is the newest one: take it as the whole window rather than
                 // putting it in front of records it now sits after.
+                eventsEpoch &+= 1
                 events = page.events
                 offset = page.nextOffset
                 conversationUsage = page.usage
@@ -725,7 +769,15 @@ final class ChatModel {
             let chunk = try await Bridge.chatEvents(id: id, offset: requestedOffset, peer: peer)
             guard selectionMatches(id: id, generation: generation) else { return }
             guard reset || requestedOffset == offset else { return }
+            // A poll that found nothing new must not write anything back. The
+            // write is what redraws the transcript, and most polls of a
+            // running turn arrive between records rather than on one.
+            if !reset, chunk.events.isEmpty, chunk.nextOffset == offset {
+                await loadResponseAttachments(id: id, generation: generation)
+                return
+            }
             if reset {
+                eventsEpoch &+= 1
                 events = chunk.events
                 // The whole timeline, so there is nothing before it.
                 earlierCursor = nil
@@ -899,7 +951,7 @@ final class ChatModel {
     }
 }
 
-struct ChatToolState {
+struct ChatToolState: Equatable {
     var callId: String
     var verb: String
     var target: String
@@ -928,11 +980,14 @@ struct ChatToolState {
     }
 }
 
-struct ChatDisplayItem: Identifiable {
+/// Equatable so a transcript can skip the rows that did not move. A chat
+/// redraws whenever anything about it changes, and without this every visible
+/// row rebuilds itself because one of them grew by a word.
+struct ChatDisplayItem: Identifiable, Equatable {
     let id: String
     let kind: Kind
 
-    enum Kind {
+    enum Kind: Equatable {
         case user(String)
         case assistant(String, backend: String?)
         case turnSeparator(String)

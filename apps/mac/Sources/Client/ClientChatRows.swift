@@ -379,4 +379,19 @@ struct ClientChatApprovalCard: View {
     }
 }
 
+/// Compared by value so a transcript can skip a row that did not move.
+///
+/// The closures are the same two functions on every draw and cannot be
+/// compared, and `attachmentData` is bytes: `attachmentRevision` is the model's
+/// own answer to "did any of those bytes arrive", which is what this needs.
+extension ClientChatEventRow: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.item == rhs.item
+            && lhs.defaultAgentName == rhs.defaultAgentName
+            && lhs.attachmentRevision == rhs.attachmentRevision
+            && lhs.isPending == rhs.isPending
+            && lhs.faceSeed == rhs.faceSeed
+    }
+}
+
 #endif

@@ -19,7 +19,7 @@ struct ChatView: View {
     /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
     @State private var follow = TranscriptFollowState()
-    @State private var window = TranscriptWindowState()
+    @State private var window = TranscriptWindow()
     @State private var settleMood: PersonaMood?
     @State private var paneDropTargeted = false
     @State private var composerDropTargeted = false
@@ -143,7 +143,11 @@ struct ChatView: View {
     private func transcript(_ chat: ChatConversation) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                // Lazy on purpose. A long conversation is hundreds of rows of
+                // markdown, and a plain stack lays out and re-measures every
+                // one of them on every update, whether or not it is anywhere
+                // near the screen.
+                LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
                     #if !os(macOS)
                     if !model.chats.isEmpty {
                         conversationMenu
@@ -153,11 +157,7 @@ struct ChatView: View {
                         emptyConversation
                     }
                     TranscriptEarlierHeader(model: model) {
-                        Task {
-                            await loadEarlier(
-                                model, window: $window, proxy: proxy, force: true
-                            )
-                        }
+                        window.ask(force: true)
                     }
                     ForEach(model.displayItems) { item in
                         ChatEventRow(
@@ -174,6 +174,7 @@ struct ChatView: View {
                             },
                             faceSeed: model.faceSeed
                         )
+                        .equatable()
                         .frame(
                             maxWidth: item.prefersWideReadingRoom
                                 ? .infinity
@@ -194,7 +195,10 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
                 .chatScrollContent()
             }
-            .chatScrollViewport()
+            .chatScrollMetrics { metrics in
+                follow.note(metrics)
+                window.note(metrics)
+            }
             .overlay(alignment: .bottom) {
                 if follow.showJump && model.approvals.isEmpty {
                     JumpToLatestButton {
@@ -203,15 +207,7 @@ struct ChatView: View {
                     }
                 }
             }
-            .onPreferenceChange(ChatScrollContentKey.self) { frame in
-                follow.noteContent(frame)
-                window.note(content: frame)
-            }
-            .onPreferenceChange(ChatScrollViewportKey.self) { height in
-                follow.noteViewport(height: height)
-                window.note(viewport: height)
-            }
-            .transcriptEarlierPages(model, window: $window, proxy: proxy)
+            .transcriptEarlierPages(model, window: window, proxy: proxy)
             .onChange(of: structureToken) { _, _ in
                 pinToLatest(proxy, animated: true)
             }
@@ -242,6 +238,17 @@ struct ChatView: View {
             .onAppear {
                 follow.suppressed = !model.approvals.isEmpty
                 pinToLatest(proxy, animated: false)
+            }
+            .task(id: model.selected?.id) {
+                // A lazy stack does not know its own height until it has drawn
+                // the rows, so the first scroll to the end lands on estimates.
+                // Settle it over the next few frames rather than opening a
+                // conversation somewhere above its latest turn.
+                for _ in 0..<8 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    guard follow.pinned, model.approvals.isEmpty else { return }
+                    pinToLatest(proxy, animated: false)
+                }
             }
             .task(id: settleMood) {
                 guard settleMood == .ok else { return }
@@ -282,7 +289,7 @@ struct ChatView: View {
         // Nothing before this, so nothing to hold a place against, and no
         // reason to measure a row on every frame of every scroll.
         guard model.hasEarlier else { return [] }
-        return Set(model.displayItems.prefix(TranscriptWindowState.watched).map(\.id))
+        return Set(model.displayItems.prefix(TranscriptWindow.watched).map(\.id))
     }
 
     private var structureToken: String {
