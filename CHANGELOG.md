@@ -13,277 +13,55 @@ commits at the end.
 
 ## [0.7.3] - Unreleased
 
-### Fixed
-
-- A newer phone that opens Chat or Pull requests on an older desktop now says
-  which computer needs an update and shows a calm animated waiting state. It
-  no longer starts loading a feature the host cannot answer and leaves an
-  "unknown method" error behind.
-
-- A pull request whose diff contains a diff, such as a patch fixture or a
-  document quoting one, showed a file it does not touch and cut the real file's
-  changes in half.
-- A GitHub connection signed itself out every few hours. When GitHub renewed an
-  authorization without issuing a fresh renewal token, the one already held was
-  overwritten with nothing, and the next renewal had nothing to work with.
-- A dropped network request said "pull requests are not connected" and offered
-  a sign-in, for a connection that was fine.
-- Reading a pull request no longer asks the machine who you are three times
-  over. A credential is resolved once a minute rather than once per request,
-  which on a machine authenticated through git's own credential helper removes
-  a subprocess and a round trip from every read.
-- Creating a branch from a starting point that begins with a dash is refused
-  rather than handed to git as an option. The branch name was already checked;
-  the starting point was not, and `--discard-changes` in that position throws
-  away uncommitted work.
-- The pull-request daemon caches for detail, timeline and diff are pruned. They
-  were only ever added to, so a machine left running kept every diff it had
-  ever shown.
-- Grok replies read with doubled spaces ("I'll  run  that  command"). It sends
-  a separator space between tokens and the next token's own leading space, and
-  both were laid end to end.
-- Every tool in a chat drew twice. A tool's start and its end are joined by a
-  call id, and the id was written under one name and read under another, so no
-  end ever found its start: one row sat running until the turn closed it, and
-  a second row appeared beside it with the result. The same mismatch emptied
-  every timestamp, which is what a tool's duration is measured from, and left
-  cached tokens and cost reading zero on every conversation. On the archive
-  here that was 186 tools drawn as 372 rows.
-- Chat records one truthful end to a turn. Agent CLIs may call their own tool
-  stream "cancelled" even when the process exits successfully; that no longer
-  becomes a second failed turn or says the person pressed Stop. The host now
-  owns the final `ok`, `error`, or `stopped` outcome, and an explicit Stop is
-  kept distinct from a failure on macOS and iOS.
-- Choosing no persona lasted exactly one conversation. A workspace with no
-  default read as one nobody had set up yet, so the next chat quietly made a
-  fresh persona and inherited it. A workspace can now say it wants none, and
-  that answer is kept. Personas has a "New chats here" row that shows which
-  persona new conversations inherit and offers "No persona" alongside them,
-  replacing the "Make default" button, which could only ever say yes to
-  whichever persona happened to be open.
-- Committing and pushing say what happened. The panel used to print git's own
-  success output, which is addressed to a script: "To <remote>" and
-  "abc1234..def5678 main to main" are both true and neither answers the
-  question you asked by pressing the button. It now leads with the answer and
-  quotes git underneath, and a failure still shows git's words in full,
-  because those name the file, the hook or the conflict.
-- The bar the commit and push buttons sit in, and the one under a day in
-  Insights, stand on the app's footer surface instead of on the content's own
-  background. The rule above each of them separated nothing, so both read as
-  loose parts at the bottom of a panel rather than as a place where the
-  actions live. Opening a day is the accent now, since it is the reason that
-  panel has a footer at all.
-- Text fields across Workflows, Tasks, Automations, Devices, the browser bar
-  and the harness settings sit on the app's own surface instead of the
-  platform's grey bezel, which on a dark panel belonged to no part of the
-  design. A field asked to hold a paragraph is now as tall as it was asked to
-  be: the describe box in Workflows showed one line whatever it was given.
-- Chat in a Git folder shows the branch beside the folder name, and switches
-  branches from there, the same control the workspace already had. Chat is not
-  drawn inside the workspace surface, so it never inherited that header and a
-  conversation about a repository could not say which branch it was about.
-- A chat in the sidebar no longer jumps when the pointer reaches it. The
-  remove button used to be inserted into the row on hover, which made the row
-  taller and the title narrower at that moment and shifted every row under it.
-  The space is always there now.
-- A conversation with an agent that cannot resume its own session said "Handed
-  to <agent>" after every single reply, describing a switch that never
-  happened. Two causes, both fixed. Antigravity and opencode do report a
-  session, but each puts it somewhere tokenstat was not looking, so no
-  conversation ever recorded one and every turn started an agent with no
-  memory of what had been said. And a summary handed to the same agent again is
-  plumbing rather than a handover, so it no longer appears on the timeline: the
-  row is for a conversation that actually changed hands. What an agent was told
-  is still written beside the conversation either way.
+This release focuses on a faster, clearer workspace for conversations, code review,
+and remote work across Mac, iPhone, iPad, and Windows preview.
 
 ### Added
 
-- A long conversation opens on its newest page instead of on its beginning,
-  and reads backwards a page at a time as you scroll. The page before the
-  oldest message is fetched as you approach it and slotted in without moving
-  the line you were reading, and the top of the transcript says plainly
-  whether there is more or whether that is where the conversation starts.
-  Chats also stop re-reading their whole history four times a second while an
-  agent is working. The cost card still covers the whole conversation, counted
-  once when it opens rather than folded from the part on screen.
-- An SSH session suggests as you type. A short panel appears under the cursor
-  with the folders and files the server itself reports for the path being
-  written, the folders this session has already been in, the commands it has
-  already run, and the saved commands that match the line. A bare `cd ` offers
-  what is in the folder you are standing in. Press Down to step into the list,
-  then Tab or Return to type that row at the prompt, and Escape to put it away
-  for the rest of the line. Until you step in, Up is still the shell's history,
-  Tab is still the shell's own completion, and Return still runs the line.
-  Choosing a row finishes the line and leaves it for you to read: nothing is
-  ever run for you. A saved command with placeholders asks for them first, and
-  the values are still never stored. What a session remembers of itself lives
-  in memory until it closes and is never written anywhere, and nothing is
-  offered on, or remembered from, a line the server is not echoing, so a
-  password prompt is left alone. On a phone and an iPad the rows are chosen by
-  touch and no key is taken from the shell.
-- Pull requests, on Mac, use the same reading room as everything else: the wide
-  work lane for diffs and checks, and content that starts at the window's
-  leading edge rather than floating in the middle of it. One rule now, shared
-  with Chat, instead of a measurement per screen.
-- Pull requests join the workspace launcher, beside Chat, Files, Browser,
-  Changes and Tasks, with the count of what is open on it.
-- Chat on Mac now uses the pull-request workspace's wider reading room: prose
-  is larger and aligned by speaker at a comfortable measure, while tools,
-  diffs, files, approvals, and the composer can use the desktop's extra width.
-- Moving between workspace or SSH sections no longer reopens a Mac inspector
-  that the person deliberately closed.
-- The Mac's existing notification switch now covers Chat. A conversation can
-  banner when it needs an answer or its turn ends, primes without replaying old
-  work, stays silent for Stop, and removes a waiting banner when the person
-  opens or answers that conversation.
-- Chat can notify a signed-in phone when a turn finishes or fails, using two
-  fixed content-free reasons composed into sentences by the account server.
-  Stop stays silent, and a burst of unanswered approvals in one conversation
-  sends one waiting notification rather than spending the whole notify budget.
-- A Git-enabled workspace gains a Pull requests section that begins with its
-  connection. Connecting uses the tokenstat GitHub App through the device flow:
-  the app shows a one-time code, GitHub's page opens, and the answer stays on
-  the machine that owns the workspace. Where git already holds a GitHub
-  credential for this host, that credential is used instead and the screen says
-  so, and a token can be pasted for GitHub Enterprise or by preference. Which
-  of the three answered is always visible. Selecting the repositories tokenstat
-  may open happens on GitHub, and a workspace whose repository is not selected
-  says exactly that rather than showing an empty list.
-- Pull requests continue into a complete native review workspace. Browse open,
-  merged, closed and draft work by relationship; read Markdown conversations
-  and review activity; inspect multi-file diffs and checks; comment, approve or
-  request changes; mark a draft ready; close, reopen, merge, or safely check a
-  pull request out as a local branch. Network reads stay cached and every
-  repository-changing operation follows an explicit labelled press.
-- The workspace branch chip searches, switches and creates branches, including
-  a clear distinction between local and remote-tracking branches.
-- Sidebar badges show cached open pull-request counts without making a request
-  while drawing navigation. Account names the GitHub host, account, and exact
-  credential source in use; it always offers an explicit tokenstat GitHub App
-  connection even when a credential borrowed from git already works, then
-  exposes repository selection and sign-out for the app-owned grant.
-- The Windows preview gains the pull-request list, conversation, lazy diff,
-  checks, review actions, connection status, and branch controls in WinUI.
-- A workspace Chat section talks to the agents already installed for that
-  folder. Conversations persist and resume. The composer sits at the bottom
-  of the conversation: Return sends, Shift+Return inserts a newline, Escape
-  stops a running turn, and one field picks agent, model and effort. Plan,
-  execute and bypass sit as pills beside it. Full setup stays in the
-  inspector (Setup on the phone). A message sends what you wrote and nothing
-  else: an agent's own brief travels as a system prompt where its CLI has
-  one, so a conversation no longer opens by describing tokenstat's own
-  plumbing. Instructions in the inspector holds that brief, editable, beside
-  the one rule tokenstat adds and the exact words it sends.
-- Default mode in Chat really does stop a tool and ask. The card appears in
-  the conversation where the agent paused, the composer is replaced by the
-  question so a waiting turn cannot be missed, and Deny refuses the call
-  rather than letting it through. Claude Code, Codex, Grok Build,
-  Antigravity and OpenCode all ask; Cursor cannot, and its chats say so
-  instead of offering a switch that does nothing. A card shows how long is
-  left and refuses on its own rather than holding a turn open forever, and
-  the answer stays on the conversation afterwards. Always allow remembers
-  one tool or one command prefix, for that conversation only, and the
-  inspector lists what it remembered. A paired phone can answer the same
-  card, and whichever surface answers first wins.
-- A persona's name reaches its agent, so you can call it by the name on the
-  screen. Chats used to show you Lumen while the agent behind it had never
-  been told it was anybody, and "Lumen, look at this again" was addressed to
-  nobody. The line tokenstat sends is visible in Instructions with everything
-  else it adds.
-- The starting brief a new folder's persona comes with is sharper about how to
-  work: read the call sites and the tests before changing something, treat
-  failures as seriously as the happy path, reproduce a bug before fixing it,
-  read what a passing suite actually asserts, and finish when the change is
-  verified rather than when the edit is typed. Existing starters nobody has
-  edited pick it up; a brief with a single word of your own in it is left
-  exactly as you wrote it.
-- Personas are a name and a brief now, and nothing else. They used to carry an
-  agent, a model, an effort, a mode and an autonomy, all of which already live
-  on the conversation, so a persona went stale and could only be used with the
-  one agent it named. The same persona now works with whichever agent a chat is
-  on, and survives that chat being handed to another. Existing personas keep
-  their name and brief; the duplicated settings simply go.
-- A persona can be written for you. Say what it should be good at in a
-  sentence, pick which installed agent drafts it, and edit the name and brief
-  that come back before anything is saved. Nothing is saved without a press,
-  the draft runs one short turn in a temporary folder and never touches your
-  project, and a draft that fails leaves your own words in the field.
-- Every persona and every conversation has a face: a small character drawn from
-  its own identity, so it exists the moment the persona does and stays the same
-  through renames and edits. It is one creature in different moods rather than
-  a set of icons, and it replaces the three dots that used to mean "working".
-  The character has weight. It breathes at rest, churns and looks up while an
-  agent thinks, narrows its eyes and hammers away while a tool runs, talks
-  while a reply streams in, goes wide-eyed in amber when a turn is waiting on
-  you, jumps when one lands, and melts into a puddle when one fails. It can
-  also bounce, keep a ball in the air, dance, and fall asleep. Because it is
-  simulated rather than drawn frame by frame, a change of mood carries the
-  motion across instead of cutting, and it never leaves the seat it sits in,
-  so a streaming transcript stays where you left it. Two personas do not move
-  alike: how firm the body is and where it dents come from the same identity
-  as its colour, which is sampled from tokenstat's own accent range so a row
-  of personas still reads as one family. In the persona editor you can poke
-  it. Everything stops for Reduce Motion and whenever the window is not in
-  front.
-- A persona can belong to every folder instead of the one it was made in.
-  The switch is on the persona itself, beside its name.
-- A new folder's starting persona is drawn from a much longer list of names,
-  so folders stop arriving as the same handful of characters.
-- An empty chat shows the character of the persona that folder's next
-  conversation will actually have, and nothing else, rather than a bubble with
-  three pulsing dots ringed by four agent marks. It has things to
-  do: it reads the paper, plays something handheld, bounces off the walls,
-  dances, keeps a ball up, walks the floor, and every so often gives up and has
-  a nap. What it picks, and for how long, is different every time, so the
-  screen you look at while deciding whether to start is never the same loop
-  twice. A long wait gets the same treatment: thinking is a creature turning
-  something over on the spot or walking the floor, not one pose held for a
-  minute.
-- One activity becomes the next rather than replacing it. Both are running for
-  half a second: the forces on the body crossfade, the expression crossfades
-  with them, whatever was being held shrinks away before the next thing grows
-  in, and the character blinks as it changes its mind. Falling asleep and then
-  waking up to dance is one continuous movement, with nothing in it that reads
-  as a cut.
-- Changing agent mid-conversation no longer starts from nothing. The incoming
-  agent is handed a summary folded from the conversation itself: what was
-  asked, which files changed, which commands ran, what you refused, and where
-  it was left. It is sent once, to an agent that has no session of its own to
-  resume, never on an ordinary continuation. The transcript shows where the
-  conversation changed hands and will show you the exact summary that was
-  sent, and the same text is kept beside the chat as `brain.md`. Like the rest
-  of a conversation, none of it is eligible for sync.
-- Chat also brings a grok Standard turn that keeps its output format, Cursor
-  without a named model using Auto, and a tool call that no longer blanks
-  the transcript or stays Running after the turn ends. The phone is a list
-  first, then a transcript with a glass composer. Windows has the same list,
-  composer, transcript, approvals and cost meter. Sidebar badges show how
-  many chats a folder holds. Token cost is a quiet in/out bar, and a
-  plan-covered turn is not drawn as money charged.
+- Workspace Chat is available across the desktop and mobile clients. Conversations
+  persist, resume with the selected agent, support attachments and approvals, and
+  can notify you when a turn needs attention or finishes.
+- Personas give each conversation a reusable name, instructions, and animated
+  identity. You can choose no persona, share one across folders, and hand a
+  conversation to another agent with its working context intact.
+- Pull requests are a native workspace: connect GitHub or Enterprise, choose
+  repositories, browse and review changes, inspect checks and conversations, and
+  take explicit actions such as approve, request changes, merge, or check out a
+  branch. Mac, mobile, and Windows preview clients are supported.
+- SSH sessions provide safe, in-memory suggestions for paths, saved commands,
+  and recent session locations while you type. Suggestions never run commands
+  or retain passwords.
+- Workspace launchers now include Chat, Pull requests, Browser, Files, Changes,
+  Tasks, Workflows, and Automations with cached counts where useful.
 
 ### Changed
 
-- Insights now arrives in one snapshot rather than nine separate requests,
-  reducing bridge work and making the charts settle together. Slow host calls
-  and slow Insights aggregates leave private local timing records, with method
-  and elapsed time only, so a real slow machine can be investigated without
-  recording projects, prompts, paths, or report values.
-- Scans and workspace status checks now take a share of the computer's own CPU
-  capacity instead of using one fixed concurrency limit. Older laptops retain
-  room for the app and active agents, while newer Macs can use their available
-  parallelism.
-
-- Pull-request list and detail screens use the same fixed app chrome as the
-  rest of the Mac: folder scope and sidebar control on the left, contextual
-  actions and the inspector toggle at the far right. WinUI's native accent,
-  focus and action controls use tokenstat violet instead of the system blue.
+- Long conversations open at the newest messages, load older pages as you scroll,
+  preserve your reading position, and render only the rows and Markdown on screen.
+- Insights loads its charts from one consistent snapshot. Slow bridge and host
+  calls record method and elapsed time locally without recording prompts, paths,
+  or report contents.
+- Background scans and workspace status checks scale to the host's available CPU,
+  leaving older Macs responsive while allowing newer Macs to use more capacity.
+- Workspace screens share a wider reading room, consistent action chrome, branch
+  context, themed controls, and adaptive layouts across Mac and mobile.
+- Monthly and yearly plan choices, StoreKit products, and paywall copy now agree
+  on the same tiers and pricing.
 
 ### Fixed
 
-- The Mac app no longer aborts when entering or leaving full screen from the
-  traffic lights. A second sidebar toggle that appeared next to those lights
-  on a narrow window is gone, so only the app's own mark remains.
-
+- Newer mobile clients now explain when a paired desktop must be updated before
+  Chat or Pull requests can load, instead of showing an unknown-method error.
+- Chat tool rows, durations, token totals, turn outcomes, agent handoffs, and
+  attachments now remain accurate while a response streams or finishes.
+- GitHub authorization keeps its existing refresh token when a renewal response
+  omits a replacement, preventing unexpected sign-outs.
+- Pull-request diffs handle quoted or nested patch text correctly; credentials and
+  detail caches are reused and pruned safely.
+- Git operations reject option-shaped branch inputs, and commit/push feedback is
+  written for people rather than copied directly from command-line output.
+- Full-screen transitions, sidebar navigation, text fields, action footers, and
+  mobile connection errors now behave consistently across supported clients.
 ## [0.7.2] - 2026-08-28
 
 ### Added
