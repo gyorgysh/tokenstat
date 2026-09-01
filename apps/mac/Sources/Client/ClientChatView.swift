@@ -353,6 +353,10 @@ private struct ClientChatThread: View {
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
             .chatScrollMetrics { metrics in
                 follow.note(metrics)
+                // Order matters: the pin is decided from this frame, and the
+                // window has to see that decision before it acts on the same
+                // frame.
+                window.followingEnd = follow.pinned || follow.settling
                 window.note(metrics)
             }
             .overlay(alignment: .bottom) {
@@ -404,7 +408,9 @@ private struct ClientChatThread: View {
                 for _ in 0..<40 {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, model.approvals.isEmpty else { return }
-                    pinToLatest(proxy, animated: false)
+                    // Only when it is not already there. Each of these is a
+                    // walk over every row between here and the end.
+                    if !follow.atEnd { pinToLatest(proxy, animated: false) }
                     quiet = model.openingConversation ? 0 : quiet + 1
                     if follow.arrived, quiet >= 3 { return }
                 }
@@ -528,7 +534,7 @@ private struct ClientChatThread: View {
         follow.chase(true)
         defer { follow.chase(false) }
         for _ in 0..<Self.chaseFrames {
-            pinToLatest(proxy, animated: false)
+            if !follow.atEnd { pinToLatest(proxy, animated: false) }
             try? await Task.sleep(for: .milliseconds(40))
             guard !Task.isCancelled, !follow.abandoned else { return }
             if follow.steadyFrames >= 2 { return }

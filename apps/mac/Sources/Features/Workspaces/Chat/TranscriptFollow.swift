@@ -149,6 +149,31 @@ final class TranscriptFollowState {
     @ObservationIgnored private var lastContentHeight: CGFloat = 0
     @ObservationIgnored private var lastOffset: CGFloat = 0
     @ObservationIgnored private var lastDistanceFromBottom: CGFloat = 0
+    /// Repins spent since the end was last actually reached.
+    ///
+    /// The pin and the lazy stack can argue forever, and did. Asking a
+    /// `ScrollView` for the end makes the stack resolve an estimate for every
+    /// row between here and there, and resolving one means building it and
+    /// measuring its text. Those real heights replace the estimates, so the
+    /// content is a different height than it was a moment ago, which is a
+    /// growth nobody scrolled for, which is another repin. On a conversation
+    /// of any size that loop does not converge: the app is in
+    /// `LazyStack.measureEstimates` and never comes back, which is the
+    /// ninety-second hang.
+    ///
+    /// A repin that works costs one frame and resets this, so following a
+    /// stream is unaffected. A repin that changes nothing spends one, and
+    /// when they run out the transcript stops arguing and offers Jump to
+    /// latest instead. A conversation the reader can leave is better than one
+    /// nobody can use.
+    @ObservationIgnored private var repinsSpent = 0
+    /// Whether the last frame put the end under the viewport.
+    ///
+    /// Read by the loops that hold the end while a conversation opens. One
+    /// scroll to the end of a lazy stack is a walk over every row in between,
+    /// so spending forty of them on a transcript that is already there is
+    /// most of what made opening a long chat a hang.
+    @ObservationIgnored private(set) var atEnd = false
     /// Somebody scrolled away while the end was being chased. Read by the
     /// chase, which stops rather than argue.
     @ObservationIgnored private(set) var abandoned = false
@@ -177,6 +202,7 @@ final class TranscriptFollowState {
         settling = active
         steadyFrames = 0
         abandoned = false
+        repinsSpent = 0
         if active {
             pinned = true
             set(jump: false)
@@ -214,7 +240,7 @@ final class TranscriptFollowState {
                 set(jump: false)
                 return
             }
-            let atEnd = metrics.contentHeight > 0
+            atEnd = metrics.contentHeight > 0
                 && metrics.distanceFromBottom <= TranscriptFollow.threshold
             steadyFrames = (atEnd && !grew && !shrank) ? steadyFrames + 1 : 0
             if steadyFrames >= Self.steadyToArrive { set(arrived: true) }
@@ -226,6 +252,8 @@ final class TranscriptFollowState {
             set(jump: false)
             return
         }
+        atEnd = metrics.contentHeight > 0
+            && metrics.distanceFromBottom <= TranscriptFollow.threshold
         guard metrics.viewportHeight > 0, metrics.contentHeight > 0 else { return }
         // Content that grew where nobody scrolled is a turn arriving, and it
         // must not unpin the view. Content that grew while the offset also
@@ -239,6 +267,15 @@ final class TranscriptFollowState {
             // the height changed under a viewport that did not move, so the
             // end is now further down than it was a frame ago.
             if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold {
+                guard repinsSpent < Self.repinBudget else {
+                    // Out of argument. Let go of the end rather than spend
+                    // another walk over the rows on a scroll that has not
+                    // moved anything for several frames running.
+                    pinned = false
+                    set(jump: true)
+                    return
+                }
+                repinsSpent += 1
                 repin?()
             }
             return
@@ -250,10 +287,17 @@ final class TranscriptFollowState {
             pinned = true
             set(jump: false)
         }
+        if metrics.distanceFromBottom <= TranscriptFollow.threshold {
+            // The end is under the viewport, so whatever was spent getting
+            // here worked. This is the only thing that refills the budget,
+            // which is what tells a productive repin from a futile one.
+            repinsSpent = 0
+        }
     }
 
     func jump() {
         pinned = true
+        repinsSpent = 0
         set(jump: false)
     }
 
@@ -268,6 +312,13 @@ final class TranscriptFollowState {
         guard arrived != value else { return }
         arrived = value
     }
+
+    /// How many repins may go by without the end being reached.
+    ///
+    /// Enough that an insertion settling over three or four frames is
+    /// followed properly, small enough that a stack which will not converge
+    /// costs a handful of walks rather than a minute and a half.
+    private static let repinBudget = 6
 
     /// Frames at the end, with the content size unchanged, before a
     /// transcript counts as arrived. Three at a sixtieth each is imperceptible
@@ -488,7 +539,17 @@ final class TranscriptWindow {
     /// the reader was a screen below them those rows were not being built, so
     /// this held whatever they last reported, and the anchor was computed
     /// from where rows used to be.
-    var rowFrames: [String: CGRect] = [:]
+    var rowFrames: [String: CGRect] = [:] {
+        didSet { rowFramesStamp &+= 1 }
+    }
+    /// Bumped every time the rows report. The drift check below is only
+    /// honest once something has been reported since the hold was armed:
+    /// `rowFrames` is filled by a view update, and the frame that inserts a
+    /// page has not had one yet, so what it holds is where the row was
+    /// *before* the insertion. Comparing the anchor against that reads the
+    /// answer off the question, finds no drift, and skips the one correction
+    /// the reader actually sees as a jump.
+    private(set) var rowFramesStamp: UInt64 = 0
     /// A page has been asked for and the answer has not arrived. Claimed at
     /// the moment of asking rather than when the request starts, so a scroll
     /// across the boundary asks once instead of once per frame.
@@ -498,6 +559,24 @@ final class TranscriptWindow {
     /// start a request per frame only to have it answer that there is
     /// nothing to fetch.
     var canAskEarlier = false
+    /// Whether the transcript is holding the latest turn: pinned to the end,
+    /// or still settling onto it after opening.
+    ///
+    /// Nothing is fetched and nothing is restored in that state, and that is
+    /// what stops a conversation opening in its middle. A half-measured lazy
+    /// stack reports an estimated content height, which says the top of what
+    /// is loaded is close, which is all `wantsEarlier` needs. The page then
+    /// lands with an anchor to put back, and putting it back is a scroll away
+    /// from the end, argued against by the settle scrolling towards it. The
+    /// reader was shown the middle of the conversation with Jump to latest
+    /// over it, and the window kept growing while the two sides argued, until
+    /// a scroll to the end cost the stack a walk over thousands of rows and
+    /// the application stopped.
+    ///
+    /// A reader at the end is not reading backwards, so there is nothing to
+    /// prefetch for them either. It turns off as soon as they leave the end,
+    /// which is screens before the boundary comes near.
+    var followingEnd = false
     /// Fetch the page before the oldest row held. Installed by the transcript,
     /// which is the only thing that holds a scroll proxy.
     var requestEarlier: (() -> Void)?
@@ -514,6 +593,8 @@ final class TranscriptWindow {
     /// costs nothing when the height is already right because the scroll is
     /// then a no-op.
     private var held: TranscriptAnchor?
+    /// What the rows had reported when the hold was armed.
+    private var heldStamp: UInt64 = 0
     private var heldFrames = 0
     private var heldUntil: Date = .distantPast
     private var lastContentHeight: CGFloat = 0
@@ -527,6 +608,7 @@ final class TranscriptWindow {
     /// the jump, and the correction chased it from there.
     func hold(_ anchor: TranscriptAnchor) {
         held = anchor
+        heldStamp = rowFramesStamp
         heldFrames = Self.holdFrames
         heldUntil = Date().addingTimeInterval(Self.holdSeconds)
     }
@@ -613,14 +695,24 @@ final class TranscriptWindow {
         updateNearTop(metrics)
         let changed = abs(metrics.contentHeight - lastContentHeight) > 0.5
         lastContentHeight = metrics.contentHeight
+        // The end owns the viewport while it is being followed. Anything held
+        // from before is dropped rather than applied against it.
+        if followingEnd {
+            release()
+            return
+        }
         if held != nil, Date() > heldUntil { release() }
         if let held, changed {
             heldFrames -= 1
             if heldFrames <= 0 { release() }
-            // Where the row actually is now. Already reported, because it is
-            // one of the rows on screen, so this costs a dictionary lookup
-            // rather than another measurement.
-            let drifted = rowFrames[held.id].map { abs($0.minY - held.top) > Self.holdSlack }
+            // Where the row actually is now, when the rows have said so since
+            // the hold was armed. Already reported, because it is one of the
+            // rows on screen, so this costs a dictionary lookup rather than
+            // another measurement.
+            let reported = rowFramesStamp != heldStamp
+            let drifted = reported
+                ? rowFrames[held.id].map { abs($0.minY - held.top) > Self.holdSlack }
+                : nil
             if drifted != false {
                 restore?(held)
                 // A frame spent putting the reader back is not a frame to
@@ -668,7 +760,8 @@ final class TranscriptWindow {
     /// earlier than that buys lead time and spends it on a lurch, because the
     /// page lands with nothing on screen to measure the correction against.
     var wantsEarlier: Bool {
-        viewportHeight > 0
+        !followingEnd
+            && viewportHeight > 0
             && distanceFromTop < viewportHeight * Self.reach
             && anchor != nil
     }

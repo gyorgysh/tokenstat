@@ -60,6 +60,7 @@
 //! so this reports [`BillingMode::Unknown`] rather than guessing from the
 //! product.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::Warning;
@@ -199,6 +200,12 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         }
     };
 
+    // Every request is stored twice, on two nodes with the same request_id.
+    // Collapse them here so the archive and the meter do not pay for both.
+    // Keep the strongest counters when a duplicate diverges, mirroring the
+    // archive's max-on-conflict and the meter's collapse.
+    let mut by_id: HashMap<EventId, usize> = HashMap::with_capacity(64);
+
     for row in rows.flatten() {
         let input = row.input.unwrap_or(0).max(0) as u64;
         let output = row.output.unwrap_or(0).max(0) as u64;
@@ -224,6 +231,20 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             _ => EventId::derive(&["devin", &row.session, &ts.to_string(), &output.to_string()]),
         };
 
+        if let Some(&idx) = by_id.get(&id) {
+            // Duplicate node: keep the larger counters rather than a
+            // second copy.
+            let kept = &mut out.events[idx].counters;
+            kept.input_fresh = kept.input_fresh.max(Some(input));
+            kept.cache_read = kept.cache_read.max(Some(cache_read));
+            kept.cache_write_5m = kept.cache_write_5m.max(Some(cache_creation));
+            kept.output = kept.output.max(Some(output));
+            // Timestamp and model are stable across the pair; keep first.
+            continue;
+        }
+
+        let pos = out.events.len();
+        by_id.insert(id, pos);
         out.events.push(UsageEvent {
             id,
             source: SourceId::Devin,

@@ -237,6 +237,15 @@ impl Profile {
             // `subagent.control.runtime_observed` restates a child's running
             // total, so a fixture carrying either would teach the parser's
             // test that double counting is correct.
+            Self::Muse => {
+                obj.get("payload")
+                    .and_then(Value::as_object)
+                    .and_then(|p| p.get("event"))
+                    .and_then(Value::as_object)
+                    .and_then(|e| e.get("kind"))
+                    .and_then(Value::as_str)
+                    == Some("model_completed")
+            }
             // The assistant nodes, which are the ones with counters. A user
             // node carries the question and nothing worth keeping.
             Self::Devin => {
@@ -247,15 +256,6 @@ impl Profile {
                         .and_then(|m| m.get("metrics"))
                         .and_then(Value::as_object)
                         .is_some_and(|m| m.contains_key("output_tokens"))
-            }
-            Self::Muse => {
-                obj.get("payload")
-                    .and_then(Value::as_object)
-                    .and_then(|p| p.get("event"))
-                    .and_then(Value::as_object)
-                    .and_then(|e| e.get("kind"))
-                    .and_then(Value::as_str)
-                    == Some("model_completed")
             }
         }
     }

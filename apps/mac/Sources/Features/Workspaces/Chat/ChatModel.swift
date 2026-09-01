@@ -852,25 +852,31 @@ final class ChatModel {
     /// How many records a conversation opens on. Records, not rows: streamed
     /// text arrives in many pieces and becomes one paragraph.
     ///
-    /// Small on purpose, and grown by the loop above until the window holds
-    /// enough rows. A page of four hundred records can coalesce into well
-    /// over a hundred rows on a backend that does not stream, and opening on
-    /// that many rows of markdown is a second of layout before anybody sees
-    /// anything, then a scroll to an end that keeps moving while the rows
-    /// measure themselves.
-    private static let openPageEvents = 150
+    /// Large, and it used to be small for a reason that turned out to be
+    /// backwards. The cost that hurts is not the number of rows, it is the
+    /// number of *insertions*: each one changes the content height, and a
+    /// changed content height makes the lazy stack resolve estimates for the
+    /// rows in between, which means building them and measuring their text.
+    /// So a page that reads four times as much history costs one of those
+    /// walks where four small pages cost four. Five hundred is the host's own
+    /// ceiling on `chat.eventPage`, so asking for more only asks for this.
+    private static let openPageEvents = 500
     /// How many records each older page carries.
     ///
-    /// Smaller than the opening page. The insertion is the one moment paging
-    /// back can be felt, and what is felt is a frame's worth of layout, so
-    /// several small pages read as nothing where one large page reads as a
-    /// stutter. The transcript keeps three and a half screens of runway ahead
-    /// of the reader on macOS, which is what makes a small page safe.
-    private static let pageEvents = 50
+    /// Nearly as large as the opening page, for the same reason. A backend
+    /// that streams spends hundreds of records on a handful of paragraphs,
+    /// and pulling fifty of them at a time meant a chat of any length was
+    /// read back in dozens of insertions, each one a walk over the rows and a
+    /// correction of the reader's place.
+    private static let pageEvents = 400
     /// The rows an opening window aims to hold before it stops pulling.
-    private static let openDisplayItems = 24
+    ///
+    /// A conversation should open with something to read behind it, not with
+    /// the last answer alone. Two dozen was a screen at best and, on a
+    /// backend that folds a whole page into one turn, a single row.
+    private static let openDisplayItems = 60
     /// How many extra pages one opening may pull to reach that.
-    private static let openExtraPages = 4
+    private static let openExtraPages = 6
 
     private func loadEvents(id: String, reset: Bool, generation: UInt64) async {
         let requestedOffset = reset ? 0 : offset
