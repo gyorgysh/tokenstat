@@ -57,6 +57,24 @@ static APPROVAL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// clients without making an id depend on a filesystem round trip.
 static RECORD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+fn validate_record_id(id: &str) -> Result<(), String> {
+    if id.is_empty()
+        || id.contains('/')
+        || id.contains('\\')
+        || id.contains('\0')
+        || id == "."
+        || id == ".."
+    {
+        return Err("invalid id".into());
+    }
+    Ok(())
+}
+
+fn safe_join(root: &Path, id: &str) -> Result<PathBuf, String> {
+    validate_record_id(id)?;
+    Ok(root.join(id))
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
@@ -1004,6 +1022,7 @@ impl Store {
     }
 
     pub fn remove(&self, id: &str) -> Result<bool, String> {
+        validate_record_id(id)?;
         if self
             .active
             .lock()
@@ -1022,7 +1041,7 @@ impl Store {
         drop(chats);
         if removed {
             self.save()?;
-            let _ = fs::remove_dir_all(self.root.join(id));
+            let _ = fs::remove_dir_all(safe_join(&self.root, id)?);
         }
         Ok(removed)
     }
@@ -1051,7 +1070,9 @@ impl Store {
             .retain(|chat| !target_set.contains(chat.id.as_str()));
         self.save()?;
         for id in &targets {
-            let _ = fs::remove_dir_all(self.root.join(id));
+            if let Ok(path) = safe_join(&self.root, id) {
+                let _ = fs::remove_dir_all(path);
+            }
         }
         Ok(targets.len())
     }
@@ -1205,7 +1226,7 @@ impl Store {
     /// a later parser fix can regenerate it, and a backend with a file-reading
     /// tool can be pointed at the path rather than handed the whole text.
     fn write_brain(&self, id: &str, brief: &str) -> Result<(), String> {
-        let path = self.root.join(id).join("brain.md");
+        let path = safe_join(&self.root, id)?.join("brain.md");
         fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
             .map_err(|error| error.to_string())?;
         fs::write(path, brief).map_err(|error| error.to_string())
@@ -1381,7 +1402,7 @@ impl Store {
         let codex_hook_home = if chat.backend == "codex"
             && let Some(helper) = &helper
         {
-            let home = self.root.join(id).join("codex-hook");
+            let home = safe_join(&self.root, id)?.join("codex-hook");
             crate::chat_gate::write_codex_home(&home, helper)?;
             environment.push(("CODEX_HOME".into(), home.display().to_string()));
             Some(home)
@@ -1821,12 +1842,16 @@ impl Store {
     }
 
     fn events_path(&self, id: &str) -> PathBuf {
-        self.root.join(id).join("events.ndjson")
+        // `id` is validated at every public entry point; this is internal.
+        // Fall back to a safe name if called with an unexpected value.
+        let safe = safe_file_name(id);
+        self.root.join(safe).join("events.ndjson")
     }
 
     fn raw_path(&self, id: &str, turn_started_at_ms: i64) -> PathBuf {
+        let safe = safe_file_name(id);
         self.root
-            .join(id)
+            .join(safe)
             .join("raw")
             .join(format!("{turn_started_at_ms}.ndjson"))
     }
@@ -1838,7 +1863,7 @@ impl Store {
     }
 
     fn write_turn_file(&self, id: &str, token: &str) -> Result<PathBuf, String> {
-        let path = self.root.join(id).join(format!("turn-{}.token", now_ms()));
+        let path = safe_join(&self.root, id)?.join(format!("turn-{}.token", now_ms()));
         fs::create_dir_all(path.parent().ok_or("invalid chat turn path")?)
             .map_err(|error| error.to_string())?;
         let mut options = OpenOptions::new();
@@ -1857,18 +1882,18 @@ impl Store {
     }
 
     fn agy_hook_home(&self, id: &str) -> PathBuf {
-        self.root.join(id).join("agy-hook")
+        self.root.join(safe_file_name(id)).join("agy-hook")
     }
 
     /// Persistent for the life of the conversation, unlike the other homes.
     /// See `chat_gate::write_grok_home`: grok keeps its sessions in here, so
     /// deleting it after a turn would delete the thing `--resume` needs.
     fn grok_hook_home(&self, id: &str) -> PathBuf {
-        self.root.join(id).join("grok-home")
+        self.root.join(safe_file_name(id)).join("grok-home")
     }
 
     fn write_opencode_hook_home(&self, id: &str) -> Result<(PathBuf, PathBuf), String> {
-        let home = self.root.join(id).join("opencode-hook");
+        let home = safe_join(&self.root, id)?.join("opencode-hook");
         fs::create_dir_all(&home).map_err(|error| error.to_string())?;
         let plugin = home.join("tokenstat-gate.js");
         fs::write(
@@ -1881,10 +1906,10 @@ impl Store {
 
     fn attachment_path(&self, chat_id: &str, attachment_id: &str, name: &str) -> PathBuf {
         self.root
-            .join(chat_id)
+            .join(safe_file_name(chat_id))
             .join("files")
-            .join(attachment_id)
-            .join(name)
+            .join(safe_file_name(attachment_id))
+            .join(safe_file_name(name))
     }
 
     fn attachment_paths(&self, chat_id: &str, ids: &[String]) -> Result<Vec<PathBuf>, String> {
@@ -1894,9 +1919,8 @@ impl Store {
     }
 
     fn single_attachment_path(&self, chat_id: &str, id: &str) -> Result<PathBuf, String> {
-        if id.is_empty() || id.contains('/') || id.contains('\\') {
-            return Err("invalid attachment id".into());
-        }
+        validate_record_id(chat_id)?;
+        validate_record_id(id)?;
         let directory = self.root.join(chat_id).join("files").join(id);
         let mut files =
             fs::read_dir(&directory).map_err(|_| "an attachment is no longer available")?;

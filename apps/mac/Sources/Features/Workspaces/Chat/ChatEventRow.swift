@@ -204,13 +204,37 @@ private struct ChatResponseAttachment: View {
             .appendingPathComponent(attachment.id, isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let url = directory.appendingPathComponent(attachment.name)
+            let safeName = Self.sanitizedFileName(attachment.name)
+            let url = directory.appendingPathComponent(safeName)
+            // `attachment.name` comes from agent output and may contain
+            // `../` or absolute paths. Ensure the resolved path stays inside
+            // the per-attachment directory.
+            guard url.standardizedFileURL.path.hasPrefix(directory.standardizedFileURL.path) else {
+                NSSound.beep()
+                return
+            }
             try data.write(to: url, options: .atomic)
             NSWorkspace.shared.open(url)
         } catch {
             NSSound.beep()
         }
         #endif
+    }
+
+    /// Strip directory components, control characters, and empty results.
+    static func sanitizedFileName(_ raw: String) -> String {
+        let leaf = (raw as NSString).lastPathComponent
+        let cleaned = leaf.filter { !$0.isNewline && !$0.unicodeScalars.contains(where: \.properties.isDefaultIgnorableCodePoint) }
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutNulls = cleaned.replacingOccurrences(of: "\0", with: "")
+        if withoutNulls.isEmpty || withoutNulls == "." || withoutNulls == ".." {
+            return "attachment"
+        }
+        // `lastPathComponent` already removed `/`, but keep a belt-and-suspenders
+        // guard against any remaining separator.
+        let noSeparators = withoutNulls.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "\\", with: "_")
+        return noSeparators.isEmpty ? "attachment" : noSeparators
     }
 }
 

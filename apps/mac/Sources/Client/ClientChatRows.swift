@@ -189,12 +189,29 @@ private struct ClientChatResponseAttachment: View {
             .appendingPathComponent(attachment.id, isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let url = directory.appendingPathComponent(attachment.name)
+            let safeName = Self.sanitizedFileName(attachment.name)
+            let url = directory.appendingPathComponent(safeName)
+            guard url.standardizedFileURL.path.hasPrefix(directory.standardizedFileURL.path) else {
+                return nil
+            }
             try data.write(to: url, options: .atomic)
             return url
         } catch {
             return nil
         }
+    }
+
+    static func sanitizedFileName(_ raw: String) -> String {
+        let leaf = (raw as NSString).lastPathComponent
+        let cleaned = leaf.filter { !$0.isNewline && !$0.unicodeScalars.contains(where: \.properties.isDefaultIgnorableCodePoint) }
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutNulls = cleaned.replacingOccurrences(of: "\0", with: "")
+        if withoutNulls.isEmpty || withoutNulls == "." || withoutNulls == ".." {
+            return "attachment"
+        }
+        let noSeparators = withoutNulls.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "\\", with: "_")
+        return noSeparators.isEmpty ? "attachment" : noSeparators
     }
 }
 

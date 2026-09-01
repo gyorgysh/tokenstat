@@ -1272,30 +1272,74 @@ internal sealed class ChatPage : Page
                 });
                 if (token.IsCancellationRequested || _openId != chatId) return;
                 var next = AsArray(chunk, "events");
-                foreach (var row in next) _events.Add(row?.DeepClone());
-                _offset = (ulong)Format.Long(chunk, "nextOffset");
-                _approvals = AsArray(await AppServices.Host.CallAsync(
+                // Host calls run on the thread pool via Task.Run; the await
+                // captures the UI SynchronizationContext so the continuation
+                // resumes on the UI thread. Still, guard the UI mutations
+                // explicitly so a future ConfigureAwait(false) or a call from a
+                // non-UI context cannot trigger RPC_E_WRONG_THREAD.
+                void ApplyPoll(JsonArray polled, ulong nextOffset, JsonArray approvals)
+                {
+                    foreach (var row in polled) _events.Add(row?.DeepClone());
+                    _offset = nextOffset;
+                    _approvals = approvals;
+                }
+                var approvals = AsArray(await AppServices.Host.CallAsync(
                     "chat.approvals", new JsonObject { ["id"] = chatId }));
                 if (token.IsCancellationRequested || _openId != chatId) return;
                 await RefreshCatalogAsync();
                 if (token.IsCancellationRequested || _openId != chatId) return;
-                _openChat = FindChat(chatId);
-                var running = Format.Flag(_openChat, "running");
-                var started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
-                _running = running;
-                _started = started;
-                if (_titleBox.FocusState == FocusState.Unfocused)
+
+                // All UI state is mutated on the DispatcherQueue regardless of
+                // which thread the awaits resumed on.
+                if (!DispatcherQueue.HasThreadAccess)
                 {
-                    _titleBox.Text = Format.Text(_openChat, "title", "New chat");
-                }
-                if (wasBusy != Busy())
-                {
-                    PaintConversation();
+                    var tcs = new TaskCompletionSource();
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        ApplyPoll(next, (ulong)Format.Long(chunk, "nextOffset"), approvals);
+                        _openChat = FindChat(chatId);
+                        var running = Format.Flag(_openChat, "running");
+                        var started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
+                        _running = running;
+                        _started = started;
+                        if (_titleBox.FocusState == FocusState.Unfocused)
+                        {
+                            _titleBox.Text = Format.Text(_openChat, "title", "New chat");
+                        }
+                        if (wasBusy != Busy())
+                        {
+                            PaintConversation();
+                        }
+                        else
+                        {
+                            RebuildTranscript();
+                            RefreshCost();
+                        }
+                        tcs.SetResult();
+                    });
+                    await tcs.Task;
                 }
                 else
                 {
-                    RebuildTranscript();
-                    RefreshCost();
+                    ApplyPoll(next, (ulong)Format.Long(chunk, "nextOffset"), approvals);
+                    _openChat = FindChat(chatId);
+                    var running = Format.Flag(_openChat, "running");
+                    var started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
+                    _running = running;
+                    _started = started;
+                    if (_titleBox.FocusState == FocusState.Unfocused)
+                    {
+                        _titleBox.Text = Format.Text(_openChat, "title", "New chat");
+                    }
+                    if (wasBusy != Busy())
+                    {
+                        PaintConversation();
+                    }
+                    else
+                    {
+                        RebuildTranscript();
+                        RefreshCost();
+                    }
                 }
                 if (!Busy()) return;
             }

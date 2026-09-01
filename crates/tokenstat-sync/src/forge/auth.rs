@@ -158,12 +158,37 @@ pub(super) fn http_client() -> Result<reqwest::blocking::Client, ForgeError> {
 
 fn normalized_host(host: &str) -> Option<String> {
     let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
-    (!host.is_empty()
-        && !host.contains(['/', '\\', '\n', '\r', ':'])
-        && host
+    if host.is_empty()
+        || host.contains(['/', '\\', '\n', '\r', ':'])
+        || !host
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.')))
-    .then_some(host)
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'))
+    {
+        return None;
+    }
+    // Block raw IP addresses and localhost to prevent SSRF via probe_token
+    // which hits `https://{host}/api/v3/user`.
+    if looks_like_ip(&host) || host == "localhost" || host.ends_with(".localhost") {
+        return None;
+    }
+    Some(host)
+}
+
+fn looks_like_ip(host: &str) -> bool {
+    // IPv4 dotted quad, e.g. 192.168.1.1 or 10.0.0.1
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() == 4
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    {
+        return parts
+            .iter()
+            .all(|p| p.parse::<u8>().is_ok() || p.parse::<u16>().is_ok_and(|n| n <= 255));
+    }
+    // IPv6 contains `:` but that is already rejected above; hex IPv6 without
+    // colons is indistinguishable from a hostname, so no extra check needed.
+    false
 }
 
 fn storage_key(host: &str) -> String {
@@ -568,6 +593,21 @@ mod tests {
         assert_eq!(normalized_host("https://github.com"), None);
         assert_eq!(normalized_host("github.com\nprotocol=http"), None);
         assert_eq!(normalized_host("github.com:443"), None);
+    }
+
+    #[test]
+    fn host_validation_rejects_ips_and_localhost() {
+        assert_eq!(normalized_host("192.168.1.1"), None);
+        assert_eq!(normalized_host("10.0.0.1"), None);
+        assert_eq!(normalized_host("127.0.0.1"), None);
+        assert_eq!(normalized_host("0.0.0.0"), None);
+        assert_eq!(normalized_host("localhost"), None);
+        assert_eq!(normalized_host("my.localhost"), None);
+        // hostnames with digits are fine
+        assert_eq!(
+            normalized_host("ghe.example.com"),
+            Some("ghe.example.com".into())
+        );
     }
 
     #[test]
