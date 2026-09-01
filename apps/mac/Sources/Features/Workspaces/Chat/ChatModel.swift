@@ -221,6 +221,28 @@ final class ChatModel {
         }
     }
 
+    /// Reopen the conversation on its newest page, dropping the window that
+    /// paging back has grown.
+    ///
+    /// Every scroll to something far from the viewport costs the lazy stack a
+    /// walk over each item in between, so a window grown to thousands of rows
+    /// makes coming back to the latest turn expensive in a way no amount of
+    /// scrolling can fix. Returning to the end is the one moment that window
+    /// can be dropped: the newest page is exactly what is being asked for,
+    /// and what is before it is a page away again.
+    func reopenAtLatest() async {
+        guard let selected else { return }
+        selectionGeneration &+= 1
+        let generation = selectionGeneration
+        events = []
+        forgetWindow()
+        openingConversation = true
+        defer {
+            if selectionGeneration == generation { openingConversation = false }
+        }
+        await openEvents(id: selected.id, generation: generation)
+    }
+
     func create() async {
         guard let workspaceID else { return }
         let context = loadGeneration

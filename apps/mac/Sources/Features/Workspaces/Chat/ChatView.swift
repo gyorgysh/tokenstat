@@ -28,6 +28,11 @@ struct ChatView: View {
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
     @State private var settleMood: PersonaMood?
+    /// Whether rows are reporting where they are. Set from the scroll
+    /// callback as the top of the loaded conversation comes near, so the
+    /// geometry readers exist for the stretch that can need an anchor and
+    /// nowhere else.
+    @State private var measuringRows = false
     @State private var paneDropTargeted = false
     @State private var composerDropTargeted = false
     @State private var dropNotice: String?
@@ -177,7 +182,7 @@ struct ChatView: View {
                     TranscriptEarlierHeader(model: model) {
                         window.ask(force: true)
                     }
-                    ForEach(Array(model.displayItems.enumerated()), id: \.element.id) { index, item in
+                    ForEach(model.displayItems) { item in
                         ChatEventRow(
                             item: item,
                             defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
@@ -200,7 +205,7 @@ struct ChatView: View {
                             alignment: .leading
                         )
                         .frame(maxWidth: .infinity, alignment: item.readingRoomAlignment)
-                        .transcriptRowFrame(item.id, index: index, watched: model.hasEarlier, window: 20)
+                        .transcriptRowFrame(item.id, watched: model.hasEarlier && measuringRows)
                     }
                     if let mood = liveMood {
                         ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
@@ -233,7 +238,7 @@ struct ChatView: View {
                 if follow.showJump && model.approvals.isEmpty {
                     JumpToLatestButton {
                         follow.jump()
-                        Task { await chaseLatest(proxy) }
+                        Task { await returnToLatest(proxy) }
                     }
                 }
             }
@@ -267,6 +272,7 @@ struct ChatView: View {
             }
             .onAppear {
                 follow.suppressed = !model.approvals.isEmpty
+                window.nearTopChanged = { measuringRows = $0 }
                 installRepin(proxy)
                 pinToLatest(proxy, animated: false)
             }
@@ -318,6 +324,19 @@ struct ChatView: View {
     /// open costs.
     private static let settleFrames = 40
 
+
+    /// Come back to the latest turn, by the cheapest route that works.
+    ///
+    /// On a window grown by paging back, scrolling there means the lazy stack
+    /// resolving every row in between, several times over as the press is
+    /// made to land. Reopening on the newest page is one bounded read and
+    /// leaves the transcript small enough that the scroll is instant.
+    private func returnToLatest(_ proxy: ScrollViewProxy) async {
+        if model.displayItems.count > TranscriptWindow.reopenAbove {
+            await model.reopenAtLatest()
+        }
+        await chaseLatest(proxy)
+    }
 
     /// Keep asking for the end until the view is actually there.
     ///

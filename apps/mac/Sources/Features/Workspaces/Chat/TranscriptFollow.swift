@@ -561,20 +561,43 @@ final class TranscriptWindow {
     /// runway. A reader flicking back through a long history covers a screen
     /// in a few hundred milliseconds and should never meet the end of what is
     /// loaded.
-    #if os(macOS)
-    static let reach: CGFloat = 3.5
-    #else
     static let reach: CGFloat = 2.5
-    #endif
+
+    /// How far from the top rows start reporting where they are, as a
+    /// multiple of the viewport. Ahead of `reach`, so a frame exists to
+    /// anchor on by the time a page is asked for, and with hysteresis so a
+    /// reader hovering at the boundary does not switch it on and off.
+    static let measureFrom: CGFloat = 4
+    static let measureUntil: CGFloat = 6
+
+    /// Above this many rows, coming back to the latest turn reopens the
+    /// conversation instead of scrolling to it.
+    ///
+    /// `scrollTo` on a lazy stack costs a walk over every item between here
+    /// and the target: SwiftUI has to resolve estimates for all of them. On a
+    /// window grown by paging back, one scroll to the end is seconds, and the
+    /// loop that makes the press land would spend that several times over.
+    static let reopenAbove = 250
 
     // Throttle anchor math: scroll callbacks fire every frame, and the anchor
     // filter+suffix runs over up to 20 reported frames each time.
     private var lastAnchorCheck = Date.distantPast
     private var lastDistanceFromTopForAnchor: CGFloat = .greatestFiniteMagnitude
 
+    /// Whether rows should be reporting where they are.
+    ///
+    /// A geometry reader per visible row is not free, and for most of a long
+    /// conversation nothing is going to be anchored, so they are only
+    /// attached as the boundary comes near. Told to the transcript rather
+    /// than read from it, because this is decided in the scroll callback and
+    /// a view update is owed only when the answer changes.
+    private(set) var nearTop = false
+    var nearTopChanged: ((Bool) -> Void)?
+
     func note(_ metrics: TranscriptMetrics) {
         viewportHeight = metrics.viewportHeight
         distanceFromTop = metrics.distanceFromTop
+        updateNearTop(metrics)
         let changed = abs(metrics.contentHeight - lastContentHeight) > 0.5
         lastContentHeight = metrics.contentHeight
         if held != nil, Date() > heldUntil { release() }
@@ -597,6 +620,27 @@ final class TranscriptWindow {
             lastDistanceFromTopForAnchor = metrics.distanceFromTop
             ask(force: false)
         }
+    }
+
+    private func updateNearTop(_ metrics: TranscriptMetrics) {
+        guard canAskEarlier, metrics.viewportHeight > 0 else {
+            setNearTop(false)
+            return
+        }
+        if nearTop {
+            setNearTop(metrics.distanceFromTop < metrics.viewportHeight * Self.measureUntil)
+        } else {
+            setNearTop(metrics.distanceFromTop < metrics.viewportHeight * Self.measureFrom)
+        }
+    }
+
+    private func setNearTop(_ value: Bool) {
+        guard nearTop != value else { return }
+        nearTop = value
+        // The readers go away with it, so what they last said has to go too.
+        // A stale frame is an anchor pointing at a row that has since moved.
+        if !value { rowFrames = [:] }
+        nearTopChanged?(value)
     }
 
     /// Whether the page before the oldest row held should be asked for now.
@@ -730,11 +774,18 @@ struct TranscriptRowFrameKey: PreferenceKey {
 }
 
 extension View {
-    /// Report where this row is, while the conversation has anything before
-    /// it to page in. A lazy stack only builds what is near the screen, so
-    /// this runs for what is visible rather than for the window. Only the
-    /// anchor candidates near the top need to report: the hang in 0.7.3 was
-    /// every visible row walking ViewTransform on every frame.
+    /// Report where this row is, while the boundary is near enough that one
+    /// of them may have to hold the reader's place.
+    ///
+    /// A lazy stack only builds what is near the screen, so this runs for
+    /// what is visible rather than for the window, and `nearTop` keeps even
+    /// that off for the rest of a long conversation.
+    ///
+    /// It has to be the visible rows. Restricting it to the first rows of the
+    /// *window* looks cheaper and is how the app came to hang: those rows are
+    /// screens above the viewport, so the anchor became a row far away, and
+    /// `scrollTo` on a lazy stack costs a walk over every item in between.
+    /// Ten corrections per page of that is a stopped application.
     func transcriptRowFrame(_ id: String, watched: Bool) -> some View {
         background {
             if watched {
@@ -746,14 +797,6 @@ extension View {
                 }
             }
         }
-    }
-
-    /// Windowed variant: only the first N rows of the window report. The
-    /// anchor is always near the top of the viewport, so watching the whole
-    /// conversation is paying ViewTransform tax for rows that can never be
-    /// chosen.
-    func transcriptRowFrame(_ id: String, index: Int, watched: Bool, window: Int = 20) -> some View {
-        transcriptRowFrame(id, watched: watched && index < window)
     }
 
     /// Fetch the page before the oldest row held as the top comes near, and
