@@ -14,6 +14,7 @@ pub mod claude_stats;
 pub mod cline;
 pub mod codex;
 pub mod copilot;
+pub mod devin;
 pub mod dsh;
 pub mod grok;
 pub mod hermes;

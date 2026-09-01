@@ -108,6 +108,29 @@ const PI_ALLOW: &[&str] = &[
     "message.usage.cost.total",
 ];
 
+/// Keys a Devin CLI fixture may keep.
+///
+/// A fixture here is one `chat_message` per line, which is how the database
+/// stores a node. Only `metadata` survives: `content` is the conversation, and
+/// `role` is all that is needed to tell an assistant node from a user one. The
+/// working directory lives in the `sessions` table rather than in a message,
+/// so it cannot reach a fixture at all.
+const DEVIN_ALLOW: &[&str] = &[
+    "role",
+    "metadata.request_id",
+    "metadata.generation_model",
+    "metadata.started_generation_at",
+    "metadata.created_at",
+    "metadata.finish_reason",
+    "metadata.num_tokens",
+    "metadata.metrics.input_tokens",
+    "metadata.metrics.output_tokens",
+    "metadata.metrics.cache_read_tokens",
+    "metadata.metrics.cache_creation_tokens",
+    "metadata.metrics.ttft_ms",
+    "metadata.metrics.total_time_ms",
+];
+
 /// Keys a Muse fixture may keep.
 ///
 /// `payload.record.workspace_root` is deliberately absent, for the same reason
@@ -165,6 +188,7 @@ enum Profile {
     Pi,
     Dsh,
     Muse,
+    Devin,
 }
 
 impl Profile {
@@ -174,9 +198,10 @@ impl Profile {
             "pi" => Ok(Self::Pi),
             "dsh" => Ok(Self::Dsh),
             "muse" => Ok(Self::Muse),
-            other => {
-                anyhow::bail!("unknown redaction profile: {other} (claude_code, pi, dsh, muse)")
-            }
+            "devin" => Ok(Self::Devin),
+            other => anyhow::bail!(
+                "unknown redaction profile: {other} (claude_code, pi, dsh, muse, devin)"
+            ),
         }
     }
 
@@ -186,6 +211,7 @@ impl Profile {
             Self::Pi => PI_ALLOW,
             Self::Dsh => DSH_ALLOW,
             Self::Muse => MUSE_ALLOW,
+            Self::Devin => DEVIN_ALLOW,
         }
     }
 
@@ -211,6 +237,17 @@ impl Profile {
             // `subagent.control.runtime_observed` restates a child's running
             // total, so a fixture carrying either would teach the parser's
             // test that double counting is correct.
+            // The assistant nodes, which are the ones with counters. A user
+            // node carries the question and nothing worth keeping.
+            Self::Devin => {
+                obj.get("role").and_then(Value::as_str) == Some("assistant")
+                    && obj
+                        .get("metadata")
+                        .and_then(Value::as_object)
+                        .and_then(|m| m.get("metrics"))
+                        .and_then(Value::as_object)
+                        .is_some_and(|m| m.contains_key("output_tokens"))
+            }
             Self::Muse => {
                 obj.get("payload")
                     .and_then(Value::as_object)

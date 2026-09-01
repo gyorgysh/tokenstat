@@ -8,8 +8,8 @@ use crate::error::{CoreError, Warning};
 use crate::model::SourceId;
 use crate::sources::claude_stats::Reconciliation;
 use crate::sources::{
-    antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, dsh,
-    grok, hermes, kilo, muse, openclaw, opencode, pi, zed,
+    antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, devin,
+    dsh, grok, hermes, kilo, muse, openclaw, opencode, pi, zed,
 };
 use crate::store::Store;
 use crate::watermark;
@@ -59,6 +59,7 @@ from_parsed!(
     hermes::ParseOutput,
     dsh::ParseOutput,
     muse::ParseOutput,
+    devin::ParseOutput,
 );
 
 impl FileOutcome {
@@ -368,6 +369,20 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
             })
             .collect();
         absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
+    }
+
+    // Devin CLI: SQLite. Counters live on the assistant nodes of a message
+    // forest and are pulled out with json_extract, so the conversation itself
+    // is never read into this process. See `sources::devin`.
+    if let Some(db) = devin::discover(&home) {
+        report.files_found += 1;
+        let outcome = read_db_shard(&db, &marks, |p| devin::parse_db(p).into());
+        absorb(
+            &mut report,
+            &mut all_events,
+            &mut marks_to_store,
+            vec![outcome],
+        );
     }
 
     // Muse: JSONL event log, one per session and one per subagent, appended

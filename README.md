@@ -38,7 +38,7 @@ everything that runs on your machine.
 - **CLI first.** Fast local reports, JSON output, setup, scheduling, updates, and an interactive terminal UI on macOS, Linux, and Windows
 - **macOS desktop.** A signed and notarized disk image with Home, Insights, Devices, workspaces, tasks, notes, workflows, and automations
 - **Clients in development.** Preview Windows desktop and Android builds exercise the shared host and archive while those platforms mature
-- **Many sources.** Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness, Muse, plus Cursor fetch
+- **Many sources.** Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness, Muse, Devin CLI, plus Cursor fetch
 - **One schema.** Daily, weekly, monthly, and per-model views across every tool
 - **MCP.** Agents can ask their own spend over stdio, no hosted server
 - **Optional sync.** Sealed aggregates to `tokenstat.ai/<handle>` when you link an account ([live example](https://tokenstat.ai/gyorgy))
@@ -47,7 +47,7 @@ everything that runs on your machine.
 
 | Kind | Tools |
 | --- | --- |
-| On disk | Claude Code (with rollup recovery), Codex, Grok, OpenCode, Cline, Antigravity CLI, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness, Muse |
+| On disk | Claude Code (with rollup recovery), Codex, Grok, OpenCode, Cline, Antigravity CLI, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness, Muse, Devin CLI |
 | Remote fetch | Cursor (keychain or pasted token, 30 minute cache) |
 | IDE sync | Antigravity IDE (app open, then `tokenstat fetch`) |
 

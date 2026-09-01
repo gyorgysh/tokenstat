@@ -46,6 +46,9 @@ pub enum SourceId {
     /// Muse. One JSONL event log per session, plus one per subagent, under a
     /// date-partitioned sessions root.
     Muse,
+    /// Devin CLI. One SQLite database, counters on the assistant nodes of a
+    /// message forest.
+    Devin,
 }
 
 impl SourceId {
@@ -68,6 +71,7 @@ impl SourceId {
             SourceId::Kilo => "kilo",
             SourceId::Dsh => "dsh",
             SourceId::Muse => "muse",
+            SourceId::Devin => "devin",
         }
     }
 
@@ -90,6 +94,7 @@ impl SourceId {
             SourceId::Kilo => "Kilo Code",
             SourceId::Dsh => "DeepSeek Harness",
             SourceId::Muse => "Muse",
+            SourceId::Devin => "Devin CLI",
         }
     }
 
@@ -140,6 +145,7 @@ impl SourceId {
             "kilo" => Some(Self::Kilo),
             "dsh" => Some(Self::Dsh),
             "muse" => Some(Self::Muse),
+            "devin" => Some(Self::Devin),
             _ => None,
         }
     }

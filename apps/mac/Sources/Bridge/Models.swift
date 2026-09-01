@@ -1745,6 +1745,7 @@ func harnessName(_ id: String) -> String {
     case "cline": return "Cline"
     case "openclaw": return "OpenClaw"
     case "muse": return "Muse"
+    case "devin": return "Devin CLI"
     case "pi": return "Pi"
     case "dsh": return "DeepSeek Harness"
     case "zed": return "Zed"

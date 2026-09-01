@@ -39,7 +39,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tokenstat_core::model::{BillingMode, Counters, EventId, SourceId};
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
 use tokenstat_core::sources::{
-    antigravity_cli, claude_code, codex, dsh, grok, hermes, kilo, muse, opencode, pi,
+    antigravity_cli, claude_code, codex, devin, dsh, grok, hermes, kilo, muse, opencode, pi,
 };
 use tokenstat_core::{Catalog, UsageEvent};
 
@@ -81,6 +81,7 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
         "pi" => pi_events(cwd)?,
         "dsh" => dsh_events(cwd)?,
         "muse" => muse_events(cwd)?,
+        "devin" => devin_events(cwd, started_at_ms)?,
         "antigravity" => antigravity_events(cwd)?,
         _ => return None,
     };
@@ -378,6 +379,7 @@ pub(crate) fn can_meter(command: &str) -> bool {
         "pi" => pi::discover(&home).is_some(),
         "dsh" => dsh::discover(&home).is_some(),
         "muse" => muse::discover(&home).is_some(),
+        "devin" => devin::discover(&home).is_some(),
         "antigravity" => antigravity_cli::discover(&home).is_some(),
         _ => false,
     }
@@ -399,6 +401,7 @@ fn harness_name(command: &str) -> Option<&'static str> {
         "pi" => Some("pi"),
         "dsh" => Some("dsh"),
         "muse" => Some("muse"),
+        "devin" => Some("devin"),
         "agy" => Some("antigravity"),
         _ => None,
     }
@@ -429,6 +432,22 @@ fn codex_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
             })
     })?;
     cached_events(&path, |contents| codex::parse_file(&path, contents).events)
+}
+
+/// Devin's database, read for one folder since this session started.
+///
+/// Both narrowings are SQL, the way OpenCode's and Hermes's are: one database
+/// holds every session the machine has run, and the counters sit inside a JSON
+/// column that SQLite can pick apart without handing the conversation over.
+fn devin_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let db = devin::discover(&home)?;
+    let floor = started_at_ms as i64 - GRACE_MS;
+    let scope = format!("{cwd}#{floor}");
+    let events = cached_db_events(&db, &scope, |path| {
+        devin::parse_db_in(path, Some(cwd), Some(floor)).events
+    })?;
+    (!events.is_empty()).then_some(events)
 }
 
 /// The Muse log for this folder, newest session first.
