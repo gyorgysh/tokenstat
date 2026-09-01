@@ -74,10 +74,16 @@ struct RemoteHostFeatureGate<Content: View>: View {
                 probe.state = .available
                 return
             }
+            // This view can be retained while the person changes the selected
+            // computer. Do not let the previous host's answer expose a feature
+            // while the next host is still being checked.
+            probe.state = .checking
             do {
                 let version = try await Bridge.peerProtocolVersion(peer)
+                guard !Task.isCancelled else { return }
                 probe.state = version >= feature.minimumProtocol ? .available : .needsUpdate(version)
             } catch {
+                guard !Task.isCancelled else { return }
                 // Reachability has its own UI. Turning an asleep host into an
                 // "update" instruction sends somebody in the wrong direction.
                 probe.state = .available
