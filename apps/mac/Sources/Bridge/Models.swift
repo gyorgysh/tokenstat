@@ -797,6 +797,21 @@ struct Totals: Codable, Sendable, Hashable {
     var lastDate: String?
 }
 
+/// One coherent archive reading for Insights. Keeping this as a bridge model
+/// makes period changes one host trip rather than a fan-out of aggregates that
+/// serialize at the daemon anyway.
+struct InsightsSnapshot: Codable, Sendable, Hashable {
+    var info: Info
+    var totals: Totals
+    var daily: [Bucket]
+    var byModel: [Bucket]
+    var byProject: [Bucket]
+    var bySource: [Bucket]
+    var bySession: [Bucket]
+    var activeBlock: Block?
+    var projectHarnesses: [SplitBucket]
+}
+
 struct Block: Codable, Sendable, Hashable, Identifiable {
     var startMs: Int64
     var endMs: Int64

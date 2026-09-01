@@ -75,6 +75,55 @@ pub fn call(method: &str, params: &str) -> String {
         }
     }
 
+    // Match the daemon path: a scan owns its own SQLite connection so a UI
+    // report does not queue behind minutes of disk parsing when the app is
+    // temporarily using the in-process fallback.
+    if method == "scan" {
+        let opened = guard.as_ref().and_then(|session| {
+            session.engine().ok().map(|engine| {
+                (
+                    engine.db_path().to_path_buf(),
+                    engine.timezone().iana_name().map(str::to_string),
+                )
+            })
+        });
+        let Some((db_path, timezone)) = opened else {
+            return match guard.as_mut() {
+                Some(session) => dispatch::call(session, method, params),
+                None => serde_json::json!({
+                    "ok": false,
+                    "error": {"code": "no_session", "message": "the archive is not open"}
+                })
+                .to_string(),
+            };
+        };
+        drop(guard);
+        return match tokenstat_core::Engine::open(Some(&db_path), timezone.as_deref()) {
+            Ok(mut engine) => match engine.scan() {
+                Ok(report) => {
+                    match serde_json::to_value(tokenstat_host::dto::ScanReportDto::from(report)) {
+                        Ok(value) => serde_json::json!({"ok": true, "result": value}).to_string(),
+                        Err(error) => serde_json::json!({
+                            "ok": false,
+                            "error": {"code": "call_failed", "message": error.to_string()}
+                        })
+                        .to_string(),
+                    }
+                }
+                Err(error) => serde_json::json!({
+                    "ok": false,
+                    "error": {"code": "call_failed", "message": error.to_string()}
+                })
+                .to_string(),
+            },
+            Err(error) => serde_json::json!({
+                "ok": false,
+                "error": {"code": "call_failed", "message": error.to_string()}
+            })
+            .to_string(),
+        };
+    }
+
     match guard.as_mut() {
         Some(session) => dispatch::call(session, method, params),
         None => serde_json::json!({

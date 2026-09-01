@@ -47,11 +47,11 @@ pub extern "C" fn tokenstat_ffi_protocol_version() -> *const c_char {
     // A C string has to be NUL terminated and the Rust constant is not, so
     // this is written out once and checked against it at compile time. Bumping
     // one without the other is a build error rather than a silent disagreement.
-    const VERSION: &str = "4\0";
+    const VERSION: &str = "5\0";
     const _: () = {
         let spoken = tokenstat_host::PROTOCOL_VERSION.as_bytes();
         assert!(
-            spoken.len() == 1 && spoken[0] == b'4',
+            spoken.len() == 1 && spoken[0] == b'5',
             "PROTOCOL_VERSION moved: update the C ABI string beside it"
         );
     };

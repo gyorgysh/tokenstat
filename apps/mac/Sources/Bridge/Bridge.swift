@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import Foundation
+import OSLog
 
 /// Errors surfaced by the bridge.
 ///
@@ -76,6 +77,13 @@ private struct Envelope<T: Decodable>: Decodable {
 /// `Transport` carries a call is chosen once, at launch, by `Bridge.connect()`.
 /// Every method below is written as though there were only one.
 enum Bridge {
+    /// Performance events intentionally contain only a method name and timing;
+    /// bridge parameters can contain paths, terminal input, and chat text.
+    private static let performanceLog = Logger(
+        subsystem: "ai.tokenstat.tokenstat",
+        category: "Performance"
+    )
+
     /// How long a call waits on a silent host before giving up.
     ///
     /// Not a deadline on the call, a budget on silence: the socket resets it
@@ -622,17 +630,49 @@ enum Bridge {
         peer: String?,
         _ work: () async throws -> T
     ) async throws -> T {
+        let started = DispatchTime.now().uptimeNanoseconds
         if let refusal = BridgeObserver.precheck?(method) {
             BridgeObserver.note(method, peer: peer, refusal)
             throw refusal
         }
         do {
             let value = try await work()
+            notePerformance(method: method, peer: peer, started: started, failed: false)
             BridgeObserver.note(method, peer: peer, nil)
             return value
         } catch {
+            notePerformance(method: method, peer: peer, started: started, failed: true)
             BridgeObserver.note(method, peer: peer, error)
             throw error
+        }
+    }
+
+    /// Keep the normal path silent. Console gets an actionable record only when
+    /// an interaction took long enough to be felt; terminal long-polls are
+    /// intentionally excluded because their wait is the requested behaviour.
+    private static func notePerformance(
+        method: String,
+        peer: String?,
+        started: UInt64,
+        failed: Bool
+    ) {
+        guard !isExpectedLongPoll(method) else { return }
+        let elapsed = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+        guard elapsed >= slowCallThreshold(method: method) else { return }
+        performanceLog.notice(
+            "slow bridge call method=\(method, privacy: .public) elapsed_ms=\(elapsed, privacy: .public) remote=\(peer != nil, privacy: .public) failed=\(failed, privacy: .public) hosted=\(isHosted, privacy: .public)"
+        )
+    }
+
+    private static func isExpectedLongPoll(_ method: String) -> Bool {
+        method == "pty.read" || method == "ssh.session.read" || method == "chat.events"
+    }
+
+    private static func slowCallThreshold(method: String) -> UInt64 {
+        switch method {
+        case "scan", "fetch", "sync", "usage.limits": return 2_000
+        case "activity.calendar", "account.report", "account.machineUsage": return 750
+        default: return 400
         }
     }
 
@@ -833,6 +873,11 @@ enum Bridge {
 
     static func activeBlock(_ query: Query = Query()) async throws -> Block? {
         try await background("blocks.active", ["query": query.payload], as: [Block].self).first
+    }
+
+    /// All aggregates the Insights screen draws, read from one archive moment.
+    static func insightsSnapshot(_ query: Query = Query()) async throws -> InsightsSnapshot {
+        try await background("insights.snapshot", ["query": query.payload], as: InsightsSnapshot.self)
     }
 
     /// Read every discoverable log source into the archive. Slow by nature:

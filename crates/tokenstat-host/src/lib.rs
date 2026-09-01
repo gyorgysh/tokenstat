@@ -149,4 +149,4 @@ pub use tokenstat_pty::warm_shell_pool;
 /// new method answers `unknown method`, and the feature is simply absent with
 /// nothing on screen to say why. `Bridge.connect` replaces a helper whose
 /// number does not match, and that check is the only thing that notices.
-pub const PROTOCOL_VERSION: &str = "4";
+pub const PROTOCOL_VERSION: &str = "5";

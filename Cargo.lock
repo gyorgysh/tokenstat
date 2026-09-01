@@ -3625,6 +3625,7 @@ version = "0.7.3"
 dependencies = [
  "jni",
  "serde_json",
+ "tokenstat-core",
  "tokenstat-host",
  "tokenstat-identity",
  "tokenstat-paths",

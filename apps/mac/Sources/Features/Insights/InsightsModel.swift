@@ -176,32 +176,18 @@ final class InsightsModel {
 
         let q = query
         do {
-            // Independent queries, so let them overlap rather than serialize.
-            async let totals = Bridge.totals(q)
-            async let daily = Bridge.report(group: .day, query: q)
-            async let byModel = Bridge.report(group: .model, query: q)
-            async let byProject = Bridge.report(group: .project, query: q)
-            async let bySource = Bridge.report(group: .source, query: q)
-            var sessionQuery = q
-            sessionQuery.limit = 80
-            async let bySession = Bridge.report(group: .session, query: sessionQuery)
-            async let activeBlock = Bridge.activeBlock(q)
-            async let split = Bridge.reportSplit(group: .project, splitBy: .source, query: q)
-            async let freshInfo = Bridge.info()
-
-            self.totals = try await totals
-            if let next = try? await freshInfo {
-                self.info = next
-            }
-            self.daily = try await daily
-            self.byModel = try await byModel
-            self.byProject = try await byProject
-            self.bySource = try await bySource
-            self.bySession = try await bySession
-            self.activeBlock = try await activeBlock
+            let snapshot = try await Bridge.insightsSnapshot(q)
+            self.info = snapshot.info
+            self.totals = snapshot.totals
+            self.daily = snapshot.daily
+            self.byModel = snapshot.byModel
+            self.byProject = snapshot.byProject
+            self.bySource = snapshot.bySource
+            self.bySession = snapshot.bySession
+            self.activeBlock = snapshot.activeBlock
             self.projectHarnesses = Self.buildProjectHarnesses(
                 projects: self.byProject,
-                split: try await split
+                split: snapshot.projectHarnesses
             )
             // A selection from before the reload may no longer exist, and a
             // stale row would sit in the inspector describing nothing.

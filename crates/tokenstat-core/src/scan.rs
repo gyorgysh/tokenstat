@@ -114,6 +114,25 @@ impl ScanReport {
 
 /// Read every discoverable source into the archive.
 pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, CoreError> {
+    // Parsing logs is CPU, memory, and storage intensive at the same time.
+    // Rayon defaults to every logical CPU, which makes a two- or four-core
+    // Intel laptop feel frozen while a background scan competes with SwiftUI,
+    // SQLite, Spotlight, and the agent that is still writing its logs. Keep at
+    // least one core for the machine and cap the scan at four workers; current
+    // Macs still parse independent shards in parallel without turning an I/O
+    // burst into system-wide contention.
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(1).clamp(1, 4))
+        .unwrap_or(2);
+    match rayon::ThreadPoolBuilder::new().num_threads(workers).build() {
+        Ok(pool) => pool.install(|| scan_inner(store, tz)),
+        // The global Rayon pool remains a correct fallback if creating a small
+        // per-scan pool ever fails under extreme resource pressure.
+        Err(_) => scan_inner(store, tz),
+    }
+}
+
+fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, CoreError> {
     let started = std::time::Instant::now();
     let mut report = ScanReport::default();
 

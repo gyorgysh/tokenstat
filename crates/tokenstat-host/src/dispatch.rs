@@ -18,7 +18,8 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::{Mutex, PoisonError};
 #[cfg(feature = "local-host")]
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -31,8 +32,9 @@ use crate::account_activity::FailureReason;
 use crate::automations::Automation;
 use crate::dto::{
     AccountBillingDto, AccountDto, AccountReportDto, BlockDto, BucketDto, CalendarDto,
-    DayDetailDto, DayPartDto, DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto, MachineDto,
-    MachineUsageDto, QueryDto, ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto,
+    DayDetailDto, DayPartDto, DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto,
+    InsightsSnapshotDto, MachineDto, MachineUsageDto, QueryDto, ScanReportDto, SplitBucketDto,
+    SyncResultDto, TotalsDto,
 };
 #[cfg(feature = "local-host")]
 use crate::dto::{WorkspaceDto, WorkspaceSummaryDto};
@@ -805,6 +807,10 @@ fn avatar_url(host: &str, raw: &Value) -> Option<String> {
 /// paid three git process spawns per folder again.
 #[cfg(feature = "local-host")]
 const WORKSPACE_STATUS_TTL: Duration = Duration::from_millis(400);
+/// Git status starts several subprocesses per workspace. Bound the fan-out so
+/// a large workspace list does not turn an older laptop into a process storm.
+#[cfg(feature = "local-host")]
+const WORKSPACE_STATUS_WORKERS: usize = 4;
 
 #[cfg(feature = "local-host")]
 struct WorkspaceStatusCache {
@@ -881,6 +887,26 @@ fn with_session<T>(
     f(s)
 }
 
+/// Static host facts included in both the standalone `info` response and an
+/// Insights snapshot. Keeping one builder prevents the two surfaces from
+/// drifting when diagnostics gain a field.
+fn info_dto(b: &Session) -> InfoDto {
+    let peers = crate::remote::connection_counts();
+    InfoDto {
+        protocol_version: PROTOCOL_VERSION.to_string(),
+        core_version: tokenstat_core::VERSION.to_string(),
+        db_path: b.engine().ok().map(|e| e.db_path().display().to_string()),
+        has_archive: b.has_archive(),
+        timezone: b.timezone().iana_name().unwrap_or("unknown").to_string(),
+        price_book_effective_from: b.prices.effective_from.clone(),
+        has_prices: !b.prices.is_empty(),
+        open_files: crate::open_files::open_file_count().map(|n| n as u64),
+        open_file_limit: crate::open_files::open_file_limit().map(|(soft, _)| soft),
+        peer_calls_live: peers.0,
+        peer_connections_idle: peers.1,
+    }
+}
+
 /// Build the wire detail for a day, pricing every row at list rates.
 ///
 /// The same `EquivalentValue` pricing the calendar's day buckets use, applied
@@ -928,9 +954,52 @@ fn day_detail_dto(
 /// Handle one call. Never panics on bad input, and never returns a non-JSON
 /// string, so the caller can decode unconditionally.
 pub fn call(session: &mut Session, method: &str, params: &str) -> String {
-    match dispatch(session, method, params) {
+    let started = Instant::now();
+    let result = match dispatch(session, method, params) {
         Ok(v) => ok(v),
         Err(e) => err(&e.code, e.message),
+    };
+    note_slow_call(method, started.elapsed(), "dispatch");
+    result
+}
+
+/// Slow-call telemetry is deliberately terse and stays in the host's existing
+/// stderr log. Method names and elapsed time are enough to investigate a
+/// regression; parameters can contain private paths, terminal input, or chat
+/// content and must never enter diagnostics.
+fn note_slow_call(method: &str, elapsed: std::time::Duration, layer: &str) {
+    if matches!(method, "pty.read" | "ssh.session.read" | "chat.events") {
+        return;
+    }
+    let threshold_ms = match method {
+        "scan" | "fetch" | "sync" | "usage.limits" => 2_000,
+        "activity.calendar" | "account.report" | "account.machineUsage" => 750,
+        _ => 400,
+    };
+    let elapsed_ms = elapsed.as_millis();
+    if elapsed_ms >= threshold_ms {
+        eprintln!("perf: slow host call layer={layer} method={method} elapsed_ms={elapsed_ms}");
+    }
+}
+
+/// Per-query detail for bundled reports. Unlike a SQL trace it contains no
+/// values, table rows, paths, or model names, but it tells us which aggregate
+/// was responsible when an Insights snapshot crosses the slow-call threshold.
+fn note_slow_archive_query(query: &str, elapsed: std::time::Duration) {
+    let elapsed_ms = elapsed.as_millis();
+    if elapsed_ms >= 150 {
+        eprintln!("perf: slow archive query query={query} elapsed_ms={elapsed_ms}");
+    }
+}
+
+fn group_name(group: GroupBy) -> &'static str {
+    match group {
+        GroupBy::Day => "day",
+        GroupBy::Week => "week",
+        GroupBy::Model => "model",
+        GroupBy::Project => "project",
+        GroupBy::Source => "source",
+        GroupBy::Session => "session",
     }
 }
 
@@ -967,25 +1036,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             Ok(json!({"opened": true}))
         }
 
-        "info" => with_session(s, |b| {
-            let peers = crate::remote::connection_counts();
-            let info = InfoDto {
-                protocol_version: PROTOCOL_VERSION.to_string(),
-                core_version: tokenstat_core::VERSION.to_string(),
-                db_path: b.engine().ok().map(|e| e.db_path().display().to_string()),
-                has_archive: b.has_archive(),
-                timezone: b.timezone().iana_name().unwrap_or("unknown").to_string(),
-                price_book_effective_from: b.prices.effective_from.clone(),
-                has_prices: !b.prices.is_empty(),
-                open_files: crate::open_files::open_file_count().map(|n| n as u64),
-                open_file_limit: crate::open_files::open_file_limit().map(|(soft, _)| soft),
-                // One reading, so the two numbers are of the same moment
-                // rather than of two turns of the pool's lock.
-                peer_calls_live: peers.0,
-                peer_connections_idle: peers.1,
-            };
-            serde_json::to_value(info).envelope()
-        }),
+        "info" => with_session(s, |b| serde_json::to_value(info_dto(b)).envelope()),
 
         "totals" => {
             let p: QueryParams = parse(params)?;
@@ -1005,6 +1056,51 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     .envelope()?;
                 let dtos: Vec<BucketDto> = rows.into_iter().map(BucketDto::from).collect();
                 serde_json::to_value(dtos).envelope()
+            })
+        }
+
+        // One snapshot instead of nine independently queued report calls.
+        // Every aggregate is intentionally built while the same archive
+        // session is held, so a scan cannot make the totals and tables disagree.
+        "insights.snapshot" => {
+            let p: QueryParams = parse(params)?;
+            with_session(s, |b| {
+                let query = Query::from(p.query);
+                let mut sessions = query.clone();
+                sessions.limit = Some(80);
+                let engine = b.engine()?;
+                let priced = |group, query: &Query| -> Result<Vec<BucketDto>, DispatchError> {
+                    let started = Instant::now();
+                    let rows = engine.priced_report(group, query, &b.prices);
+                    note_slow_archive_query(group_name(group), started.elapsed());
+                    Ok(rows.envelope()?.into_iter().map(BucketDto::from).collect())
+                };
+                let started = Instant::now();
+                let project_harnesses = engine
+                    .report_split(GroupBy::Project, GroupBy::Source, &query)
+                    .envelope()?
+                    .into_iter()
+                    .map(SplitBucketDto::from)
+                    .collect();
+                note_slow_archive_query("project_by_source", started.elapsed());
+                let started = Instant::now();
+                let totals = TotalsDto::from(engine.totals(&query).envelope()?);
+                note_slow_archive_query("totals", started.elapsed());
+                let started = Instant::now();
+                let active_block = engine.active_block(&query).envelope()?.map(BlockDto::from);
+                note_slow_archive_query("active_block", started.elapsed());
+                let snapshot = InsightsSnapshotDto {
+                    info: info_dto(b),
+                    totals,
+                    daily: priced(GroupBy::Day, &query)?,
+                    by_model: priced(GroupBy::Model, &query)?,
+                    by_project: priced(GroupBy::Project, &query)?,
+                    by_source: priced(GroupBy::Source, &query)?,
+                    by_session: priced(GroupBy::Session, &sessions)?,
+                    active_block,
+                    project_harnesses,
+                };
+                serde_json::to_value(snapshot).envelope()
             })
         }
 
@@ -2252,22 +2348,26 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 .filter(|ws| !is_test_workspace(ws))
                 .cloned()
                 .collect();
-            // One thread per folder. Reading git means three subprocesses, and
-            // doing that serially made the whole list cost the sum of every
-            // repository rather than the slowest one. The folders are
-            // independent, so there is nothing to coordinate.
-            let dtos: Vec<WorkspaceDto> = std::thread::scope(|scope| {
-                let handles: Vec<_> = folders
-                    .iter()
-                    .map(|ws| scope.spawn(move || describe(ws)))
-                    .collect();
-                handles
-                    .into_iter()
-                    // A panic reading one folder must not lose the others, and
-                    // there is nothing useful to say about it here.
-                    .filter_map(|h| h.join().ok())
-                    .collect()
-            });
+            // Concurrent enough to hide one slow repository, but deliberately
+            // bounded: each description starts several Git processes and one
+            // thread per registered folder overwhelmed older Intel machines.
+            let dtos: Vec<WorkspaceDto> = folders
+                .chunks(WORKSPACE_STATUS_WORKERS)
+                .flat_map(|batch| {
+                    std::thread::scope(|scope| {
+                        let handles: Vec<_> = batch
+                            .iter()
+                            .map(|ws| scope.spawn(move || describe(ws)))
+                            .collect();
+                        handles
+                            .into_iter()
+                            // A panic reading one folder must not lose the
+                            // others, and there is nothing useful to say here.
+                            .filter_map(|h| h.join().ok())
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
             serde_json::to_value(dtos).map_err(|e| e.to_string())
         }
 
@@ -4246,6 +4346,28 @@ mod tests {
         let v: Value = serde_json::from_str(&out).expect("json");
         assert_eq!(v["ok"], true, "{out}");
         assert!(v["result"].is_null(), "{out}");
+    }
+
+    #[test]
+    fn insights_snapshot_answers_every_required_aggregate() {
+        let mut s = session();
+        let out = call(&mut s, "insights.snapshot", "{}");
+        let v: Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(v["ok"], true, "{out}");
+        let result = &v["result"];
+        assert!(result["info"].is_object(), "{out}");
+        assert_eq!(result["totals"]["events"], 0, "{out}");
+        for name in [
+            "daily",
+            "byModel",
+            "byProject",
+            "bySource",
+            "bySession",
+            "projectHarnesses",
+        ] {
+            assert!(result[name].is_array(), "missing {name}: {out}");
+        }
+        assert!(result["activeBlock"].is_null(), "{out}");
     }
 
     /// The hover detail is priced, grouped per model × source, and a quiet day

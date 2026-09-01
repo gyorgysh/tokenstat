@@ -385,7 +385,8 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
             drop(guard);
             return with_id(envelope, request.id);
         };
-        match tokenstat_core::Engine::open(Some(&db_path), tz_name.as_deref()) {
+        let started = std::time::Instant::now();
+        let result = match tokenstat_core::Engine::open(Some(&db_path), tz_name.as_deref()) {
             Ok(mut engine) => match engine.scan() {
                 Ok(r) => {
                     let dto = crate::dto::ScanReportDto::from(r);
@@ -409,7 +410,16 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
                 "error": {"code": "call_failed", "message": e.to_string()}
             })
             .to_string(),
+        };
+        let elapsed_ms = started.elapsed().as_millis();
+        if elapsed_ms >= 2_000 {
+            // The scan has no request parameters in its public contract, but
+            // keep diagnostics just as strict as ordinary dispatch calls.
+            eprintln!(
+                "perf: slow host call layer=dedicated_scan method=scan elapsed_ms={elapsed_ms}"
+            );
         }
+        result
     } else {
         match crate::dispatch::call_sessionless(&request.method, &params) {
             Some(envelope) => envelope,

@@ -150,6 +150,26 @@ pub struct TotalsDto {
     pub last_date: Option<String>,
 }
 
+/// The complete, internally consistent reading the Insights screen needs.
+///
+/// This deliberately travels as one response. Insights used to fan out nine
+/// requests which all queued behind the host's archive session anyway. Besides
+/// making a cold screen slower, those independent reads could describe slightly
+/// different moments when a scan landed between them.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsightsSnapshotDto {
+    pub info: InfoDto,
+    pub totals: TotalsDto,
+    pub daily: Vec<BucketDto>,
+    pub by_model: Vec<BucketDto>,
+    pub by_project: Vec<BucketDto>,
+    pub by_source: Vec<BucketDto>,
+    pub by_session: Vec<BucketDto>,
+    pub active_block: Option<BlockDto>,
+    pub project_harnesses: Vec<SplitBucketDto>,
+}
+
 impl From<Totals> for TotalsDto {
     fn from(t: Totals) -> TotalsDto {
         TotalsDto {

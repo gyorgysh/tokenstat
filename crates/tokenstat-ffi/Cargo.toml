@@ -24,6 +24,7 @@ default = ["local-host"]
 local-host = ["tokenstat-host/local-host"]
 
 [dependencies]
+tokenstat-core.workspace = true
 tokenstat-host = { workspace = true }
 # Transitively links a network stack through the host, because account and
 # sync belong to the app. That stays forbidden in `tokenstat-core`, which is
