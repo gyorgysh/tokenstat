@@ -232,7 +232,7 @@ enum ClientRemote {
     }
 
     /// The newest conversations on this host, across its folders.
-    static func recentChats(peer: String, limit: Int = 20) async throws -> [ChatConversation] {
+    static func recentChats(peer: String, limit: Int = 50) async throws -> [ChatRecentConversation] {
         try await Bridge.recentChats(peer: peer, limit: limit)
     }
 

@@ -40,10 +40,33 @@ final class ClientChatReadState {
     }
 
     func isUnread(peer: String, chat: ChatConversation) -> Bool {
-        guard chat.lastMessageAuthor == "agent", let at = chat.lastMessageAtMs else {
+        isUnread(
+            peer: peer,
+            chatID: chat.id,
+            lastMessageAtMs: chat.lastMessageAtMs,
+            lastMessageAuthor: chat.lastMessageAuthor
+        )
+    }
+
+    func isUnread(peer: String, chat: ChatRecentConversation) -> Bool {
+        isUnread(
+            peer: peer,
+            chatID: chat.id,
+            lastMessageAtMs: chat.lastMessageAtMs,
+            lastMessageAuthor: chat.lastMessageAuthor
+        )
+    }
+
+    private func isUnread(
+        peer: String,
+        chatID: String,
+        lastMessageAtMs: Int64?,
+        lastMessageAuthor: String?
+    ) -> Bool {
+        guard lastMessageAuthor == "agent", let at = lastMessageAtMs else {
             return false
         }
-        let lastRead = reads[key(peer: peer, chatID: chat.id), default: trackingStartedAt]
+        let lastRead = reads[key(peer: peer, chatID: chatID), default: trackingStartedAt]
         return max(lastRead, trackingStartedAt) < at
     }
 
@@ -67,19 +90,28 @@ struct ClientRecentChatsSection: View {
     let peer: String
     let hostName: String
     let folders: [WorkspaceFolder]
-    let chats: [ChatConversation]
+    let chats: [ChatRecentConversation]
 
     private var receipts: ClientChatReadState { .shared }
 
     /// A week is recent enough to be useful without turning this into another
     /// permanent chat list. Unread replies survive the window, capped by the
     /// same five rows, so a reply cannot disappear merely because life was busy.
-    private var visible: [ChatConversation] {
+    private var visible: [ChatRecentConversation] {
         let cutoff = Int64(Date().addingTimeInterval(-7 * 24 * 60 * 60).timeIntervalSince1970 * 1000)
-        return Array(chats.filter { chat in
-            chat.running
+        let candidates = chats.filter { chat in
+            chat.needsAttention
+                || chat.running
                 || receipts.isUnread(peer: peer, chat: chat)
                 || (chat.lastMessageAtMs ?? 0) >= cutoff
+        }
+        return Array(candidates.sorted { left, right in
+            let leftPriority = priority(of: left)
+            let rightPriority = priority(of: right)
+            if leftPriority != rightPriority {
+                return leftPriority > rightPriority
+            }
+            return (left.lastMessageAtMs ?? 0) > (right.lastMessageAtMs ?? 0)
         }.prefix(5))
     }
 
@@ -117,10 +149,20 @@ struct ClientRecentChatsSection: View {
             (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == workspaceID
         }?.name ?? "Workspace"
     }
+
+    /// Host-owned approvals first, then this device's unread replies, active
+    /// work, and finally ordinary recency. Keeping unread local is deliberate:
+    /// opening a chat on one device must not clear it on another.
+    private func priority(of chat: ChatRecentConversation) -> Int {
+        if chat.needsAttention { return 3 }
+        if receipts.isUnread(peer: peer, chat: chat) { return 2 }
+        if chat.running { return 1 }
+        return 0
+    }
 }
 
 private struct ClientRecentChatRow: View {
-    let chat: ChatConversation
+    let chat: ChatRecentConversation
     let folderName: String
     let unread: Bool
 
@@ -128,9 +170,9 @@ private struct ClientRecentChatRow: View {
         HStack(spacing: Theme.Space.s) {
             ZStack(alignment: .topTrailing) {
                 HarnessMark(id: chat.backend, size: 28)
-                if unread {
+                if unread || chat.needsAttention {
                     Circle()
-                        .fill(Theme.accent)
+                        .fill(chat.needsAttention ? Theme.warning : Theme.accent)
                         .frame(width: 8, height: 8)
                         .overlay(Circle().stroke(Theme.background, lineWidth: 2))
                         .offset(x: 2, y: -2)
@@ -138,7 +180,7 @@ private struct ClientRecentChatRow: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(chat.title)
-                    .font(ClientType.label.weight(unread ? .semibold : .medium))
+                    .font(ClientType.label.weight(unread || chat.needsAttention ? .semibold : .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 HStack(spacing: 5) {
@@ -150,7 +192,10 @@ private struct ClientRecentChatRow: View {
                             style: .abbreviated
                         ))
                     }
-                    if chat.running {
+                    if chat.needsAttention {
+                        Text("· Needs approval")
+                            .foregroundStyle(Theme.warning)
+                    } else if chat.running {
                         Text("· Working")
                             .foregroundStyle(Theme.accent)
                     }
@@ -168,7 +213,14 @@ private struct ClientRecentChatRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
         .accessibilityElement(children: .combine)
-        .accessibilityValue(unread ? "Unread" : "")
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: String {
+        if chat.needsAttention, unread { return "Needs approval, unread" }
+        if chat.needsAttention { return "Needs approval" }
+        if unread { return "Unread" }
+        return ""
     }
 }
 

@@ -2512,6 +2512,41 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     }
 }
 
+/// Host-wide chat metadata for the Workspaces shortcut.
+///
+/// This deliberately is not `ChatConversation`: the full record includes the
+/// system prompt, tool permissions and backend resume token. None of those are
+/// needed to draw five rows. The custom decoder keeps a new client compatible
+/// with a 0.7.3 host, whose `chat.recent` response predates `needsAttention`.
+struct ChatRecentConversation: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var workspaceID: String
+    var title: String
+    var backend: String
+    var lastMessageAtMs: Int64?
+    var lastMessageAuthor: String?
+    var running: Bool
+    var needsAttention: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case workspaceID = "workspaceId"
+        case title, backend, lastMessageAtMs, lastMessageAuthor, running, needsAttention
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        workspaceID = try c.decode(String.self, forKey: .workspaceID)
+        title = try c.decode(String.self, forKey: .title)
+        backend = try c.decode(String.self, forKey: .backend)
+        lastMessageAtMs = try c.decodeIfPresent(Int64.self, forKey: .lastMessageAtMs)
+        lastMessageAuthor = try c.decodeIfPresent(String.self, forKey: .lastMessageAuthor)
+        running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
+        needsAttention = try c.decodeIfPresent(Bool.self, forKey: .needsAttention) ?? false
+    }
+}
+
 /// Chat-only backend metadata. `gateTier` is deliberately host-owned: clients
 /// must not imply an interactive approval channel where a CLI only has rules.
 struct ChatBackend: Codable, Sendable, Identifiable, Hashable {

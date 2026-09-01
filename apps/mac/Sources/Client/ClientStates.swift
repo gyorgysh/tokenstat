@@ -206,24 +206,24 @@ struct ClientErrorCard: View {
 /// A wireframe shaped like the content that is coming.
 ///
 /// Shaped, not generic: a placeholder whose layout matches the real thing means
-/// nothing moves when the data lands. The pulse is `Skeleton.Bar`'s, which is
-/// the Mac's, deterministic rather than random and still under Reduce Motion,
-/// so somebody using both apps does not meet two of them.
+/// nothing moves when the data lands. All bars start together on mobile: the
+/// old per-row delays made one placeholder look like several animation layers.
+/// The pulse remains `Skeleton.Bar`'s and still honours Reduce Motion.
 enum ClientWireframe {
     /// The two totals at the top of Home.
     struct Totals: View {
         var body: some View {
             HStack(spacing: Theme.Space.s) {
-                tile(phase: 0)
-                tile(phase: 0.12)
+                tile
+                tile
             }
             .accessibilityHidden(true)
         }
 
-        private func tile(phase: Double) -> some View {
+        private var tile: some View {
             VStack(alignment: .leading, spacing: 6) {
-                Skeleton.Bar(width: 54, height: 11, phase: phase)
-                Skeleton.Bar(width: 96, height: 26, phase: phase + 0.06)
+                Skeleton.Bar(width: 54, height: 11)
+                Skeleton.Bar(width: 96, height: 26)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Theme.Space.m)
@@ -251,15 +251,15 @@ enum ClientWireframe {
 
         var body: some View {
             VStack(spacing: Theme.Space.s) {
-                ForEach(0..<count, id: \.self) { index in
+                ForEach(0..<count, id: \.self) { _ in
                     HStack(spacing: Theme.Space.s) {
-                        Skeleton.Bar(width: 26, height: 26, phase: Double(index) * 0.1)
+                        Skeleton.Bar(width: 26, height: 26)
                         VStack(alignment: .leading, spacing: 5) {
-                            Skeleton.Bar(width: 130, height: 11, phase: Double(index) * 0.1)
-                            Skeleton.Bar(width: 76, height: 9, phase: Double(index) * 0.1 + 0.05)
+                            Skeleton.Bar(width: 130, height: 11)
+                            Skeleton.Bar(width: 76, height: 9)
                         }
                         Spacer(minLength: Theme.Space.s)
-                        Skeleton.Bar(width: 48, height: 11, phase: Double(index) * 0.1)
+                        Skeleton.Bar(width: 48, height: 11)
                     }
                     .padding(Theme.Space.s)
                     .cardSurface()

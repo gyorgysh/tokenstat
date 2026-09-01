@@ -117,29 +117,6 @@ struct ClientWorkspacesView: View {
                             )
                         }
 
-                        if !model.folders.isEmpty {
-                            ClientSectionTitle(title: "Folders", mark: "mark_archive")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 2)
-                                .padding(.top, Theme.Space.s)
-                            ForEach(model.folders) { folder in
-                                NavigationLink {
-                                    if let peer = model.connectedKey,
-                                       let host = model.hosts.first(where: { $0.peerKey == peer })
-                                    {
-                                        ClientWorkspaceDetailView(
-                                            peer: peer,
-                                            hostName: host.name,
-                                            folder: folder
-                                        )
-                                    }
-                                } label: {
-                                    ClientFolderRow(folder: folder)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-
                         if !model.sessions.isEmpty {
                             Text("All sessions")
                                 .font(ClientType.sectionTitle)
@@ -168,6 +145,29 @@ struct ClientWorkspacesView: View {
                             .scrollDisabled(true)
                             .scrollContentBackground(.hidden)
                             .frame(minHeight: CGFloat(model.sessions.count) * 78)
+                        }
+
+                        if !model.folders.isEmpty {
+                            ClientSectionTitle(title: "Folders", mark: "mark_archive")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 2)
+                                .padding(.top, Theme.Space.s)
+                            ForEach(model.folders) { folder in
+                                NavigationLink {
+                                    if let peer = model.connectedKey,
+                                       let host = model.hosts.first(where: { $0.peerKey == peer })
+                                    {
+                                        ClientWorkspaceDetailView(
+                                            peer: peer,
+                                            hostName: host.name,
+                                            folder: folder
+                                        )
+                                    }
+                                } label: {
+                                    ClientFolderRow(folder: folder)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }
@@ -334,7 +334,7 @@ final class ClientWorkspacesModel {
     private(set) var hosts: [ClientHost] = []
     private(set) var folders: [WorkspaceFolder] = []
     private(set) var sessions: [PtySessionInfo] = []
-    private(set) var recentChats: [ChatConversation] = []
+    private(set) var recentChats: [ChatRecentConversation] = []
     private(set) var connectedKey: String?
     private(set) var isConnecting: String?
     private(set) var errorMessage: String?

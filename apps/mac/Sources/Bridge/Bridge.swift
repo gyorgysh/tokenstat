@@ -959,12 +959,12 @@ extension Bridge {
     /// Recently messaged conversations across every workspace on one host.
     /// The host answers from its in-memory index; no transcript crosses the
     /// tunnel until somebody opens one of these rows.
-    static func recentChats(peer: String, limit: Int = 20) async throws -> [ChatConversation] {
+    static func recentChats(peer: String, limit: Int = 50) async throws -> [ChatRecentConversation] {
         try await chatInvoke(
             peer: peer,
             "chat.recent",
             ["limit": min(max(limit, 1), 50)],
-            as: [ChatConversation].self
+            as: [ChatRecentConversation].self
         )
     }
 

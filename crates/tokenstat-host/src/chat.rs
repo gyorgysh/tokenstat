@@ -128,6 +128,24 @@ pub struct Conversation {
     pub running: bool,
 }
 
+/// The only conversation metadata needed by a host-wide recent-chat list.
+///
+/// Keep this separate from [`Conversation`]. A conversation carries prompts,
+/// permissions and backend resume tokens which belong on the full chat route,
+/// not in a sidebar summary fetched whenever a phone opens Workspaces.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentConversation {
+    pub id: String,
+    pub workspace_id: String,
+    pub title: String,
+    pub backend: String,
+    pub last_message_at_ms: Option<i64>,
+    pub last_message_author: Option<String>,
+    pub running: bool,
+    pub needs_attention: bool,
+}
+
 /// A voice, not a launcher.
 ///
 /// A persona used to carry a backend, a model, an effort, a mode and an
@@ -465,16 +483,44 @@ impl Store {
     /// One pass over the in-memory index. The transcript is not opened here:
     /// old indexes are hydrated once at daemon startup, and new turns update
     /// the two message fields when they are written.
-    pub fn recent(&self, limit: usize) -> Vec<Conversation> {
+    pub fn recent(&self, limit: usize) -> Vec<RecentConversation> {
+        let now = now_ms();
+        let needs_attention: HashSet<String> = self
+            .approvals
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|approval| approval.decision.is_none() && approval.expires_at_ms > now)
+            .map(|approval| approval.conversation_id.clone())
+            .collect();
         let mut rows: Vec<_> = self
             .conversations
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .filter(|chat| chat.last_message_at_ms.is_some())
-            .cloned()
+            .map(|chat| RecentConversation {
+                id: chat.id.clone(),
+                workspace_id: chat.workspace_id.clone(),
+                title: chat.title.clone(),
+                backend: chat.backend.clone(),
+                last_message_at_ms: chat.last_message_at_ms,
+                last_message_author: chat.last_message_author.clone(),
+                running: chat.running,
+                needs_attention: needs_attention.contains(&chat.id),
+            })
             .collect();
-        rows.sort_by_key(|chat| std::cmp::Reverse(chat.last_message_at_ms.unwrap_or_default()));
+        // An approval that is waiting must survive the host cap even when an
+        // old conversation needs it. Work in progress follows, then ordinary
+        // recency. The phone applies its device-local unread priority after
+        // this because read receipts intentionally never leave that device.
+        rows.sort_by(|left, right| {
+            right
+                .needs_attention
+                .cmp(&left.needs_attention)
+                .then_with(|| right.running.cmp(&left.running))
+                .then_with(|| right.last_message_at_ms.cmp(&left.last_message_at_ms))
+        });
         rows.truncate(limit.min(50));
         rows
     }
@@ -3158,18 +3204,52 @@ mod tests {
             chats[2].last_message_at_ms = Some(5);
             chats[2].last_message_author = Some("agent".into());
         }
+        store.approvals.lock().unwrap().push(Approval {
+            id: "approval-a1".into(),
+            conversation_id: "chat-a1".into(),
+            verb: "run command".into(),
+            preview: "cargo test".into(),
+            shell_prefix: Some("cargo test".into()),
+            created_at_ms: now_ms(),
+            expires_at_ms: now_ms() + 60_000,
+            decision: None,
+        });
         let recent = store.recent(20);
         assert_eq!(
             recent
                 .iter()
                 .map(|chat| chat.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["chat-b1", "chat-a1"]
+            vec!["chat-a1", "chat-b1"]
         );
+        assert!(recent[0].needs_attention);
+        assert_eq!(store.recent(1)[0].id, "chat-a1");
+
+        // A recents fetch must not serialize the sensitive/full conversation
+        // record. These are the complete keys allowed on that route.
+        let value = serde_json::to_value(&recent[0]).unwrap();
+        let keys: HashSet<_> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         assert_eq!(
-            store.recent(1)[0].last_message_author.as_deref(),
-            Some("agent")
+            keys,
+            HashSet::from([
+                "id",
+                "workspaceId",
+                "title",
+                "backend",
+                "lastMessageAtMs",
+                "lastMessageAuthor",
+                "running",
+                "needsAttention",
+            ])
         );
+        assert!(value.get("systemPrompt").is_none());
+        assert!(value.get("resumeToken").is_none());
+        assert!(value.get("allowedShellPrefixes").is_none());
     }
 
     #[test]

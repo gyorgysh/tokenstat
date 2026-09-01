@@ -94,24 +94,6 @@ struct ClientHostWorkspacesView: View {
                     chats: model.recentChats
                 )
 
-                if !model.folders.isEmpty {
-                    ClientSectionTitle(title: "Folders", mark: "mark_archive")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 2)
-                    ForEach(model.folders) { folder in
-                        NavigationLink {
-                            ClientWorkspaceDetailView(
-                                peer: peerKey,
-                                hostName: hostName,
-                                folder: folder
-                            )
-                        } label: {
-                            ClientFolderRow(folder: folder)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
                 if !model.sessions.isEmpty {
                     ClientSectionTitle(title: "Sessions", mark: "mark_terminal")
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,6 +104,25 @@ struct ClientHostWorkspacesView: View {
                             model.open(session, peer: peerKey)
                         } label: {
                             ClientSessionRow(session: session)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if !model.folders.isEmpty {
+                    ClientSectionTitle(title: "Folders", mark: "mark_archive")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 2)
+                        .padding(.top, Theme.Space.s)
+                    ForEach(model.folders) { folder in
+                        NavigationLink {
+                            ClientWorkspaceDetailView(
+                                peer: peerKey,
+                                hostName: hostName,
+                                folder: folder
+                            )
+                        } label: {
+                            ClientFolderRow(folder: folder)
                         }
                         .buttonStyle(.plain)
                     }
@@ -157,7 +158,7 @@ struct ClientHostWorkspacesView: View {
 final class ClientHostWorkspacesModel {
     private(set) var folders: [WorkspaceFolder] = []
     private(set) var sessions: [PtySessionInfo] = []
-    private(set) var recentChats: [ChatConversation] = []
+    private(set) var recentChats: [ChatRecentConversation] = []
     private(set) var errorMessage: String?
     private(set) var isConnecting = false
     /// Whether a call to this host has come back. Nil until one has, so the
