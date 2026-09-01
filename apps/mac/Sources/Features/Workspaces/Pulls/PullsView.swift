@@ -72,7 +72,7 @@ struct PullsView: View {
                             heading
                             content
                         }
-                        .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
+                        .frame(maxWidth: ReadingRoom.listWidth, alignment: .leading)
                         .padding(Theme.Space.xl)
                         .frame(maxWidth: .infinity, alignment: ReadingRoom.alignment)
                     }

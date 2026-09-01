@@ -1125,6 +1125,9 @@ private struct LaunchSurface: View {
     @State private var pendingHide: LaunchProfile?
     /// Keeps the Chat tile responsive while a first conversation is created.
     @State private var openingChat = false
+    /// Open pull requests, for the tile's count. The same store the sidebar
+    /// badge reads, so the launcher and the row cannot say different numbers.
+    @State private var pullCounts = PullCountStore.shared
 
     private var visibility: LauncherVisibility { LauncherVisibility.shared }
     private var visibilityScope: String { modelPeer ?? "local" }
@@ -1200,6 +1203,13 @@ private struct LaunchSurface: View {
                     }
                     utilityButton("Changes", symbol: WorkspaceSection.changes.symbol) {
                         onOpenSection(.changes)
+                    }
+                    utilityButton(
+                        "Pull requests",
+                        symbol: WorkspaceSection.pulls.symbol,
+                        count: pullCounts.count(workspaceID: folder.id) ?? 0
+                    ) {
+                        onOpenSection(.pulls)
                     }
                     utilityButton("Tasks", symbol: WorkspaceSection.todo.symbol) {
                         onOpenSection(.todo)
@@ -1554,23 +1564,38 @@ private struct LaunchSurface: View {
         )
     }
 
+    /// One destination tile. `count` draws the same corner badge the Chat
+    /// tile carries, so a number means the same thing wherever it appears.
     private func utilityButton(
         _ label: String,
         symbol: String,
+        count: Int = 0,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: Theme.Space.s) {
-                Image(systemName: symbol)
-                    .font(Theme.font(18))
-                    .foregroundStyle(Theme.accent)
-                    .frame(height: 34)
-                Text(label)
-                    .font(Theme.font(13, weight: .medium))
-                    .lineLimit(1)
+            ZStack(alignment: .topTrailing) {
+                VStack(spacing: Theme.Space.s) {
+                    Image(systemName: symbol)
+                        .font(Theme.font(18))
+                        .foregroundStyle(Theme.accent)
+                        .frame(height: 34)
+                    Text(label)
+                        .font(Theme.font(13, weight: .medium))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Space.m)
+
+                if count > 0 {
+                    Text("\(count)")
+                        .font(Theme.numeric(10, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 6)
+                        .frame(height: 18)
+                        .background(Theme.accentSoft, in: Capsule())
+                        .padding(Theme.Space.s)
+                }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Space.m)
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.cardRadius)
@@ -1579,6 +1604,7 @@ private struct LaunchSurface: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(count > 0 ? "\(label), \(count)" : label)
     }
 }
 

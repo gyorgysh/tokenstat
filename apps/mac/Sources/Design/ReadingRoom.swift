@@ -36,6 +36,15 @@ enum ReadingRoom {
     static let proseWidth: CGFloat = 780
     #endif
 
+    /// A screen that is scanned rather than read: rows of pull requests, and
+    /// whatever else is a table in all but name.
+    ///
+    /// It takes the window. A row here spreads a title, a branch pair, counts
+    /// and a check across its width, so the lane that keeps prose readable is
+    /// the lane that pushes those into each other and leaves the right third
+    /// of a wide window saying nothing.
+    static let listWidth: CGFloat = .infinity
+
     /// Where the lane sits inside the window it is given.
     static let alignment: Alignment = .topLeading
 }
