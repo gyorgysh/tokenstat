@@ -715,6 +715,27 @@ final class ChatModel {
         return displayCache
     }
 
+    /// Parse the prose in the rows now, off the main thread.
+    ///
+    /// Called when a page of a conversation lands, never while one is
+    /// streaming. A row that scrolls into view would otherwise parse its own
+    /// markdown inside `init`, on the main thread, in the middle of a layout
+    /// pass, which is a stall on exactly the frame a reader is scrolling back
+    /// through history. A message that is still being written is a different
+    /// string on every token and is not worth warming.
+    func warmMarkdown() {
+        MarkdownText.warm(displayItems.compactMap { item in
+            switch item.kind {
+            case let .user(text): text
+            case let .assistant(text, _): text
+            case let .thinking(text): text
+            case let .failed(text): text
+            case let .handoff(_, brief): brief
+            default: nil
+            }
+        })
+    }
+
     /// What the cached rows were folded from. Cheap to build, and every way
     /// the window can change moves at least one field of it.
     private struct DisplayKey: Equatable {
@@ -773,6 +794,7 @@ final class ChatModel {
             hasEarlier = page.hasEarlier
             conversationUsage = page.usage
             usageThrough = page.nextOffset
+            warmMarkdown()
             settleNotifications()
             var pulled = 0
             while displayItems.count < Self.openDisplayItems,
@@ -826,6 +848,7 @@ final class ChatModel {
                 offset = page.nextOffset
                 conversationUsage = page.usage
                 usageThrough = page.nextOffset
+                warmMarkdown()
             } else {
                 // Pages do not overlap, but a trim or a retry could still put
                 // a record in two answers. Identity is the record's place in
@@ -833,6 +856,7 @@ final class ChatModel {
                 let oldest = events.first?.seq ?? UInt64.max
                 let fresh = page.events.filter { ($0.seq ?? 0) < oldest }
                 events.insert(contentsOf: fresh, at: 0)
+                warmMarkdown()
             }
             // Always, even for a page that carried nothing this window can
             // use. The cursor is how the walk moves: keeping the old one

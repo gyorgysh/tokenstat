@@ -11,9 +11,10 @@ import SwiftUI
 /// Small, read-only Markdown for pull-request conversations and chat.
 ///
 /// This is deliberately a renderer rather than a web view. GitHub bodies are
-/// untrusted text: HTML is shown literally and remote images become links, so
-/// opening a conversation never contacts a host the person did not choose.
-/// The block parser owns the handful of shapes these conversations need while
+/// untrusted text: supported block HTML is converted to native Markdown,
+/// unknown tags are discarded, and remote images become links, so opening a
+/// conversation never contacts a host the person did not choose. The block
+/// parser owns the handful of shapes these conversations need while
 /// `AttributedString` handles inline emphasis, code spans and links.
 struct MarkdownText: View {
     private let blocks: [MarkdownBlock]
@@ -53,6 +54,55 @@ struct MarkdownText: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension MarkdownText {
+    /// Parse these bodies now, off the main thread, so that nothing has to be
+    /// parsed later while a row is being laid out.
+    ///
+    /// This is the whole fix for a scroll that hitches on a long pull request.
+    /// A conversation's rows are lazy, so a body is parsed the first time it
+    /// scrolls into view, and the parse happens inside `init` on the main
+    /// thread, in the middle of a layout pass. A Dependabot release note is
+    /// twenty kilobytes of HTML, and turning it into blocks and then into
+    /// attributed runs is tens of milliseconds of regular expressions. Doing
+    /// that on the frame the row appears is exactly the stall a reader feels.
+    ///
+    /// Everything here is a pure function of the text and the caches are
+    /// `NSCache`, which is thread safe, so the only thing that changes is when
+    /// the work happens. If a row is reached before its warm finishes it parses
+    /// itself as before and the warm finds the answer already there.
+    static func warm(_ sources: [String]) {
+        let pending = sources.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !pending.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            for source in pending {
+                let blocks = MarkdownCache.blocks.value(for: source) {
+                    var parser = MarkdownParser(source)
+                    return parser.blocks()
+                }
+                for block in blocks {
+                    switch block.kind {
+                    case let .heading(_, text):
+                        _ = MarkdownInline.attributed(text)
+                    case let .paragraph(text):
+                        _ = MarkdownInline.attributed(text)
+                    case let .quote(text):
+                        _ = MarkdownInline.attributed(text)
+                    case let .list(items):
+                        for item in items { _ = MarkdownInline.attributed(item.text) }
+                    case let .table(header, rows):
+                        for cell in header { _ = MarkdownInline.attributed(cell) }
+                        for row in rows {
+                            for cell in row { _ = MarkdownInline.attributed(cell) }
+                        }
+                    case .code, .rule:
+                        break
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -120,8 +170,32 @@ private enum MarkdownCache {
     static let blocks = ParsedTextCache<[MarkdownBlock]>(limit: 1500)
     /// One entry per paragraph, list row and table cell, so several per block.
     static let inline = ParsedTextCache<AttributedString>(limit: 6000)
-    /// Syntax spans, which cost a round trip to the host rather than a parse.
-    static let highlights = ParsedTextCache<[SyntaxSpan]>(limit: 800)
+    /// Finished, coloured code, keyed by the fence's digest.
+    ///
+    /// Spans used to be cached here and turned into a `Text` chain inside a
+    /// computed property, which meant every visible fence re-sorted its spans
+    /// and rebuilt its whole string on every pass of the enclosing view's
+    /// body. During a scroll that is once a frame per fence, and it is what
+    /// made a conversation full of code hitch. The colouring is now done once
+    /// and what is kept is the answer.
+    static let rendered = ParsedTextCache<AttributedString>(limit: 600)
+}
+
+/// A short, stable name for a piece of text.
+///
+/// FNV-1a, the same function the host uses for its own stable ids. The point
+/// is length: a fence's key is a dozen characters, so using it as a cache key
+/// or as a `task(id:)` costs nothing, where the fence's own source costs a
+/// walk of the whole thing every time it is compared.
+private enum MarkdownDigest {
+    static func key(_ language: String?, _ text: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return "\(language ?? "plain").\(String(hash, radix: 36))"
+    }
 }
 
 private actor MarkdownHighlightLimiter {
@@ -156,7 +230,13 @@ private struct MarkdownBlock: Identifiable {
         case paragraph(String)
         case list([MarkdownListItem])
         case quote(String)
-        case code(language: String?, text: String)
+        /// `key` is a short digest of the language and the source, worked out
+        /// once when the block is parsed. Everything downstream that needs to
+        /// identify this fence uses it, so no drawing pass ever hashes,
+        /// compares or concatenates the fence's whole text again. `widest` is
+        /// the longest line in characters, which decides whether this fence
+        /// needs a scroller of its own.
+        case code(language: String?, text: String, key: String, widest: Int)
         case rule
         case table(header: [String], rows: [[String]])
     }
@@ -210,8 +290,8 @@ private struct MarkdownBlockView: View {
             .padding(.horizontal, Theme.Space.m)
             .background(Theme.accentSoft.opacity(0.62))
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius - 4, style: .continuous))
-        case let .code(language, text):
-            MarkdownCodeBlock(language: language, source: text, font: codeFont, style: style)
+        case let .code(language, text, key, widest):
+            MarkdownCodeBlock(language: language, source: text, key: key, widest: widest, font: codeFont, style: style)
         case .rule:
             Capsule(style: .continuous)
                 .fill(
@@ -276,13 +356,13 @@ private struct MarkdownListRow: View {
     }
 }
 
-private struct InlineMarkdown: View {
-    private let attributed: AttributedString
-    private let font: Font
-
-    init(_ source: String, font: Font) {
-        self.font = font
-        attributed = MarkdownCache.inline.value(for: source) {
+/// One run of inline markdown, parsed once and kept.
+///
+/// Separated from the view so the same work can be done ahead of time, off the
+/// main thread, by `MarkdownText.warm`.
+private enum MarkdownInline {
+    static func attributed(_ source: String) -> AttributedString {
+        MarkdownCache.inline.value(for: source) {
             let safe = MarkdownSanitizer.inline(source)
             let options = AttributedString.MarkdownParsingOptions(
                 interpretedSyntax: .inlineOnlyPreservingWhitespace,
@@ -290,6 +370,16 @@ private struct InlineMarkdown: View {
             )
             return (try? AttributedString(markdown: safe, options: options)) ?? AttributedString(source)
         }
+    }
+}
+
+private struct InlineMarkdown: View {
+    private let attributed: AttributedString
+    private let font: Font
+
+    init(_ source: String, font: Font) {
+        self.font = font
+        attributed = MarkdownInline.attributed(source)
     }
 
     var body: some View {
@@ -305,13 +395,46 @@ private struct InlineMarkdown: View {
 private struct MarkdownCodeBlock: View {
     let language: String?
     let source: String
+    /// The fence's digest, from the parser. Cheap to compare and to hash.
+    let key: String
+    /// The longest line, in characters.
+    let widest: Int
     let font: Font
     var style: MarkdownStyle = .document
 
-    @State private var spans: [SyntaxSpan] = []
+    @State private var coloured: AttributedString?
 
     private var isDiff: Bool {
         ["diff", "patch"].contains(language?.lowercased())
+    }
+
+    /// Whether this fence gets a scroller of its own.
+    ///
+    /// On macOS every `ScrollView` is a real `NSScrollView`, with a clip view,
+    /// scrollers and its own place in event routing, and a conversation full
+    /// of fences put a dozen of them inside the one the reader is actually
+    /// using. Most fences do not need it: a shell one-liner or a small JSON
+    /// object fits any pane this app opens in. So the scroller is bought only
+    /// for a fence wide enough to want it, measured in characters at parse
+    /// time, and everything narrower is a plain wrapping `Text`.
+    ///
+    /// An aside never gets one. The fixed size inside a scroller is what keeps
+    /// a line's shape, and it is also what would propose an unbounded width to
+    /// the transcript around it.
+    private var needsScroller: Bool {
+        style == .document && widest > 54
+    }
+
+    /// What to draw right now: the coloured version if it has arrived, the
+    /// plain one otherwise.
+    ///
+    /// Both are looked up by the short key, so a fence that has been on screen
+    /// before costs one small hash and no string work at all. This used to
+    /// build a fresh `Text` chain out of the whole source on every evaluation.
+    private var shown: AttributedString {
+        if let coloured { return coloured }
+        if let done = MarkdownCache.rendered.stored(for: "c" + key) { return done }
+        return MarkdownCache.rendered.value(for: "p" + key) { AttributedString(source) }
     }
 
     var body: some View {
@@ -337,20 +460,20 @@ private struct MarkdownCodeBlock: View {
                     // fixed size below is what makes the line keep its shape
                     // inside a scroller, and it is also what would propose an
                     // unbounded width to the transcript around it.
-                    if style == .aside {
-                        highlightedText
-                            .font(font)
-                            .textSelection(.enabled)
-                            .padding(Theme.Space.m)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
+                    if needsScroller {
                         ScrollView(.horizontal) {
-                            highlightedText
+                            Text(shown)
                                 .font(font)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: true, vertical: false)
                                 .padding(Theme.Space.m)
                         }
+                    } else {
+                        Text(shown)
+                            .font(font)
+                            .textSelection(.enabled)
+                            .padding(Theme.Space.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -361,15 +484,17 @@ private struct MarkdownCodeBlock: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius - 2, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1)
         }
-        .task(id: highlightKey) {
-            guard let path = highlightPath else {
-                spans = []
+        .task(id: key) {
+            // `ForEach` identifies blocks by their position in one message.
+            // When a streaming message edits a fence in place SwiftUI keeps
+            // this view's state, so the colour from the old fence must not win
+            // over the new source while its own highlight is being fetched.
+            coloured = nil
+            if let done = MarkdownCache.rendered.stored(for: "c" + key) {
+                coloured = done
                 return
             }
-            if let cached = MarkdownCache.highlights.stored(for: highlightKey) {
-                spans = cached
-                return
-            }
+            guard let path = highlightPath else { return }
             // A flick through a long conversation builds dozens of fences in
             // a second. Cap concurrent highlights so the scroll, not the
             // host, gets the thread.
@@ -385,14 +510,16 @@ private struct MarkdownCodeBlock: View {
             }
             let result = try? await Bridge.highlight(path: path, text: source)
             await MarkdownHighlightLimiter.shared.signal()
-            guard !Task.isCancelled else { return }
-            spans = result?.spans ?? []
-            MarkdownCache.highlights.store(spans, for: highlightKey)
+            guard !Task.isCancelled, let spans = result?.spans else { return }
+            // An empty answer is still an answer, and it is stored as the
+            // plain text. Otherwise a fence the highlighter has nothing to say
+            // about asks it again every time it scrolls back into view.
+            let text = spans.isEmpty
+                ? MarkdownCache.rendered.value(for: "p" + key) { AttributedString(source) }
+                : Self.colouring(source, with: spans)
+            MarkdownCache.rendered.store(text, for: "c" + key)
+            coloured = text
         }
-    }
-
-    private var highlightKey: String {
-        "\(language ?? "plain"):\(source)"
     }
 
     /// The highlighter detects a language from a filename. Common fence names
@@ -412,25 +539,28 @@ private struct MarkdownCodeBlock: View {
         return "pull-request-fence.\(ext)"
     }
 
-    private var highlightedText: Text {
+    /// Paint the spans onto the source, once. Called from the task that
+    /// fetched them, never from a body.
+    private static func colouring(_ source: String, with spans: [SyntaxSpan]) -> AttributedString {
         let string = source as NSString
         let length = string.length
         var cursor = 0
-        var result = Text("")
+        var result = AttributedString()
 
         for span in spans.sorted(by: { $0.start < $1.start }) {
             guard span.start >= cursor,
                   span.len > 0,
                   span.start + span.len <= length else { continue }
             if span.start > cursor {
-                result = result + Text(string.substring(with: NSRange(location: cursor, length: span.start - cursor)))
+                result += AttributedString(string.substring(with: NSRange(location: cursor, length: span.start - cursor)))
             }
-            let token = string.substring(with: span.range)
-            result = result + Text(token).foregroundColor(Theme.syntax(span.kind))
+            var token = AttributedString(string.substring(with: span.range))
+            token.foregroundColor = Theme.syntax(span.kind)
+            result += token
             cursor = span.start + span.len
         }
         if cursor < length {
-            result = result + Text(string.substring(from: cursor))
+            result += AttributedString(string.substring(from: cursor))
         }
         return result
     }
@@ -513,8 +643,162 @@ private enum MarkdownSanitizer {
         // filesystem path is not duplicated above the attachment card.
         var safe = replacingLocalAttachmentLinks(in: source)
         safe = replacingImages(in: safe)
-        safe = replacingHTML(in: safe)
         return safe
+    }
+
+    /// Turn GitHub's block HTML into actual Markdown structure before the
+    /// block parser runs.
+    ///
+    /// Doing this in `inline` is too late: a Dependabot release body then
+    /// reaches SwiftUI as a handful of enormous paragraphs, each one a single
+    /// selectable `Text`. Those monolithic text layouts are what made the PR
+    /// reader hitch on every scroll. Headings, list items and paragraphs must
+    /// become blocks first, so layout and selection work on small rows.
+    static func blocks(_ source: String) -> String {
+        let normalized = source.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        var output: [String] = []
+        var prose: [String] = []
+        var fence: (marker: Character, count: Int)?
+
+        func flushProse() {
+            guard !prose.isEmpty else { return }
+            output.append(convertHTMLBlocks(prose.joined(separator: "\n")))
+            prose.removeAll(keepingCapacity: true)
+        }
+
+        for line in normalized.components(separatedBy: "\n") {
+            if let open = fence {
+                output.append(line)
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                let count = trimmed.prefix { $0 == open.marker }.count
+                if count >= open.count, trimmed.dropFirst(count).isEmpty { fence = nil }
+                continue
+            }
+            if let opening = blockFence(in: line) {
+                flushProse()
+                output.append(line)
+                fence = opening
+            } else {
+                prose.append(line)
+            }
+        }
+        flushProse()
+        return output.joined(separator: "\n")
+    }
+
+    private static func convertHTMLBlocks(_ source: String) -> String {
+        var safe = source
+        var codeSpans: [String] = []
+
+        // Most bodies are plain Markdown with no tags and no entities in them.
+        // Everything between here and the whitespace tidy-up exists to turn
+        // GitHub's HTML into Markdown, and running twenty regular expressions
+        // and as many whole-string copies over a document that contains no
+        // markup is pure cost, paid on the main thread while a row is being
+        // laid out. One scan to find out is worth it.
+        if source.contains("<") || source.contains("&") {
+
+        // Literal `<thing>` inside an inline code span is source text, not an
+        // HTML tag. Hide those spans while tags are converted and restore them
+        // afterwards. Fenced blocks are excluded by `blocks` above.
+        safe = replace(pattern: #"`[^`\n]*`"#, in: safe) { match, string in
+            let slot = codeSpans.count
+            codeSpans.append(substring(match.range, in: string))
+            return "\u{E000}\(slot)\u{E001}"
+        }
+
+        // Preserve links before stripping their tags. A linked `<code>` label
+        // deliberately becomes a normal linked label: AttributedString cannot
+        // express code styling nested inside a Markdown link consistently.
+        safe = replace(
+            pattern: #"(?i)<a\s+[^>]*href\s*=\s*[\"']([^\"']+)[\"'][^>]*>([\s\S]*?)</a\s*>"#,
+            in: safe
+        ) { match, string in
+            let href = substring(match.range(at: 1), in: string)
+            var label = substring(match.range(at: 2), in: string)
+            label = label.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            if label.isEmpty { label = href }
+            // A body is untrusted text. Only hand the URL handler a scheme the
+            // author would have chosen to open; anything else is shown as its
+            // label, so a `javascript:` or `file:` href can no more become a
+            // live link than it could when this tag was escaped outright.
+            if let scheme = URL(string: href)?.scheme?.lowercased(),
+               !["http", "https", "mailto"].contains(scheme) {
+                return label
+            }
+            return "[\(label)](\(href))"
+        }
+
+        // Inline emphasis survives the HTML-to-Markdown boundary.
+        safe = replace(pattern: #"(?i)<strong[^>]*>"#, in: safe) { _, _ in "**" }
+        safe = replace(pattern: #"(?i)</strong\s*>"#, in: safe) { _, _ in "**" }
+        safe = replace(pattern: #"(?i)<em[^>]*>"#, in: safe) { _, _ in "*" }
+        safe = replace(pattern: #"(?i)</em\s*>"#, in: safe) { _, _ in "*" }
+        safe = replace(pattern: #"(?i)<code[^>]*>"#, in: safe) { _, _ in "`" }
+        safe = replace(pattern: #"(?i)</code\s*>"#, in: safe) { _, _ in "`" }
+
+        // A summary is the visible label of a GitHub details block. The
+        // native renderer has no disclosure control, so show it as a compact
+        // heading above the content that GitHub would reveal.
+        safe = replace(pattern: #"(?i)<summary[^>]*>"#, in: safe) { _, _ in "\n\n### " }
+        safe = replace(pattern: #"(?i)</summary\s*>"#, in: safe) { _, _ in "\n\n" }
+        for level in 1...6 {
+            safe = replace(pattern: "(?i)<h\(level)[^>]*>", in: safe) { _, _ in
+                "\n\n\(String(repeating: "#", count: level)) "
+            }
+            safe = replace(pattern: "(?i)</h\(level)\\s*>", in: safe) { _, _ in "\n\n" }
+        }
+
+        // Lists need markers before parsing. Without them 81 Dependabot
+        // entries become one 20 KB Text even though the source clearly
+        // provides row boundaries.
+        safe = replace(pattern: #"(?i)<li[^>]*>"#, in: safe) { _, _ in "\n- " }
+        safe = replace(pattern: #"(?i)</li\s*>"#, in: safe) { _, _ in "\n" }
+        safe = replace(pattern: #"(?i)</?ul[^>]*>|</?ol[^>]*>"#, in: safe) { _, _ in "\n" }
+
+        safe = replace(pattern: #"(?i)<br\s*/?>"#, in: safe) { _, _ in "\n" }
+        safe = replace(pattern: #"(?i)<p[^>]*>"#, in: safe) { _, _ in "\n\n" }
+        safe = replace(pattern: #"(?i)</p\s*>"#, in: safe) { _, _ in "\n\n" }
+        safe = replace(
+            pattern: #"(?i)</?(?:div|blockquote|details|section|article|table|thead|tbody|tr)[^>]*>"#,
+            in: safe
+        ) { _, _ in "\n\n" }
+
+        safe = replace(pattern: #"<!--[\s\S]*?-->"#, in: safe) { _, _ in "" }
+        // Only discard things that actually have the shape of HTML tags.
+        // A broad `<[^>]+>` also eats Markdown autolinks such as
+        // `<https://example.com>` and prose such as `one < two and three >
+        // two`, both of which are ordinary conversation content.
+        safe = replace(
+            pattern: #"(?i)</?[a-z][a-z0-9:-]*(?:\s+[^<>]*?)?\s*/?>"#,
+            in: safe
+        ) { _, _ in "" }
+        safe = decodeEntities(in: safe)
+        }
+
+        // Source indentation beside HTML tags is not content. Keep exactly
+        // one blank line between blocks: compact on screen, still enough for
+        // the parser to end one block before beginning the next.
+        safe = safe.replacingOccurrences(of: #"[ \t]+\n"#, with: "\n", options: .regularExpression)
+        safe = safe.replacingOccurrences(of: #"\n[ \t]+"#, with: "\n", options: .regularExpression)
+        safe = safe.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+        // Consecutive HTML `<li>` rows should be one Markdown list, not 81
+        // one-row lists separated by card-sized paragraph spacing.
+        safe = safe.replacingOccurrences(of: #"\n{2,}(?=- )"#, with: "\n", options: .regularExpression)
+        for (slot, code) in codeSpans.enumerated() {
+            safe = safe.replacingOccurrences(of: "\u{E000}\(slot)\u{E001}", with: code)
+        }
+        return safe.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func blockFence(in line: String) -> (marker: Character, count: Int)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let marker = trimmed.first, marker == "`" || marker == "~" else { return nil }
+        let count = trimmed.prefix { $0 == marker }.count
+        guard count >= 3 else { return nil }
+        return (marker, count)
     }
 
     private static func replacingLocalAttachmentLinks(in source: String) -> String {
@@ -541,15 +825,11 @@ private enum MarkdownSanitizer {
         }
     }
 
-    /// `AttributedString(markdown:)` may interpret supported inline HTML. It
-    /// is content here, so escape whole tags and comments before parsing.
-    private static func replacingHTML(in source: String) -> String {
-        replace(pattern: #"<!--[\s\S]*?-->|<[^>]+>"#, in: source) { match, string in
-            substring(match.range, in: string)
-                .replacingOccurrences(of: "&", with: "&amp;")
-                .replacingOccurrences(of: "<", with: "&lt;")
-                .replacingOccurrences(of: ">", with: "&gt;")
-        }
+    private static func decodeEntities(in source: String) -> String {
+        source.replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
     }
 
     private static func replace(
@@ -579,7 +859,8 @@ private struct MarkdownParser {
     private var nextID = 0
 
     init(_ markdown: String) {
-        lines = markdown.replacingOccurrences(of: "\r\n", with: "\n")
+        lines = MarkdownSanitizer.blocks(markdown)
+            .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .components(separatedBy: "\n")
     }
@@ -623,7 +904,13 @@ private struct MarkdownParser {
             index += 1
         }
         let language = opening.language.isEmpty ? nil : opening.language
-        return make(.code(language: language, text: body.joined(separator: "\n")))
+        let text = body.joined(separator: "\n")
+        return make(.code(
+            language: language,
+            text: text,
+            key: MarkdownDigest.key(language, text),
+            widest: body.map(\.count).max() ?? 0
+        ))
     }
 
     private mutating func readHeading() -> MarkdownBlock? {
