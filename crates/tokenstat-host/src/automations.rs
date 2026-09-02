@@ -557,18 +557,35 @@ pub fn chat_agent_command(
         // value, which is the error a Standard grok turn printed instead of
         // answering.
         argv.retain(|arg| arg != "--permission-mode" && arg != "bypassPermissions");
-        // `default` rather than `dontAsk` for a guarded turn. Grok discovers
-        // hooks from `$GROK_HOME`, which the caller now points at a private
-        // directory holding ours, so a Standard turn has a real gate and no
-        // longer has to decide everything at launch. `dontAsk` would deny
-        // whatever it would otherwise have to prompt for, which is what made
-        // grok look like it never asked: it never could.
+        // A guarded turn runs grok's own permission layer wide open, because
+        // the hook is the gate and grok's layer cannot be one here.
+        //
+        // Grok's hook contract, in its own words: "An `allow` means only 'not
+        // blocked' - it does not auto-approve a call the user would otherwise
+        // be asked about." So under `default` the hook answering allow is not
+        // permission, it is only the absence of a refusal, and grok then goes
+        // to its own permission prompt. There is nobody at a `-p
+        // --output-format streaming-json` session to answer one, so the call
+        // is cancelled and the transcript reads "User cancelled the execution
+        // for tool `web_fetch`" over a card the person had just approved. It
+        // only ever showed on the tools grok itself asks about, which is why
+        // reads and greps looked fine.
+        //
+        // `bypassPermissions` makes grok's layer approve, and hooks are a
+        // separate mechanism that still run: by grok's documentation, "only an
+        // explicit `deny` decision returned by the hook blocks a tool call".
+        // So tokenstat's `PreToolUse` hook becomes the single gate, which is
+        // the arrangement agy, codex and opencode already run under here.
+        //
+        // Safe only *because* the hook is installed. `write_grok_home` is
+        // fallible and its failure aborts the turn before anything spawns, so
+        // there is no path where this ships without the gate behind it. With
+        // no helper the answer stays `dontAsk`, which refuses rather than
+        // asking nobody.
         let permission = if plan {
             "plan"
-        } else if launch.bypass {
+        } else if launch.bypass || launch.hook_helper.is_some() {
             "bypassPermissions"
-        } else if launch.hook_helper.is_some() {
-            "default"
         } else {
             "dontAsk"
         };
@@ -2361,6 +2378,58 @@ mod tests {
                 .iter()
                 .any(|arg| arg == "--dangerously-skip-permissions"),
             "plan mode keeps agy's own restraint"
+        );
+    }
+
+    /// Grok's own permission layer must be out of the way in a guarded turn,
+    /// for the same reason agy's is, and the reason is in grok's own hook
+    /// documentation: "An `allow` means only 'not blocked' - it does not
+    /// auto-approve a call the user would otherwise be asked about." Under
+    /// `default` a hook that answers allow therefore leaves grok to run its
+    /// own permission prompt, and a headless turn has nobody to answer it, so
+    /// the call comes back as "User cancelled the execution". The person had
+    /// approved it; nothing they did was a cancellation.
+    #[test]
+    fn grok_leaves_its_own_gate_open_only_when_ours_is_installed() {
+        let launch = |helper: Option<&'static str>, mode: &'static str, bypass: bool| {
+            chat_agent_command(
+                "grok",
+                "inspect this",
+                None,
+                None,
+                DEFAULT_BUDGET_SECONDS,
+                ChatLaunch {
+                    resume: None,
+                    bypass,
+                    mode,
+                    hook_helper: helper.map(Path::new),
+                    system_append: None,
+                    agy_customization_dir: None,
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap()
+        };
+        let mode_of = |argv: &[String]| {
+            argv.windows(2)
+                .find(|pair| pair[0] == "--permission-mode")
+                .map(|pair| pair[1].clone())
+                .expect("grok always carries a permission mode")
+        };
+
+        assert_eq!(
+            mode_of(&launch(Some("/tmp/tokenstat-hostd"), "execute", false)),
+            "bypassPermissions",
+            "a guarded grok turn must not be cancelled by a prompt nobody can answer"
+        );
+        // No hook, no gate, so nothing may run: refuse rather than ask nobody.
+        assert_eq!(mode_of(&launch(None, "execute", false)), "dontAsk");
+        assert_eq!(mode_of(&launch(None, "plan", false)), "plan");
+        assert_eq!(
+            mode_of(&launch(Some("/tmp/tokenstat-hostd"), "plan", false)),
+            "plan",
+            "plan mode keeps grok's own restraint"
         );
     }
 
