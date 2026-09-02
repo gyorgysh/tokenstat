@@ -20,7 +20,18 @@ struct ClientChatView: View {
 
     @State private var model = ChatModel()
     @State private var loaded = false
-    @State private var created: ChatConversation?
+    /// The conversation being read, shown in place of the list.
+    ///
+    /// Not a push, and that is the point. A pushed screen outlives the screen
+    /// that pushed it: on the iPad this list lives in a split view's detail
+    /// column, and choosing another sidebar row destroys this view while the
+    /// stack keeps holding the thread, which then sits on top of the page that
+    /// just opened. Nothing outside the stack can pop it, and the stack cannot
+    /// be reached: `.id` does not rebuild a split view's detail column and
+    /// emptying a bound path does not reach this kind of push. `PullsView`
+    /// never had the bug because it swaps its detail in place, so this does
+    /// the same, and the state goes away with the view that owns it.
+    @State private var opened: ChatConversation?
     @State private var pendingDelete: ChatConversation?
     /// The launcher may skip the list once. Back from the thread must still
     /// reach the list rather than immediately pushing the same chat again.
@@ -29,6 +40,20 @@ struct ClientChatView: View {
     private var place: String { folderName.isEmpty ? "this folder" : folderName }
 
     var body: some View {
+        if let opened {
+            ClientChatThread(
+                model: model,
+                chatID: opened.id,
+                folderName: folderName,
+                hostName: hostName,
+                onBack: { self.opened = nil }
+            )
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
         ClientCardList(
             title: "Chat",
             errorMessage: model.error.map { ClientTunnelCopy.display($0, host: hostName) },
@@ -44,17 +69,12 @@ struct ClientChatView: View {
             reload: { await reload() }
         ) {
             ForEach(model.chats) { chat in
-                NavigationLink {
-                    ClientChatThread(
-                        model: model,
-                        chatID: chat.id,
-                        folderName: folderName,
-                        hostName: hostName
-                    )
+                Button {
+                    opened = chat
                 } label: {
                     row(chat)
                 }
-                .navigationLinkIndicatorVisibility(.hidden)
+                .buttonStyle(.plain)
                 .clientCardRow()
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button("Delete", role: .destructive) { pendingDelete = chat }
@@ -65,14 +85,6 @@ struct ClientChatView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("New chat", .create) { Task { await create() } }
             }
-        }
-        .navigationDestination(item: $created) { chat in
-            ClientChatThread(
-                model: model,
-                chatID: chat.id,
-                folderName: folderName,
-                hostName: hostName
-            )
         }
         .confirmationDialog(
             "Delete this chat?",
@@ -98,7 +110,7 @@ struct ClientChatView: View {
                 didOpenConversation = true
                 if let recent = model.mostRecent {
                     await model.select(recent)
-                    created = recent
+                    opened = recent
                 } else {
                     await create()
                 }
@@ -149,7 +161,7 @@ struct ClientChatView: View {
 
     private func create() async {
         await model.create()
-        created = model.selected
+        opened = model.selected
     }
 }
 
@@ -159,6 +171,10 @@ struct ClientChatThread: View {
     let chatID: String
     let folderName: String
     let hostName: String
+    /// How to leave, when this is shown in place of the chat list rather than
+    /// pushed on top of it. `PullDetailView` takes the same closure for the
+    /// same reason.
+    var onBack: (() -> Void)?
     @State private var draft = ""
     /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
@@ -270,6 +286,11 @@ struct ClientChatThread: View {
         .navigationTitle(chat?.title ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if let onBack {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: onBack) { ActionIcon.back.label("Chats") }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 if chat != nil {
                     Button("Setup", .settings) { showingSetup = true }
