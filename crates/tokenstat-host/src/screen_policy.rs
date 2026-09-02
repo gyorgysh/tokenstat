@@ -69,6 +69,11 @@ const REVIEW_DEMO_ACCOUNT_ID: &str = "u_5ce664fd625c5ea13f51f5d2";
 /// is not it. Somebody who deliberately renames their macOS account to this
 /// has only reached the *second* gate, and still needs a server willing to
 /// call them the demo account.
+///
+/// Kept on every platform rather than compiled away with the check that reads
+/// it, because what the exception is for is worth saying in one place whatever
+/// the target. Only the Unix build has anything to compare it against.
+#[cfg_attr(not(unix), allow(dead_code))]
 const REVIEW_DEMO_USER: &str = "appreview";
 
 /// Whether this computer is the one the review exception is for.

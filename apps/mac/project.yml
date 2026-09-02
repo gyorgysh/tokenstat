@@ -122,8 +122,14 @@ settings:
     # being restricted" while accepting every other name, with no ruleset on
     # the repository. A published tag name is gone for good, so the rule is
     # not "a released version is spent", it is "a tagged one is".
-    # Next free Apple build number is 70.
-    CURRENT_PROJECT_VERSION: "69"
+    # 70 is 0.8.0 with the iPad fixes: the folder tree connecting on its own
+    # from the sidebar, a conversation opening in place so it stops covering
+    # the page picked after it, pull requests carrying a bar like every other
+    # section, and the detail column sized on the first pass instead of a pass
+    # late. Also the review exception needing the review machine and not only
+    # the account id. 69 never went up.
+    # Next free Apple build number is 71.
+    CURRENT_PROJECT_VERSION: "70"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
