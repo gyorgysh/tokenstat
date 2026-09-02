@@ -1,9 +1,9 @@
 # Changelog
 
 Every version of tokenstat: the CLI, desktop and mobile clients, host daemon,
-and MCP server, which develop together under one version number. Stable
-releases currently contain every CLI target and the macOS desktop app; Windows
-desktop and Android builds remain previews. Newest first.
+and MCP server. They develop together under one version number. A stable
+release carries every CLI target and the macOS desktop app. The Windows
+desktop and Android builds are still previews. Newest first.
 
 The Unreleased section is always the complete, person-facing delta from the
 latest `v<version>` tag to `main`. Work that has not appeared in a shipped app
@@ -54,7 +54,7 @@ branches and files they touch.
 - Recent conversations sit above folders on iPhone and iPad, with their last
   activity and a per-device unread mark, and open straight into the thread.
 - A phone reconnects on its own to the computer you were last on: when the app
-  opens, when that machine wakes, and when you come back to the app. Every host
+  opens, when that machine wakes, and when you come back to it. Every host
   card carries the switch, so a computer you would rather dial by hand stays
   that way.
 - Patron and Legend are available monthly as well as yearly.
@@ -68,8 +68,8 @@ branches and files they touch.
   and there is room around what they are asking.
 - Committing and pushing say what happened in words. You no longer get the
   command's own output to read.
-- Antigravity's CLI and IDE report under one name, where they used to sit in
-  your reports as two tools.
+- Antigravity's CLI and IDE count as one tool in your reports, where they used
+  to be two.
 - Scrolling with a terminal open no longer searches the whole window on every
   wheel tick.
 
@@ -202,19 +202,19 @@ Everything since 0.6.8, which is the last release anybody received.
 - Credentials live in an encrypted vault that can follow the account. Setting
   one up takes the servers, folders, keys and snippets already saved on this
   device with it, syncing runs both ways, and Sync now says when it last ran.
-  It is one quiet row above the server list, saying how many records it holds,
-  with
-  setting it up, replacing the recovery code and deleting it one click away and
-  each with room to say what it costs. Recovery is confirmed in two steps: the
-  code is on screen to be written down, then off screen while it is typed back,
-  so confirming cannot be done by reading. The vault is a Supporter feature and
-  says so as a plan rather than as a locked door: on Free the row reads "not
-  syncing", the screen explains that your servers and keys are saved on this
-  device and work exactly as they do now, and the button on it opens plans
-  instead of doing nothing. A vault that outlives the plan that made it stays
-  readable and says out loud that it has stopped receiving changes. Deleting it
-  on one device removes it from every other one, rather than leaving a second
+  It is one quiet row above the server list, saying how many records it holds.
+  Setting it up, replacing the recovery code and deleting it are each one click
+  from there, and each has room to say what it costs. Recovery is confirmed in
+  two steps: the code is on screen to be written down, then off screen while it
+  is typed back, so confirming cannot be done by reading. Deleting the vault on
+  one device removes it from every other one, rather than leaving a second
   device offering to change the password of a vault that is gone.
+- The vault is a Supporter feature and says so as a plan rather than as a locked
+  door. On Free the row reads "not syncing", the screen explains that your
+  servers and keys are saved on this device and work exactly as they do now, and
+  the button on it opens plans instead of doing nothing. A vault that outlives
+  the plan that made it stays readable and says out loud that it has stopped
+  receiving changes.
 - Trusted servers are listed with their fingerprints and any of them can be
   forgotten, so a key that changed can be confirmed again rather than quietly
   accepted. A key shows its own fingerprint, and its public half can be copied
@@ -237,7 +237,7 @@ Everything since 0.6.8, which is the last release anybody received.
   drag holds the button down, and pinch zooms in. A row of keys over the
   keyboard sends escape, tab, the arrows and sticky ctrl, opt, cmd and shift,
   and a pull on the bottom edge brings that row back over a full-screen
-  picture. Driving a desktop is at sixty pictures a second and every pointer
+  picture. Driving a desktop runs at sixty pictures a second and every pointer
   move is delivered as it happens, on the same bandwidth a session watched from
   an armchair costs.
 - Notes get an inspector on the Mac, so a note written on a phone can be read
@@ -628,7 +628,7 @@ Everything since 0.6.8, which is the last release anybody received.
 
 - The tunnel tries every resolved address, bounds its DNS, and aborts a stalled
   handshake.
-- Release downloads follow redirects; snapshot fetches deliberately do not.
+- Release downloads follow redirects. Snapshot fetches deliberately do not.
 - A phone counts as a device slot.
 - The price book refreshes at launch without needing the CLI installed.
 
@@ -726,7 +726,7 @@ Everything since 0.6.8, which is the last release anybody received.
 
 ### Fixed
 
-- Secrets, login URLs, redirects, and updates hardened; socket requests capped
+- Secrets, login URLs, redirects, and updates hardened, socket requests capped,
   and workspace paths contained.
 - Scan and sync no longer wait on the session mutex.
 
