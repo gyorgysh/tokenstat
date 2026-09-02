@@ -11,7 +11,7 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one, rather than reconstructing release notes from
 commits at the end.
 
-## [0.7.3] - 2026-09-02
+## [0.8.0] - 2026-09-02
 
 Chat comes to the Mac, along with the pull requests around a folder and the
 branches and files they touch.

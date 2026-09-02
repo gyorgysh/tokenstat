@@ -2529,7 +2529,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
 /// This deliberately is not `ChatConversation`: the full record includes the
 /// system prompt, tool permissions and backend resume token. None of those are
 /// needed to draw five rows. The custom decoder keeps a new client compatible
-/// with a 0.7.3 host, whose `chat.recent` response predates `needsAttention`.
+/// with an older host, whose `chat.recent` response predates `needsAttention`.
 struct ChatRecentConversation: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var workspaceID: String

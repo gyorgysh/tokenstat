@@ -3554,7 +3554,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokenstat-cli"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "anstream",
  "anstyle",
@@ -3574,7 +3574,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-core"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "blake3",
  "directories",
@@ -3593,7 +3593,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-ffi"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "jni",
  "serde_json",
@@ -3605,7 +3605,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-highlight"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
@@ -3628,7 +3628,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-host"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "argon2",
  "chacha20poly1305 0.11.0",
@@ -3659,7 +3659,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-identity"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "blake3",
  "directories",
@@ -3673,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-mcp"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -3683,14 +3683,14 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-paths"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "directories",
 ]
 
 [[package]]
 name = "tokenstat-pty"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "portable-pty",
  "serde",
@@ -3699,7 +3699,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-remote"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3711,7 +3711,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-sync"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3732,7 +3732,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-workspace"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "directories",
  "serde",
@@ -4544,7 +4544,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "serde_json",
