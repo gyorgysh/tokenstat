@@ -119,9 +119,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("claude_code"),
         symbol: None,
         install_command: Some("curl -fsSL https://claude.ai/install.sh | bash"),
-        install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://claude.ai/install.ps1 | iex""#,
-        ),
+        install_command_windows: Some("irm https://claude.ai/install.ps1 | iex"),
         install_dirs: &[],
         open_url: None,
     },
@@ -134,9 +132,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("codex"),
         symbol: None,
         install_command: Some("curl -fsSL https://chatgpt.com/codex/install.sh | sh"),
-        install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://chatgpt.com/codex/install.ps1 | iex""#,
-        ),
+        install_command_windows: Some("irm https://chatgpt.com/codex/install.ps1 | iex"),
         install_dirs: &[],
         open_url: None,
     },
@@ -177,9 +173,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("grok"),
         symbol: None,
         install_command: Some("curl -fsSL https://x.ai/cli/install.sh | bash"),
-        install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://x.ai/cli/install.ps1 | iex""#,
-        ),
+        install_command_windows: Some("irm https://x.ai/cli/install.ps1 | iex"),
         install_dirs: &[".grok/bin"],
         open_url: None,
     },
@@ -218,9 +212,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("openclaw"),
         symbol: None,
         install_command: Some("curl -fsSL https://openclaw.ai/install.sh | bash"),
-        install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://openclaw.ai/install.ps1 | iex""#,
-        ),
+        install_command_windows: Some("irm https://openclaw.ai/install.ps1 | iex"),
         install_dirs: &[],
         open_url: None,
     },
@@ -233,9 +225,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("muse"),
         symbol: None,
         install_command: Some("curl -fsSL https://dev.meta.ai/install.sh | bash"),
-        install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://dev.meta.ai/install.ps1 | iex""#,
-        ),
+        install_command_windows: Some("irm https://dev.meta.ai/install.ps1 | iex"),
         install_dirs: &[],
         open_url: None,
     },
@@ -278,9 +268,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("antigravity"),
         symbol: None,
         install_command: Some("curl -fsSL https://antigravity.google/cli/install.sh | bash"),
-        install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://antigravity.google/cli/install.ps1 | iex""#,
-        ),
+        install_command_windows: Some("irm https://antigravity.google/cli/install.ps1 | iex"),
         install_dirs: &[],
         open_url: None,
     },
@@ -325,7 +313,7 @@ const PROFILES: &[Profile] = &[
             "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-setup",
         ),
         install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive -SkipSetup""#,
+            "& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive -SkipSetup",
         ),
         // The installer puts a symlink in ~/.local/bin, which search_path
         // already looks at. No extra directory to declare.
@@ -354,9 +342,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("kimi"),
         symbol: None,
         install_command: Some("curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"),
-        install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://code.kimi.com/kimi-code/install.ps1 | iex""#,
-        ),
+        install_command_windows: Some("irm https://code.kimi.com/kimi-code/install.ps1 | iex"),
         install_dirs: &[],
         open_url: None,
     },
@@ -372,7 +358,7 @@ const PROFILES: &[Profile] = &[
             "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash",
         ),
         install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex""#,
+            "irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex",
         ),
         install_dirs: &[],
         open_url: None,
@@ -390,9 +376,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("devin"),
         symbol: None,
         install_command: Some("curl -fsSL https://cli.devin.ai/install.sh | bash"),
-        install_command_windows: Some(
-            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://static.devin.ai/cli/install.ps1 | iex""#,
-        ),
+        install_command_windows: Some("irm https://static.devin.ai/cli/install.ps1 | iex"),
         // Its installer symlinks into ~/.local/bin, which search_path already
         // looks at.
         install_dirs: &[],
@@ -576,10 +560,29 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
         return Err(format!("{id} is already installed"));
     }
 
+    // PowerShell, not `cmd.exe`. Every Windows installer a vendor publishes is
+    // a `.ps1` fetched with `irm` and run with `iex`, which is PowerShell
+    // syntax and means nothing to cmd. Handing cmd a `powershell -Command "…"`
+    // wrapper would work in principle and quote badly in practice: the string
+    // goes through Rust's Windows quoting and then cmd's own, which are not
+    // the same rules. Running the shell that owns the syntax removes both
+    // layers, and `npm` resolves under PowerShell as well.
+    //
+    // `-NoProfile` so a machine's own profile cannot change what an installer
+    // sees. `-NonInteractive` alongside the null stdin below, so an installer
+    // that wants to ask something fails rather than hanging on a prompt no
+    // one can answer.
     #[cfg(windows)]
     let mut cmd = {
-        let mut cmd = std::process::Command::new("cmd.exe");
-        cmd.args(["/C", command]);
+        let mut cmd = std::process::Command::new("powershell.exe");
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            command,
+        ]);
         cmd
     };
     #[cfg(not(windows))]
@@ -1191,28 +1194,36 @@ mod tests {
     /// v1, so a machine that runs the beta gets its own tile while v1 keeps
     /// the classic one. It bills as the same product, so the harness id and
     /// its installer command must not drift from the OpenCode family.
-    /// Every Windows installer has to be something `cmd.exe /C` can actually
-    /// run, because that is what `install` hands it to.
+    /// Every Windows installer is PowerShell, because that is the shell
+    /// `install` hands it to.
     ///
     /// This is the check that was missing. The catalog carried one installer
     /// per tool, `curl -fsSL … | bash`, and Windows ran that string under
     /// `cmd.exe`, where there is no `bash` and `|` pipes to something else.
     /// Thirteen tiles offered an Install button that could only fail.
     #[test]
-    fn windows_installers_are_runnable_by_cmd() {
+    fn windows_installers_are_powershell() {
         for profile in PROFILES {
             let Some(command) = profile.install_command_windows else {
                 continue;
             };
             assert!(
-                command.starts_with("npm ") || command.starts_with("powershell "),
-                "{}: a Windows installer runs under cmd.exe, so it starts a \
-                 program cmd knows: {command}",
+                command.starts_with("npm ")
+                    || command.starts_with("irm ")
+                    || command.starts_with("& ("),
+                "{}: a Windows installer is run by PowerShell, so it is \
+                 PowerShell: {command}",
                 profile.id
             );
             assert!(
                 !command.contains("curl ") && !command.contains("| bash"),
                 "{}: this is the Unix installer, not a Windows one: {command}",
+                profile.id
+            );
+            assert!(
+                !command.starts_with("powershell "),
+                "{}: PowerShell runs this, so it must not re-enter PowerShell \
+                 to run itself: {command}",
                 profile.id
             );
         }
@@ -1272,9 +1283,16 @@ mod tests {
             .iter()
             .find(|v| v.get("id").and_then(|v| v.as_str()) == Some("claude_code"))
             .expect("claude_code must be listed");
+        // The catalog answers for the machine it is running on, so this is the
+        // one assertion in the file that has to know which machine that is.
+        let expected = if cfg!(windows) {
+            "irm https://claude.ai/install.ps1 | iex"
+        } else {
+            "curl -fsSL https://claude.ai/install.sh | bash"
+        };
         assert_eq!(
             claude.get("installCommand").and_then(|v| v.as_str()),
-            Some("curl -fsSL https://claude.ai/install.sh | bash")
+            Some(expected)
         );
     }
 
