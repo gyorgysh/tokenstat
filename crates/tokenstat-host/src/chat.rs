@@ -941,7 +941,7 @@ impl Store {
         let manager = tokenstat_pty::manager();
         let info = manager
             .spawn(&tokenstat_pty::Spawn {
-                command: argv[0].clone(),
+                command: crate::launcher::spawn_command(&argv[0]),
                 args: argv[1..].to_vec(),
                 cwd,
                 workspace_id: None,
@@ -1552,7 +1552,7 @@ impl Store {
         };
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
-                command: argv[0].clone(),
+                command: crate::launcher::spawn_command(&argv[0]),
                 args: argv[1..].to_vec(),
                 cwd: workspace.path,
                 workspace_id: Some(chat.workspace_id.clone()),

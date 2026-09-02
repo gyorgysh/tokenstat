@@ -915,6 +915,20 @@ fn command_names(profile: &Profile) -> impl Iterator<Item = &'static str> {
 ///
 /// Automations use this so `grok models` and friends resolve the same way
 /// a launcher tile does. The daemon's launchd PATH is too small on its own.
+/// The absolute path to spawn, or the name back when it cannot be found.
+///
+/// Every agent spawn goes through here. A bare name is otherwise resolved by
+/// the pty against the daemon's own PATH, which is launchd's: no Homebrew, and
+/// none of the directories a harness installs itself into. So a tool could be
+/// offered on the launcher, which resolves properly, and then fail to start
+/// from chat with a dump of that short PATH for an error.
+///
+/// The name back rather than an error, because a command this cannot place may
+/// still be spawnable, and the failure it produces then is the pty's own.
+pub(crate) fn spawn_command(command: &str) -> String {
+    resolve_command(command).unwrap_or_else(|| command.to_string())
+}
+
 pub(crate) fn resolve_command(command: &str) -> Option<String> {
     let path = search_path();
     if let Some(found) = resolve_on_path(command, &path) {

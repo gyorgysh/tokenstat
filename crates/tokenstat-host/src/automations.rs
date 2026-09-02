@@ -1550,7 +1550,7 @@ impl Store {
         )?;
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
-                command: argv[0].clone(),
+                command: crate::launcher::spawn_command(&argv[0]),
                 args: argv[1..].to_vec(),
                 cwd: workspace.path.clone(),
                 workspace_id: Some(workspace.id.clone()),
