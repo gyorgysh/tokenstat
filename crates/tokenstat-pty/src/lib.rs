@@ -1305,15 +1305,40 @@ fn fallback_path() -> String {
         format!("{home}/.local/bin"),
         format!("{home}/.npm-global/bin"),
         format!("{home}/.volta/bin"),
+        format!("{home}/.opencode/bin"),
+        format!("{home}/.grok/bin"),
+        format!("{home}/.kimi-code/bin"),
         format!("{home}/.cargo/bin"),
         "/opt/homebrew/bin".into(),
         "/usr/local/bin".into(),
         "/usr/bin".into(),
         "/bin".into(),
     ]);
+    parts.extend(nvm_fallback_paths(&home));
     let mut seen = std::collections::HashSet::new();
     parts.retain(|p| !p.is_empty() && seen.insert(p.clone()));
     parts.join(":")
+}
+
+#[cfg(unix)]
+fn nvm_fallback_paths(home: &str) -> Vec<String> {
+    let base = std::path::Path::new(home).join(".nvm/versions/node");
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let bin = entry.path().join("bin");
+        if bin.is_dir() {
+            out.push(bin.display().to_string());
+        }
+    }
+    out
+}
+
+#[cfg(not(unix))]
+fn nvm_fallback_paths(_home: &str) -> Vec<String> {
+    Vec::new()
 }
 
 /// How long a harness spawn may wait for the login-env warm thread.

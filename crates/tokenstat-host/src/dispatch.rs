@@ -2650,9 +2650,14 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 p.model_provider.as_deref(),
                 p.model_id.as_deref(),
             ));
+            let command = if crate::launcher::absolute_command(&p.command) {
+                p.command.clone()
+            } else {
+                crate::launcher::spawn_command(&p.command)
+            };
             let info = tokenstat_pty::manager()
                 .spawn(&tokenstat_pty::Spawn {
-                    command: p.command.clone(),
+                    command,
                     args,
                     cwd: ws.path.clone(),
                     workspace_id: Some(ws.id.clone()),

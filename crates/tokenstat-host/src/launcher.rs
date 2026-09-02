@@ -343,7 +343,7 @@ const PROFILES: &[Profile] = &[
         symbol: None,
         install_command: Some("curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"),
         install_command_windows: Some("irm https://code.kimi.com/kimi-code/install.ps1 | iex"),
-        install_dirs: &[],
+        install_dirs: &[".kimi-code/bin"],
         open_url: None,
     },
     Profile {
@@ -972,7 +972,7 @@ fn split_path_var(value: &str) -> impl Iterator<Item = String> + '_ {
         .map(str::to_string)
 }
 
-fn absolute_command(command: &str) -> bool {
+pub(crate) fn absolute_command(command: &str) -> bool {
     Path::new(command).is_absolute() || command.starts_with('/')
 }
 
@@ -1061,16 +1061,38 @@ fn conventional_paths(home: &str) -> Vec<String> {
     }
     #[cfg(not(windows))]
     {
-        vec![
+        let mut paths = vec![
             format!("{home}/.local/bin"),
             format!("{home}/.npm-global/bin"),
             format!("{home}/.volta/bin"),
+            format!("{home}/.opencode/bin"),
+            format!("{home}/.grok/bin"),
+            format!("{home}/.kimi-code/bin"),
+            format!("{home}/.cargo/bin"),
             "/opt/homebrew/bin".into(),
             "/usr/local/bin".into(),
             "/usr/bin".into(),
             "/bin".into(),
-        ]
+        ];
+        paths.extend(nvm_bin_paths(home));
+        paths
     }
+}
+
+#[cfg(not(windows))]
+fn nvm_bin_paths(home: &str) -> Vec<String> {
+    let base = Path::new(home).join(".nvm/versions/node");
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let bin = entry.path().join("bin");
+        if bin.is_dir() {
+            out.push(bin.display().to_string());
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1183,7 +1205,7 @@ mod tests {
         assert!(resolve_profile(&profile("opencode", &[]), &[], Path::new("")).is_none());
     }
 
-    /// The two tools that ship their own directory are the two this exists
+    /// The tools that ship their own directory are the ones this exists
     /// for. A rename here silently reintroduces the bug.
     #[test]
     fn the_tools_that_ship_a_directory_declare_it() {
@@ -1191,6 +1213,7 @@ mod tests {
             ("opencode", ".opencode/bin"),
             ("opencode2", ".opencode/bin"),
             ("grok", ".grok/bin"),
+            ("kimi", ".kimi-code/bin"),
         ] {
             let found = PROFILES
                 .iter()
