@@ -32,7 +32,8 @@ branches and files they touch.
 - Personas: a name, a brief, and a face. A persona is yours, not one chat's, so
   you can give a workspace a default one, reuse it across folders, or have none.
   The face is a small physical character, so it leans, lands and follows through
-  as the conversation moves.
+  as the conversation moves, and it finds something to do while a long turn
+  runs rather than holding a pose.
 - Drop or paste files anywhere in a conversation, or attach them from the
   composer. Images go to the backends that take them natively.
 - Hand a conversation to another agent with its working context intact. The
@@ -47,10 +48,15 @@ branches and files they touch.
 - An SSH session suggests paths on the far machine, your saved commands, and
   where recent sessions were working, while you type. It keeps them in memory
   only. Nothing is run to produce them and no password is kept.
-- Muse and Devin CLI usage now appears in your reports, and Devin has its own
-  mark in the app.
+- Muse, Devin CLI, Kimi Code and Qwen Code usage now appears in your reports,
+  each under the tool's own mark. Kimi Code and Qwen Code are on the launcher
+  as well, so you start them where you start the others.
 - Recent conversations sit above folders on iPhone and iPad, with their last
   activity and a per-device unread mark, and open straight into the thread.
+- A phone reconnects on its own to the computer you were last on: when the app
+  opens, when that machine wakes, and when you come back to the app. Every host
+  card carries the switch, so a computer you would rather dial by hand stays
+  that way.
 - Patron and Legend are available monthly as well as yearly.
 
 ### Changed
@@ -62,6 +68,10 @@ branches and files they touch.
   and there is room around what they are asking.
 - Committing and pushing say what happened in words. You no longer get the
   command's own output to read.
+- Antigravity's CLI and IDE report under one name, where they used to sit in
+  your reports as two tools.
+- Scrolling with a terminal open no longer searches the whole window on every
+  wheel tick.
 
 ### Fixed
 
@@ -75,6 +85,8 @@ branches and files they touch.
   will actually give one to.
 - A branch name shaped like a command-line option is refused rather than passed
   to git.
+- The pinned day stays on screen while a refresh or a sync reloads its numbers,
+  instead of emptying to a placeholder and filling back in.
 
 ## [0.7.2] - 2026-08-28
 
