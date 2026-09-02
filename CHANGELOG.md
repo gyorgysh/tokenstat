@@ -11,6 +11,24 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one, rather than reconstructing release notes from
 commits at the end.
 
+## [0.8.1] - 2026-09-03
+
+A hotfix for agents that would not start from chat.
+
+### Fixed
+
+- An agent launched from a conversation is found the same way the launcher
+  finds it: your PATH, then your login shell's PATH, then the places a harness
+  installs itself into. The helper runs from launchd and inherits none of that,
+  so an agent the launcher listed as installed could still fail to start with a
+  short PATH for an error. Chat, automations and workflows all spawned the same
+  way and are all fixed.
+- Node version manager directories and the usual install locations for a few
+  more agents are searched too, so a tool installed under a Node version or in
+  its own directory is picked up without being pointed at.
+- The first conversation on a new machine starts in execute rather than plan.
+  Once you have chosen a mode, your choice is what comes back.
+
 ## [0.8.0] - 2026-09-02
 
 Chat comes to the Mac, along with the pull requests around a folder and the
