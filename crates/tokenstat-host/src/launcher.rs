@@ -308,6 +308,27 @@ const PROFILES: &[Profile] = &[
         install_dirs: &[],
         open_url: None,
     },
+    Profile {
+        id: "devin",
+        name: "Devin CLI",
+        command: "devin",
+        args: &[],
+        // `--permission-mode` takes a word rather than a flag, and "dangerous"
+        // is the only one of the four that auto-approves every tool. The
+        // default, "auto", already runs read-only tools without asking, so
+        // anything less than "dangerous" would leave the switch half on.
+        bypass_args: &["--permission-mode", "dangerous"],
+        harness_id: Some("devin"),
+        symbol: None,
+        // No installer here on purpose: the vendor's one-shot URL has not been
+        // verified, and a wrong install command is worse than none. The tile
+        // still launches the CLI for anybody who has it.
+        install_command: None,
+        // Its installer symlinks into ~/.local/bin, which search_path already
+        // looks at.
+        install_dirs: &[],
+        open_url: None,
+    },
 ];
 
 /// Tools taken off this machine's launcher. Display only: the binary stays.

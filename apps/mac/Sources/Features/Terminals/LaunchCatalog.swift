@@ -179,6 +179,13 @@ struct LaunchProfile: Identifiable, Sendable {
             bypassArgs: ["--approval-mode", "yolo"], harnessID: "qwen", symbol: nil,
             installCommand: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"
         ),
+        // "dangerous" is the one permission mode that auto-approves every
+        // tool. No installCommand: the vendor's own URL is not verified, and
+        // the tile launches an installed CLI either way.
+        LaunchProfile(
+            id: "devin", name: "Devin CLI", command: "devin", args: [],
+            bypassArgs: ["--permission-mode", "dangerous"], harnessID: "devin", symbol: nil
+        ),
     ]
 
     /// Names this tile answers to. Kilo's npm page and its docs disagree
