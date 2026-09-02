@@ -2069,6 +2069,19 @@ struct WidthReader<Content: View>: View {
 
     var body: some View {
         content(width)
+            // Stretched *before* it is measured, so what is read is the width
+            // on offer rather than the width the content happens to want.
+            //
+            // Without this the reader measures its own child, and a child that
+            // sizes to its content feeds its width back in as the width to lay
+            // out for. In a scrolling list that is a loop with a lever on it:
+            // a lazy row arriving with a wide table or a long code line grows
+            // the content, which moves the measurement, which rewrites the
+            // state, which rebuilds the entire subtree, on the frame the row
+            // appeared. It can also sit either side of a breakpoint and
+            // oscillate. Measuring the offer is stable because the offer does
+            // not depend on the answer.
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 GeometryReader { proxy in
                     Color.clear.preference(key: WidthKey.self, value: proxy.size.width)
@@ -2078,6 +2091,13 @@ struct WidthReader<Content: View>: View {
             // otherwise delivers a new sub-pixel width every frame and reshapes
             // the whole card grid for a change nobody can see.
             .onPreferenceChange(WidthKey.self) { measured in
+                // A zero is not a width, it is a view that has not been laid
+                // out yet, and a lazy stack recycling its rows can produce one
+                // mid-scroll. Answering it means picking the narrow layout for
+                // a pane that is nothing of the sort, then picking the wide one
+                // back a frame later: two full rebuilds of whatever is inside,
+                // for a measurement that was never real.
+                guard measured > 0 else { return }
                 let next = quantised(measured, step: 4)
                 if width != next { width = next }
             }

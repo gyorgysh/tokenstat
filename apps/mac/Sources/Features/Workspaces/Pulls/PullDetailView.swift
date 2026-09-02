@@ -38,21 +38,33 @@ struct PullDetailView: View {
                         DetailTabs(selection: $model.tab, checks: detail.checks.count)
                         if let notice = model.actionNotice { actionBanner(notice, tint: Theme.success, symbol: "checkmark.circle.fill") }
                         if let error = model.actionError { actionBanner(FriendlyError.from(error).message, tint: Theme.warning, symbol: "exclamationmark.triangle.fill") }
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .top, spacing: Theme.Space.l) {
-                                selectedContent(detail).frame(maxWidth: .infinity, alignment: .topLeading)
-                                inspector(detail).frame(width: 248)
-                            }
-                            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                                selectedContent(detail)
-                                inspector(detail)
+                        // Measuring two copies of an entire PR conversation on
+                        // every layout pass is expensive, especially when one
+                        // contains a long Dependabot body. Read the actual
+                        // width once and build only the layout that can fit.
+                        WidthReader { width in
+                            if width >= 760 {
+                                HStack(alignment: .top, spacing: Theme.Space.l) {
+                                    selectedContent(detail).frame(maxWidth: .infinity, alignment: .topLeading)
+                                    inspector(detail).frame(width: 248)
+                                }
+                            } else {
+                                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                                    selectedContent(detail)
+                                    inspector(detail)
+                                }
                             }
                         }
                     } else {
                         pullDetailSkeleton
                     }
                 }
-                .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
+                // A pull request is a workspace view: tables, release notes,
+                // diff tabs and the inspector all benefit from the width the
+                // window has. Only prose within a card chooses a narrow
+                // measure; the detail surface itself should not leave a dead
+                // right-hand lane on a wide desktop window.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Space.xl)
                 .frame(maxWidth: .infinity, alignment: ReadingRoom.alignment)
             }
@@ -198,7 +210,22 @@ struct PullDetailView: View {
     }
 
     private func conversation(_ detail: PullDetail) -> some View {
-        LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
+        // A plain stack, and the laziness is what was making it jump.
+        //
+        // A `LazyVStack` does not know the height of a row it has not built,
+        // so the scroll view works with an estimate and corrects it the moment
+        // the row is real. Here the rows are a pull request body next to a row
+        // of one line, so the estimate is not slightly wrong, it is wrong by
+        // thousands of points: every card that scrolls in resizes the content,
+        // which moves the scrollbar and the offset under the reader's fingers.
+        // That is the jumping, and no amount of making the rows cheaper fixes
+        // it, because the cause is that their heights were never known.
+        //
+        // A page of a timeline is a bounded number of cards, and their text is
+        // already parsed off the main thread by `MarkdownText.warm` before any
+        // of this is built, so measuring all of them up front is affordable.
+        // What it buys is an exact content height that never changes.
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             PullConversationCard(actor: detail.author, date: detail.createdDate) {
                 if detail.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text("No description was added.").font(Theme.body).foregroundStyle(.tertiary)
@@ -780,16 +807,25 @@ private final class PullDetailModel {
             async let timeline = Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
             let loaded = try await detail
             self.detail = loaded
+            // Turn the prose into blocks now, off the main thread, rather than
+            // on the frame each card first scrolls into view.
+            MarkdownText.warm([loaded.body])
             if checkoutBranch.isEmpty { checkoutBranch = loaded.headRef }
             let page = try await timeline
             events = page.events; nextCursor = page.nextCursor; timelineError = nil
+            MarkdownText.warm(page.events.compactMap(\.body))
         } catch { self.error = error.localizedDescription }
         if tab == .changes { await loadDiff(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh) }
     }
     func moreTimeline(workspaceID: String, peer: String?, number: UInt32) async {
         guard let cursor = nextCursor, !loadingTimeline else { return }
         loadingTimeline = true; timelineError = nil; defer { loadingTimeline = false }
-        do { let page = try await Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, cursor: cursor); events += page.events; nextCursor = page.nextCursor }
+        do {
+            let page = try await Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, cursor: cursor)
+            events += page.events
+            nextCursor = page.nextCursor
+            MarkdownText.warm(page.events.compactMap(\.body))
+        }
         catch { timelineError = error.localizedDescription }
     }
     func loadDiff(workspaceID: String, peer: String?, number: UInt32, refresh: Bool = false) async {
