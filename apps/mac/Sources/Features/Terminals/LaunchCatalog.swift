@@ -180,11 +180,11 @@ struct LaunchProfile: Identifiable, Sendable {
             installCommand: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"
         ),
         // "dangerous" is the one permission mode that auto-approves every
-        // tool. No installCommand: the vendor's own URL is not verified, and
-        // the tile launches an installed CLI either way.
+        // tool: the default already runs read-only tools unasked.
         LaunchProfile(
             id: "devin", name: "Devin CLI", command: "devin", args: [],
-            bypassArgs: ["--permission-mode", "dangerous"], harnessID: "devin", symbol: nil
+            bypassArgs: ["--permission-mode", "dangerous"], harnessID: "devin", symbol: nil,
+            installCommand: "curl -fsSL https://cli.devin.ai/install.sh | bash"
         ),
     ]
 

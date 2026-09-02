@@ -47,6 +47,17 @@ struct Profile {
     /// with no clean standalone installer. The front end offers the command
     /// to a user who has not installed the tool; the host runs it.
     install_command: Option<&'static str>,
+    /// The same, for Windows. Separate because it is a different command, not
+    /// a different path: the Unix entries are `curl | bash`, and `install()`
+    /// runs the string under `cmd.exe /C`, where there is no `bash` and the
+    /// pipe means something else. Every value here was read off the vendor's
+    /// own `.ps1` rather than guessed from the Unix URL.
+    ///
+    /// `None` means this tool has no installer we have verified for Windows.
+    /// The catalog then reports no install command, the front end offers no
+    /// Install button, and somebody sees a tile they cannot install rather
+    /// than a button that fails.
+    install_command_windows: Option<&'static str>,
     /// Where this tool's own installer puts it, relative to `$HOME`.
     ///
     /// A CLI that ships its own directory is only on the PATH because its
@@ -66,6 +77,25 @@ struct Profile {
     open_url: Option<&'static str>,
 }
 
+impl Profile {
+    /// The installer for the machine this host is running on.
+    ///
+    /// A catalog answer is about *this* machine: a phone asking a Windows host
+    /// what it can install must be told what that host can actually run, not
+    /// what a Mac would.
+    /// `cfg!` rather than `#[cfg]` on purpose: both arms compile everywhere, so
+    /// the whole table stays type-checked and read on every platform. Behind
+    /// `#[cfg]` the Windows column would be dead code on a Mac and could rot
+    /// until somebody ran a Windows build.
+    fn installer(&self) -> Option<&'static str> {
+        if cfg!(windows) {
+            self.install_command_windows
+        } else {
+            self.install_command
+        }
+    }
+}
+
 const PROFILES: &[Profile] = &[
     Profile {
         id: "shell",
@@ -76,6 +106,7 @@ const PROFILES: &[Profile] = &[
         harness_id: None,
         symbol: Some("terminal"),
         install_command: None,
+        install_command_windows: None,
         install_dirs: &[],
         open_url: None,
     },
@@ -88,6 +119,9 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("claude_code"),
         symbol: None,
         install_command: Some("curl -fsSL https://claude.ai/install.sh | bash"),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://claude.ai/install.ps1 | iex""#,
+        ),
         install_dirs: &[],
         open_url: None,
     },
@@ -100,6 +134,9 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("codex"),
         symbol: None,
         install_command: Some("curl -fsSL https://chatgpt.com/codex/install.sh | sh"),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://chatgpt.com/codex/install.ps1 | iex""#,
+        ),
         install_dirs: &[],
         open_url: None,
     },
@@ -112,6 +149,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("opencode"),
         symbol: None,
         install_command: Some("curl -fsSL https://opencode.ai/install | bash"),
+        install_command_windows: Some("npm install -g opencode-ai"),
         install_dirs: &[".opencode/bin"],
         open_url: None,
     },
@@ -126,6 +164,7 @@ const PROFILES: &[Profile] = &[
         install_command: Some(
             "curl -fsSL https://raw.githubusercontent.com/anomalyco/opencode/v2/install | bash",
         ),
+        install_command_windows: None,
         install_dirs: &[".opencode/bin"],
         open_url: None,
     },
@@ -138,6 +177,9 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("grok"),
         symbol: None,
         install_command: Some("curl -fsSL https://x.ai/cli/install.sh | bash"),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://x.ai/cli/install.ps1 | iex""#,
+        ),
         install_dirs: &[".grok/bin"],
         open_url: None,
     },
@@ -150,6 +192,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("copilot"),
         symbol: None,
         install_command: Some("npm install -g @github/copilot"),
+        install_command_windows: Some("npm install -g @github/copilot"),
         install_dirs: &[],
         open_url: None,
     },
@@ -162,6 +205,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("cline"),
         symbol: None,
         install_command: Some("npm install -g cline"),
+        install_command_windows: Some("npm install -g cline"),
         install_dirs: &[],
         open_url: None,
     },
@@ -174,6 +218,9 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("openclaw"),
         symbol: None,
         install_command: Some("curl -fsSL https://openclaw.ai/install.sh | bash"),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://openclaw.ai/install.ps1 | iex""#,
+        ),
         install_dirs: &[],
         open_url: None,
     },
@@ -186,6 +233,9 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("muse"),
         symbol: None,
         install_command: Some("curl -fsSL https://dev.meta.ai/install.sh | bash"),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://dev.meta.ai/install.ps1 | iex""#,
+        ),
         install_dirs: &[],
         open_url: None,
     },
@@ -198,6 +248,9 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("pi"),
         symbol: None,
         install_command: Some("npm install -g --ignore-scripts @earendil-works/pi-coding-agent"),
+        install_command_windows: Some(
+            "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
+        ),
         install_dirs: &[],
         open_url: None,
     },
@@ -210,6 +263,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("dsh"),
         symbol: None,
         install_command: None,
+        install_command_windows: None,
         install_dirs: &[],
         // `npx @deepseek-ai/dsh web` serves the UI here. The session is the
         // server process. The front end opens this URL once it answers.
@@ -224,6 +278,9 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("antigravity"),
         symbol: None,
         install_command: Some("curl -fsSL https://antigravity.google/cli/install.sh | bash"),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://antigravity.google/cli/install.ps1 | iex""#,
+        ),
         install_dirs: &[],
         open_url: None,
     },
@@ -236,6 +293,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("cursor"),
         symbol: None,
         install_command: Some("curl https://cursor.com/install -fsS | bash"),
+        install_command_windows: None,
         install_dirs: &[],
         open_url: None,
     },
@@ -248,6 +306,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("cursor"),
         symbol: None,
         install_command: None,
+        install_command_windows: None,
         install_dirs: &[],
         open_url: None,
     },
@@ -265,6 +324,9 @@ const PROFILES: &[Profile] = &[
         install_command: Some(
             "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-setup",
         ),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive -SkipSetup""#,
+        ),
         // The installer puts a symlink in ~/.local/bin, which search_path
         // already looks at. No extra directory to declare.
         install_dirs: &[],
@@ -279,6 +341,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("kilo"),
         symbol: None,
         install_command: Some("npm install -g @kilocode/cli"),
+        install_command_windows: Some("npm install -g @kilocode/cli"),
         install_dirs: &[],
         open_url: None,
     },
@@ -291,6 +354,9 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("kimi"),
         symbol: None,
         install_command: Some("curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://code.kimi.com/kimi-code/install.ps1 | iex""#,
+        ),
         install_dirs: &[],
         open_url: None,
     },
@@ -304,6 +370,9 @@ const PROFILES: &[Profile] = &[
         symbol: None,
         install_command: Some(
             "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash",
+        ),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex""#,
         ),
         install_dirs: &[],
         open_url: None,
@@ -320,10 +389,10 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--permission-mode", "dangerous"],
         harness_id: Some("devin"),
         symbol: None,
-        // No installer here on purpose: the vendor's one-shot URL has not been
-        // verified, and a wrong install command is worse than none. The tile
-        // still launches the CLI for anybody who has it.
-        install_command: None,
+        install_command: Some("curl -fsSL https://cli.devin.ai/install.sh | bash"),
+        install_command_windows: Some(
+            r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://static.devin.ai/cli/install.ps1 | iex""#,
+        ),
         // Its installer symlinks into ~/.local/bin, which search_path already
         // looks at.
         install_dirs: &[],
@@ -451,7 +520,7 @@ pub(crate) fn catalog() -> Value {
                 "openUrl": profile.open_url,
                 "installed": installed,
                 "hidden": hidden.contains(profile.id),
-                "installCommand": profile.install_command,
+                "installCommand": profile.installer(),
             });
             if profile.id == "shell" {
                 #[cfg(windows)]
@@ -493,8 +562,8 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
         .find(|p| p.id == id)
         .ok_or_else(|| format!("no launcher profile {id}"))?;
     let command = profile
-        .install_command
-        .ok_or_else(|| format!("{id} has no bundled installer"))?;
+        .installer()
+        .ok_or_else(|| format!("{id} has no installer for this platform"))?;
 
     // Refuse when the tool is already where the catalog looks for it. The
     // front end never offers this, so the guard is for a stale tile or a
@@ -1024,6 +1093,7 @@ mod tests {
             harness_id: None,
             symbol: None,
             install_command: None,
+            install_command_windows: None,
             install_dirs,
             open_url: None,
         }
@@ -1121,6 +1191,46 @@ mod tests {
     /// v1, so a machine that runs the beta gets its own tile while v1 keeps
     /// the classic one. It bills as the same product, so the harness id and
     /// its installer command must not drift from the OpenCode family.
+    /// Every Windows installer has to be something `cmd.exe /C` can actually
+    /// run, because that is what `install` hands it to.
+    ///
+    /// This is the check that was missing. The catalog carried one installer
+    /// per tool, `curl -fsSL … | bash`, and Windows ran that string under
+    /// `cmd.exe`, where there is no `bash` and `|` pipes to something else.
+    /// Thirteen tiles offered an Install button that could only fail.
+    #[test]
+    fn windows_installers_are_runnable_by_cmd() {
+        for profile in PROFILES {
+            let Some(command) = profile.install_command_windows else {
+                continue;
+            };
+            assert!(
+                command.starts_with("npm ") || command.starts_with("powershell "),
+                "{}: a Windows installer runs under cmd.exe, so it starts a \
+                 program cmd knows: {command}",
+                profile.id
+            );
+            assert!(
+                !command.contains("curl ") && !command.contains("| bash"),
+                "{}: this is the Unix installer, not a Windows one: {command}",
+                profile.id
+            );
+        }
+    }
+
+    /// A tool we cannot install on Windows says so by having nothing, rather
+    /// than by borrowing the Unix command. Pinned by name so removing one is
+    /// a decision somebody makes here, not a slip.
+    #[test]
+    fn tools_without_a_windows_installer_are_named() {
+        let missing: Vec<_> = PROFILES
+            .iter()
+            .filter(|p| p.install_command.is_some() && p.install_command_windows.is_none())
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(missing, ["opencode2", "cursor_agent"], "{missing:?}");
+    }
+
     #[test]
     fn the_next_opencode_build_is_its_own_profile() {
         let next = PROFILES
@@ -1177,12 +1287,14 @@ mod tests {
         assert!(error.contains("no launcher profile"), "{error}");
     }
 
-    /// A profile without a bundled installer is refused too, rather than
-    /// launching nothing or running a guessed command.
+    /// A profile without an installer for this machine is refused too, rather
+    /// than launching nothing or running a guessed command. The message names
+    /// the platform because that is now the usual reason: a tool can have a
+    /// Unix installer and no Windows one.
     #[test]
     fn install_refuses_a_profile_without_an_installer() {
         let error = install("cursor").expect_err("no installer");
-        assert!(error.contains("no bundled installer"), "{error}");
+        assert!(error.contains("no installer for this platform"), "{error}");
     }
 
     /// Installer output is shown to people as an error message, so the ANSI

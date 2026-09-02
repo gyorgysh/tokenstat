@@ -18,6 +18,15 @@ commits at the end.
 - Devin CLI is on the launcher, so a folder can start it the way it starts the
   others. Its usage was already read in 0.7.3, but the tile was missing.
 
+### Fixed
+
+- Install on Windows runs a command Windows can run. Every tile offered the
+  same installer everywhere, and on Windows thirteen of them were a `curl`
+  pipeline into a shell that is not there, so the button could only fail. Each
+  tool now carries its own Windows installer, taken from the vendor's own
+  script, and the two with none say so by offering no button rather than a
+  broken one.
+
 ## [0.7.3] - 2026-09-02
 
 Chat comes to the Mac, along with the pull requests around a folder and the
