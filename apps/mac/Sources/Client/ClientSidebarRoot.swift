@@ -98,7 +98,7 @@ struct ClientSidebarRoot: View {
             // the second was not enough on its own.
             .onChange(of: detailIdentity) { _, _ in
                 guard !detailPath.isEmpty else { return }
-                detailPath.removeLast(detailPath.count)
+                detailPath = NavigationPath()
             }
             .id(detailIdentity)
         }

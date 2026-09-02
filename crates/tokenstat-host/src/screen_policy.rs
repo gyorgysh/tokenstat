@@ -86,27 +86,38 @@ const REVIEW_DEMO_USER: &str = "appreview";
 /// business granting this and answering no there costs nothing.
 #[cfg(unix)]
 fn on_review_machine() -> bool {
-    let mut buf = vec![0 as libc::c_char; 1024];
-    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut found: *mut libc::passwd = std::ptr::null_mut();
     // `getpwuid_r` over `getpwuid`: the latter answers into a static buffer
     // shared by the process, and this runs on a daemon serving many peers.
-    let rc = unsafe {
-        libc::getpwuid_r(
-            libc::geteuid(),
-            &mut pwd,
-            buf.as_mut_ptr(),
-            buf.len(),
-            &mut found,
-        )
-    };
-    if rc != 0 || found.is_null() || pwd.pw_name.is_null() {
-        return false;
+    // Start at 16 KiB and grow once on ERANGE so a large directory entry does
+    // not become a spurious miss. A miss is a closed gate, so failing here
+    // only denies the exception, still the right side to fail on.
+    let mut size = 16 * 1024;
+    loop {
+        let mut buf = vec![0 as libc::c_char; size];
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut found: *mut libc::passwd = std::ptr::null_mut();
+        let rc = unsafe {
+            libc::getpwuid_r(
+                libc::geteuid(),
+                &mut pwd,
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut found,
+            )
+        };
+        if rc == libc::ERANGE && size < 256 * 1024 {
+            size *= 2;
+            continue;
+        }
+        if rc != 0 || found.is_null() || pwd.pw_name.is_null() {
+            return false;
+        }
+        let name = unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) };
+        return name
+            .to_str()
+            .map(|n| n == REVIEW_DEMO_USER)
+            .unwrap_or(false);
     }
-    let name = unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) };
-    name.to_str()
-        .map(|n| n == REVIEW_DEMO_USER)
-        .unwrap_or(false)
 }
 
 #[cfg(not(unix))]
