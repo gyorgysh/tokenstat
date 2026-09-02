@@ -182,7 +182,7 @@ const PROFILES: &[Profile] = &[
         name: "Muse",
         command: "muse",
         args: &[],
-        bypass_args: &[],
+        bypass_args: &["--yolo"],
         harness_id: Some("muse"),
         symbol: None,
         install_command: Some("curl -fsSL https://dev.meta.ai/install.sh | bash"),

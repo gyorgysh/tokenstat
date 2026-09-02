@@ -122,7 +122,7 @@ struct LaunchProfile: Identifiable, Sendable {
         ),
         LaunchProfile(
             id: "muse", name: "Muse", command: "muse", args: [],
-            bypassArgs: [], harnessID: "muse", symbol: nil,
+            bypassArgs: ["--yolo"], harnessID: "muse", symbol: nil,
             installCommand: "curl -fsSL https://dev.meta.ai/install.sh | bash"
         ),
         LaunchProfile(
