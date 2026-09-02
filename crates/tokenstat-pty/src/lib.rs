@@ -1336,11 +1336,6 @@ fn nvm_fallback_paths(home: &str) -> Vec<String> {
     out
 }
 
-#[cfg(not(unix))]
-fn nvm_fallback_paths(_home: &str) -> Vec<String> {
-    Vec::new()
-}
-
 /// How long a harness spawn may wait for the login-env warm thread.
 ///
 /// Shells source their own profile and must not pay this. Harnesses do not,
