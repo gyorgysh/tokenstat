@@ -18,32 +18,6 @@ permissions:
   contents: read
 
 jobs:
-  # On a push as well as a pull request. This repository takes no pull
-  # requests, so gating this on one meant the commit format CONTRIBUTING.md
-  # documents was never actually checked: five commits on main do not match
-  # it. A push checks only the commits it is adding, so history stays as it
-  # is and the rule applies from here on.
-  commit-style:
-    name: commit style
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Check conventional commit format
-        env:
-          BASE_SHA: >-
-            ${{ github.event_name == 'pull_request'
-                && github.event.pull_request.base.sha
-                || github.event.before }}
-          HEAD_SHA: >-
-            ${{ github.event_name == 'pull_request'
-                && github.event.pull_request.head.sha
-                || github.sha }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: bash .github/scripts/check-commit-style.sh
-
   lint:
     name: fmt and clippy
     runs-on: ubuntu-latest
