@@ -107,9 +107,11 @@ struct HomeView: View {
             Task { await model.refreshIfStale() }
         }
         // Insights Scan wrote new events into the archive; Home must not keep
-        // showing yesterday's heatmap until the window is reopened.
+        // showing yesterday's heatmap until the window is reopened. The
+        // Inspector's pinned day is cached per-date, so a plain quiet load
+        // would leave it on the pre-scan numbers.
         .onReceive(NotificationCenter.default.publisher(for: .archiveDidChange)) { _ in
-            Task { await model.load(quiet: true) }
+            Task { await model.reloadAfterSync() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
             Task { await model.refresh() }

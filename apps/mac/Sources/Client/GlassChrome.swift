@@ -71,12 +71,34 @@ extension View {
     }
 
     /// Hide the iOS 26 scroll-edge fade. Older systems never drew it.
+    ///
+    /// Pass the edges that already have something drawing them. A scroll view
+    /// that ends against a bar of our own gets two treatments stacked at that
+    /// edge, and only that edge is worth hiding: the one that runs under the
+    /// navigation bar is the system doing the job we would otherwise fake.
     @ViewBuilder
-    func clientHideScrollEdgeEffect() -> some View {
+    func clientHideScrollEdgeEffect(for edges: Edge.Set = .all) -> some View {
         if #available(iOS 26, *) {
-            scrollEdgeEffectHidden(true, for: .all)
+            scrollEdgeEffectHidden(true, for: edges)
         } else {
             self
+        }
+    }
+
+    /// A navigation bar that reads as a bar on systems without Liquid Glass.
+    ///
+    /// iOS 26 draws the bar itself and Apple asks for no custom background
+    /// there, because a custom one replaces the glass with a flat blur and
+    /// takes the scroll-edge behaviour with it. Below 26 nothing is drawn at
+    /// all, and content scrolling under a bare bar is unreadable, so those
+    /// systems keep the material they always had.
+    @ViewBuilder
+    func clientNavigationBarBackground() -> some View {
+        if #available(iOS 26, *) {
+            self
+        } else {
+            toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 

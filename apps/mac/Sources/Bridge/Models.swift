@@ -1698,6 +1698,8 @@ struct ProjectHarnesses: Identifiable, Hashable {
 ///
 /// Matched on the basename so `/Users/…/bin/claude` and `claude` are the
 /// same harness. Used by session rows on both the Mac and the phone.
+/// Historical chats stored the raw binary name `agy`; map it to the
+/// canonical source id so brand marks and recent-chat tiles match.
 func harnessID(forCommand command: String) -> String? {
     switch URL(fileURLWithPath: command).lastPathComponent {
     case "claude": return "claude_code"
@@ -1718,6 +1720,14 @@ func harnessID(forCommand command: String) -> String? {
     }
 }
 
+func harnessCanonicalID(_ id: String) -> String {
+    // Recent chats persist as `agy` from older builds; brand catalog is
+    // `antigravity`, so normalize before lookup.
+    if id == "agy" { return "antigravity" }
+    if id.hasPrefix("antigravity") { return "antigravity" }
+    return id
+}
+
 /// The tool a stored source id belongs to.
 ///
 /// Recovery rows stay on disk as `claude_code_estimate` / `claude_code_rollup`.
@@ -1736,7 +1746,8 @@ func harnessToolKey(_ id: String) -> String {
 /// step: a user reading their profile on the web and their app should not see
 /// two names for one tool.
 func harnessName(_ id: String) -> String {
-    switch id {
+    let canonical = harnessCanonicalID(id)
+    switch canonical {
     case "claude_code": return "Claude Code"
     case "claude_code_rollup", "claude_code_estimate": return "Claude Code (recovered)"
     case "codex": return "Codex"
@@ -1750,8 +1761,7 @@ func harnessName(_ id: String) -> String {
     case "dsh": return "DeepSeek Harness"
     case "zed": return "Zed"
     case "copilot": return "Copilot CLI"
-    case "antigravity": return "Antigravity CLI"
-    case "antigravity_ide": return "Antigravity IDE"
+    case "antigravity": return "Antigravity"
     case "cursor": return "Cursor"
     case "gemini": return "Gemini"
     case "hermes": return "Hermes Agent"
@@ -1759,7 +1769,7 @@ func harnessName(_ id: String) -> String {
     case "kimi": return "Kimi Code"
     case "qwen": return "Qwen Code"
     case "": return "unknown"
-    default: return id
+    default: return canonical.isEmpty ? "unknown" : canonical
     }
 }
 
@@ -1769,11 +1779,11 @@ func harnessName(_ id: String) -> String {
 /// letter tile rather than borrowing another tool's logo.
 func harnessBrandAsset(_ id: String) -> String? {
     // Estimate / rollup rows belong to the same brand as the live source.
+    let canonical = harnessCanonicalID(id)
     let assetId: String
-    switch id {
+    switch canonical {
     case "claude_code_estimate", "claude_code_rollup": assetId = "claude_code"
-    case "antigravity_ide": assetId = "antigravity"
-    default: assetId = id
+    default: assetId = canonical
     }
     let known: Set<String> = [
         "claude_code", "codex", "grok", "opencode",

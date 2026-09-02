@@ -2048,22 +2048,17 @@ struct RootView: View {
                 checkUpdates,
             ]
         }
-        // Flipped so the destructive row is furthest from the account
-        // row when the menu pops upward from the sidebar footer. The footer
-        // sits at the bottom of the screen, so the last item is what sits
-        // under the cursor on open, and that should be the safest row, not
-        // Sign out.
         return [
-            NativeMenuItem("Sign out") { Task { await account.signOut() } },
-            .separator,
-            checkUpdates,
-            .separator,
             NativeMenuItem(
                 "Sync now",
                 isEnabled: !account.isSyncing && account.syncCooldownUntil == nil
             ) {
                 Task { await account.sync() }
             },
+            .separator,
+            checkUpdates,
+            .separator,
+            NativeMenuItem("Sign out") { Task { await account.signOut() } },
             NativeMenuItem("Account settings") { navigate(to: .global(.account)) },
         ]
     }
@@ -2071,14 +2066,12 @@ struct RootView: View {
     @ViewBuilder
     private var accountMenuContent: some View {
         if account.signedIn {
-            // Same flip as the AppKit menu: most destructive furthest,
-            // safest closest to the footer when the sheet pops upward.
-            Button("Sign out", .signOut) { Task { await account.signOut() } }
+            Button("Sync now", .refresh) { Task { await account.sync() } }
+                .disabled(account.isSyncing || account.syncCooldownUntil != nil)
             ThemeRule()
             updateItem
             ThemeRule()
-            Button("Sync now", .refresh) { Task { await account.sync() } }
-                .disabled(account.isSyncing || account.syncCooldownUntil != nil)
+            Button("Sign out", .signOut) { Task { await account.signOut() } }
             Button("Account settings", .settings) { navigate(to: .global(.account)) }
         } else {
             Button("Sign in to tokenstat.ai", .signIn) {

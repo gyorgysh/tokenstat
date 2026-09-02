@@ -261,8 +261,18 @@ final class HomeModel {
 
     /// Explicit re-read from the toolbar. Always hits the host; also refreshes
     /// plan limit cards so one control covers the whole Home surface.
+    ///
+    /// The Inspector is a pinned day and the archive can move under it.
+    /// `load` only drops those per-day caches when the scope changes, so a
+    /// plain quiet load would leave the Inspector on yesterday's numbers until
+    /// the next cold start. Keep the currently displayed Inspector visible
+    /// while fresh data loads, then crossfade - clearing `selectedDetail`
+    /// before the fetch is what made the pane blink to empty.
     func refresh() async {
+        let pinned = selectedDay?.date
+        softInvalidateForRefresh()
         await load(quiet: true, refreshAccountGrid: true)
+        if let pinned, let fresh = cell(on: pinned) { select(day: fresh) }
         await loadPlanLimits()
     }
 
@@ -276,7 +286,30 @@ final class HomeModel {
         {
             return
         }
+        let pinned = selectedDay?.date
+        softInvalidateForRefresh()
         await load(quiet: true)
+        if let pinned, let fresh = cell(on: pinned) { select(day: fresh) }
+    }
+
+    /// Clear per-day caches but keep the Inspector's current content on
+    /// screen. `invalidateArchiveCaches` wipes `selectedDetail`/`selectedOverview`
+    /// and the Inspector disappears to a placeholder - that is the lag the
+    /// refresh was reported as. This keeps stale content visible while fresh
+    /// fetches run, with a subtle spinner from `isLoadingSelected*`.
+    private func softInvalidateForRefresh() {
+        dayDetailCache = [:]
+        dayOverviewCache = [:]
+        hoveredDay = nil
+        hoveredDetail = nil
+        isLoadingDayDetail = false
+        hoverDetailTask?.cancel()
+        // Keep selectedDay/selectedDetail/selectedOverview on screen; new
+        // fetches will replace them when they land without flashing.
+        selectedDetailTask?.cancel()
+        dayOverviewTask?.cancel()
+        if selectedDetail != nil { isLoadingSelectedDetail = true }
+        if selectedOverview != nil { isLoadingSelectedOverview = true }
     }
 
     /// Keep trying while the host is still booting.
@@ -345,7 +378,12 @@ final class HomeModel {
     }
 
     /// Pin a day in the inspector. Hover still only glances.
+    ///
+    /// When the same date is re-selected during a sync/refresh the Inspector
+    /// keeps stale content on screen instead of flashing to "Loading day..." -
+    /// see `softInvalidateForRefresh` and `refreshPinnedDay`.
     func select(day: HeatCell) {
+        let isSameDay = selectedDay?.date == day.date
         selectedDay = day
         selectedDetailTask?.cancel()
         if day.isLocked {
@@ -360,17 +398,17 @@ final class HomeModel {
             isLoadingSelectedDetail = false
         } else {
             isLoadingSelectedDetail = true
-            selectedDetail = nil
+            if !isSameDay { selectedDetail = nil }
             selectedDetailTask = fetchDayDetail(day.date, settle: false)
         }
-        loadOverview(for: day.date)
+        loadOverview(for: day.date, keepStale: isSameDay)
     }
 
     /// Local reports for the pinned day: models, harnesses, projects, sessions.
     ///
     /// The account series has no project or session keys, so this stays off
     /// when the grid is counting every device.
-    private func loadOverview(for date: String) {
+    private func loadOverview(for date: String, keepStale: Bool = false) {
         dayOverviewTask?.cancel()
         guard deliveredScope == .thisMachine else {
             selectedOverview = nil
@@ -383,7 +421,7 @@ final class HomeModel {
             return
         }
         isLoadingSelectedOverview = true
-        selectedOverview = nil
+        if !keepStale { selectedOverview = nil }
         dayOverviewTask = Task { [weak self] in
             let query = Query(since: date, until: date)
             var sessionQuery = query

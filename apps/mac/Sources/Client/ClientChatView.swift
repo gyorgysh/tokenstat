@@ -244,6 +244,10 @@ struct ClientChatThread: View {
             }
         }
         .background(Theme.background)
+        // Do not fight the system's Liquid Glass. On iOS 26 the bar is glass
+        // already and any background of ours replaces it with a flat blur, so
+        // that system gets nothing from us. Below 26 there is no bar to fight.
+        .clientNavigationBarBackground()
         .dropDestination(for: String.self) { items, _ in
             Task { await receive(items.map(ChatInboxDrop.text)) }
             return !items.isEmpty
@@ -349,7 +353,10 @@ struct ClientChatThread: View {
                 .chatScrollContent()
             }
             .scrollDismissesKeyboard(.interactively)
-            .clientHideScrollEdgeEffect()
+            // Only the bottom. The composer sits right under it and draws
+            // its own edge, while the top is where the system's own fade
+            // keeps the first "Web search:" chip off the navigation bar.
+            .clientHideScrollEdgeEffect(for: .bottom)
             .opacity(transcriptReady ? 1 : 0)
             .overlay {
                 if !transcriptReady {

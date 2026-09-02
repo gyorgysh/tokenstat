@@ -23,6 +23,53 @@ struct ClientWorkspacesView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: ClientWorkspacesModel
     @State private var pendingClose: PtySessionInfo?
+    // Per-host, not global: each host card owns its row. A global key would
+    // make every toggle move together, which is the extra card in the
+    // screenshot.
+    //
+    // Missing means on, and that is the intended default rather than an
+    // oversight: nothing dials on its own until somebody has connected to a
+    // machine by hand once, because the auto path needs
+    // `client.lastConnectedHost` and only a successful connection writes it.
+    // So the switch is an opt out of redialling the machine you were last on,
+    // not an opt in to being dialled.
+    private func autoConnectBinding(for peerKey: String) -> Binding<Bool> {
+        Binding(
+            get: { UserDefaults.standard.object(forKey: Self.autoConnectKey(for: peerKey)) as? Bool ?? true },
+            set: { UserDefaults.standard.set($0, forKey: Self.autoConnectKey(for: peerKey)) }
+        )
+    }
+
+    private static func autoConnectKey(for peerKey: String) -> String {
+        "client.autoConnectHost.\(peerKey)"
+    }
+
+    private func isAutoConnectEnabled(for peerKey: String) -> Bool {
+        UserDefaults.standard.object(forKey: Self.autoConnectKey(for: peerKey)) as? Bool ?? true
+    }
+
+    /// The one place that dials without being asked.
+    ///
+    /// Three things want this: the screen appearing, the host list changing
+    /// as a machine wakes, and coming back to the foreground. They overlap
+    /// constantly - a wake refreshes the list *and* activates the scene - and
+    /// `connectedKey` is only set once a connection has finished, so a
+    /// second caller used to walk straight past that check and pair, open a
+    /// tunnel and load the remote side all over again. One function here, and
+    /// `connect` refusing while an attempt is in flight, is what makes that
+    /// impossible rather than unlikely.
+    ///
+    /// `connectedKey` is in-memory, so a cold start has nothing to recover:
+    /// the last peer that was connected is remembered on disk instead.
+    private func autoConnectLastHost() async {
+        guard model.connectedKey == nil, model.isConnecting == nil else { return }
+        guard let last = UserDefaults.standard.string(forKey: "client.lastConnectedHost"),
+              isAutoConnectEnabled(for: last),
+              let host = model.hosts.first(where: { $0.peerKey == last }),
+              host.online != false
+        else { return }
+        await model.connect(host)
+    }
 
     /// The sidebar layout owns one model for the whole window: its tree and
     /// this screen are one connection, not two dialling the same machine.
@@ -186,12 +233,26 @@ struct ClientWorkspacesView: View {
             }
             .task {
                 await model.refresh(account: account.account)
+                await autoConnectLastHost()
+            }
+            // When the host list refreshes and the last host comes online
+            // after being offline (Mac wakes, lid opens), try again. This is
+            // what makes "keep trying until online" work without a timer.
+            .onChange(of: model.hosts) { _, _ in
+                Task { await autoConnectLastHost() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+                guard let key = model.connectedKey ?? UserDefaults.standard.string(forKey: "client.lastConnectedHost"),
+                      isAutoConnectEnabled(for: key) else { return }
                 Task { await model.recoverAfterNetworkChange(account: account.account) }
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else { return }
+                guard let key = model.connectedKey else {
+                    Task { await autoConnectLastHost() }
+                    return
+                }
+                guard isAutoConnectEnabled(for: key) else { return }
                 Task { await model.recoverAfterNetworkChange(account: account.account) }
             }
             .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
@@ -302,6 +363,21 @@ struct ClientWorkspacesView: View {
                 // is connected. The row already says that: the dot is lit and
                 // the button says Disconnect.
                 HostStatsStrip(peer: host.peerKey)
+                // Per-host, on by default, same line-height as Disconnect.
+                HStack(spacing: 6) {
+                    Text("Auto-connect")
+                        .font(ClientType.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: Theme.Space.s)
+                    Toggle("", isOn: autoConnectBinding(for: host.peerKey))
+                        .labelsHidden()
+                        .tint(Theme.accent)
+                        .scaleEffect(0.82)
+                }
+                .padding(.top, 4)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Auto-connect \(host.name)")
+                .accessibilityValue(isAutoConnectEnabled(for: host.peerKey) ? "On" : "Off")
             }
         }
         .padding(Theme.Space.m)
@@ -403,6 +479,10 @@ final class ClientWorkspacesModel {
     /// surface up and retries `no_such_peer` at 1/2/4s instead of pinning
     /// a red error that only a force-quit used to clear.
     func recoverAfterNetworkChange(account: Account?) async {
+        // An attempt already running is the recovery. Its ladder outlasts the
+        // path change that woke this, so redialling on top of it only refreshes
+        // the list twice.
+        guard isConnecting == nil else { return }
         let now = Date()
         if now.timeIntervalSince(lastRecoverAt) < 1.5 { return }
         lastRecoverAt = now
@@ -414,7 +494,16 @@ final class ClientWorkspacesModel {
         activeTerminal?.clearTransientTunnelError()
     }
 
+    /// One attempt at a time, for the whole model.
+    ///
+    /// `connectedKey` is not set until a connection has finished, so it
+    /// cannot stand in for "busy": every caller that checked it was free to
+    /// start a second attempt while the first was still on its retry ladder,
+    /// and the two would pair, raise a tunnel and load the remote side twice.
+    /// `isConnecting` is set for the whole run, including the sleeps, so this
+    /// is the check that actually holds.
     func connect(_ host: ClientHost, recovering: Bool) async {
+        guard isConnecting == nil else { return }
         guard host.online != false else {
             errorMessage = "\(host.name) is asleep."
             infoMessage = nil
@@ -483,6 +572,7 @@ final class ClientWorkspacesModel {
                 sessions = (try? await loadedSessions) ?? []
                 recentChats = (try? await loadedChats) ?? []
                 connectedKey = host.peerKey
+                UserDefaults.standard.set(host.peerKey, forKey: "client.lastConnectedHost")
                 errorMessage = nil
                 infoMessage = nil
                 return

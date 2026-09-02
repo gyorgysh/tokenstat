@@ -23,7 +23,7 @@ struct ClientChatEventRow: View {
             HStack {
                 Spacer(minLength: 36)
                 Text(text)
-                    .font(ClientType.body)
+                    .font(Theme.chatBody)
                     .padding(Theme.Space.m)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
@@ -32,7 +32,7 @@ struct ClientChatEventRow: View {
                 Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
                     .font(ClientType.caption.weight(.medium))
                     .foregroundStyle(Theme.accent)
-                MarkdownText(text)
+                MarkdownText(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode)
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)

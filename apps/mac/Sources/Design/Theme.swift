@@ -403,7 +403,10 @@ enum Theme {
     static var footnote: Font { font(13, weight: .regular, relativeTo: .footnote) }
     static var caption: Font { font(12, weight: .regular, relativeTo: .caption) }
     static var caption2: Font { font(11, weight: .regular, relativeTo: .caption2) }
-    static var chatBody: Font { body }
+    // iOS chat at 17 was too loose - the same hierarchy as the Mac
+    // (body 17 -> chat 15) gives a calmer reading size without shrinking
+    // supporting chrome. Thinking stays subheadline (15 -> 13) for the aside.
+    static var chatBody: Font { font(15, weight: .regular, relativeTo: .body) }
     static var chatCode: Font { monoText(12, relativeTo: .body) }
     #endif
 
