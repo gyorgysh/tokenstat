@@ -74,7 +74,17 @@ struct PullsView: View {
                         }
                         .frame(maxWidth: ReadingRoom.listWidth, alignment: .leading)
                         .padding(Theme.Space.xl)
-                        .frame(maxWidth: .infinity, alignment: ReadingRoom.alignment)
+                        // Top as well as leading. `ReadingRoom.alignment` is
+                        // `.topLeading`, but a frame only honours the vertical
+                        // half of an alignment when it is also given a height,
+                        // so without `maxHeight` this was a leading alignment
+                        // and nothing held the screen to the top of the
+                        // column. A short list sat in the middle of the page.
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: ReadingRoom.alignment
+                        )
                     }
                     .refreshable { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
                 }

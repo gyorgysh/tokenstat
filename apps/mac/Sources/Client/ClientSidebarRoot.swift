@@ -34,10 +34,6 @@ struct ClientSidebarRoot: View {
     /// What each folder holds, keyed by workspace id. One call for the whole
     /// tree rather than one per folder: the Mac's sidebar draws these counts
     /// too, and asking per row is five tunnel hops per folder.
-    /// The detail column's own width, not the window's. Starts wide because
-    /// an iPad detail column is wide: guessing narrow would draw every folder
-    /// section stacked for one frame and then re-lay it out.
-    @State private var detailWidth: CGFloat = 10_000
     /// What the detail column has pushed on top of the current page.
     ///
     /// Held here so picking a sidebar row can empty it. A link that names its
@@ -72,21 +68,23 @@ struct ClientSidebarRoot: View {
                 // decision that needs it: a folder section choosing between a
                 // nested split and a stacked screen on the room it has. On an
                 // 820 point iPad the sidebar takes 300 of them.
-                detail(width: detailWidth)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background {
-                        GeometryReader { geo in
-                            Color.clear
-                                .preference(key: DetailWidthKey.self, value: geo.size.width)
-                        }
-                    }
-                    .onPreferenceChange(DetailWidthKey.self) { width in
-                        // Zero is the pass before the column has a size. Taking
-                        // it would collapse every section to its narrow layout
-                        // and then expand it again, which is the flicker.
-                        guard width > 0 else { return }
-                        detailWidth = width
-                    }
+                GeometryReader { geo in
+                    detail(width: geo.size.width)
+                        // Fill the reader, top leading. Not `.frame(width:
+                        // height:)` from the reading, whose default alignment
+                        // is centre and which centres anything that does not
+                        // fill the column. And not a width carried up through
+                        // a preference either: that arrives a pass late, so
+                        // the first paint is laid out against a guess and
+                        // anything sized from it, a loading skeleton most
+                        // visibly, is drawn to the wrong width and hangs over
+                        // the edge until the real number lands.
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .topLeading
+                        )
+                }
             }
             // One stack for the whole detail column, so anything a screen
             // pushes sits *above* the root. Picking a different sidebar row
@@ -568,15 +566,6 @@ struct ClientSidebarRoot: View {
             case .workspaces: ClientWorkspacesView(model: workspaces)
             }
         }
-    }
-}
-
-/// The detail column's measured width, carried up from a background reader.
-private struct DetailWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
