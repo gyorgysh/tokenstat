@@ -76,6 +76,10 @@ ALLOWED = [
     ("Design/Theme.swift", "withAnimation(.snappy(duration: 0.22)) { selection = option }"),
     ("Client/AvatarButton.swift", "Button(action: action)"),
     ("Client/ClientHostWorkspacesView.swift", "model.open(session, peer: peerKey)"),
+    # A conversation row: the whole card is the label, and the row already
+    # carries the agent's mark. It is a button rather than a NavigationLink
+    # because the thread opens in place, see ClientChatView.
+    ("Client/ClientChatView.swift", "opened = chat"),
     ("Client/ClientLaunchTile.swift", "Button(action: action)"),
     ("Client/ClientLoginView.swift", "Button(title) {"),
     ("Client/ClientOnboarding.swift", 'Button("Skip")'),
