@@ -174,6 +174,11 @@ struct LaunchProfile: Identifiable, Sendable {
             bypassArgs: ["--yolo"], harnessID: "kimi", symbol: nil,
             installCommand: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"
         ),
+        LaunchProfile(
+            id: "qwen", name: "Qwen Code", command: "qwen", args: [],
+            bypassArgs: ["--approval-mode", "yolo"], harnessID: "qwen", symbol: nil,
+            installCommand: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"
+        ),
     ]
 
     /// Names this tile answers to. Kilo's npm page and its docs disagree
