@@ -26,6 +26,7 @@ struct ClientSidebarRoot: View {
     /// A pointer means a person aiming, not a thumb landing. Rows tighten and
     /// grow hover states. See `ClientLayout`.
     @Environment(PointerKeyboardModel.self) private var input
+    @Environment(\.scenePhase) private var scenePhase
 
     /// One workspaces model for the whole layout: the tree in the sidebar and
     /// the screen in the detail column are the same connection, not two.
@@ -59,6 +60,23 @@ struct ClientSidebarRoot: View {
         .onChange(of: workspaces.connectedKey) { _, _ in
             Task { await loadSummaries() }
         }
+        // The same three moments the Workspaces screen watches. This layout
+        // never mounts that screen until somebody picks Workspaces, so
+        // without these an iPad with a keyboard opened to an empty tree and
+        // sat there. `connect` refuses a second attempt while one is running,
+        // so both surfaces asking is harmless.
+        .onChange(of: workspaces.hosts) { _, _ in
+            Task { await workspaces.autoConnectLastHost() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            guard let key = workspaces.connectedKey else {
+                Task { await workspaces.autoConnectLastHost() }
+                return
+            }
+            guard ClientWorkspacesModel.isAutoConnectEnabled(for: key) else { return }
+            Task { await workspaces.recoverAfterNetworkChange(account: account.account) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await workspaces.recoverAfterNetworkChange(account: account.account) }
         }
@@ -79,6 +97,10 @@ struct ClientSidebarRoot: View {
 
     private func reload() async {
         await workspaces.refresh(account: account.account)
+        // Before the summaries, not after: the tree has nothing to count
+        // until a host is connected, and `loadSummaries` bails on a nil
+        // `connectedKey`. Dialling first is what fills the sidebar on open.
+        await workspaces.autoConnectLastHost()
         await loadSummaries()
     }
 
