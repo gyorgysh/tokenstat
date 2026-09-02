@@ -63,6 +63,28 @@ final class TerminalDropView: TerminalView {
         registerTypes()
     }
 
+    /// Tell the wheel forwarder whether there is anything for it to forward to.
+    /// It reads this before it hit-tests the window, so a screen with no
+    /// terminal on it does not pay for the search on every scroll event.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil, !counted {
+            counted = true
+            TerminalWheelForwarder.terminalAppeared(self)
+        } else if window == nil, counted {
+            counted = false
+            TerminalWheelForwarder.terminalDisappeared(self)
+        }
+    }
+
+    private var counted = false
+
+    // No `deinit` counterpart on purpose. A view is taken out of its window
+    // before it is released, so the decrement above is the one that runs, and
+    // asserting main-actor isolation inside a `deinit` to catch the case that
+    // does not happen would trade a harmless miscount for a crash. A count
+    // left high only means the forwarder does the work it always used to.
+
     private static let imageTypes: [NSPasteboard.PasteboardType] = [
         .png, .tiff,
         NSPasteboard.PasteboardType("public.jpeg"),

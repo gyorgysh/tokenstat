@@ -40,10 +40,33 @@ enum TerminalWheelForwarder {
         }
     }
 
+    /// The terminal views currently in a window, held weakly.
+    ///
+    /// Every wheel event in the app used to pay for a hit test of the whole
+    /// window's view tree before the scroll view underneath was allowed to see
+    /// it. A trackpad sends those at the display's rate, and a window showing a
+    /// long pull request or a long chat has a very large tree to walk, so
+    /// reading prose spent its time searching for a terminal that was either
+    /// not on screen or nowhere near the pointer.
+    ///
+    /// The registry answers both of those cheaply. The hit test still runs, so
+    /// occlusion is still decided by AppKit rather than by this file, but only
+    /// once the pointer is known to be inside a terminal's own rectangle.
+    @MainActor private static let live = NSHashTable<TerminalView>.weakObjects()
+
+    static func terminalAppeared(_ view: TerminalView) { live.add(view) }
+    static func terminalDisappeared(_ view: TerminalView) { live.remove(view) }
+
     private static func handle(_ event: NSEvent) -> NSEvent? {
-        guard event.deltaY != 0,
-              let window = event.window,
-              let view = window.contentView?.hitTest(event.locationInWindow) as? TerminalView,
+        guard live.count > 0, event.deltaY != 0, let window = event.window else { return event }
+        let point = event.locationInWindow
+        let overTerminal = live.allObjects.contains { candidate in
+            candidate.window === window
+                && !candidate.isHiddenOrHasHiddenAncestor
+                && candidate.convert(candidate.bounds, to: nil).contains(point)
+        }
+        guard overTerminal,
+              let view = window.contentView?.hitTest(point) as? TerminalView,
               let terminal = view.terminal
         else { return event }
 
