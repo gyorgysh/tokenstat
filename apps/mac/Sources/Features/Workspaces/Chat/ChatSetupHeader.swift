@@ -319,6 +319,7 @@ private struct ChatAgentMenu: View {
 
     var body: some View {
         Menu {
+            #if os(macOS)
             Menu("Agent") {
                 ForEach(agentOptions, id: \.value) { option in
                     Button {
@@ -386,6 +387,78 @@ private struct ChatAgentMenu: View {
                     }
                 }
             }
+            #else
+            // iOS renders nested Menus bottom-up in the glass sheet, so the
+            // declaration order is reversed to keep the visual order Agent ·
+            // Model · Effort (top to bottom) identical to macOS.
+            if let backend, !backend.efforts.isEmpty {
+                Menu("Effort") {
+                    Button {
+                        Task { await model.update(effort: "") }
+                    } label: {
+                        if (chat.effort ?? "").isEmpty {
+                            Label("Default", systemImage: "checkmark")
+                        } else {
+                            Text("Default")
+                        }
+                    }
+                    ForEach(backend.efforts, id: \.self) { id in
+                        Button {
+                            Task { await model.update(effort: id) }
+                        } label: {
+                            if chat.effort == id {
+                                Label(id, systemImage: "checkmark")
+                            } else {
+                                Text(id)
+                            }
+                        }
+                    }
+                }
+            }
+            if let backend, !backend.models.isEmpty {
+                Menu("Model") {
+                    Button {
+                        Task { await model.update(model: "") }
+                    } label: {
+                        if (chat.model ?? "").isEmpty {
+                            Label("Default", systemImage: "checkmark")
+                        } else {
+                            Text("Default")
+                        }
+                    }
+                    ForEach(modelIDs, id: \.self) { id in
+                        Button {
+                            Task { await model.update(model: id) }
+                        } label: {
+                            if chat.model == id {
+                                Label(id, systemImage: "checkmark")
+                            } else {
+                                Text(id)
+                            }
+                        }
+                    }
+                }
+            }
+            Menu("Agent") {
+                ForEach(agentOptions, id: \.value) { option in
+                    Button {
+                        Task {
+                            if model.backend(for: option.value)?.gateTier == "bypassOnly" {
+                                await model.update(backend: option.value, autonomy: "bypass")
+                            } else {
+                                await model.update(backend: option.value)
+                            }
+                        }
+                    } label: {
+                        if option.value == chat.backend {
+                            Label(option.label, systemImage: "checkmark")
+                        } else {
+                            Text(option.label)
+                        }
+                    }
+                }
+            }
+            #endif
         } label: {
             HStack(spacing: 6) {
                 Text(summary)
