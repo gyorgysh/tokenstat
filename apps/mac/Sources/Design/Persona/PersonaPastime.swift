@@ -39,7 +39,11 @@ struct PersonaPastime: View {
 
         var activities: [PersonaMood] {
             switch self {
-            case .leisure: return [.bouncing, .reading, .gaming, .dancing, .juggling, .pacing]
+            case .leisure: return [
+                .bouncing, .reading, .gaming, .dancing, .juggling, .pacing,
+                .typing, .sipping, .sketching, .stargazing, .gardening,
+                .bubbling, .snacking
+            ]
             case .thought: return [.pacing, .thinking]
             }
         }
@@ -52,17 +56,48 @@ struct PersonaPastime: View {
             }
         }
 
-        /// How long an activity lasts. Long enough to be read as that
-        /// activity, short enough that nobody watches the loop come round.
+        /// How many tellings of an activity to sit through.
+        ///
+        /// Counted in the activity's own cycles rather than in seconds. Each
+        /// one has something in it that arrives late (the bubble pops, the
+        /// nail goes in, the tea gets drunk) and they are not the same length
+        /// as each other, so a flat span in seconds showed a five second story
+        /// five times over and cut an eleven second one off before its point.
+        /// Once or twice through is what a person will watch.
+        var tellings: ClosedRange<Int> {
+            switch self {
+            case .leisure: return 1...2
+            case .thought: return 1...1
+            }
+        }
+
+        /// The bounds a telling is clamped to, for a mood with no story of its
+        /// own and for the very short ones.
         var busyFor: ClosedRange<Double> {
             switch self {
-            case .leisure: return 6.0...12.0
-            case .thought: return 5.0...9.0
+            case .leisure: return 5.5...20.0
+            case .thought: return 5.0...11.0
             }
         }
 
         /// Odds of a nap instead of an activity, and how long it lasts.
         var naps: Bool { self == .leisure }
+
+        /// How long to hold one activity: a whole number of its own tellings,
+        /// kept inside `busyFor` so a three second story is not shown once and
+        /// gone, and an eleven second one does not outstay itself.
+        func span(for mood: PersonaMood) -> Double {
+            let story = mood.storyLength
+            guard story > 0 else { return Double.random(in: busyFor) }
+            let least = max(tellings.lowerBound, Int(ceil(busyFor.lowerBound / story)))
+            let most = min(tellings.upperBound, Int(floor(busyFor.upperBound / story)))
+            guard least <= most else {
+                // No whole telling can fit the category's bounds. Keep the
+                // story intact in preference to cutting its ending off.
+                return story
+            }
+            return story * Double(Int.random(in: least...most))
+        }
 
         /// Whether the first thing it does is an activity rather than a wait.
         ///
@@ -119,7 +154,9 @@ struct PersonaPastime: View {
             last = next
             mood = next
 
-            let span = next == .sleeping ? Double.random(in: 7...14) : Double.random(in: doing.busyFor)
+            let span = next == .sleeping
+                ? Double.random(in: 7...14)
+                : doing.span(for: next)
             try? await Task.sleep(for: .seconds(span))
             guard !Task.isCancelled else { return }
             mood = doing.quiet

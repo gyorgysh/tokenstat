@@ -55,6 +55,21 @@ final class PersonaEngine {
     private var leaving: (mood: PersonaMood, clock: CGFloat)?
     private var shift: CGFloat = 0
 
+    /// How soft a recent landing has left the body, one to nought.
+    ///
+    /// A landing that only bounces is a ball. A landing that also stops the
+    /// creature holding its own shape for a fifth of a second is jelly, and
+    /// the difference is the whole character. It decays on its own, so no mood
+    /// has to remember to put the stiffness back.
+    private var softening: CGFloat = 0
+    /// The ring-out after an impact, and the clock it runs on.
+    private var jiggle: CGFloat = 0
+    private var jiggleClock: CGFloat = 0
+    /// Dust from recent landings. A fixed four, oldest overwritten, because a
+    /// growing array in a per-frame path is a leak with a nice name.
+    private var dust: [(x: CGFloat, age: CGFloat, weight: CGFloat)] = []
+    private var dustCursor = 0
+
     private var lastTime: TimeInterval?
     private var pending: CGFloat = 0
     private var blinkCountdown: CGFloat = 2.5
@@ -72,6 +87,7 @@ final class PersonaEngine {
         random = seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed
         face = mood.face(clock: 0, traits: traits)
         blinkCountdown = 1.4 + nextUnit() * 3.0
+        dust = Array(repeating: (x: PersonaStage.centreX, age: 10, weight: 0), count: 4)
     }
 
     /// Kinetic energy, for the lab's readouts and for anything that wants to
@@ -156,7 +172,7 @@ final class PersonaEngine {
         // mind.
         let arriving = mood.drive(clock: now, traits: traits)
         let arrivingFace = mood.face(clock: now, traits: traits)
-        let drive: PersonaDrive
+        var drive: PersonaDrive
         let target: PersonaFacePose
         if let leaving, shift > 0 {
             let done = 1 - shift
@@ -167,11 +183,50 @@ final class PersonaEngine {
             target = arrivingFace
         }
 
+        // What a landing left behind. Both decay on their own clock, so the
+        // squash always comes back and no mood can leave the body permanently
+        // slack by forgetting to tidy up after itself.
+        if softening > 0 || jiggle > 0 {
+            softening = max(0, softening - Self.fixedStep / 0.24)
+            jiggle = max(0, jiggle - Self.fixedStep / 0.55)
+            jiggleClock += Self.fixedStep
+            let eased = softening * softening
+            drive.shapeStiffness *= 1 - 0.38 * eased
+            drive.pressure *= 1 - 0.20 * eased
+            drive.damping *= 1 - 0.22 * eased
+            drive.jiggle += jiggle * jiggle * 0.55
+            drive.jigglePhase = jiggleClock * 5.2
+        }
+
         body.step(dt: Self.fixedStep, drive: drive)
+        absorbLanding()
         // The face eases toward the mood's pose rather than being set to it,
         // which is what makes a change of mood read as an expression moving.
         face.ease(towards: target, rate: Self.fixedStep * 11)
         advanceBlink(Self.fixedStep)
+    }
+
+    /// Turn a landing into a splat.
+    ///
+    /// The floor reports how hard the body arrived. Everything a landing looks
+    /// like is bought here, once, for every mood: the body goes briefly slack
+    /// so the squash lingers past the bounce, a wave rings round the rim, and
+    /// the ground puffs. A mood that adds a hop gets all of it for nothing.
+    private func absorbLanding() {
+        for index in dust.indices {
+            dust[index].age += Self.fixedStep
+        }
+        guard let hit = body.takeImpact(), hit.speed > 0.32 else { return }
+        let force = min(1, (hit.speed - 0.32) / 1.5)
+        // The hardest recent landing, not the sum of them. Adding meant a
+        // dancing character, which lands on every beat, saturated inside two
+        // bars and stayed a slack bag for the rest of the song.
+        softening = max(softening, force)
+        jiggle = max(jiggle, force)
+        jiggleClock = 0
+        guard force > 0.18 else { return }
+        dust[dustCursor] = (x: hit.x, age: 0, weight: force)
+        dustCursor = (dustCursor + 1) % dust.count
     }
 
     /// Everything the renderer reads that is not integrated: the blink, the
@@ -193,6 +248,27 @@ final class PersonaEngine {
         mood.motes(clock: clock, traits: traits, at: anchors, into: &motes)
         if shift > 0 {
             fade(motes[start...].indices, to: eased(ramp((0.65 - shift) / 0.65)))
+        }
+        addDust()
+    }
+
+    /// The ground answering back. Two puffs per landing, thrown outwards from
+    /// where the body actually hit rather than from the middle of the frame,
+    /// so a character that lands off to one side kicks dust up on that side.
+    private func addDust() {
+        for grain in dust where grain.age < 0.46 {
+            let life = grain.age / 0.46
+            for side in [CGFloat(-1), 1] {
+                motes.append(PersonaMote(
+                    kind: .puff,
+                    position: CGPoint(
+                        x: grain.x + side * (0.03 + life * 0.11) * grain.weight,
+                        y: PersonaStage.floor - 0.012 - life * life * 0.045
+                    ),
+                    scale: (0.34 + life * 0.62) * grain.weight,
+                    opacity: (1 - life) * (1 - life) * 0.42 * grain.weight
+                ))
+            }
         }
     }
 
@@ -264,8 +340,8 @@ final class PersonaEngine {
             body.impulse(CGVector(dx: 0, dy: -0.28))
             body.pulse(0.05)
         case .ok:
-            body.impulse(CGVector(dx: 0, dy: -1.18))
-            body.pulse(0.20)
+            body.impulse(CGVector(dx: 0, dy: -1.30))
+            body.pulse(0.24)
         case .failed:
             body.impulse(CGVector(dx: 0.55, dy: 0))
         case .sleeping:
@@ -276,50 +352,87 @@ final class PersonaEngine {
             body.impulse(CGVector(dx: 0, dy: -0.22))
         case .pacing:
             body.impulse(CGVector(dx: -0.18, dy: -0.30))
+        case .typing:
+            body.impulse(CGVector(dx: 0, dy: -0.16))
+        case .sipping:
+            body.pulse(-0.04)
+        case .sketching:
+            body.pulse(-0.04)
+        case .stargazing:
+            body.pulse(0.04)
+        case .gardening:
+            body.impulse(CGVector(dx: -0.10, dy: -0.14))
+        case .bubbling:
+            body.pulse(0.05)
+        case .snacking:
+            body.pulse(-0.05)
         }
     }
 
     /// Discrete beats. Everything continuous is a force in `PersonaMood`;
     /// this is only what has to happen *at* an instant, which is what a hop, a
     /// beat and a bounce are.
+    ///
+    /// Anticipation lives here too, and it is most of what separates this from
+    /// a thing that merely moves. A jump with nothing before it reads as a
+    /// teleport upward. The same jump with a crouch an eighth of a second
+    /// earlier reads as a decision, and the crouch is one extra call.
     private func fireEvents(from previous: CGFloat, to now: CGFloat) {
         switch mood {
         case .bouncing:
             // Re-kick once it has run out of bounce, rather than on a timer,
             // so the rhythm comes from the physics and a heavy persona takes
             // longer to get going again than a light one.
+            // Down, and no longer going anywhere. Measured on the body's
+            // travel rather than its total energy, because a slack blob
+            // quivering on the floor has plenty of the second kind and would
+            // never be kicked again.
             let low = body.centroid.y > PersonaStage.floor - PersonaStage.restRadius * 1.12
-            if low, body.energy < 0.30 {
+            if low, abs(body.momentum.dy) < 0.14 {
                 launches += 1
                 let side: CGFloat = launches.isMultiple(of: 2) ? 1 : -1
-                body.impulse(CGVector(dx: side * 0.30, dy: -1.35))
-                body.pulse(-0.08)
+                body.impulse(CGVector(dx: side * 0.34, dy: -1.45))
+                body.pulse(-0.10)
             }
 
         case .working:
-            if crossed(PersonaMood.workPeriod, previous, now) {
-                body.impulse(CGVector(dx: 0, dy: -0.78))
-                body.poke(at: body.crown, strength: -0.26, reach: 0.30)
+            guard PersonaMood.workAdmire(now) < 0.02 else { break }
+            // The blow, and the body arriving behind it. A hammer that lands
+            // without the shoulder following through is a hammer being waved.
+            if crossed(PersonaMood.blowPeriod, previous + 0.07, now + 0.07) {
+                body.pulse(-0.06)
+            }
+            if struck(PersonaMood.blowPeriod, 0.93, previous, now) {
+                body.impulse(CGVector(dx: 0.10, dy: 0.34))
+                body.poke(at: body.anchors.hands, strength: -0.42, reach: 0.30)
             }
 
         case .dancing:
+            if crossed(PersonaMood.beatPeriod, previous + 0.10, now + 0.10) {
+                body.pulse(-0.06)
+            }
             if crossed(PersonaMood.beatPeriod, previous, now) {
                 beatIndex += 1
                 let accent = beatIndex.isMultiple(of: 4)
-                body.impulse(CGVector(dx: 0, dy: accent ? -0.92 : -0.40))
-                body.pulse(accent ? 0.14 : -0.09)
+                body.impulse(CGVector(dx: 0, dy: accent ? -0.34 : -0.15))
+                body.pulse(accent ? 0.07 : -0.04)
             }
 
         case .juggling:
             if crossed(PersonaMood.rallyPeriod, previous, now) {
-                // The ball lands on the crown at the seam between two arcs.
-                body.poke(at: body.crown, strength: -0.85, reach: 0.26)
-                body.impulse(CGVector(dx: 0, dy: 0.22))
+                // The ball lands on the crown at the seam between two arcs,
+                // and the wild one lands harder because it fell further.
+                let wild = Int(floor(now / PersonaMood.rallyPeriod)) % 4 == 0
+                body.poke(at: body.crown, strength: wild ? -1.25 : -0.85, reach: 0.26)
+                body.impulse(CGVector(dx: 0, dy: wild ? 0.34 : 0.22))
             }
 
         case .waiting:
-            if crossed(1.5, previous, now) {
+            if crossed(1.2, previous, now) {
                 body.impulse(CGVector(dx: 0, dy: 0.46))
+            }
+            if struck(5.6, 0.70, previous, now) {
+                body.pulse(-0.11)
             }
 
         case .failed:
@@ -331,6 +444,14 @@ final class PersonaEngine {
             if crossed(0.34, previous, now) {
                 body.slump(0.85)
             }
+            // It has another go every few seconds, gets a third of the way up,
+            // and gives that up as well.
+            if now > 1.5, struck(4.4, 0.55, previous - 1.5, now - 1.5) {
+                body.impulse(CGVector(dx: 0, dy: -0.62))
+            }
+            if now > 1.5, struck(4.4, 0.80, previous - 1.5, now - 1.5) {
+                body.slump(0.45)
+            }
 
         case .idle:
             // A shift of weight, so a resting character is not a loop.
@@ -338,29 +459,134 @@ final class PersonaEngine {
                 let side: CGFloat = nextUnit() > 0.5 ? 1 : -1
                 body.impulse(CGVector(dx: side * 0.12, dy: -0.10))
             }
+            if struck(11.5, 0.62, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.30))
+            }
+
+        case .thinking:
+            // The idea arrives as a jolt. It is the one moment in this mood
+            // that is not churn, so it has to land like one.
+            if struck(7.2, 0.84, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.80))
+                body.pulse(0.18)
+            }
 
         case .gaming:
-            // A win is a jump, and the frantic thumbing in between is a
-            // steady low patter that never lets the body settle.
-            if crossed(4.3, previous - 2.6, now - 2.6) {
-                body.impulse(CGVector(dx: 0, dy: -0.85))
-                body.pulse(0.11)
+            let round = PersonaMood.gamingRound(now)
+            if round.win > 0.6, struck(PersonaMood.gamePeriod, 0.078, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.95))
+                body.pulse(0.13)
+            } else if round.loss > 0.6, struck(PersonaMood.gamePeriod, 0.578, previous, now) {
+                body.slump(0.55)
             } else if crossed(0.26, previous, now) {
                 body.poke(at: body.anchors.hands, strength: -0.13, reach: 0.20)
             }
 
         case .pacing:
-            // A footfall, and a heavier one at each turn where it plants and
-            // pushes off the other way.
-            if crossed(0.42, previous, now) {
-                body.impulse(CGVector(dx: 0, dy: -0.30))
+            if PersonaMood.pacingIdea(now) < 0.25 {
+                // A footfall, and a heavier one at each turn where it plants
+                // and pushes off the other way.
+                if crossed(0.42, previous, now) {
+                    body.impulse(CGVector(dx: 0, dy: -0.32))
+                }
+                if crossed(PersonaMood.stridePeriod, previous, now) {
+                    body.impulse(CGVector(dx: 0, dy: -0.44))
+                    body.pulse(-0.07)
+                }
             }
-            if crossed(PersonaMood.stridePeriod, previous, now) {
-                body.impulse(CGVector(dx: 0, dy: -0.42))
-                body.pulse(-0.07)
+            if struck(PersonaMood.paceThinkPeriod, 0.78, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.50))
+                body.pulse(0.14)
             }
 
-        case .thinking, .speaking, .ok, .sleeping, .reading:
+        case .typing:
+            // Keystrokes, not hops. A small local knock at the hands for each
+            // one, fast and uneven, so the body ripples the way a hand landing
+            // on a key ripples the arm it is on.
+            let keys = PersonaMood.typing(now)
+            if keys.tap > 0.5, crossed(0.078, previous, now) {
+                body.poke(at: body.anchors.hands, strength: -0.20, reach: 0.22)
+                body.impulse(CGVector(dx: 0, dy: -0.05))
+            }
+            if struck(PersonaMood.typePeriod, 0.90, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.34))
+                body.pulse(0.08)
+            }
+
+        case .gardening:
+            if PersonaMood.garden(now).joy < 0.3, crossed(1.15, previous, now) {
+                body.impulse(CGVector(dx: -0.04, dy: -0.16))
+                body.poke(at: body.anchors.hands, strength: -0.12, reach: 0.20)
+            }
+            if struck(11.2, 0.70, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.85))
+                body.pulse(0.14)
+            }
+
+        case .reading:
+            // Something on the page. The body has to move for it, or the face
+            // is reacting to nothing.
+            if struck(8.4, 0.66, previous, now) {
+                if PersonaMood.readingGag(now).shock > 0 {
+                    body.impulse(CGVector(dx: 0, dy: -0.70))
+                    body.pulse(0.16)
+                } else {
+                    body.pulse(-0.12)
+                }
+            }
+
+        case .sipping:
+            // Hot. The whole body finds out at once.
+            if struck(PersonaMood.teaPeriod, 0.30, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.55))
+                body.poke(at: body.anchors.mouth, strength: -0.55, reach: 0.28)
+            }
+
+        case .sketching:
+            // A small knock at each end of the sweep, where the hand changes
+            // direction. That is the only impulse a brush stroke has in it.
+            if PersonaMood.sketch(now).look < 0.25, crossed(0.725, previous, now) {
+                body.poke(at: body.anchors.hands, strength: -0.16, reach: 0.24)
+            }
+
+        case .stargazing:
+            if struck(9.4, 0.40, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.34))
+                body.pulse(0.09)
+            }
+
+        case .sleeping:
+            // A twitch, in the middle of a good dream.
+            if struck(13.0, 0.62, previous, now) {
+                body.poke(at: body.crown, strength: -0.22, reach: 0.28)
+            }
+
+        case .ok:
+            // Once is a result. Twice is a celebration.
+            if now < 0.7, crossed(0.62, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.72))
+                body.pulse(0.10)
+            }
+
+        case .bubbling:
+            if struck(5.4, 0.60, previous, now) {
+                // It knew. It has always known. It is surprised anyway.
+                body.poke(at: body.anchors.mouth, strength: -0.95, reach: 0.34)
+                body.impulse(CGVector(dx: -0.30, dy: -0.18))
+                blinkHold = 0.12
+            }
+
+        case .snacking:
+            for start in [CGFloat(0.10), 0.32, 0.54] where struck(7.6, start, previous, now) {
+                body.impulse(CGVector(dx: -0.22, dy: -0.20))
+                body.poke(at: body.anchors.mouth, strength: -0.30, reach: 0.26)
+            }
+            if struck(7.6, 0.80, previous, now) {
+                body.impulse(CGVector(dx: 0, dy: -0.40))
+                body.pulse(0.10)
+            }
+
+        case .speaking:
             break
         }
     }
@@ -415,10 +641,20 @@ final class PersonaEngine {
         face = mood.face(clock: 0, traits: traits)
         blinkHold = 0
         pending = 0
+        softening = 0
+        jiggle = 0
+        for index in dust.indices { dust[index].age = 10 }
     }
 
     private func crossed(_ period: CGFloat, _ previous: CGFloat, _ now: CGFloat) -> Bool {
         floor(previous / period) != floor(now / period)
+    }
+
+    /// Once per cycle, at a given phase of it. The same shift a mood applies
+    /// when it works out where in its own story it is, so an impulse lands on
+    /// the frame the face is already reacting.
+    private func struck(_ period: CGFloat, _ at: CGFloat, _ previous: CGFloat, _ now: CGFloat) -> Bool {
+        crossed(period, previous - at * period, now - at * period)
     }
 
     /// xorshift, so a blink pattern is this persona's own and the same on

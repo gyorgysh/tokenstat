@@ -82,6 +82,14 @@ struct PersonaDrive {
     /// personas with the same seed ripple identically on every machine.
     var wobble: CGFloat = 0
     var wobblePhase: CGFloat = 0
+    /// The second ripple channel, and the engine owns it.
+    ///
+    /// `wobble` is character: a mood decides this creature ripples while it
+    /// thinks. This one is consequence: it is switched on by a hard landing
+    /// and rings down on its own, so the wave that travels round the rim after
+    /// a splat is not something a mood had to remember to ask for.
+    var jiggle: CGFloat = 0
+    var jigglePhase: CGFloat = 0
 }
 
 /// A pressure soft body: a closed ring of point masses held out by internal
@@ -118,6 +126,15 @@ struct PersonaSoftBody {
     /// Built from the second and third harmonics only, so no persona is an
     /// off-centre circle: the shape is dented rather than displaced.
     private var lumps: [CGFloat]
+    /// The hardest a node hit the floor since the engine last looked, and
+    /// where. Nought when nothing has landed.
+    ///
+    /// Recorded here rather than inferred upstairs, because the floor is the
+    /// only place that knows how fast the body was going when it arrived. It
+    /// is what pays for the dust, the extra squash and the ring-out, in every
+    /// mood, without a mood having to ask.
+    private var impactSpeed: CGFloat = 0
+    private var impactX: CGFloat = PersonaStage.centreX
 
     init(
         count: Int = 14,
@@ -161,6 +178,24 @@ struct PersonaSoftBody {
         return CGPoint(x: x * inverse, y: y * inverse)
     }
 
+    /// The body's travel, with its own ringing left out.
+    ///
+    /// `energy` counts every node, so a slack blob quivering on the floor
+    /// looks energetic to it. This is the mean velocity, where an internal
+    /// wobble cancels itself and only the creature actually going somewhere
+    /// survives. It is what tells a bouncing character it has stopped
+    /// bouncing.
+    var momentum: CGVector {
+        var dx: CGFloat = 0
+        var dy: CGFloat = 0
+        for node in nodes {
+            dx += node.v.dx
+            dy += node.v.dy
+        }
+        let inverse = 1 / CGFloat(nodes.count)
+        return CGVector(dx: dx * inverse, dy: dy * inverse)
+    }
+
     /// Sum of squared speeds. The sleep test: a body this still, under a mood
     /// with nothing driving it, can stop being stepped at all.
     var energy: CGFloat {
@@ -169,6 +204,17 @@ struct PersonaSoftBody {
             total += node.v.dx * node.v.dx + node.v.dy * node.v.dy
         }
         return total
+    }
+
+    /// The landing since this was last called, and forget it.
+    ///
+    /// Consumed rather than read, so one landing pays for one splat however
+    /// many steps the frame spent.
+    mutating func takeImpact() -> (speed: CGFloat, x: CGFloat)? {
+        guard impactSpeed > 0 else { return nil }
+        let hit = (speed: impactSpeed, x: impactX)
+        impactSpeed = 0
+        return hit
     }
 
     var bounds: CGRect {
@@ -341,10 +387,13 @@ struct PersonaSoftBody {
                 forces[index].dx += -dy * drive.swirl
                 forces[index].dy += dx * drive.swirl
             }
-            if drive.wobble != 0 {
+            if drive.wobble != 0 || drive.jiggle != 0 {
                 let distance = max(sqrt(dx * dx + dy * dy), 1e-4)
-                let ripple = sin(drive.wobblePhase * 2 * .pi + self.ripple[index])
-                let amount = drive.wobble * ripple
+                var amount = drive.wobble * sin(drive.wobblePhase * 2 * .pi + self.ripple[index])
+                // The impact ring runs at its own faster rate and against the
+                // ripple order, so a splat travels up the body rather than
+                // beating with whatever the mood was already doing.
+                amount += drive.jiggle * sin(drive.jigglePhase * 2 * .pi - self.ripple[index] * 1.5)
                 forces[index].dx += dx / distance * amount
                 forces[index].dy += dy / distance * amount
             }
@@ -364,6 +413,14 @@ struct PersonaSoftBody {
                 if node.p.y > drive.floor {
                     node.p.y = drive.floor
                     if node.v.dy > 0 {
+                        // Only a body that was in the air lands. A node of a
+                        // resting creature grazing the floor is not an event,
+                        // and treating it as one would have every idle persona
+                        // standing in its own dust cloud.
+                        if grounded < 0.55, node.v.dy > impactSpeed {
+                            impactSpeed = node.v.dy
+                            impactX = node.p.x
+                        }
                         node.v.dy = -node.v.dy * drive.restitution
                     }
                     node.v.dx *= drive.friction
@@ -489,9 +546,11 @@ extension PersonaDrive {
         out.restitution = mix(from.restitution, to.restitution)
         out.friction = mix(from.friction, to.friction)
         out.wobble = mix(from.wobble, to.wobble)
+        out.jiggle = mix(from.jiggle, to.jiggle)
         // Phases are clocks, not amounts. Blending two of them walks the
         // ripple backwards; the incoming one simply takes over.
         out.wobblePhase = to.wobblePhase
+        out.jigglePhase = to.jigglePhase
         return out
     }
 }
@@ -512,6 +571,12 @@ struct PersonaAnchors {
     /// difference.
     var hands: CGPoint {
         CGPoint(x: centroid.x, y: bounds.maxY - bounds.height * 0.20)
+    }
+
+    /// Where the mouth is, near enough. Anything that comes out of the
+    /// character rather than being held by it starts here.
+    var mouth: CGPoint {
+        CGPoint(x: centroid.x, y: centroid.y + bounds.height * 0.18)
     }
 
     /// Where something is held up to be read: high enough to cover the body
