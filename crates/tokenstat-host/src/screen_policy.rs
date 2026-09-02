@@ -56,6 +56,59 @@ pub(crate) const PENDING_TTL: u64 = 15 * 60;
 /// it. See `is_review_demo`.
 const REVIEW_DEMO_ACCOUNT_ID: &str = "u_5ce664fd625c5ea13f51f5d2";
 
+/// The account name the review machine runs under.
+///
+/// The other half of the same question, and the half a server cannot answer.
+/// Pinning the account id says *which* account the exception is for, but the
+/// server is what asserts the account, so a server that named the demo account
+/// to every machine would hand every machine the exception. This is a fact
+/// about the computer instead, and the two have to agree.
+///
+/// Nothing here is a secret. It is a username, written in plain for the same
+/// reason the account id is: so anybody reading this file can see that theirs
+/// is not it. Somebody who deliberately renames their macOS account to this
+/// has only reached the *second* gate, and still needs a server willing to
+/// call them the demo account.
+const REVIEW_DEMO_USER: &str = "appreview";
+
+/// Whether this computer is the one the review exception is for.
+///
+/// Read out of the passwd database for the effective uid rather than `$USER`,
+/// because an environment variable is set by whoever started the process and
+/// the whole point of this check is a fact the caller cannot supply.
+///
+/// Not Unix, no exception. App Review runs on a Mac, so a Windows host has no
+/// business granting this and answering no there costs nothing.
+#[cfg(unix)]
+fn on_review_machine() -> bool {
+    let mut buf = vec![0 as libc::c_char; 1024];
+    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut found: *mut libc::passwd = std::ptr::null_mut();
+    // `getpwuid_r` over `getpwuid`: the latter answers into a static buffer
+    // shared by the process, and this runs on a daemon serving many peers.
+    let rc = unsafe {
+        libc::getpwuid_r(
+            libc::geteuid(),
+            &mut pwd,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut found,
+        )
+    };
+    if rc != 0 || found.is_null() || pwd.pw_name.is_null() {
+        return false;
+    }
+    let name = unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) };
+    name.to_str()
+        .map(|n| n == REVIEW_DEMO_USER)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn on_review_machine() -> bool {
+    false
+}
+
 #[derive(Default, Deserialize, Serialize)]
 struct Store {
     permissions: Vec<ScreenPermission>,
@@ -267,6 +320,14 @@ struct QualityParams {
 /// A server too old to name the account cannot pass this, which is the right
 /// answer: the exception is worth nothing next to granting by accident.
 fn is_review_demo(status: &tokenstat_sync::profile::StatusResult) -> bool {
+    account_is_review_demo(status) && on_review_machine()
+}
+
+/// What the server said, on its own.
+///
+/// Split out so the account half can be tested without the machine half: a
+/// test host is not called `appreview` and never will be.
+fn account_is_review_demo(status: &tokenstat_sync::profile::StatusResult) -> bool {
     status.review_demo && status.account_id.as_deref() == Some(REVIEW_DEMO_ACCOUNT_ID)
 }
 
@@ -612,16 +673,31 @@ mod tests {
                 raw: serde_json::Value::Null,
             };
         // Somebody else's account, however loudly a server says otherwise.
-        assert!(!is_review_demo(&status(Some("u_someone_else"), true)));
+        assert!(!account_is_review_demo(&status(
+            Some("u_someone_else"),
+            true
+        )));
         // The demo account between rounds.
-        assert!(!is_review_demo(&status(
+        assert!(!account_is_review_demo(&status(
             Some(REVIEW_DEMO_ACCOUNT_ID),
             false
         )));
         // A server too old to name the account cannot pass.
-        assert!(!is_review_demo(&status(None, true)));
+        assert!(!account_is_review_demo(&status(None, true)));
         // Both, which is the only way through.
-        assert!(is_review_demo(&status(Some(REVIEW_DEMO_ACCOUNT_ID), true)));
+        assert!(account_is_review_demo(&status(
+            Some(REVIEW_DEMO_ACCOUNT_ID),
+            true
+        )));
+
+        // And the account half alone is not enough. A server naming the demo
+        // account to a machine that is not the review machine still gets no
+        // for the whole question, which is the point of the second gate.
+        assert!(
+            !on_review_machine(),
+            "a test host is not the review machine"
+        );
+        assert!(!is_review_demo(&status(Some(REVIEW_DEMO_ACCOUNT_ID), true)));
     }
 
     #[test]
