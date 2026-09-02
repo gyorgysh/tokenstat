@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use tokenstat_core::sources::{claude_code, dsh, pi};
+use tokenstat_core::sources::{claude_code, dsh, pi, qwen};
 
 fn fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -196,6 +196,23 @@ const DSH_ALLOWED_KEYS: &[&str] = &[
     "reasoningTokens",
 ];
 
+/// Qwen's separate usage ledger contains counters and identifiers only.
+const QWEN_ALLOWED_KEYS: &[&str] = &[
+    "schemaVersion",
+    "id",
+    "timestamp",
+    "sessionId",
+    "model",
+    "authType",
+    "source",
+    "inputTokens",
+    "outputTokens",
+    "cachedTokens",
+    "thoughtsTokens",
+    "totalTokens",
+    "apiDurationMs",
+];
+
 /// Which allowlist a fixture is held to, by the directory it sits in.
 ///
 /// An unknown directory gets the strictest list rather than a free pass, so
@@ -206,6 +223,8 @@ fn allowlist_for(path: &Path) -> &'static [&'static str] {
         PI_ALLOWED_KEYS
     } else if path.components().any(|c| c.as_os_str() == "dsh") {
         DSH_ALLOWED_KEYS
+    } else if path.components().any(|c| c.as_os_str() == "qwen") {
+        QWEN_ALLOWED_KEYS
     } else {
         ALLOWED_KEYS
     }
@@ -348,6 +367,35 @@ fn dsh_fixtures_parse_into_events() {
             e.counters.cache_write_5m, None,
             "this vendor reports no cache write, so it must not claim a zero"
         );
+    }
+}
+
+#[test]
+fn qwen_ledger_fixtures_parse_into_complete_unique_events() {
+    let dir = fixtures_root().join("qwen");
+    if !dir.is_dir() {
+        return;
+    }
+    let sessions = HashMap::new();
+    let mut events = Vec::new();
+    for path in walkdir::WalkDir::new(&dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+    {
+        let contents = std::fs::read_to_string(path.path()).unwrap();
+        let out = qwen::parse_file(path.path(), &contents, &sessions);
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+        events.extend(out.events);
+    }
+    assert!(!events.is_empty(), "fixtures produced no events");
+    let unique: HashSet<_> = events.iter().map(|e| e.id).collect();
+    assert_eq!(unique.len(), events.len(), "two ledger rows share an id");
+    for event in events {
+        assert!(event.counters.total() > 0);
+        if let Some(reasoning) = event.extras.reasoning_within_output {
+            assert!(reasoning <= event.counters.output.unwrap_or(0));
+        }
     }
 }
 

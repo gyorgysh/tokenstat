@@ -294,6 +294,20 @@ const PROFILES: &[Profile] = &[
         install_dirs: &[],
         open_url: None,
     },
+    Profile {
+        id: "qwen",
+        name: "Qwen Code",
+        command: "qwen",
+        args: &[],
+        bypass_args: &["--approval-mode", "yolo"],
+        harness_id: Some("qwen"),
+        symbol: None,
+        install_command: Some(
+            "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash",
+        ),
+        install_dirs: &[],
+        open_url: None,
+    },
 ];
 
 /// Tools taken off this machine's launcher. Display only: the binary stays.

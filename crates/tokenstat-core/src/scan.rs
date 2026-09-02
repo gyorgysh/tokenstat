@@ -9,7 +9,7 @@ use crate::model::SourceId;
 use crate::sources::claude_stats::Reconciliation;
 use crate::sources::{
     antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, devin,
-    dsh, grok, hermes, kilo, kimi, muse, openclaw, opencode, pi, zed,
+    dsh, grok, hermes, kilo, kimi, muse, openclaw, opencode, pi, qwen, zed,
 };
 use crate::store::Store;
 use crate::watermark;
@@ -61,6 +61,7 @@ from_parsed!(
     muse::ParseOutput,
     devin::ParseOutput,
     kimi::ParseOutput,
+    qwen::ParseOutput,
 );
 
 impl FileOutcome {
@@ -396,6 +397,27 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
             let parsed: Vec<_> = files
                 .par_iter()
                 .map(|path| read_shard(path, &marks, |p, text| kimi::parse_file(p, text).into()))
+                .collect();
+            absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
+        }
+    }
+
+    // Qwen Code: its own append-only usage ledger, one file per calendar
+    // month. Read from the last offset, and the transcripts are never opened:
+    // the folder each session ran in comes from their file names alone. See
+    // `sources::qwen`.
+    if let Some(root) = qwen::discover(&home) {
+        let files = qwen::ledgers(&root);
+        if !files.is_empty() {
+            report.files_found += files.len() as u64;
+            let sessions = qwen::session_index(&root);
+            let parsed: Vec<_> = files
+                .par_iter()
+                .map(|path| {
+                    read_shard(path, &marks, |p, text| {
+                        qwen::parse_file(p, text, &sessions).into()
+                    })
+                })
                 .collect();
             absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
         }

@@ -40,6 +40,7 @@ use tokenstat_core::model::{BillingMode, Counters, EventId, SourceId};
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
 use tokenstat_core::sources::{
     antigravity_cli, claude_code, codex, devin, dsh, grok, hermes, kilo, kimi, muse, opencode, pi,
+    qwen,
 };
 use tokenstat_core::{Catalog, UsageEvent};
 
@@ -83,6 +84,7 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
         "muse" => muse_events(cwd)?,
         "devin" => devin_events(cwd, started_at_ms)?,
         "kimi" => kimi_events(cwd)?,
+        "qwen" => qwen_events(cwd)?,
         "antigravity" => antigravity_events(cwd)?,
         _ => return None,
     };
@@ -382,6 +384,7 @@ pub(crate) fn can_meter(command: &str) -> bool {
         "muse" => muse::discover(&home).is_some(),
         "devin" => devin::discover(&home).is_some(),
         "kimi" => kimi::discover(&home).is_some(),
+        "qwen" => qwen::discover(&home).is_some(),
         "antigravity" => antigravity_cli::discover(&home).is_some(),
         _ => false,
     }
@@ -405,6 +408,7 @@ fn harness_name(command: &str) -> Option<&'static str> {
         "muse" => Some("muse"),
         "devin" => Some("devin"),
         "kimi" => Some("kimi"),
+        "qwen" => Some("qwen"),
         "agy" => Some("antigravity"),
         _ => None,
     }
@@ -463,6 +467,32 @@ fn kimi_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
             cached_events(&path, |contents| kimi::parse_file(&path, contents).events)
         {
             all.extend(events.iter().cloned());
+        }
+    }
+    (!all.is_empty()).then(|| Arc::new(all))
+}
+
+/// Qwen Code's monthly ledger narrowed to the sessions for this exact folder.
+fn qwen_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let root = qwen::discover(&home)?;
+    let session_ids: std::collections::HashSet<_> =
+        qwen::sessions_for_cwd(&root, cwd).into_iter().collect();
+    if session_ids.is_empty() {
+        return None;
+    }
+    let mut all = Vec::new();
+    for path in qwen::ledgers(&root) {
+        let empty = HashMap::new();
+        if let Some(events) = cached_events(&path, |contents| {
+            qwen::parse_file(&path, contents, &empty).events
+        }) {
+            all.extend(
+                events
+                    .iter()
+                    .filter(|event| session_ids.contains(&event.session))
+                    .cloned(),
+            );
         }
     }
     (!all.is_empty()).then(|| Arc::new(all))

@@ -51,6 +51,9 @@ pub enum SourceId {
     Devin,
     /// Kimi Code. Per-request usage records in each agent's durable wire log.
     Kimi,
+    /// Qwen Code. Its own append-only usage ledger, one file per month, one
+    /// line per API response.
+    Qwen,
 }
 
 impl SourceId {
@@ -75,6 +78,7 @@ impl SourceId {
             SourceId::Muse => "muse",
             SourceId::Devin => "devin",
             SourceId::Kimi => "kimi",
+            SourceId::Qwen => "qwen",
         }
     }
 
@@ -99,6 +103,7 @@ impl SourceId {
             SourceId::Muse => "Muse",
             SourceId::Devin => "Devin CLI",
             SourceId::Kimi => "Kimi Code",
+            SourceId::Qwen => "Qwen Code",
         }
     }
 
@@ -151,6 +156,7 @@ impl SourceId {
             "muse" => Some(Self::Muse),
             "devin" => Some(Self::Devin),
             "kimi" => Some(Self::Kimi),
+            "qwen" => Some(Self::Qwen),
             _ => None,
         }
     }

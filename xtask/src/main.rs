@@ -131,6 +131,29 @@ const DEVIN_ALLOW: &[&str] = &[
     "metadata.metrics.total_time_ms",
 ];
 
+/// Keys a Qwen Code fixture may keep.
+///
+/// Nearly the whole line, because nothing in this file is conversation: every
+/// field is a counter, an identifier, a timestamp, a model id or a fixed enum.
+/// `localDate` and `localMonth` are the writer's own local-calendar copies of
+/// the timestamp and say nothing more than it does, so they are dropped rather
+/// than published.
+const QWEN_ALLOW: &[&str] = &[
+    "schemaVersion",
+    "id",
+    "timestamp",
+    "sessionId",
+    "model",
+    "authType",
+    "source",
+    "inputTokens",
+    "outputTokens",
+    "cachedTokens",
+    "thoughtsTokens",
+    "totalTokens",
+    "apiDurationMs",
+];
+
 /// Keys a Kimi Code wire fixture may keep. Conversation records are discarded;
 /// these are the complete fields of its durable per-request usage record.
 const KIMI_ALLOW: &[&str] = &[
@@ -205,6 +228,7 @@ enum Profile {
     Muse,
     Devin,
     Kimi,
+    Qwen,
 }
 
 impl Profile {
@@ -216,8 +240,9 @@ impl Profile {
             "muse" => Ok(Self::Muse),
             "devin" => Ok(Self::Devin),
             "kimi" => Ok(Self::Kimi),
+            "qwen" => Ok(Self::Qwen),
             other => anyhow::bail!(
-                "unknown redaction profile: {other} (claude_code, pi, dsh, muse, devin, kimi)"
+                "unknown redaction profile: {other} (claude_code, pi, dsh, muse, devin, kimi, qwen)"
             ),
         }
     }
@@ -230,6 +255,7 @@ impl Profile {
             Self::Muse => MUSE_ALLOW,
             Self::Devin => DEVIN_ALLOW,
             Self::Kimi => KIMI_ALLOW,
+            Self::Qwen => QWEN_ALLOW,
         }
     }
 
@@ -274,6 +300,14 @@ impl Profile {
                         .and_then(|m| m.get("metrics"))
                         .and_then(Value::as_object)
                         .is_some_and(|m| m.contains_key("output_tokens"))
+            }
+            // Every line of the ledger is one API response, so the only ones
+            // worth dropping are the failed calls that recorded nothing.
+            Self::Qwen => {
+                obj.contains_key("totalTokens")
+                    && ["inputTokens", "outputTokens", "thoughtsTokens"]
+                        .iter()
+                        .any(|k| obj.get(*k).and_then(Value::as_u64).is_some_and(|v| v > 0))
             }
             Self::Kimi => {
                 obj.get("type").and_then(Value::as_str) == Some("usage.record")

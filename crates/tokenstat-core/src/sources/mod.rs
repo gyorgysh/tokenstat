@@ -24,4 +24,5 @@ pub mod muse;
 pub mod openclaw;
 pub mod opencode;
 pub mod pi;
+pub mod qwen;
 pub mod zed;

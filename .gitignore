@@ -52,6 +52,7 @@ perf.data*
 .zed/
 .direnv/
 .cursor/
+.qwen/
 
 # OS
 .DS_Store
