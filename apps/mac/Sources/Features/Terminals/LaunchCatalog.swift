@@ -169,6 +169,11 @@ struct LaunchProfile: Identifiable, Sendable {
             bypassArgs: [], harnessID: "kilo", symbol: nil,
             installCommand: "npm install -g @kilocode/cli"
         ),
+        LaunchProfile(
+            id: "kimi", name: "Kimi Code", command: "kimi", args: [],
+            bypassArgs: ["--yolo"], harnessID: "kimi", symbol: nil,
+            installCommand: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"
+        ),
     ]
 
     /// Names this tile answers to. Kilo's npm page and its docs disagree

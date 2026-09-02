@@ -1777,7 +1777,7 @@ func harnessBrandAsset(_ id: String) -> String? {
     let known: Set<String> = [
         "claude_code", "codex", "grok", "opencode",
         "cline", "openclaw", "muse", "devin", "pi", "dsh", "zed", "copilot",
-        "antigravity", "cursor", "gemini", "hermes", "kilo",
+        "antigravity", "cursor", "gemini", "hermes", "kilo", "kimi",
     ]
     return known.contains(assetId) ? "brand_\(assetId)" : nil
 }
