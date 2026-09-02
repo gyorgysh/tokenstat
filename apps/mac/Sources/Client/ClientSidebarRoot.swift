@@ -50,9 +50,23 @@ struct ClientSidebarRoot: View {
                 // sidebar takes 300 of them.
                 GeometryReader { geo in
                     detail(width: geo.size.width)
-                        .frame(width: geo.size.width, height: geo.size.height)
+                        // Top leading, not the default centre. A section that
+                        // does not fill the column was being centred in it,
+                        // so a short screen began halfway down the page.
+                        .frame(
+                            width: geo.size.width,
+                            height: geo.size.height,
+                            alignment: .topLeading
+                        )
                 }
             }
+            // One stack for the whole detail column, so anything a screen
+            // pushes sits *above* the root. Picking a different sidebar row
+            // swaps that root underneath, which left a chat thread on screen
+            // covering the page that had just opened behind it, visible only
+            // after going back. Re-identifying the stack for each page
+            // discards what the previous one pushed.
+            .id(detailIdentity)
         }
         .navigationSplitViewStyle(.balanced)
         .clientShortcuts(shortcuts)
@@ -483,6 +497,16 @@ struct ClientSidebarRoot: View {
     }
 
     // MARK: - Detail
+
+    /// What counts as a different page in the detail column.
+    ///
+    /// The folder and the section are in here as well as the destination,
+    /// because moving between two folders, or between Chat and Changes in
+    /// one, is the same kind of move as leaving Workspaces entirely: whatever
+    /// the last page pushed should not still be on top.
+    private var detailIdentity: String {
+        "\(navigation.destination)-\(navigation.folderID ?? "")-\(navigation.section)"
+    }
 
     @ViewBuilder
     private func detail(width: CGFloat) -> some View {
