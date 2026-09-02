@@ -39,7 +39,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tokenstat_core::model::{BillingMode, Counters, EventId, SourceId};
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
 use tokenstat_core::sources::{
-    antigravity_cli, claude_code, codex, devin, dsh, grok, hermes, kilo, muse, opencode, pi,
+    antigravity_cli, claude_code, codex, devin, dsh, grok, hermes, kilo, kimi, muse, opencode, pi,
 };
 use tokenstat_core::{Catalog, UsageEvent};
 
@@ -82,6 +82,7 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
         "dsh" => dsh_events(cwd)?,
         "muse" => muse_events(cwd)?,
         "devin" => devin_events(cwd, started_at_ms)?,
+        "kimi" => kimi_events(cwd)?,
         "antigravity" => antigravity_events(cwd)?,
         _ => return None,
     };
@@ -380,6 +381,7 @@ pub(crate) fn can_meter(command: &str) -> bool {
         "dsh" => dsh::discover(&home).is_some(),
         "muse" => muse::discover(&home).is_some(),
         "devin" => devin::discover(&home).is_some(),
+        "kimi" => kimi::discover(&home).is_some(),
         "antigravity" => antigravity_cli::discover(&home).is_some(),
         _ => false,
     }
@@ -402,6 +404,7 @@ fn harness_name(command: &str) -> Option<&'static str> {
         "dsh" => Some("dsh"),
         "muse" => Some("muse"),
         "devin" => Some("devin"),
+        "kimi" => Some("kimi"),
         "agy" => Some("antigravity"),
         _ => None,
     }
@@ -448,6 +451,21 @@ fn devin_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>> {
         devin::parse_db_in(path, Some(cwd), Some(floor)).events
     })?;
     (!events.is_empty()).then_some(events)
+}
+
+/// Kimi Code wires for this exact workspace, including every subagent.
+fn kimi_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let root = kimi::discover(&home)?;
+    let mut all = Vec::new();
+    for path in kimi::wires_for_cwd(&root, cwd) {
+        if let Some(events) =
+            cached_events(&path, |contents| kimi::parse_file(&path, contents).events)
+        {
+            all.extend(events.iter().cloned());
+        }
+    }
+    (!all.is_empty()).then(|| Arc::new(all))
 }
 
 /// The Muse log for this folder, newest session first.

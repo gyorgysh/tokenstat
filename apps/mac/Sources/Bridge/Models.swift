@@ -1756,6 +1756,7 @@ func harnessName(_ id: String) -> String {
     case "gemini": return "Gemini"
     case "hermes": return "Hermes Agent"
     case "kilo": return "Kilo Code"
+    case "kimi": return "Kimi Code"
     case "": return "unknown"
     default: return id
     }

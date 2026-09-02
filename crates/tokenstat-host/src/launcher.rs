@@ -282,6 +282,18 @@ const PROFILES: &[Profile] = &[
         install_dirs: &[],
         open_url: None,
     },
+    Profile {
+        id: "kimi",
+        name: "Kimi Code",
+        command: "kimi",
+        args: &[],
+        bypass_args: &["--yolo"],
+        harness_id: Some("kimi"),
+        symbol: None,
+        install_command: Some("curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"),
+        install_dirs: &[],
+        open_url: None,
+    },
 ];
 
 /// Tools taken off this machine's launcher. Display only: the binary stays.

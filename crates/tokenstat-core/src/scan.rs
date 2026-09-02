@@ -9,7 +9,7 @@ use crate::model::SourceId;
 use crate::sources::claude_stats::Reconciliation;
 use crate::sources::{
     antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, devin,
-    dsh, grok, hermes, kilo, muse, openclaw, opencode, pi, zed,
+    dsh, grok, hermes, kilo, kimi, muse, openclaw, opencode, pi, zed,
 };
 use crate::store::Store;
 use crate::watermark;
@@ -60,6 +60,7 @@ from_parsed!(
     dsh::ParseOutput,
     muse::ParseOutput,
     devin::ParseOutput,
+    kimi::ParseOutput,
 );
 
 impl FileOutcome {
@@ -383,6 +384,21 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
             &mut marks_to_store,
             vec![outcome],
         );
+    }
+
+    // Kimi Code: one durable wire per main agent and subagent. Only its flat
+    // usage records are decoded; conversation records are ignored. Each wire
+    // is append-only, so resume at the last byte like the other JSONL logs.
+    if let Some(root) = kimi::discover(&home) {
+        let files = kimi::wires(&root);
+        if !files.is_empty() {
+            report.files_found += files.len() as u64;
+            let parsed: Vec<_> = files
+                .par_iter()
+                .map(|path| read_shard(path, &marks, |p, text| kimi::parse_file(p, text).into()))
+                .collect();
+            absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
+        }
     }
 
     // Muse: JSONL event log, one per session and one per subagent, appended

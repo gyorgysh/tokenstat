@@ -19,6 +19,7 @@ pub mod dsh;
 pub mod grok;
 pub mod hermes;
 pub mod kilo;
+pub mod kimi;
 pub mod muse;
 pub mod openclaw;
 pub mod opencode;

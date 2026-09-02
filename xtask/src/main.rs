@@ -131,6 +131,21 @@ const DEVIN_ALLOW: &[&str] = &[
     "metadata.metrics.total_time_ms",
 ];
 
+/// Keys a Kimi Code wire fixture may keep. Conversation records are discarded;
+/// these are the complete fields of its durable per-request usage record.
+const KIMI_ALLOW: &[&str] = &[
+    "type",
+    "time",
+    "agentId",
+    "model",
+    "usage",
+    "inputOther",
+    "output",
+    "inputCacheRead",
+    "inputCacheCreation",
+    "usageScope",
+];
+
 /// Keys a Muse fixture may keep.
 ///
 /// `payload.record.workspace_root` is deliberately absent, for the same reason
@@ -189,6 +204,7 @@ enum Profile {
     Dsh,
     Muse,
     Devin,
+    Kimi,
 }
 
 impl Profile {
@@ -199,8 +215,9 @@ impl Profile {
             "dsh" => Ok(Self::Dsh),
             "muse" => Ok(Self::Muse),
             "devin" => Ok(Self::Devin),
+            "kimi" => Ok(Self::Kimi),
             other => anyhow::bail!(
-                "unknown redaction profile: {other} (claude_code, pi, dsh, muse, devin)"
+                "unknown redaction profile: {other} (claude_code, pi, dsh, muse, devin, kimi)"
             ),
         }
     }
@@ -212,6 +229,7 @@ impl Profile {
             Self::Dsh => DSH_ALLOW,
             Self::Muse => MUSE_ALLOW,
             Self::Devin => DEVIN_ALLOW,
+            Self::Kimi => KIMI_ALLOW,
         }
     }
 
@@ -256,6 +274,27 @@ impl Profile {
                         .and_then(|m| m.get("metrics"))
                         .and_then(Value::as_object)
                         .is_some_and(|m| m.contains_key("output_tokens"))
+            }
+            Self::Kimi => {
+                obj.get("type").and_then(Value::as_str) == Some("usage.record")
+                    && obj
+                        .get("usage")
+                        .and_then(Value::as_object)
+                        .is_some_and(|usage| {
+                            [
+                                "inputOther",
+                                "output",
+                                "inputCacheRead",
+                                "inputCacheCreation",
+                            ]
+                            .iter()
+                            .any(|key| {
+                                usage
+                                    .get(*key)
+                                    .and_then(Value::as_u64)
+                                    .is_some_and(|value| value > 0)
+                            })
+                        })
             }
         }
     }

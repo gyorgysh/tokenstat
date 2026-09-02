@@ -49,6 +49,8 @@ pub enum SourceId {
     /// Devin CLI. One SQLite database, counters on the assistant nodes of a
     /// message forest.
     Devin,
+    /// Kimi Code. Per-request usage records in each agent's durable wire log.
+    Kimi,
 }
 
 impl SourceId {
@@ -72,6 +74,7 @@ impl SourceId {
             SourceId::Dsh => "dsh",
             SourceId::Muse => "muse",
             SourceId::Devin => "devin",
+            SourceId::Kimi => "kimi",
         }
     }
 
@@ -95,6 +98,7 @@ impl SourceId {
             SourceId::Dsh => "DeepSeek Harness",
             SourceId::Muse => "Muse",
             SourceId::Devin => "Devin CLI",
+            SourceId::Kimi => "Kimi Code",
         }
     }
 
@@ -146,6 +150,7 @@ impl SourceId {
             "dsh" => Some(Self::Dsh),
             "muse" => Some(Self::Muse),
             "devin" => Some(Self::Devin),
+            "kimi" => Some(Self::Kimi),
             _ => None,
         }
     }
