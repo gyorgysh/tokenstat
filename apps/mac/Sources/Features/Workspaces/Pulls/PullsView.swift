@@ -91,6 +91,15 @@ struct PullsView: View {
             }
             }
             .background(Theme.background)
+            // What every other section gets from `ClientCardList`, which this
+            // screen does not use because it is shared with the Mac. Without
+            // it the bar keeps the default large-title mode with no title in
+            // it, and reserves the height of one: the empty strip that pushed
+            // this screen down the page while Tasks and Notes sat at the top.
+            #if !os(macOS)
+            .navigationTitle("Pull requests")
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
             .task(id: workspaceID) { await model.load(workspaceID: workspaceID, peer: peer) }
             .onChange(of: model.scope) { _, _ in
                 Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
@@ -138,6 +147,11 @@ struct PullsView: View {
     private var heading: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
+                // The mark and the name are the screen's own on the Mac, where
+                // there is no navigation bar to carry them. On a phone or an
+                // iPad the bar has the name, so repeating it here would be the
+                // title twice with a gap between.
+                #if os(macOS)
                 Image(systemName: "arrow.triangle.merge")
                     .font(Theme.fixed(17, weight: .semibold))
                     .foregroundStyle(Theme.accent)
@@ -150,6 +164,12 @@ struct PullsView: View {
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
+                #else
+                Text(model.availability?.repositoryName ?? "Review the work around this branch")
+                    .font(Theme.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                #endif
                 Spacer()
                 if model.isLoading && model.availability == nil {
                     ProgressView().controlSize(.small)
