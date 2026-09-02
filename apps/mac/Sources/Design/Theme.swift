@@ -389,8 +389,8 @@ enum Theme {
     /// Conversation prose is read for minutes at a time, not scanned as Mac
     /// chrome. Give it a calmer reading size without inflating every sidebar,
     /// table and utility label that correctly uses the 13-point body style.
-    static var chatBody: Font { font(15, weight: .regular, relativeTo: .body) }
-    static var chatCode: Font { monoText(13, relativeTo: .body) }
+    static var chatBody: Font { font(14, weight: .regular, relativeTo: .body) }
+    static var chatCode: Font { monoText(12, relativeTo: .body) }
     #else
     static var largeTitle: Font { font(34, weight: .regular, relativeTo: .largeTitle) }
     static var title: Font { font(28, weight: .regular, relativeTo: .title) }

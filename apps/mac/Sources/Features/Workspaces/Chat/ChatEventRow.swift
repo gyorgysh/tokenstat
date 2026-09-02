@@ -64,8 +64,8 @@ struct ChatEventRow: View {
             // reading as one.
             MarkdownText(
                 text,
-                bodyFont: Theme.caption,
-                codeFont: Theme.monoText(10, relativeTo: .caption),
+                bodyFont: Theme.subheadline,
+                codeFont: Theme.monoText(11, relativeTo: .subheadline),
                 style: .aside
             )
             .foregroundStyle(.secondary)

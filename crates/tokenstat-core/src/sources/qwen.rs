@@ -271,6 +271,11 @@ pub fn parse_file(path: &Path, contents: &str, sessions: &HashMap<String, String
 
         // See the module comment: the provider's own total says which
         // convention this line follows, and neither branch is assumed.
+        // When totalTokens is absent and thoughts are present the branch
+        // below falls back to inside counting, which is the least inflating
+        // reading. If the vendor ever stops emitting totalTokens while still
+        // reporting thoughts beside the output, this line will systematically
+        // undercount, and a warning there would be worth adding.
         let separate = row.total_tokens == Some(input + output + thoughts) && thoughts > 0;
         let generated = if separate { output + thoughts } else { output };
 
@@ -286,12 +291,31 @@ pub fn parse_file(path: &Path, contents: &str, sessions: &HashMap<String, String
         // rewritten, so a re-read lands on the same event. Without one the
         // file offset would be the only identity, and a ledger rotated or
         // rewritten from the start would count the month again.
+        //
+        // When the row has no stable id the identity is built from the
+        // content itself, so the same tail slice read twice, or the same
+        // ledger read incrementally after a restart, lands on the same event.
+        // An index into the slice, as this function once used, would shift
+        // after a truncated tail and duplicate the month. The same fields are
+        // used that the confidence already carries, mirroring kimi.rs.
         let (id, confidence) = match row.id.as_deref() {
             Some(id) if !id.is_empty() => (EventId::derive(&["qwen", id]), Confidence::Exact),
-            _ => (
-                EventId::derive(&["qwen", &session, &i.to_string()]),
-                Confidence::Derived,
-            ),
+            _ => {
+                let ts_raw = row.timestamp.as_deref().unwrap_or("");
+                (
+                    EventId::derive(&[
+                        "qwen",
+                        &session,
+                        ts_raw,
+                        row.model.as_deref().unwrap_or(""),
+                        &input.to_string(),
+                        &cached.to_string(),
+                        &output.to_string(),
+                        &thoughts.to_string(),
+                    ]),
+                    Confidence::Derived,
+                )
+            }
         };
 
         out.events.push(UsageEvent {
