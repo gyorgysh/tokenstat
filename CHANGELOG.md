@@ -11,22 +11,6 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one, rather than reconstructing release notes from
 commits at the end.
 
-## [Unreleased]
-
-### Added
-
-- Devin CLI is on the launcher, so a folder can start it the way it starts the
-  others. Its usage was already read in 0.7.3, but the tile was missing.
-
-### Fixed
-
-- Install on Windows runs a command Windows can run. Every tile offered the
-  same installer everywhere, and on Windows thirteen of them were a `curl`
-  pipeline into a shell that is not there, so the button could only fail. Each
-  tool now carries its own Windows installer, taken from the vendor's own
-  script, and the two with none say so by offering no button rather than a
-  broken one.
-
 ## [0.7.3] - 2026-09-02
 
 Chat comes to the Mac, along with the pull requests around a folder and the
@@ -65,8 +49,8 @@ branches and files they touch.
   where recent sessions were working, while you type. It keeps them in memory
   only. Nothing is run to produce them and no password is kept.
 - Muse, Devin CLI, Kimi Code and Qwen Code usage now appears in your reports,
-  each under the tool's own mark. Kimi Code and Qwen Code are on the launcher
-  as well, so you start them where you start the others.
+  each under the tool's own mark. Devin CLI, Kimi Code and Qwen Code are on the
+  launcher as well, so you start them where you start the others.
 - Recent conversations sit above folders on iPhone and iPad, with their last
   activity and a per-device unread mark, and open straight into the thread.
 - A phone reconnects on its own to the computer you were last on: when the app
@@ -103,6 +87,12 @@ branches and files they touch.
   to git.
 - The pinned day stays on screen while a refresh or a sync reloads its numbers,
   instead of emptying to a placeholder and filling back in.
+- Install on Windows runs a command Windows can run. Every tile offered the
+  same installer everywhere, and on Windows thirteen of them were a `curl`
+  pipeline into a shell that is not there, so the button could only fail. Each
+  tool now carries its own Windows installer, taken from the vendor's own
+  script, and the two with none say so by offering no button rather than a
+  broken one.
 
 ## [0.7.2] - 2026-08-28
 

@@ -116,8 +116,14 @@ settings:
     # each, so an Antigravity turn stops leaving a blank stretch where the
     # tools it ran should be. v0.7.3 was retagged onto it, which the version
     # number can afford because the cancelled release run published nothing.
-    # Next free Apple build number is 69.
-    CURRENT_PROJECT_VERSION: "68"
+    # 69 is 0.7.3 again with Devin CLI on the launcher and Windows install
+    # commands that Windows can run. This one did reuse a version whose
+    # GitHub Release had been published: it was deleted first, with two
+    # downloads on it between them, both machine-looking. That is a decision
+    # taken once with the numbers in front of us, not the rule. The rule is
+    # still that a published version is spent.
+    # Next free Apple build number is 70.
+    CURRENT_PROJECT_VERSION: "69"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
