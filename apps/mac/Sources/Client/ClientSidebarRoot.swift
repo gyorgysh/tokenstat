@@ -34,6 +34,16 @@ struct ClientSidebarRoot: View {
     /// What each folder holds, keyed by workspace id. One call for the whole
     /// tree rather than one per folder: the Mac's sidebar draws these counts
     /// too, and asking per row is five tunnel hops per folder.
+    /// The detail column's own width, not the window's. Starts wide because
+    /// an iPad detail column is wide: guessing narrow would draw every folder
+    /// section stacked for one frame and then re-lay it out.
+    @State private var detailWidth: CGFloat = 10_000
+    /// What the detail column has pushed on top of the current page.
+    ///
+    /// Held here so picking a sidebar row can empty it. A link that names its
+    /// destination rather than a value still goes through this path, as an
+    /// entry with a type of the framework's own.
+    @State private var detailPath = NavigationPath()
     @State private var summaries: [String: WorkspaceSummary] = [:]
     @State private var pullCounts = PullCountStore.shared
     @State private var columns = NavigationSplitViewVisibility.all
@@ -43,29 +53,55 @@ struct ClientSidebarRoot: View {
             sidebar
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
         } detail: {
-            NavigationStack {
-                // The detail column's own width, not the window's. A folder
-                // section decides between a nested split and a stacked screen
-                // on the room it actually has, and on an 820 point iPad the
-                // sidebar takes 300 of them.
-                GeometryReader { geo in
-                    detail(width: geo.size.width)
-                        // Top leading, not the default centre. A section that
-                        // does not fill the column was being centred in it,
-                        // so a short screen began halfway down the page.
-                        .frame(
-                            width: geo.size.width,
-                            height: geo.size.height,
-                            alignment: .topLeading
-                        )
-                }
+            NavigationStack(path: $detailPath) {
+                // The width is *observed*, never used to size anything.
+                //
+                // This used to be a `GeometryReader` wrapping the content and
+                // a `.frame(width:height:)` built from its reading, which made
+                // every layout depend on a number that is wrong on the first
+                // pass and again on every column resize. Three symptoms came
+                // out of that one line: a short screen centred in an oversized
+                // box instead of starting at the top, skeletons drawn to a
+                // stale width and hanging off the side, and both settling only
+                // after enough navigation to force a correct pass.
+                //
+                // A background reader cannot affect layout, because a
+                // background is measured against its parent rather than the
+                // other way round. So the content fills the column the
+                // ordinary way and the number is only read, for the one
+                // decision that needs it: a folder section choosing between a
+                // nested split and a stacked screen on the room it has. On an
+                // 820 point iPad the sidebar takes 300 of them.
+                detail(width: detailWidth)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background {
+                        GeometryReader { geo in
+                            Color.clear
+                                .preference(key: DetailWidthKey.self, value: geo.size.width)
+                        }
+                    }
+                    .onPreferenceChange(DetailWidthKey.self) { width in
+                        // Zero is the pass before the column has a size. Taking
+                        // it would collapse every section to its narrow layout
+                        // and then expand it again, which is the flicker.
+                        guard width > 0 else { return }
+                        detailWidth = width
+                    }
             }
             // One stack for the whole detail column, so anything a screen
             // pushes sits *above* the root. Picking a different sidebar row
             // swaps that root underneath, which left a chat thread on screen
             // covering the page that had just opened behind it, visible only
-            // after going back. Re-identifying the stack for each page
-            // discards what the previous one pushed.
+            // after going back.
+            //
+            // Emptied and re-identified, because the two do not cover the same
+            // ground: clearing the path pops what a link pushed, and the id
+            // rebuilds the stack for anything the path never held. Doing only
+            // the second was not enough on its own.
+            .onChange(of: detailIdentity) { _, _ in
+                guard !detailPath.isEmpty else { return }
+                detailPath.removeLast(detailPath.count)
+            }
             .id(detailIdentity)
         }
         .navigationSplitViewStyle(.balanced)
@@ -532,6 +568,15 @@ struct ClientSidebarRoot: View {
             case .workspaces: ClientWorkspacesView(model: workspaces)
             }
         }
+    }
+}
+
+/// The detail column's measured width, carried up from a background reader.
+private struct DetailWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
