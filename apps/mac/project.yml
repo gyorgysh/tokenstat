@@ -129,8 +129,8 @@ settings:
     # late. Also the review exception needing the review machine and not only
     # the account id. 69 never went up.
     # 70 went up: delivery 5d81ff14-c2b9-40ac-ada2-31adc45d4ed5.
-    # 71 is 0.8.1, the PATH hotfix. The iOS app is unchanged by it, so this
-    # number is only spent if that build is uploaded.
+    # 71 is 0.8.1, the PATH hotfix.
+    # 71 went up: delivery bcaa4a44-63fa-42b7-a12c-29af82069d43.
     # Next free Apple build number is 72.
     CURRENT_PROJECT_VERSION: "71"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
