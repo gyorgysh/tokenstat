@@ -105,8 +105,15 @@ settings:
     # 62 is 0.7.3, the GitHub pull-request connection for a workspace.
     # 63 is 0.7.3 on TestFlight: personas, chat motion, and the themed
     # sheets accumulated since 62. 64 is the first local production-candidate
-    # upload. 65 adds recent mobile chats. Next free Apple build number is 66.
-    CURRENT_PROJECT_VERSION: "66"
+    # upload. 65 adds recent mobile chats.
+    # 66 is spent without a record here: App Store Connect already held it and
+    # refused the second upload with previousBundleVersion 66. Read Apple's
+    # answer, not this comment, when a number looks free and is not.
+    # 67 is 0.7.3 on TestFlight: Kimi Code and Qwen Code read and on the
+    # launcher, the phone's per-host auto-connect, Antigravity under one name,
+    # and the chat, pull-request and terminal scrolling work.
+    # Next free Apple build number is 68.
+    CURRENT_PROJECT_VERSION: "67"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
