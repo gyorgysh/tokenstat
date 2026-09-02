@@ -11,6 +11,14 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one, rather than reconstructing release notes from
 commits at the end.
 
+## [Unreleased]
+
+### Fixed
+
+- A conversation with Antigravity no longer leaves a tall blank stretch in the
+  middle of the transcript. Every tool it ran was taking a row's worth of
+  space, while only one of those rows was drawn.
+
 ## [0.7.3] - 2026-09-02
 
 Chat comes to the Mac, along with the pull requests around a folder and the

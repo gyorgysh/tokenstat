@@ -1166,6 +1166,11 @@ struct ChatDisplayItem: Identifiable, Equatable {
     static func coalesce(_ events: [ChatTimelineEvent], defaultBackend: String? = nil) -> [ChatDisplayItem] {
         var items: [ChatDisplayItem] = []
         var toolIndex: [String: Int] = [:]
+        // How many times each call id has already started a tool in this
+        // conversation. An agent is supposed to name every call something of
+        // its own, and most do, but Antigravity sends `call_id: "tool"` for
+        // all of them.
+        var toolStarts: [String: Int] = [:]
         var approvalIndex: [String: Int] = [:]
         var text = ""
         var textID = ""
@@ -1280,6 +1285,17 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 flushText()
                 flushThinking()
                 let callId = agent.callId ?? "tool-\(stamp(event, items.count))"
+                // Every tool row needs an identity of its own. `ForEach` is
+                // keyed on it, and a list where fourteen rows answer to
+                // "tool-tool" lays out fourteen slots and draws one, which is
+                // the tall blank stretch in the middle of an Antigravity
+                // transcript. The call id still matches an end to its start,
+                // so only the row's name changes here, and it changes only
+                // for the second and later use of a repeated id: an agent
+                // that names its calls properly keeps the ids it has.
+                let occurrence = (toolStarts[callId] ?? 0) + 1
+                toolStarts[callId] = occurrence
+                let rowID = occurrence == 1 ? "tool-\(callId)" : "tool-\(callId)#\(occurrence)"
                 let state = ChatToolState(
                     callId: callId,
                     verb: agent.verb ?? "Tool",
@@ -1291,7 +1307,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     endedAtMs: nil
                 )
                 toolIndex[callId] = items.count
-                items.append(ChatDisplayItem(id: "tool-\(callId)", kind: .tool(state)))
+                items.append(ChatDisplayItem(id: rowID, kind: .tool(state)))
             case "toolEnd":
                 flushText()
                 flushThinking()
