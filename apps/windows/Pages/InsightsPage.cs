@@ -55,9 +55,21 @@ internal sealed class InsightsPage : Page
         JsonNode rows;
         try
         {
-            rows = await AppServices.Host.CallAsync(
-                "report",
-                new JsonObject { ["group"] = group });
+            // Proto 5 coherent snapshot first (what the Mac uses); fall back
+            // to the legacy report when the host is older.
+            try
+            {
+                var snapshot = await AppServices.Host.CallAsync("insights.snapshot", new JsonObject());
+                rows = PickSnapshotGroup(snapshot, group) ?? await AppServices.Host.CallAsync(
+                    "report",
+                    new JsonObject { ["group"] = group });
+            }
+            catch (HostException ex) when (ex.Code.Contains("unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                rows = await AppServices.Host.CallAsync(
+                    "report",
+                    new JsonObject { ["group"] = group });
+            }
         }
         catch (Exception ex)
         {
@@ -99,5 +111,18 @@ internal sealed class InsightsPage : Page
             "By " + group,
             list,
             "List-rate equivalent, not a charge."));
+    }
+
+    private static JsonNode? PickSnapshotGroup(JsonNode? snapshot, string group)
+    {
+        if (snapshot is null) return null;
+        return group switch
+        {
+            "model" => snapshot["byModel"] ?? snapshot["by_model"],
+            "source" => snapshot["bySource"] ?? snapshot["by_source"],
+            "project" => snapshot["byProject"] ?? snapshot["by_project"],
+            "day" => snapshot["daily"],
+            _ => null,
+        };
     }
 }

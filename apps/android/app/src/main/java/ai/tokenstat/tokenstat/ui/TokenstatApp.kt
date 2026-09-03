@@ -1509,6 +1509,8 @@ private fun WorkspaceList(
 private data class WorkspacePart(val label: String, val method: String, val icon: ImageVector, val kind: String? = null)
 private val workspaceParts = listOf(
     WorkspacePart("Sessions", "pty.list", Icons.Default.Terminal),
+    WorkspacePart("Chat", "chat.list", Icons.Default.ChatBubble),
+    WorkspacePart("Pulls", "pulls.list", Icons.Default.MergeType),
     WorkspacePart("Changes", "workspace.status", Icons.Default.Difference),
     WorkspacePart("Tasks", "todo.list", Icons.Default.Checklist),
     // Notes share the todo board's method; the Apple client filters the same

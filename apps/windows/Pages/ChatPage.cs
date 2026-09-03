@@ -32,6 +32,9 @@ internal sealed class ChatPage : Page
     private readonly string _workspaceId;
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _transcript = new() { Spacing = Theme.SpaceM };
+    private ScrollViewer? _scroll;
+    private readonly HashSet<string> _renderedKeys = new();
+    private bool _followEnd = true;
     private readonly StackPanel _attachStrip = new()
     {
         Orientation = Orientation.Horizontal,
@@ -83,7 +86,7 @@ internal sealed class ChatPage : Page
             if (string.IsNullOrEmpty(next) || next == Format.Text(_openChat, "title")) return;
             await UpdateAsync(new JsonObject { ["title"] = next });
         };
-        Content = new ScrollViewer
+        _scroll = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl, Theme.SpaceXl),
             Content = new Grid
@@ -93,6 +96,13 @@ internal sealed class ChatPage : Page
                 Children = { _root },
             },
         };
+        _scroll.ViewChanged += (_, args) =>
+        {
+            if (args == null || _scroll == null) return;
+            // Pinned while at the end; a scroll up hands control to the reader.
+            _followEnd = _scroll.ScrollableHeight - _scroll.VerticalOffset < 48;
+        };
+        Content = _scroll;
         Loaded += async (_, _) => await ShowListAsync();
         Unloaded += (_, _) => _poll?.Cancel();
     }
@@ -105,6 +115,9 @@ internal sealed class ChatPage : Page
         _attachments.Clear();
         _events = new JsonArray();
         _offset = 0;
+        _renderedKeys.Clear();
+        _transcript.Children.Clear();
+        _followEnd = true;
         _root.Children.Clear();
         _root.Children.Add(ListHeader());
         try
@@ -315,7 +328,10 @@ internal sealed class ChatPage : Page
         }
         _root.Children.Add(_titleBox);
 
-        RebuildTranscript();
+        _renderedKeys.Clear();
+        _transcript.Children.Clear();
+        _followEnd = true;
+        RebuildTranscript(full: true);
         _root.Children.Add(_transcript);
         RefreshCost();
         _root.Children.Add(_costHost);
@@ -521,11 +537,17 @@ internal sealed class ChatPage : Page
         return button;
     }
 
-    private void RebuildTranscript()
+    private void RebuildTranscript(bool full = false)
     {
-        _transcript.Children.Clear();
+        if (full)
+        {
+            _transcript.Children.Clear();
+            _renderedKeys.Clear();
+        }
         foreach (var item in Coalesce(_events))
         {
+            var key = item.Kind + "|" + item.Text.GetHashCode(StringComparison.Ordinal);
+            if (!full && !_renderedKeys.Add(key)) continue;
             _transcript.Children.Add(Render(item));
         }
         if (Busy())
@@ -537,6 +559,11 @@ internal sealed class ChatPage : Page
                 FontSize = 12,
             });
         }
+        else if (full)
+        {
+            // Keys were rebuilt above; keep the set in sync.
+        }
+        if (_followEnd) _scroll?.ChangeView(null, _scroll.ScrollableHeight, null, true);
     }
 
     private UIElement Render(DisplayItem item) => item.Kind switch

@@ -128,6 +128,8 @@ fun WorkspaceSection(
     val reload: () -> Unit = { scope.launch { load() } }
     when (section) {
         "Sessions" -> SessionsSection(data, error, loading, onOpenTerminal, reload, modifier)
+        "Chat" -> ChatSection(model, peer, workspace, protocol = null, modifier)
+        "Pulls" -> PullsSection(model, peer, workspace, protocol = null, modifier)
         "Changes" -> ChangesSection(model, peer, workspace, data, error, loading, modifier)
         "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier)
         "Notes" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = false, onChanged = reload, modifier)
@@ -141,6 +143,8 @@ fun WorkspaceSection(
 
 private fun methodFor(section: String): String = when (section) {
     "Sessions" -> "pty.list"
+    "Chat" -> "chat.list"
+    "Pulls" -> "pulls.list"
     "Changes" -> "workspace.status"
     "Tasks", "Notes" -> "todo.list"
     "Workflows" -> "workflow.list"

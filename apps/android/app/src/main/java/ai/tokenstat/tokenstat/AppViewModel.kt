@@ -105,8 +105,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             })
         }
         val limits = viewModelScope.async { CoreClient.call("usage.limits") }
+        // Proto 5 coherent snapshot first (what the Mac Insights model uses);
+        // fall back to the legacy per-model report when the host is older.
         val report = viewModelScope.async {
-            CoreClient.call("account.report", buildJsonObject { put("group", "model"); put("weeks", 53) })
+            runCatching { CoreClient.call("insights.snapshot", buildJsonObject {}) }.getOrElse {
+                CoreClient.call("account.report", buildJsonObject { put("group", "model"); put("weeks", 53) })
+            }
         }
         runCatching { calendar.await() }.onSuccess {
             mutableState.value = mutableState.value.copy(home = (it as? JsonObject))

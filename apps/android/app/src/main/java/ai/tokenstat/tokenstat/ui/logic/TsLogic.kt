@@ -90,21 +90,42 @@ object TunnelCopy {
 /// Apple table is longer; these are the rows the phone's screens hit.
 data class FriendlyError(val title: String, val message: String, val canRetry: Boolean)
 
-fun friendlyError(raw: String?): FriendlyError = when {
-    raw == null -> FriendlyError("Something went wrong", "The request could not be completed.", true)
-    raw.contains("offline", ignoreCase = true) || raw.contains("no_such_peer", ignoreCase = true) ->
-        FriendlyError("The computer is unreachable", TunnelCopy.waiting(null), true)
-    raw.contains("timeout", ignoreCase = true) ->
-        FriendlyError("That took too long", "The machine did not answer in time. Try again.", true)
-    raw.contains("unauthorized", ignoreCase = true) || raw.contains("forbidden", ignoreCase = true) ->
-        FriendlyError("Not allowed", "This account or device does not have access to that.", false)
-    raw.contains("unknown method", ignoreCase = true) || raw.contains("unknown_method", ignoreCase = true) ->
-        FriendlyError(
-            "Helper is out of date",
-            "The background helper on this machine is older than the app and does not know this yet. Restart the app to replace it, then try again.",
-            true,
-        )
-    else -> FriendlyError("Something went wrong", raw, true)
+fun friendlyError(raw: String?): FriendlyError {
+    val lower = raw?.lowercase().orEmpty()
+    return when {
+        raw == null -> FriendlyError("Something went wrong", "The request could not be completed.", true)
+        lower.contains("offline") || lower.contains("no_such_peer") || lower.contains("not on the tunnel") ->
+            FriendlyError("The computer is unreachable", TunnelCopy.waiting(null), true)
+        lower.contains("timeout") || lower.contains("host_timeout") ->
+            FriendlyError("That took too long", "The machine did not answer in time. Try again.", true)
+        lower.contains("unauthorized") || lower.contains("forbidden") ->
+            FriendlyError("Not allowed", "This account or device does not have access to that.", false)
+        lower.contains("unknown method") || lower.contains("unknown_method") ->
+            FriendlyError(
+                "Helper is out of date",
+                "The background helper on this machine is older than the app and does not know this yet. Restart the app to replace it, then try again.",
+                true,
+            )
+        lower.contains("session_time_limit") || lower.contains("idle") ->
+            FriendlyError("Session ended", "The session reached its time limit or went idle.", true)
+        lower.contains("screen_already_open") || lower.contains("already open") ->
+            FriendlyError("Already open", "That screen session is already open on the host.", false)
+        lower.contains("quota_exceeded") || lower.contains("429") || lower.contains("rate") ->
+            FriendlyError("Rate limited", "The service asked us to slow down. Wait a moment and try again.", true)
+        lower.contains("vault") || lower.contains("not enrolled") || lower.contains("machine_required") ->
+            FriendlyError("Vault needed", "Unlock the vault on the host to continue.", false)
+        lower.contains("not approved") || lower.contains("not approved") ->
+            FriendlyError("Not approved", "The host has not approved this device yet.", false)
+        lower.contains("paid-plan") || lower.contains("paid plan") || lower.contains("device limit") ->
+            FriendlyError("Plan limit", "This needs a paid plan or has hit a device limit. Check Account.", false)
+        lower.contains("sign-in") || lower.contains("signin") || lower.contains("credential") ->
+            FriendlyError("Sign in needed", "Sign in again, then retry.", false)
+        lower.contains("tunnel") || lower.contains("unreachable") || lower.contains("asleep") || lower.contains("broken pipe") ->
+            FriendlyError("The computer is unreachable", TunnelCopy.display(raw ?: "", null), true)
+        lower.contains("helper not running") ->
+            FriendlyError("Helper not running", "Start tokenstat on the computer, then try again.", true)
+        else -> FriendlyError("Something went wrong", raw, true)
+    }
 }
 
 /// The same vault password rule the host enforces in `tokenstat_core::passphrase`.

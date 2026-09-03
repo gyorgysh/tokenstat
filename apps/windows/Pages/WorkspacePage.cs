@@ -315,11 +315,53 @@ internal sealed class WorkspacePage : Page
                     ["paths"] = paths,
                 });
             }));
+            actions.Children.Add(ActionIconGlyph.Button("Diff", ActionIcon.Diff, async (_, _) =>
+            {
+                await ShowDiffAsync(filePath);
+            }));
             Grid.SetColumn(actions, 1);
             line.Children.Add(actions);
             list.Children.Add(line);
         }
         _root.Children.Add(Chrome.Card("Changes", list));
+    }
+
+    private async Task ShowDiffAsync(string filePath)
+    {
+        JsonNode diff;
+        try
+        {
+            diff = await AppServices.Host.CallAsync(
+                "workspace.diff",
+                new JsonObject { ["id"] = _id, ["path"] = filePath });
+        }
+        catch (Exception ex)
+        {
+            _root.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+            return;
+        }
+        var text = diff?["diff"]?.GetValue<string>()
+            ?? diff?["text"]?.GetValue<string>()
+            ?? diff?.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
+            ?? "(empty)";
+        if (text.Length > 20000) text = text[..20000] + "…";
+        var dialog = new ContentDialog
+        {
+            Title = "Diff · " + filePath,
+            Content = new ScrollViewer
+            {
+                MaxHeight = 480,
+                Content = new TextBlock
+                {
+                    Text = text,
+                    FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+                    TextWrapping = TextWrapping.Wrap,
+                    IsTextSelectionEnabled = true,
+                },
+            },
+            CloseButtonText = "Close",
+        };
+        await Chrome.ShowDialog(this, dialog);
     }
 
     private async Task<UIElement> BranchBarAsync(string current)
