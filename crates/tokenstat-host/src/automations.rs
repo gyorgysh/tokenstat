@@ -290,6 +290,19 @@ pub fn agent_command(
                 .map(str::to_string),
             );
         }
+        "muse" => {
+            args.extend(["muse", "exec", "--json"].map(str::to_string));
+            if let Some(m) = model {
+                args.extend(["--model", m].map(str::to_string));
+            }
+            if let Some(e) = effort {
+                args.extend(["--reasoning-effort", e].map(str::to_string));
+            }
+            // Muse is deliberately Bypass-only in chat and automation runs:
+            // its own `--yolo` contract disables both tool approval and the
+            // workspace sandbox for this explicitly trusted action.
+            args.extend(["--yolo", "--", p].map(str::to_string));
+        }
         "grok" => {
             args.push("grok".into());
             if let Some(m) = model {
@@ -495,7 +508,7 @@ pub fn chat_agent_command(
     // Codex and OpenCode do not expose the same first-class plan switch as the
     // other backends. Give them an explicit turn instruction; Codex also gets
     // a read-only sandbox below, while OpenCode loses its headless auto grant.
-    if plan && matches!(backend, "codex" | "opencode" | "opencode2") {
+    if plan && matches!(backend, "codex" | "opencode" | "opencode2" | "muse") {
         instructions.push_str(
             "Plan mode: inspect and reason only. Do not modify files, run commands that change state, or perform external side effects. Return a proposed plan instead.",
         );
@@ -524,6 +537,22 @@ pub fn chat_agent_command(
             .unwrap_or(true);
     let model = if cursor_default { Some("auto") } else { model };
     let mut argv = agent_command(backend, prompt, model, effort, budget_seconds)?;
+    if backend == "muse" && (!launch.bypass || plan) {
+        // `agent_command` is shared with unattended automations, where Muse
+        // must be allowed to run its workspace tools. A persona draft is a
+        // plan-only chat turn instead: remove the full-bypass flag and make
+        // the CLI's own write and shell tools unavailable. The UI exposes
+        // Muse as Bypass-only, but retain this guard for older saved chats.
+        if let Some(index) = argv.iter().position(|value| value == "--yolo") {
+            argv.remove(index);
+        }
+        if plan {
+            argv.splice(
+                headless_flag_at(&argv)..headless_flag_at(&argv),
+                ["--disable-write".into(), "--disable-shell".into()],
+            );
+        }
+    }
     // Automations are an explicit background action and retain their existing
     // bypass contract. Chat is interactive: until a backend's hook-based
     // approval channel decides otherwise, it must not inherit those flags.
@@ -689,12 +718,26 @@ pub fn chat_agent_command(
                     argv.splice(at + 1..at + 1, ["-s".into(), token.into()]);
                 }
             }
+            "muse" => extra.extend(["--session-id".into(), token.into()]),
             "sh" => return Err("shell conversations cannot be resumed".into()),
             _ => {}
         }
     }
     if !extra.is_empty() {
         insert_flags(&mut argv, extra);
+    }
+    if backend == "codex" && launch.resume.is_some_and(|token| !token.trim().is_empty()) {
+        // `--sandbox` belongs to `codex exec`, not its `resume` subcommand.
+        // `insert_flags` correctly puts normal exec flags before the prompt,
+        // but after `resume <session>`; move this pair back across the
+        // subcommand so resumed Plan turns parse on current Codex CLIs.
+        if let Some(at) = argv.iter().position(|arg| arg == "--sandbox")
+            && let Some(value) = argv.get(at + 1).cloned()
+            && let Some(exec) = argv.iter().position(|arg| arg == "exec")
+        {
+            argv.drain(at..=at + 1);
+            argv.splice(exec + 1..exec + 1, ["--sandbox".into(), value]);
+        }
     }
     Ok(argv)
 }
@@ -746,6 +789,16 @@ pub fn interactive_agent_command(
                 ]
                 .map(str::to_string),
             );
+        }
+        "muse" => {
+            args.push("muse".into());
+            if let Some(m) = model {
+                args.extend(["--model", m].map(str::to_string));
+            }
+            if let Some(e) = effort {
+                args.extend(["--reasoning-effort", e].map(str::to_string));
+            }
+            args.extend(["--yolo", p].map(str::to_string));
         }
         "grok" => {
             args.push("grok".into());
@@ -878,6 +931,15 @@ pub fn backends(force: bool) -> Vec<serde_json::Value> {
             // nothing here emits that yet, and a picker that changes nothing
             // is worse than no picker.
             serde_json::json!([]),
+        ),
+        (
+            "muse",
+            "Muse",
+            "muse exec --json …",
+            // Muse does not expose a list-models command. Keep the requested
+            // contributor model visible instead of hiding model choice.
+            &["muse-spark-1.3-contributor"],
+            serde_json::json!(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
         ),
         (
             "grok",
@@ -2211,6 +2273,7 @@ mod tests {
         for backend in [
             "claude",
             "codex",
+            "muse",
             "grok",
             "cursor",
             "agy",
@@ -2539,6 +2602,28 @@ mod tests {
                 .iter()
                 .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox")
         );
+        let muse = chat_agent_command(
+            "muse",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                mode: "execute",
+                hook_helper: None,
+                system_append: None,
+                agy_customization_dir: None,
+                grok_allow_rules: &[],
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        assert!(
+            !muse.iter().any(|arg| arg == "--yolo"),
+            "a non-bypass Muse chat must never inherit YOLO: {muse:?}"
+        );
         let guarded_codex = chat_agent_command(
             "codex",
             "inspect this",
@@ -2644,6 +2729,51 @@ mod tests {
     }
 
     #[test]
+    fn chat_bypass_retains_each_backends_unattended_permission_flag() {
+        let launch = |backend: &str| {
+            chat_agent_command(
+                backend,
+                "make the change",
+                None,
+                None,
+                DEFAULT_BUDGET_SECONDS,
+                ChatLaunch {
+                    resume: Some("session-1"),
+                    bypass: true,
+                    mode: "execute",
+                    hook_helper: None,
+                    system_append: None,
+                    agy_customization_dir: None,
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap()
+        };
+        for (backend, flag) in [
+            ("claude", "--dangerously-skip-permissions"),
+            ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+            ("muse", "--yolo"),
+            ("cursor", "--trust"),
+            ("agy", "--dangerously-skip-permissions"),
+            ("opencode", "--auto"),
+            ("opencode2", "--auto"),
+        ] {
+            let argv = launch(backend);
+            assert!(
+                argv.iter().any(|arg| arg == flag),
+                "{backend} Bypass lost {flag}: {argv:?}"
+            );
+        }
+        let grok = launch("grok");
+        assert!(
+            grok.windows(2)
+                .any(|pair| pair == ["--permission-mode", "bypassPermissions"]),
+            "Grok Bypass must use bypassPermissions: {grok:?}"
+        );
+    }
+
+    #[test]
     fn persona_drafts_never_inherit_automation_write_access() {
         for backend in [
             "claude",
@@ -2714,6 +2844,36 @@ mod tests {
             "{grok:?}"
         );
         assert!(grok.windows(2).any(|pair| pair == ["--resume", "sess-1"]));
+    }
+
+    #[test]
+    fn codex_resume_keeps_sandbox_on_exec_not_on_resume() {
+        let codex = chat_agent_command(
+            "codex",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: Some("thread-1"),
+                bypass: false,
+                mode: "plan",
+                hook_helper: None,
+                system_append: None,
+                agy_customization_dir: None,
+                grok_allow_rules: &[],
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        let exec = codex.iter().position(|arg| arg == "exec").unwrap();
+        let resume = codex.iter().position(|arg| arg == "resume").unwrap();
+        let sandbox = codex.iter().position(|arg| arg == "--sandbox").unwrap();
+        assert!(exec < sandbox && sandbox < resume, "{codex:?}");
+        assert_eq!(
+            codex.get(sandbox + 1).map(String::as_str),
+            Some("read-only")
+        );
     }
 
     #[test]
@@ -2810,7 +2970,15 @@ mod tests {
 
     #[test]
     fn plan_mode_overrides_bypass_flags() {
-        for backend in ["claude", "codex", "cursor", "agy", "opencode", "opencode2"] {
+        for backend in [
+            "claude",
+            "codex",
+            "muse",
+            "cursor",
+            "agy",
+            "opencode",
+            "opencode2",
+        ] {
             let argv = chat_agent_command(
                 backend,
                 "inspect this",
@@ -2834,6 +3002,7 @@ mod tests {
                     arg.as_str(),
                     "--dangerously-skip-permissions"
                         | "--dangerously-bypass-approvals-and-sandbox"
+                        | "--yolo"
                         | "--trust"
                         | "--auto"
                 )),

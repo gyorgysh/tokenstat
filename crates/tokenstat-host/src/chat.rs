@@ -2638,7 +2638,11 @@ pub fn backends(force: bool) -> Vec<Value> {
                     // ask about anything else, it could only refuse. It now
                     // runs against a private `$GROK_HOME` holding tokenstat's
                     // own `PreToolUse` hook, so it asks like the rest.
-                    json!(if matches!(id, "cursor" | "sh") {
+                    // Muse's headless approval UI is not tokenstat's hook
+                    // protocol, so expose it as an explicit Bypass choice.
+                    // Bypass invokes Muse's `--yolo` mode: no approvals and
+                    // no workspace sandbox for that explicitly trusted run.
+                    json!(if matches!(id, "cursor" | "sh" | "muse") {
                         "bypassOnly"
                     } else {
                         "full"

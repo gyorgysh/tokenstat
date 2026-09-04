@@ -286,6 +286,7 @@ impl Parser {
             "claude" => render_claude_family(&value),
             "cursor" => render_cursor(&value),
             "codex" => render_codex(&value),
+            "muse" => render_muse(&value),
             "opencode" | "opencode2" => render_opencode(&value),
             "agy" => render_agy(&value),
             _ => None,
@@ -400,7 +401,7 @@ impl Parser {
     fn is_json_backend(&self) -> bool {
         matches!(
             self.backend.as_str(),
-            "grok" | "claude" | "cursor" | "codex" | "opencode" | "opencode2" | "agy"
+            "grok" | "claude" | "cursor" | "codex" | "muse" | "opencode" | "opencode2" | "agy"
         )
     }
 }
@@ -453,6 +454,7 @@ fn events_for_value(backend: &str, value: &Value) -> Vec<Event> {
         "claude" => events_claude(value),
         "cursor" => events_cursor(value),
         "codex" => events_codex(value),
+        "muse" => events_muse(value),
         "opencode" | "opencode2" => events_opencode(value),
         "agy" => events_agy(value),
         _ => Vec::new(),
@@ -721,6 +723,28 @@ fn events_codex(value: &Value) -> Vec<Event> {
         return event_failed(value.get("message").and_then(Value::as_str));
     }
     Vec::new()
+}
+
+/// Muse `exec --json` wraps each record in a stream envelope. Its session id
+/// is stable across the records and becomes the `--session-id` used for the
+/// next chat turn; visible answer text is carried by `run.output.delta`.
+fn events_muse(value: &Value) -> Vec<Event> {
+    let mut events = value
+        .pointer("/stream/id")
+        .and_then(Value::as_str)
+        .map(|id| Event::Session { id: id.into() })
+        .into_iter()
+        .collect::<Vec<_>>();
+    match value.get("payload_type").and_then(Value::as_str) {
+        Some("run.output.delta") => events.extend(event_text(
+            value.pointer("/payload/text").and_then(Value::as_str),
+        )),
+        Some("run.terminal.failed") => events.extend(event_failed(
+            value.pointer("/payload/reason").and_then(Value::as_str),
+        )),
+        _ => {}
+    }
+    events
 }
 
 fn events_opencode(value: &Value) -> Vec<Event> {
@@ -1250,6 +1274,22 @@ fn render_agy(value: &serde_json::Value) -> Option<Piece> {
                 ))
             })
         }
+        _ => None,
+    }
+}
+
+fn render_muse(value: &serde_json::Value) -> Option<Piece> {
+    match value.get("payload_type").and_then(Value::as_str) {
+        Some("run.output.delta") => value
+            .pointer("/payload/text")
+            .and_then(Value::as_str)
+            .and_then(|text| nonempty(Some(text)))
+            .map(Piece::Text),
+        Some("run.terminal.failed") => value
+            .pointer("/payload/reason")
+            .and_then(Value::as_str)
+            .and_then(|text| nonempty(Some(text)))
+            .map(Piece::Block),
         _ => None,
     }
 }
