@@ -247,12 +247,19 @@ struct PickerOptionList<Value: Hashable>: View {
     var refresh: (() async -> Void)?
     /// What a section is currently set to, shown beside its heading.
     var sectionValue: ((String) -> String?)?
+    /// Optional quick filters for a picker with several independent settings.
+    /// The agent/model/effort picker uses these to make its three editable
+    /// dimensions obvious before somebody starts scrolling its long list.
+    var sectionTabs: [String] = []
     var pick: (Value) -> Void
     /// Trailing accessory per row, for the model picker's favourite star.
     var accessory: ((Value) -> AnyView)?
 
     @State private var query = ""
     @State private var refreshing = false
+    /// Empty means every section. It avoids inventing a fourth, fake section
+    /// solely to represent the All tab.
+    @State private var selectedSection = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -269,6 +276,9 @@ struct PickerOptionList<Value: Hashable>: View {
                     if refresh != nil {
                         refreshButton
                     }
+                }
+                if !sectionTabs.isEmpty {
+                    sectionFilter
                 }
             }
             .padding(Theme.Space.s)
@@ -344,8 +354,51 @@ struct PickerOptionList<Value: Hashable>: View {
         .help("Ask this computer to read the agent's model list again")
     }
 
+    /// The group names stay visible while the list changes underneath them.
+    /// A search field alone told people they could search, not that Agent,
+    /// Model and Effort were separate things they could change.
+    private var sectionFilter: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                sectionTab(title: "All", section: "")
+                ForEach(sectionTabs, id: \.self) { section in
+                    sectionTab(title: section, section: section)
+                }
+            }
+        }
+        .accessibilityLabel("Filter settings")
+    }
+
+    private func sectionTab(title: String, section: String) -> some View {
+        let selected = selectedSection == section
+        return Button {
+            selectedSection = section
+        } label: {
+            Text(title)
+                .font(Theme.caption.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Theme.accent : .secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    selected ? Theme.accentSoft : Theme.background,
+                    in: Capsule()
+                )
+                .overlay {
+                    Capsule().strokeBorder(
+                        selected ? Theme.accent.opacity(0.35) : Theme.border,
+                        lineWidth: 1
+                    )
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
     private var filtered: [PickerChoice<Value>] {
-        choices.filter { $0.matches(query) }
+        choices.filter {
+            $0.matches(query) && (selectedSection.isEmpty || $0.section == selectedSection)
+        }
     }
 
     /// Sections in first-seen order. A dictionary would sort them by name and

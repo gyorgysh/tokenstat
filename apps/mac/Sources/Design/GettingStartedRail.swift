@@ -204,6 +204,10 @@ private struct GettingStartedDisc: View {
 struct GettingStartedGhostGrid: View {
     /// How many weeks wide. The Mac has room for a season, a phone does not.
     var weeks: Int = 18
+    /// The Mac's wider onboarding card uses its grid as part of the reading
+    /// rail. The client Home card uses a shorter grid as an illustration, so
+    /// it can opt into a centred treatment without changing the Mac layout.
+    var alignment: Alignment = .leading
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -238,7 +242,7 @@ struct GettingStartedGhostGrid: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: alignment)
     }
 
     /// Where the band is, as a fraction of the width, from the wall clock. Time

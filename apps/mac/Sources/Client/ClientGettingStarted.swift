@@ -98,7 +98,7 @@ struct ClientGettingStarted: View {
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            GettingStartedGhostGrid(weeks: 16)
+            GettingStartedGhostGrid(weeks: 16, alignment: .center)
                 .padding(.top, Theme.Space.xs)
         }
         .padding(.top, Theme.Space.xs)

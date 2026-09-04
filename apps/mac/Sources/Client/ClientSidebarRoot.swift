@@ -43,6 +43,10 @@ struct ClientSidebarRoot: View {
     @State private var summaries: [String: WorkspaceSummary] = [:]
     @State private var pullCounts = PullCountStore.shared
     @State private var columns = NavigationSplitViewVisibility.all
+    /// A path only knows about value-based links. Changes still opens a diff
+    /// through a view-based link, so changing the sidebar destination also
+    /// needs a fresh stack identity to dismiss that screen.
+    @State private var detailGeneration = 0
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
@@ -93,16 +97,23 @@ struct ClientSidebarRoot: View {
             // after going back.
             //
             // Emptied and re-identified, because the two do not cover the same
-            // ground: clearing the path pops what a link pushed, and the id
-            // rebuilds the stack for anything the path never held. Doing only
-            // the second was not enough on its own.
+            // ground: clearing the path pops value-based links, while a fresh
+            // identity dismisses view-based links such as a file diff. Doing
+            // only the first left a child screen sitting over the newly
+            // selected sidebar destination.
             .onChange(of: detailIdentity) { _, _ in
-                guard !detailPath.isEmpty else { return }
                 detailPath = NavigationPath()
+                detailGeneration &+= 1
             }
-            .id(detailIdentity)
         }
         .navigationSplitViewStyle(.balanced)
+        // `NavigationSplitView` retains its detail controller independently
+        // of the `NavigationStack` declared in its closure. Re-keying only
+        // that stack can therefore leave an already-presented diff or chat
+        // above the newly selected root. Re-key the split subtree instead:
+        // shared models live above this view, while every controller the split
+        // owns is replaced.
+        .id(detailGeneration)
         .clientShortcuts(shortcuts)
         .task { await reload() }
         .onChange(of: workspaces.connectedKey) { _, _ in
@@ -144,6 +155,11 @@ struct ClientSidebarRoot: View {
     }
 
     private func reload() async {
+        // The directory is the authority for a host's online state. Refresh it
+        // before rebuilding sidebar rows; previously this only rebuilt rows
+        // from the account snapshot that was already on screen, so pulling to
+        // refresh could leave a just-awake Mac looking disconnected.
+        await account.load()
         await workspaces.refresh(account: account.account)
         // Before the summaries, not after: the tree has nothing to count
         // until a host is connected, and `loadSummaries` bails on a nil

@@ -354,6 +354,7 @@ private struct ChatAgentMenu: View {
                 caption: "Three settings for this conversation.",
                 refresh: canRefresh ? { await model.reloadBackends() } : nil,
                 sectionValue: currentValue,
+                sectionTabs: selectableSections,
                 pick: pick,
                 accessory: { value in AnyView(star(for: value)) }
             )
@@ -411,6 +412,15 @@ private struct ChatAgentMenu: View {
             }
         }
         return rows
+    }
+
+    /// Only show filters that have choices for the selected agent. For
+    /// example, an agent with no effort control should not advertise one.
+    private var selectableSections: [String] {
+        var seen = Set<String>()
+        return choices.compactMap { choice in
+            seen.insert(choice.section).inserted ? choice.section : nil
+        }
     }
 
     /// What each section is set to, for its heading. The panel is three
