@@ -119,6 +119,9 @@ pub struct Parser {
     /// caller: a `Session` event writes the conversation index to disk, and
     /// one per line would be one save per line.
     last_session: Option<String>,
+    /// Muse names a tool when its task is proposed, then gives its stable call
+    /// id when it is scheduled. Keep that tiny join until the card can start.
+    muse_tasks: HashMap<String, String>,
 }
 
 impl Parser {
@@ -132,6 +135,7 @@ impl Parser {
             tool_inputs: HashMap::new(),
             last_claude_assistant: None,
             last_session: None,
+            muse_tasks: HashMap::new(),
         }
     }
 
@@ -272,6 +276,9 @@ impl Parser {
             return None;
         }
         if !cleaned.starts_with('{') {
+            if self.backend == "muse" && cleaned.starts_with("muse:") {
+                return None;
+            }
             if self.is_json_backend() {
                 // Truncated or escape-polluted JSON must not become the view.
                 if cleaned.contains("\"type\":") {
@@ -302,6 +309,9 @@ impl Parser {
             return Vec::new();
         }
         if !cleaned.starts_with('{') {
+            if self.backend == "muse" && cleaned.starts_with("muse:") {
+                return Vec::new();
+            }
             let events = if self.is_json_backend() && cleaned.contains("\"type\":") {
                 Vec::new()
             } else if let Some(text) = cli_refusal_text(&cleaned) {
@@ -314,7 +324,11 @@ impl Parser {
         let Ok(value) = serde_json::from_str(&cleaned) else {
             return Vec::new();
         };
-        let mut events = events_for_value(&self.backend, &value);
+        let mut events = if self.backend == "muse" {
+            self.events_muse(&value)
+        } else {
+            events_for_value(&self.backend, &value)
+        };
         if self.backend == "claude" {
             match value.get("type").and_then(Value::as_str) {
                 Some("assistant") => {
@@ -404,6 +418,73 @@ impl Parser {
             "grok" | "claude" | "cursor" | "codex" | "muse" | "opencode" | "opencode2" | "agy"
         )
     }
+
+    fn events_muse(&mut self, value: &Value) -> Vec<Event> {
+        let mut events = muse_session(value)
+            .map(|id| Event::Session { id: id.into() })
+            .into_iter()
+            .collect::<Vec<_>>();
+        let payload = value.get("payload").unwrap_or(value);
+        match value.get("payload_type").and_then(Value::as_str) {
+            Some("task.lifecycle.proposed") => {
+                let task = payload
+                    .get("task_id")
+                    .or_else(|| payload.pointer("/event/task_id"))
+                    .and_then(Value::as_str);
+                let kind = payload.pointer("/event/task_kind").and_then(Value::as_str);
+                if let (Some(task), Some(name)) = (task, kind.and_then(muse_tool_name)) {
+                    self.muse_tasks.insert(task.into(), name.into());
+                }
+            }
+            Some("task.lifecycle.scheduled") => {
+                let task = payload.get("task_id").and_then(Value::as_str);
+                let call = payload
+                    .pointer("/event/idempotency_key")
+                    .and_then(Value::as_str)
+                    .and_then(|key| key.strip_prefix("tool:"));
+                if let (Some(task), Some(call)) = (task, call)
+                    && let Some(name) = self.muse_tasks.remove(task)
+                {
+                    events.push(tool_start_with_id(call, &name, Value::Null));
+                }
+            }
+            Some("tool.result") => {
+                let call = payload.get("call_id").and_then(Value::as_str);
+                let name = payload
+                    .pointer("/correlation_facts/tool_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool");
+                if let Some(call) = call {
+                    // A result without a scheduled task is still useful when
+                    // attaching to a running Muse session.
+                    if !self.open_tools.iter().any(|open| open == call) {
+                        events.push(tool_start_with_id(call, name, Value::Null));
+                    }
+                    events.push(Event::ToolEnd {
+                        call_id: call.into(),
+                        ok: payload
+                            .pointer("/correlation_facts/outcome")
+                            .and_then(Value::as_str)
+                            .map(|outcome| outcome == "success")
+                            .unwrap_or(true),
+                        detail: muse_tool_result_detail(payload),
+                    });
+                    if let Some(edit) = muse_edit_event(payload, call) {
+                        events.push(edit);
+                    }
+                }
+            }
+            Some("run.output.delta") => {
+                events.extend(event_text(payload.get("text").and_then(Value::as_str)));
+            }
+            Some("run.terminal.failed") => {
+                events.extend(event_failed(payload.get("reason").and_then(Value::as_str)));
+            }
+            Some("run.terminal.completed") => events.push(done("done", None)),
+            _ => {}
+        }
+        events
+    }
 }
 
 /// Headless CLIs print a refusal as plain text, not NDJSON. That is a failed
@@ -454,7 +535,6 @@ fn events_for_value(backend: &str, value: &Value) -> Vec<Event> {
         "claude" => events_claude(value),
         "cursor" => events_cursor(value),
         "codex" => events_codex(value),
-        "muse" => events_muse(value),
         "opencode" | "opencode2" => events_opencode(value),
         "agy" => events_agy(value),
         _ => Vec::new(),
@@ -689,29 +769,62 @@ fn events_codex(value: &Value) -> Vec<Event> {
     if kind == "item.started" {
         let Some(item) = item else { return Vec::new() };
         return match item.get("type").and_then(Value::as_str) {
-            Some("command_execution") => vec![tool_start(
-                item,
-                "shell",
-                serde_json::json!({"command": item.get("command").and_then(Value::as_str).unwrap_or("")}),
-            )],
+            Some("command_execution") => {
+                let command = item.get("command").and_then(Value::as_str).unwrap_or("");
+                vec![tool_start(
+                    item,
+                    codex_command_kind(command),
+                    codex_command_input(command),
+                )]
+            }
+            // Codex reports first-class edits separately from shell commands.
+            // Keeping these as Edit cards makes the timeline show changes even
+            // when the agent used its apply-patch tool rather than a shell
+            // redirection. A single item can affect several files, so retain
+            // the whole change list as card input while using its first path
+            // for the collapsed-row target.
+            Some("file_change") => vec![tool_start(item, "edit", codex_file_change_input(item))],
             _ => Vec::new(),
         };
     }
     if kind == "item.completed" {
         let Some(item) = item else { return Vec::new() };
         return match item.get("type").and_then(Value::as_str) {
-            Some("agent_message" | "message" | "text") => event_text(
-                item.get("text")
+            Some("agent_message" | "message" | "text") => {
+                let text = item
+                    .get("text")
                     .and_then(Value::as_str)
-                    .or_else(|| item.get("content").and_then(Value::as_str)),
-            ),
-            Some("command_execution") => vec![Event::ToolEnd {
-                call_id: item_id(item),
-                ok: item.get("exit_code").and_then(json_i32).unwrap_or(0) == 0,
-                detail: item
+                    .or_else(|| item.get("content").and_then(Value::as_str));
+                if let Some(error) = codex_rejection(text) {
+                    event_failed(Some(&error))
+                } else {
+                    event_text(text)
+                }
+            }
+            Some("command_execution") => {
+                let detail = item
                     .get("aggregated_output")
                     .and_then(Value::as_str)
-                    .map(str::to_string),
+                    .map(str::to_string);
+                let ok = item
+                    .get("exit_code")
+                    .and_then(json_i32)
+                    .map(|code| code == 0)
+                    .unwrap_or_else(|| !detail.as_deref().is_some_and(|output| codex_rejection(Some(output)).is_some()));
+                vec![Event::ToolEnd {
+                    call_id: item_id(item),
+                    ok,
+                    detail,
+                }]
+            }
+            Some("file_change") => vec![Event::ToolEnd {
+                call_id: item_id(item),
+                ok: item
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .map(|status| status != "failed")
+                    .unwrap_or(true),
+                detail: codex_file_change_detail(item),
             }],
             _ => Vec::new(),
         };
@@ -725,26 +838,185 @@ fn events_codex(value: &Value) -> Vec<Event> {
     Vec::new()
 }
 
-/// Muse `exec --json` wraps each record in a stream envelope. Its session id
-/// is stable across the records and becomes the `--session-id` used for the
-/// next chat turn; visible answer text is carried by `run.output.delta`.
-fn events_muse(value: &Value) -> Vec<Event> {
-    let mut events = value
-        .pointer("/stream/id")
-        .and_then(Value::as_str)
-        .map(|id| Event::Session { id: id.into() })
-        .into_iter()
-        .collect::<Vec<_>>();
-    match value.get("payload_type").and_then(Value::as_str) {
-        Some("run.output.delta") => events.extend(event_text(
-            value.pointer("/payload/text").and_then(Value::as_str),
-        )),
-        Some("run.terminal.failed") => events.extend(event_failed(
-            value.pointer("/payload/reason").and_then(Value::as_str),
-        )),
-        _ => {}
+/// Codex can surface router/approval failures as a verbose agent message
+/// instead of a structured `error` event. Keep that failure out of the prose
+/// transcript so the corresponding tool row is visibly failed.
+fn codex_rejection(text: Option<&str>) -> Option<String> {
+    let text = text?.trim();
+    let lower = text.to_ascii_lowercase();
+    if !(lower.contains("codex_core::tools::router")
+        || lower.contains("exec_command failed")
+        || lower.contains("rejected(")
+        || lower.contains("commands are not permitted"))
+    {
+        return None;
     }
-    events
+    if let Some((_, reason)) = text.rsplit_once("rejected:") {
+        let reason = reason.trim().trim_matches(|ch| ch == '"' || ch == '}' || ch == ']');
+        return Some(format!("Codex tool rejected: {reason}"));
+    }
+    Some("Codex tool execution failed or was rejected.".into())
+}
+
+fn codex_file_change_input(item: &Value) -> Value {
+    let changes = item.get("changes").cloned().unwrap_or(Value::Null);
+    let path = changes
+        .as_array()
+        .and_then(|changes| changes.first())
+        .and_then(|change| change.get("path"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    serde_json::json!({"path": path, "changes": changes})
+}
+
+/// Codex's CLI deliberately exposes local tools through one
+/// `command_execution` item. Recover the common intent from the command so
+/// the timeline can use the same Read/Write/Diff/Grep cards as other engines.
+/// Mixed or unknown commands remain Shell and retain their complete command.
+fn codex_command_kind(command: &str) -> &'static str {
+    let lower = command.to_ascii_lowercase();
+    if lower.contains("diff ") || lower.contains(" diff") || lower.starts_with("diff") {
+        return "diff";
+    }
+    if lower.contains("rg ") || lower.contains("grep ") || lower.contains("grep -") {
+        return "grep";
+    }
+    if lower.contains("cat ")
+        || lower.contains("sed ")
+        || lower.contains("head ")
+        || lower.contains("tail ")
+        || lower.contains(" od ")
+    {
+        return "read_file";
+    }
+    if lower.contains("mkdir ")
+        || lower.contains("touch ")
+        || lower.contains(" cp ")
+        || lower.contains(" mv ")
+        || lower.contains(" rm ")
+        || lower.contains("> ")
+        || lower.contains(" | tee ")
+    {
+        return "write_file";
+    }
+    "shell"
+}
+
+fn codex_command_input(command: &str) -> Value {
+    let kind = codex_command_kind(command);
+    let target = command
+        .split_whitespace()
+        .map(|part| part.trim_matches(|ch: char| "'\";,()".contains(ch)))
+        .find(|part| {
+            (part.starts_with('/') || part.ends_with(".txt") || part.ends_with(".md"))
+                && !matches!(*part, "/bin/sh" | "/bin/bash" | "/bin/zsh")
+        })
+        .unwrap_or("");
+    if target.is_empty() || kind == "shell" {
+        serde_json::json!({"command": command})
+    } else {
+        serde_json::json!({"path": target, "command": command})
+    }
+}
+
+fn codex_file_change_detail(item: &Value) -> Option<String> {
+    let changes = item.get("changes")?.as_array()?;
+    let lines: Vec<String> = changes
+        .iter()
+        .filter_map(|change| {
+            let path = change.get("path").and_then(Value::as_str)?;
+            // Newer Codex builds may include the actual patch on each change.
+            // Preserve it verbatim so the client can render real +/- lines.
+            if let Some(patch) = change
+                .get("diff")
+                .or_else(|| change.get("patch"))
+                .and_then(Value::as_str)
+                .filter(|patch| !patch.trim().is_empty())
+            {
+                return Some(patch.to_string());
+            }
+            if let (Some(old), Some(new)) = (
+                change.get("old_content").and_then(Value::as_str),
+                change.get("new_content").and_then(Value::as_str),
+            ) {
+                let mut lines = Vec::new();
+                lines.extend(old.lines().map(|line| format!("-{line}")));
+                lines.extend(new.lines().map(|line| format!("+{line}")));
+                if !lines.is_empty() {
+                    return Some(lines.join("\n"));
+                }
+            }
+            let kind = change
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("updated");
+            let label = match kind {
+                "add" | "create" => "Added file",
+                "delete" | "remove" => "Removed file",
+                _ => "Updated file",
+            };
+            Some(format!("{label}: {path}"))
+        })
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// Muse `exec --json` stamps every record with the session that `--session-id`
+/// needs on the next chat turn.
+fn muse_session(value: &Value) -> Option<&str> {
+    value.pointer("/stream/id").and_then(Value::as_str)
+}
+
+/// Task kinds are deliberately namespaced. Model tasks are plumbing; only the
+/// `tool.*` ones belong in the conversation timeline.
+fn muse_tool_name(kind: &str) -> Option<&str> {
+    kind.strip_prefix("tool.")
+}
+
+/// Muse's Bash tool returns a JSON document *as the text field* of its normal
+/// tool result. It is useful structured data, not assistant prose: unwrap it
+/// so a chat row reads like the other engines' command and stdout card.
+fn muse_tool_result_detail(payload: &Value) -> Option<String> {
+    let text = payload.get("text").and_then(Value::as_str)?;
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return (!text.is_empty()).then(|| text.to_string());
+    };
+    let command = value.get("command").and_then(Value::as_str);
+    let description = value.get("description").and_then(Value::as_str);
+    let output = value.get("output").and_then(Value::as_str);
+    if command.is_none() && description.is_none() && output.is_none() {
+        return (!text.is_empty()).then(|| text.to_string());
+    }
+    let mut sections = Vec::new();
+    if let Some(description) = description.filter(|value| !value.is_empty()) {
+        sections.push(description.to_string());
+    }
+    if let Some(command) = command.filter(|value| !value.is_empty()) {
+        sections.push(format!("$ {command}"));
+    }
+    if let Some(output) = output.filter(|value| !value.is_empty()) {
+        sections.push(output.to_string());
+    }
+    (!sections.is_empty()).then(|| sections.join("\n"))
+}
+
+/// `edit_facts` has the exact path and line counts that are missing from the
+/// task lifecycle. Pair it with the tool's textual unified patch so the UI
+/// gets its first-class, expandable edit row instead of a generic tool card.
+fn muse_edit_event(payload: &Value, call_id: &str) -> Option<Event> {
+    let facts = payload.get("edit_facts")?;
+    if facts.get("tool_name").and_then(Value::as_str) != Some("edit_file") {
+        return None;
+    }
+    let path = facts.get("path").and_then(Value::as_str)?;
+    let patch = payload.get("text").and_then(Value::as_str)?;
+    Some(Event::Edit {
+        call_id: call_id.into(),
+        path: path.into(),
+        added: facts.get("added").and_then(Value::as_u64).unwrap_or(0) as u32,
+        removed: facts.get("removed").and_then(Value::as_u64).unwrap_or(0) as u32,
+        patch: patch.into(),
+    })
 }
 
 fn events_opencode(value: &Value) -> Vec<Event> {
@@ -1201,6 +1473,10 @@ fn render_codex(value: &serde_json::Value) -> Option<Piece> {
             let one_line = command.lines().next().unwrap_or(command);
             return Some(Piece::Block(format!("Shell {one_line}")));
         }
+        if item_type == "file_change" {
+            let detail = codex_file_change_detail(item)?;
+            return Some(Piece::Block(format!("Edit {detail}")));
+        }
         return None;
     }
     if kind == "message" && value.get("role").and_then(|v| v.as_str()) == Some("assistant") {
@@ -1650,6 +1926,7 @@ fn display_verb(name: &str) -> String {
             return "Shell".into();
         }
         "grep" | "grep_search" | "code_search" | "search" => return "Grep".into(),
+        "diff" | "compare" => return "Diff".into(),
         "glob" | "find_by_name" | "list_dir" | "list_directory" | "ls" => return "Glob".into(),
         "webfetch" | "web_fetch" | "read_url_content" | "fetch" => return "WebFetch".into(),
         "websearch" | "web_search" | "search_web" => return "WebSearch".into(),
@@ -1841,6 +2118,74 @@ mod tests {
                 "{backend} leaked its stream marker as a process outcome: {events:?}"
             );
         }
+    }
+
+    #[test]
+    fn muse_streams_tool_cards_and_hides_its_startup_diagnostics() {
+        let raw = concat!(
+            "muse: workspace root: /tmp (explicit)\n",
+            r#"{"stream":{"kind":"session","id":"muse-session"},"payload_type":"task.lifecycle.proposed","payload":{"task_id":"task-1","event":{"task_kind":"tool.read_file"}}}"#,
+            "\n",
+            r#"{"stream":{"kind":"session","id":"muse-session"},"payload_type":"task.lifecycle.scheduled","payload":{"task_id":"task-1","event":{"idempotency_key":"tool:call-1"}}}"#,
+            "\n",
+            r#"{"stream":{"kind":"session","id":"muse-session"},"payload_type":"tool.result","payload":{"call_id":"call-1","text":"Read text file `/tmp/check.txt`.","correlation_facts":{"tool_name":"read_file","outcome":"success"}}}"#,
+            "\n",
+            r#"{"stream":{"kind":"session","id":"muse-session"},"payload_type":"run.output.delta","payload":{"text":"Two lines."}}"#,
+            "\n"
+        );
+        let mut parser = Parser::new("muse");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::ToolStart { call_id, verb, .. } if call_id == "call-1" && verb == "Read"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::ToolEnd { call_id, ok: true, detail: Some(detail) }
+                if call_id == "call-1" && detail.contains("/tmp/check.txt")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::Text { delta } if delta == "Two lines."
+        )));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            Event::Text { delta } if delta.starts_with("muse:")
+        )));
+    }
+
+    #[test]
+    fn muse_unwraps_shell_json_and_emits_a_real_edit() {
+        // Captured from Muse Spark 1.3 contributor: Bash serializes its
+        // command and stdout as JSON inside `tool.result.text`, while edits
+        // attach exact file facts alongside their textual unified patch.
+        let raw = concat!(
+            r#"{"payload_type":"tool.result","payload":{"call_id":"bash-1","text":"{\"command\":\"diff -u a b || true\",\"description\":\"Compare files\",\"output\":\"-old\\n+new\\n\"}","correlation_facts":{"tool_name":"bash","outcome":"success"}}}"#,
+            "\n",
+            r#"{"payload_type":"tool.result","payload":{"call_id":"edit-1","text":"edited\n-old\n+new\n","edit_facts":{"tool_name":"edit_file","path":"/tmp/note.txt","added":1,"removed":1},"correlation_facts":{"tool_name":"edit_file","outcome":"success"}}}"#,
+            "\n"
+        );
+        let mut parser = Parser::new("muse");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, detail: Some(detail), .. }
+                    if call_id == "bash-1"
+                        && detail.contains("Compare files")
+                        && detail.contains("$ diff -u a b || true")
+                        && detail.contains("-old")
+            )),
+            "{events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::Edit { call_id, path, added: 1, removed: 1, patch }
+                    if call_id == "edit-1" && path == "/tmp/note.txt" && patch.contains("+new")
+            )),
+            "{events:?}"
+        );
     }
 
     #[test]
@@ -2129,6 +2474,81 @@ mod tests {
         assert!(out.contains("Done."));
         assert!(out.contains("Shell ls -la"));
         assert!(!out.contains("item.started"));
+    }
+
+    #[test]
+    fn codex_file_changes_are_edit_cards_not_lost_as_shell_only() {
+        // Captured from `codex exec --json` using gpt-5.6-luna. Codex emits
+        // file changes as their own item type; it does not describe an
+        // apply-patch operation as command_execution.
+        let raw = concat!(
+            "{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"file_change\",\"changes\":[{\"path\":\"/tmp/check/sample.txt\",\"kind\":\"update\"}],\"status\":\"in_progress\"}}\n",
+            "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"file_change\",\"changes\":[{\"path\":\"/tmp/check/sample.txt\",\"kind\":\"update\"}],\"status\":\"completed\"}}\n",
+        );
+        let mut parser = Parser::new("codex");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolStart { call_id, verb, target, .. }
+                    if call_id == "item_3" && verb == "Edit" && target == "/tmp/check/sample.txt"
+            )),
+            "{events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, ok: true, detail: Some(detail) }
+                    if call_id == "item_3" && detail == "Updated file: /tmp/check/sample.txt"
+            )),
+            "{events:?}"
+        );
+        assert!(feed("codex", raw).contains("Edit Updated file: /tmp/check/sample.txt"));
+    }
+
+    #[test]
+    fn codex_command_tools_get_semantic_cards() {
+        let raw = concat!(
+            r#"{"type":"item.started","item":{"id":"read-1","type":"command_execution","command":"/bin/zsh -lc 'sed -n 1,5p /tmp/note.txt'"}}"#,
+            "\n",
+            r#"{"type":"item.completed","item":{"id":"read-1","type":"command_execution","command":"/bin/zsh -lc 'sed -n 1,5p /tmp/note.txt'","aggregated_output":"hello\n","exit_code":0}}"#,
+            "\n",
+            r#"{"type":"item.started","item":{"id":"diff-1","type":"command_execution","command":"diff -u /tmp/old.txt /tmp/new.txt || true"}}"#,
+            "\n",
+            r#"{"type":"item.completed","item":{"id":"diff-1","type":"command_execution","command":"diff -u /tmp/old.txt /tmp/new.txt || true","aggregated_output":"-old\n+new\n","exit_code":0}}"#,
+            "\n"
+        );
+        let mut parser = Parser::new("codex");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolStart { call_id, verb, target, .. }
+                    if call_id == "read-1" && verb == "Read" && target == "/tmp/note.txt"
+            )),
+            "{events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolStart { call_id, verb, target, .. }
+                    if call_id == "diff-1" && verb == "Diff" && target == "/tmp/old.txt"
+            )),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn codex_file_change_preserves_native_patch_lines() {
+        let raw = concat!(
+            "{\"type\":\"item.started\",\"item\":{\"id\":\"patch-1\",\"type\":\"file_change\",\"changes\":[{\"path\":\"/tmp/a.txt\",\"kind\":\"update\",\"diff\":\"-old\\n+new\"}]}}\n",
+            "{\"type\":\"item.completed\",\"item\":{\"id\":\"patch-1\",\"type\":\"file_change\",\"status\":\"completed\",\"changes\":[{\"path\":\"/tmp/a.txt\",\"kind\":\"update\",\"diff\":\"-old\\n+new\"}]}}\n",
+        );
+        let events = Parser::new("codex").push_events(raw.as_bytes());
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::ToolEnd { detail: Some(detail), .. } if detail == "-old\n+new"
+        )));
     }
 
     #[test]

@@ -278,6 +278,9 @@ pub fn agent_command(
                 args.push("--model".into());
                 args.push(m.into());
             }
+            if let Some(e) = effort {
+                args.extend(["-c".into(), format!("model_reasoning_effort={e}")]);
+            }
             args.extend(
                 [
                     "exec",
@@ -781,6 +784,9 @@ pub fn interactive_agent_command(
                 args.push("--model".into());
                 args.push(m.into());
             }
+            if let Some(e) = effort {
+                args.extend(["-c".into(), format!("model_reasoning_effort={e}")]);
+            }
             args.extend(
                 [
                     "--dangerously-bypass-approvals-and-sandbox",
@@ -927,18 +933,22 @@ pub fn backends(force: bool) -> Vec<serde_json::Value> {
                 "gpt-5.4",
                 "gpt-5.4-mini",
             ],
-            // Codex takes an effort through `-c model_reasoning_effort=`, but
-            // nothing here emits that yet, and a picker that changes nothing
-            // is worse than no picker.
-            serde_json::json!([]),
+            // Codex takes an effort through `-c model_reasoning_effort=`.
+            serde_json::json!(["low", "medium", "high", "xhigh", "max"]),
         ),
         (
             "muse",
             "Muse",
             "muse exec --json …",
-            // Muse does not expose a list-models command. Keep the requested
-            // contributor model visible instead of hiding model choice.
-            &["muse-spark-1.3-contributor"],
+            // Muse does not expose a list-models command. Its built-in model
+            // picker currently offers this Spark set, so keep the complete
+            // choice visible rather than pinning chat to Contributor.
+            &[
+                "muse-spark-1.3",
+                "muse-spark-1.3-contributor",
+                "muse-spark-1.2",
+                "muse-spark-1.2-contributor",
+            ],
             serde_json::json!(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
         ),
         (
@@ -3077,6 +3087,19 @@ mod tests {
         let at_effort = claude.iter().position(|a| a == "--effort").unwrap();
         assert_eq!(claude[at_effort + 1], "high");
 
+        let codex = agent_command(
+            "codex",
+            "do it",
+            Some("gpt-5.6-luna"),
+            Some("low"),
+            DEFAULT_BUDGET_SECONDS,
+        )
+        .unwrap();
+        let at_model = codex.iter().position(|a| a == "--model").unwrap();
+        assert_eq!(codex[at_model + 1], "gpt-5.6-luna");
+        let at_effort = codex.iter().position(|a| a == "-c").unwrap();
+        assert_eq!(codex[at_effort + 1], "model_reasoning_effort=low");
+
         // A backend without the flags must not silently swallow them; the
         // shell ignores both because the client never offers a picker for it.
         let shell = agent_command(
@@ -3143,6 +3166,23 @@ mod tests {
             .collect();
         assert!(ids.contains(&"opencode".into()));
         assert!(ids.contains(&"opencode2".into()));
+    }
+
+    #[test]
+    fn muse_advertises_every_available_spark_model() {
+        let muse = backends(false)
+            .into_iter()
+            .find(|backend| backend.get("id").and_then(serde_json::Value::as_str) == Some("muse"))
+            .expect("Muse backend is advertised");
+        assert_eq!(
+            muse["models"],
+            serde_json::json!([
+                "muse-spark-1.3",
+                "muse-spark-1.3-contributor",
+                "muse-spark-1.2",
+                "muse-spark-1.2-contributor",
+            ])
+        );
     }
 
     #[test]

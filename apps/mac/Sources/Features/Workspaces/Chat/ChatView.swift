@@ -293,11 +293,6 @@ struct ChatView: View {
                 // (growth frames repin on their own).
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
-            .onChange(of: streamToken) { _, _ in
-                // Each of these is a walk over every row between here and
-                // the end. Skip it when already there.
-                if !follow.atEnd { pinToLatest(proxy, animated: false) }
-            }
             .onChange(of: followPulse) { _, _ in
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
@@ -351,12 +346,17 @@ struct ChatView: View {
                 // opening backfill takes, and the pages that landed after it
                 // ran out are what left the view in the middle.
                 var quiet = 0
+                var correctionPins = 0
                 for _ in 0..<Self.settleFrames {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, isActive, model.approvals.isEmpty else { return }
-                    // Only when it is not already there. Each of these is a
-                    // walk over every row between here and the end.
-                    if !follow.atEnd { pinToLatest(proxy, animated: false) }
+                    // A lazy-stack scroll walks every row between here and
+                    // the end. Limit settling corrections; geometry-based
+                    // repinning handles later height changes.
+                    if !follow.atEnd, correctionPins < 3 {
+                        correctionPins += 1
+                        pinToLatest(proxy, animated: false)
+                    }
                     quiet = model.openingConversation ? 0 : quiet + 1
                     if follow.arrived, quiet >= 3 { return }
                 }
@@ -467,10 +467,6 @@ struct ChatView: View {
             runningTool: model.isRunningTool,
             settle: settleMood
         )
-    }
-
-    private var streamToken: Int {
-        TranscriptFollow.streamExtent(model.displayItems)
     }
 
     private func settleAfterTurn(was: Bool, now: Bool) {

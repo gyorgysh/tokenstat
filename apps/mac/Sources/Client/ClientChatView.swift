@@ -418,9 +418,6 @@ struct ClientChatThread: View {
             .onChange(of: structureToken) { _, _ in
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
-            .onChange(of: streamToken) { _, _ in
-                if !follow.atEnd { pinToLatest(proxy, animated: false) }
-            }
             .onChange(of: followPulse) { _, _ in
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
@@ -461,12 +458,17 @@ struct ClientChatThread: View {
                 // Same as the Mac: hold the end until the conversation has
                 // stopped arriving, not for a fixed count of frames.
                 var quiet = 0
+                var correctionPins = 0
                 for _ in 0..<40 {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, model.approvals.isEmpty else { return }
-                    // Only when it is not already there. Each of these is a
-                    // walk over every row between here and the end.
-                    if !follow.atEnd { pinToLatest(proxy, animated: false) }
+                    // A lazy-stack scroll walks every row between here and
+                    // the end. Limit settling corrections; geometry-based
+                    // repinning handles later height changes.
+                    if !follow.atEnd, correctionPins < 3 {
+                        correctionPins += 1
+                        pinToLatest(proxy, animated: false)
+                    }
                     quiet = model.openingConversation ? 0 : quiet + 1
                     if follow.arrived, quiet >= 3 { return }
                 }
@@ -533,10 +535,6 @@ struct ClientChatThread: View {
             runningTool: model.isRunningTool,
             settle: settleMood
         )
-    }
-
-    private var streamToken: Int {
-        TranscriptFollow.streamExtent(model.displayItems)
     }
 
     private func settleAfterTurn(was: Bool, now: Bool) {

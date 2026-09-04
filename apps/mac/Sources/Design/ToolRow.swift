@@ -25,7 +25,9 @@ struct ToolRow: View {
     }
 
     /// Red/green lines the host attached to an edit's end event.
-    private var hasDiff: Bool { diffAdded + diffRemoved > 0 }
+    private var hasDiff: Bool {
+        ["Edit", "NotebookEdit", "Diff"].contains(verb) && diffAdded + diffRemoved > 0
+    }
 
     private var diffAdded: Int {
         snippet.filter { Self.isDiffLine($0, added: true) }.count
@@ -166,6 +168,7 @@ struct ToolRow: View {
         case "Read": return "book"
         case "Write": return "pencil"
         case "Edit", "NotebookEdit": return "square.and.pencil"
+        case "Diff": return "arrow.left.arrow.right"
         case "Shell", "Bash": return "terminal"
         case "Grep", "Search": return "magnifyingglass"
         case "Glob", "Find": return "folder"

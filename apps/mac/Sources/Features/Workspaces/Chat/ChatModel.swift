@@ -1230,7 +1230,10 @@ struct ChatToolState: Equatable {
         // and unified patches ("-hello", "@@" hunks stay grey). Other verbs
         // keep the output marker on every line, so a shell trace like
         // "+ set -x" never poses as a diff.
-        let diffVerbs = ["Edit", "NotebookEdit"]
+        // Codex often exposes a unified patch through a command_execution
+        // item. Treat Diff like a native edit so +/- lines remain visible and
+        // receive the same semantic coloring as Edit/NotebookEdit cards.
+        let diffVerbs = ["Edit", "NotebookEdit", "Diff"]
         let isDiff = diffVerbs.contains(verb)
         var out = lines.prefix(Self.snippetLineCap).map { line in
             if isDiff, Self.isDiffLine(line) {
