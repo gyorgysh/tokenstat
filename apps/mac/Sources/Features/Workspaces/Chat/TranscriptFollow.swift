@@ -186,6 +186,10 @@ final class TranscriptFollowState {
     /// A conversation the reader can leave is better than one
     /// nobody can use.
     @ObservationIgnored private var repinsSpent = 0
+    /// When the last repin walk ran. Growth frames arrive faster than walks
+    /// pay off, so repins coalesce to ~6 a second (see the throttle below).
+    /// Reset wherever a new pursuit starts so Jump and send act at once.
+    @ObservationIgnored private var lastRepinAt = Date.distantPast
     /// Whether the last frame put the end under the viewport.
     ///
     /// Read by the loops that hold the end while a conversation opens. One
@@ -222,6 +226,7 @@ final class TranscriptFollowState {
         steadyFrames = 0
         abandoned = false
         repinsSpent = 0
+        lastRepinAt = .distantPast
         undrivenDrift = 0
         if active {
             paused = false
@@ -328,7 +333,14 @@ final class TranscriptFollowState {
             // budget only stops asking the lazy stack for another walk,
             // never the pin itself.
             if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold {
+                // One walk per frame is the sluggishness: a streaming turn
+                // grows for hundreds of frames and each repin walks the lazy
+                // stack over every row in between. Coalesce to ~6 walks a
+                // second; the end still catches up every frame it matters.
+                let now = Date()
+                guard now.timeIntervalSince(lastRepinAt) > 0.15 else { return }
                 guard repinsSpent < Self.repinBudget else { return }
+                lastRepinAt = now
                 repinsSpent += 1
                 markDrivenInstant()
                 repin?()
@@ -390,6 +402,7 @@ final class TranscriptFollowState {
         paused = false
         pinned = true
         repinsSpent = 0
+        lastRepinAt = .distantPast
         undrivenDrift = 0
         markDriven()
         set(jump: false)
