@@ -91,6 +91,13 @@ fn run() -> Result<(), String> {
     // fully-started shell is warmed beside the environment and handed over on
     // request.
     tokenstat_pty::warm_shell_pool();
+    // And the agent CLIs' model lists, for the same reason. A client asks for
+    // them as its first screen paints, and until a probe has answered every
+    // backend falls back to a curated list, or to nothing for the ones that
+    // have no curated list. That is how a fresh daemon served a Codex chat
+    // with no model picker: the answer was correct at the moment it was given
+    // and stale a second later, and the app keeps the list it was handed.
+    tokenstat_host::agent_models::refresh();
 
     // Open the archive before binding. Failing after the socket exists would
     // leave clients connecting to something that answers every request with an

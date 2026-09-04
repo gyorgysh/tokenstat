@@ -151,6 +151,12 @@ struct ChatView: View {
         }
         .task(id: "\(model.selected?.id ?? "")-\(isActive)") {
             guard isActive else { return }
+            // A daemon that has just started serves its curated fallbacks
+            // while it probes the agent CLIs. Give that a moment and look
+            // again, so a chat opened during the race does not keep a
+            // half-filled model list until the window is closed.
+            try? await Task.sleep(for: .seconds(2))
+            await model.refillBackendsIfIncomplete()
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(400))
                 await model.poll()

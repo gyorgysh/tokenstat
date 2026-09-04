@@ -856,7 +856,29 @@ pub fn backends(force: bool) -> Vec<serde_json::Value> {
             // `--effort` per `claude --help`: low, medium, high, xhigh, max.
             serde_json::json!(["low", "medium", "high", "xhigh", "max"]),
         ),
-        ("codex", "Codex", "codex exec … -- \"…\"", &[], serde_json::json!([])),
+        (
+            "codex",
+            "Codex",
+            "codex exec … -- \"…\"",
+            // The live list comes from `codex app-server`'s `model/list`, and
+            // replaces these the moment a probe answers. They are here because
+            // the first request after a daemon starts is served before any
+            // probe has finished, and an empty list means no model picker at
+            // all: a Codex chat could only ever run the model in
+            // `~/.codex/config.toml`, with nothing on screen saying why.
+            &[
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
+                "gpt-5.5",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+            ],
+            // Codex takes an effort through `-c model_reasoning_effort=`, but
+            // nothing here emits that yet, and a picker that changes nothing
+            // is worse than no picker.
+            serde_json::json!([]),
+        ),
         (
             "grok",
             "Grok",

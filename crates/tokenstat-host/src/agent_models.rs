@@ -15,7 +15,7 @@
 //! show, and a timeout cannot hang the picker.
 
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{BufRead, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
@@ -77,7 +77,7 @@ pub fn refresh_now() {
 /// Whether any entry is missing or past its TTL. Pure cache read, no probes.
 fn needs_refresh() -> bool {
     let cache = cache_lock();
-    for id in ["grok", "cursor", "agy", "opencode", "opencode2"] {
+    for id in ["grok", "cursor", "agy", "codex", "opencode", "opencode2"] {
         let stale = match cache.get(id) {
             None => true,
             Some(entry) => {
@@ -143,6 +143,7 @@ fn probe_all(force: bool) {
             })
         });
         scope.spawn(|| fill("agy", force, || list("agy", &["models"], parse_agy_models)));
+        scope.spawn(|| fill("codex", force, codex_models));
         scope.spawn(|| {
             fill("opencode", force, || {
                 list("opencode", &["models"], parse_opencode_models)
@@ -267,6 +268,82 @@ fn run_list(bin: &str, args: &[&str]) -> Option<String> {
     }
     let bytes = rx.recv_timeout(Duration::from_secs(1)).ok()?;
     Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Codex's model list, over its app server.
+///
+/// Every other CLI here answers a `models` subcommand. Codex does not: its
+/// picker is part of the interactive UI, `codex models` wants a terminal, and
+/// the list itself is served by `codex app-server` as a `model/list` request.
+/// So this is a three-line JSON-RPC conversation, not a command whose output
+/// gets parsed, and it is the reason a Codex chat had no model picker at all
+/// while every other agent had one.
+///
+/// The child is killed, not asked to stop. `app-server` is a server: it does
+/// not exit when its question has been answered, and there is nothing else we
+/// want from it.
+fn codex_models() -> Option<Vec<String>> {
+    let bin = crate::launcher::resolve_command("codex")?;
+    let mut child = Command::new(bin)
+        .arg("app-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env("PATH", crate::launcher::search_path_var())
+        .spawn()
+        .ok()?;
+
+    // `initialize` first: the server answers nothing else until it has been
+    // told who is asking.
+    {
+        let stdin = child.stdin.as_mut()?;
+        let handshake = concat!(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":"#,
+            r#"{"name":"tokenstat","title":"tokenstat","version":"1"}}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":2,"method":"model/list","params":{}}"#,
+            "\n",
+        );
+        stdin.write_all(handshake.as_bytes()).ok()?;
+        stdin.flush().ok()?;
+    }
+    // Closing stdin would end the session before the answer arrives, so the
+    // pipe is held open for as long as the child is.
+    let stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(stdout.take(LIST_CAP as u64));
+        for line in reader.lines().map_while(Result::ok) {
+            // Notifications arrive on the same pipe. Only the answer to id 2
+            // is being waited for.
+            if line.contains("\"id\":2") {
+                let _ = tx.send(line);
+                return;
+            }
+        }
+    });
+    let answer = rx.recv_timeout(LIST_TIMEOUT);
+    let _ = child.kill();
+    let _ = child.wait();
+    parse_codex_models(&answer.ok()?)
+}
+
+/// The ids out of one `model/list` answer, in the order the server gave them,
+/// which puts the default first. A model the server marks hidden is hidden
+/// from its own picker and does not belong in ours either.
+pub(crate) fn parse_codex_models(line: &str) -> Option<Vec<String>> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let models = value.get("result")?.get("data")?.as_array()?;
+    let ids: Vec<String> = models
+        .iter()
+        .filter(|model| model.get("hidden").and_then(serde_json::Value::as_bool) != Some(true))
+        .filter_map(|model| model.get("id").and_then(serde_json::Value::as_str))
+        .filter(|id| is_model_id(id))
+        .map(str::to_string)
+        .collect();
+    (!ids.is_empty()).then_some(ids)
 }
 
 /// `grok models` prints a login banner, then `* grok-4.6 (default)` / `- grok-4.5`.
@@ -606,6 +683,42 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
                 "opencode models parsed to {list:?}"
             );
         }
+        // Codex speaks a protocol instead of printing a list, so this one
+        // exercises the whole handshake on a machine that has the CLI.
+        if crate::launcher::resolve_command("codex").is_some() {
+            if let Some(list) = codex_models() {
+                assert!(
+                    list.iter().all(|m| !m.is_empty()),
+                    "codex models parsed to {list:?}"
+                );
+            }
+        }
+    }
+
+    /// The one shape that matters out of `model/list`: ids, in order, with
+    /// the hidden ones left out.
+    #[test]
+    fn codex_list_takes_visible_ids_in_order() {
+        let line = r#"{"id":2,"result":{"data":[
+            {"id":"gpt-5.6-sol","displayName":"GPT-5.6-Sol","isDefault":true,"hidden":false},
+            {"id":"gpt-5.6-terra","displayName":"GPT-5.6-Terra","hidden":false},
+            {"id":"internal-eval","hidden":true}
+        ]}}"#;
+        assert_eq!(
+            parse_codex_models(line),
+            Some(vec!["gpt-5.6-sol".to_string(), "gpt-5.6-terra".to_string()])
+        );
+    }
+
+    /// A notification on the same pipe, or an error answer, is not a list.
+    #[test]
+    fn codex_list_rejects_anything_that_is_not_an_answer() {
+        assert_eq!(
+            parse_codex_models(r#"{"method":"x/changed","params":{}}"#),
+            None
+        );
+        assert_eq!(parse_codex_models(r#"{"id":2,"error":{"code":-1}}"#), None);
+        assert_eq!(parse_codex_models(r#"{"id":2,"result":{"data":[]}}"#), None);
     }
 
     #[test]

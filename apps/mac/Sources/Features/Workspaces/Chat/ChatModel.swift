@@ -291,6 +291,28 @@ final class ChatModel {
         }
     }
 
+    /// Take the backend list again when the one in hand looks like a daemon
+    /// that had not finished probing.
+    ///
+    /// The host answers immediately and fills its model lists on a background
+    /// thread, so the first request after it starts is served from curated
+    /// fallbacks. A client that asks once, at launch, and keeps the answer
+    /// forever is holding that half-filled list for the life of the window,
+    /// which is how a Codex chat ended up with no model picker on a machine
+    /// whose host could list six models a second later.
+    ///
+    /// Unforced: this is the ordinary cached read, arriving late enough to be
+    /// the real one. Refresh in the picker is the other call, for a list that
+    /// is complete but out of date.
+    func refillBackendsIfIncomplete() async {
+        guard let chosen = backends.first(where: { $0.id == selected?.backend }) else { return }
+        guard chosen.models.isEmpty, chosen.id != "sh" else { return }
+        let context = loadGeneration
+        guard let loaded = try? await Bridge.chatBackends(peer: peer) else { return }
+        guard context == loadGeneration else { return }
+        backends = loaded
+    }
+
     /// Ask this conversation's host to read the agent CLIs' model lists again.
     ///
     /// The host caches them for ten minutes, which is right for a picker that
