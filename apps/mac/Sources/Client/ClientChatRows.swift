@@ -16,6 +16,9 @@ struct ClientChatEventRow: View {
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
     var faceSeed: UInt64 = 0
+    /// The row still being written. Selectable chains are held back until
+    /// the turn ends; copy buttons stay live throughout.
+    var isLive = false
 
     var body: some View {
         switch item.kind {
@@ -40,7 +43,7 @@ struct ClientChatEventRow: View {
                     Spacer(minLength: 0)
                     RowCopyButton(text: text, help: "Copy response")
                 }
-                MessageMarkdown(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode)
+                MessageMarkdown(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode, selectable: !isLive)
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -68,7 +71,8 @@ struct ClientChatEventRow: View {
                 text,
                 bodyFont: ClientType.caption,
                 codeFont: Theme.monoText(10, relativeTo: .caption),
-                style: .aside
+                style: .aside,
+                selectable: !isLive
             )
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -423,6 +427,7 @@ extension ClientChatEventRow: Equatable {
             && lhs.attachmentRevision == rhs.attachmentRevision
             && lhs.isPending == rhs.isPending
             && lhs.faceSeed == rhs.faceSeed
+            && lhs.isLive == rhs.isLive
     }
 }
 

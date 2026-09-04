@@ -7,6 +7,22 @@ import AppKit
 
 /// One coalesced transcript block: a user turn, assistant markdown, a tool,
 /// an edit, an approval, or a quiet usage line.
+#if os(macOS)
+/// Hover state for a row's copy action, owned by a leaf.
+///
+/// Revealing the button from whole-row `@State` re-ran the markdown beside
+/// it on every enter/exit (per hang report). Scoped here, only the header
+/// re-runs.
+private struct HoverReveal<Content: View>: View {
+    @ViewBuilder let content: (Bool) -> Content
+    @State private var hovering = false
+
+    var body: some View {
+        content(hovering)
+            .onHover { hovering = $0 }
+    }
+}
+#endif
 struct ChatEventRow: View {
     let item: ChatDisplayItem
     let defaultAgentName: String
@@ -18,47 +34,50 @@ struct ChatEventRow: View {
     /// The conversation's face, used when a turn fails so the same character
     /// that was thinking is the one that droops.
     var faceSeed: UInt64 = 0
-    #if os(macOS)
-    /// Block hover for the copy actions. The buttons below stay hidden until
-    /// the pointer is over the row; each button then lights up on its own
-    /// hover and pins its copied tick in place.
-    @State private var hovering = false
-    #endif
+    /// The row still being written. Its markdown is rebuilt on every token,
+    /// so selectable chains (one SelectionOverlay each) are held back until
+    /// the turn ends. Copy buttons stay live throughout.
+    var isLive = false
 
     var body: some View {
         switch item.kind {
         case let .user(text):
+            #if os(macOS)
+            HoverReveal { hovering in
+                HStack(spacing: Theme.Space.s) {
+                    Spacer(minLength: 48)
+                    RowCopyButton(text: text, help: "Copy prompt", visible: hovering)
+                    userBubble(text)
+                }
+            }
+            #else
             HStack(spacing: Theme.Space.s) {
                 Spacer(minLength: 48)
-                #if os(macOS)
-                RowCopyButton(text: text, help: "Copy prompt", visible: hovering)
-                #endif
-                Text(text)
-                    .font(Theme.chatBody)
-                    .textSelection(.enabled)
-                    .padding(Theme.Space.m)
-                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .contextMenu {
-                        Button("Copy") { ChatClipboard.copy(text) }
-                    }
+                userBubble(text)
             }
-            #if os(macOS)
-            .onHover { hovering = $0 }
             #endif
         case let .assistant(text, backend):
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                #if os(macOS)
+                HoverReveal { hovering in
+                    HStack(spacing: Theme.Space.s) {
+                        Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
+                            .font(Theme.caption.weight(.medium))
+                            .foregroundStyle(Theme.accent)
+                        Spacer(minLength: 0)
+                        RowCopyButton(text: text, help: "Copy response", visible: hovering)
+                    }
+                }
+                #else
                 HStack(spacing: Theme.Space.s) {
                     Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
                         .font(Theme.caption.weight(.medium))
                         .foregroundStyle(Theme.accent)
                     Spacer(minLength: 0)
-                    #if os(macOS)
-                    RowCopyButton(text: text, help: "Copy response", visible: hovering)
-                    #else
                     RowCopyButton(text: text, help: "Copy response")
-                    #endif
                 }
-                MessageMarkdown(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode)
+                #endif
+                MessageMarkdown(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode, selectable: !isLive)
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -67,9 +86,6 @@ struct ChatEventRow: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
             }
-            #if os(macOS)
-            .onHover { hovering = $0 }
-            #endif
             .contextMenu {
                 Button("Copy response") { ChatClipboard.copy(text) }
             }
@@ -92,28 +108,31 @@ struct ChatEventRow: View {
             // Quiet headings, because this is an aside and has to keep
             // reading as one.
             VStack(alignment: .leading, spacing: 2) {
+                #if os(macOS)
+                HoverReveal { hovering in
+                    HStack {
+                        Spacer(minLength: 0)
+                        RowCopyButton(text: text, help: "Copy reasoning", visible: hovering)
+                    }
+                }
+                #else
                 HStack {
                     Spacer(minLength: 0)
-                    #if os(macOS)
-                    RowCopyButton(text: text, help: "Copy reasoning", visible: hovering)
-                    #else
                     RowCopyButton(text: text, help: "Copy reasoning")
-                    #endif
                 }
+                #endif
                 MessageMarkdown(
                     text,
                     bodyFont: Theme.subheadline,
                     codeFont: Theme.monoText(11, relativeTo: .subheadline),
-                    style: .aside
+                    style: .aside,
+                    selectable: !isLive
                 )
             }
             .foregroundStyle(.secondary)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
-            #if os(macOS)
-            .onHover { hovering = $0 }
-            #endif
         case let .tool(state):
             ToolRow(
                 verb: state.verb,
@@ -156,6 +175,18 @@ struct ChatEventRow: View {
             }
         }
     }
+}
+
+/// The user turn bubble, shared by the hover and plain layouts above.
+private func userBubble(_ text: String) -> some View {
+    Text(text)
+        .font(Theme.chatBody)
+        .textSelection(.enabled)
+        .padding(Theme.Space.m)
+        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .contextMenu {
+            Button("Copy") { ChatClipboard.copy(text) }
+        }
 }
 
 /// A response file is part of the conversation, not a path printed into it.
@@ -623,5 +654,6 @@ extension ChatEventRow: Equatable {
             && lhs.attachmentRevision == rhs.attachmentRevision
             && lhs.isPending == rhs.isPending
             && lhs.faceSeed == rhs.faceSeed
+            && lhs.isLive == rhs.isLive
     }
 }

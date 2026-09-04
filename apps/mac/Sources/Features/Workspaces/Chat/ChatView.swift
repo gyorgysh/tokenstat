@@ -198,7 +198,8 @@ struct ChatView: View {
                             resolve: { approval, choice in
                                 Task { await model.resolve(approval, choice: choice) }
                             },
-                            faceSeed: model.faceSeed
+                            faceSeed: model.faceSeed,
+                            isLive: model.busy && item.id == model.displayItems.last?.id
                         )
                         .equatable()
                         .frame(
@@ -257,16 +258,22 @@ struct ChatView: View {
             }
             .transcriptEarlierPages(model, window: window, proxy: proxy)
             .onChange(of: structureToken) { _, _ in
-                pinToLatest(proxy, animated: true)
+                // Tool-heavy (Codex) turns change shape per poll. An animated
+                // pin per poll is what yanked scrollback, so structural pins
+                // are silent while busy and skipped entirely when at the end
+                // (growth frames repin on their own).
+                if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
             .onChange(of: streamToken) { _, _ in
-                pinToLatest(proxy, animated: false)
+                // Each of these is a walk over every row between here and
+                // the end. Skip it when already there.
+                if !follow.atEnd { pinToLatest(proxy, animated: false) }
             }
             .onChange(of: followPulse) { _, _ in
-                pinToLatest(proxy, animated: true)
+                if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
             .onChange(of: chat.running) { _, _ in
-                pinToLatest(proxy, animated: true)
+                if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
             .onChange(of: model.busy) { was, now in
                 settleAfterTurn(was: was, now: now)
@@ -386,7 +393,7 @@ struct ChatView: View {
         let model = model
         state.repin = { [weak state] in
             guard let state, state.pinned, model.approvals.isEmpty else { return }
-            state.markDriven()
+            state.markDrivenInstant()
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
         }
     }
@@ -452,8 +459,11 @@ struct ChatView: View {
     private func scrollTo(_ id: String, _ proxy: ScrollViewProxy, animated: Bool) {
         // Every scroll here is programmatic. Say so, or the frames of the
         // animation read as the reader leaving and unpin mid-flight.
-        follow.markDriven()
-        if !animated || reduceMotion {
+        // Instant pins land on the same frame and only need a short window;
+        // the long one is what locked out slow scrollback during streams.
+        let animate = animated && !reduceMotion
+        follow.markDriven(duration: animate ? 0.4 : 0.08)
+        if !animate {
             proxy.scrollTo(id, anchor: .bottom)
         } else {
             withAnimation(.easeOut(duration: TranscriptFollow.structureDuration)) {

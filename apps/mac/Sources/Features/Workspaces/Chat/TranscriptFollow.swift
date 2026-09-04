@@ -236,8 +236,15 @@ final class TranscriptFollowState {
     /// chases, approval jumps). The animation lands within a few frames;
     /// anything inside the window that shrinks the gap to the end is the
     /// arrival, not a departure.
-    func markDriven() {
-        programmaticUntil = Date().addingTimeInterval(0.4)
+    func markDriven(duration: TimeInterval = 0.4) {
+        programmaticUntil = Date().addingTimeInterval(duration)
+    }
+
+    /// Short window for instant (non-animated) pins. They land on the same
+    /// frame, so a 0.4s window only serves to wipe the slow-scroll drift
+    /// tab and lock the reader out of scrollback for the whole stream.
+    func markDrivenInstant() {
+        markDriven(duration: 0.08)
     }
 
     /// Whether the end is under the viewport *and* the content has stopped
@@ -296,7 +303,16 @@ final class TranscriptFollowState {
         lastContentHeight = metrics.contentHeight
         lastOffset = metrics.distanceFromTop
         if driven {
-            undrivenDrift = 0
+            // Instant pins land on the same frame. A slow trackpad scroll
+            // retreating inside that window is still the reader leaving:
+            // wiping its drift is what made scrollback impossible during a
+            // stream (every token pin reset the tab before it reached 6pt).
+            let retreatingNow = metrics.distanceFromBottom > prevBottom + 2
+            if moved, retreatingNow {
+                undrivenDrift += abs(metrics.distanceFromTop - prevOffset)
+            } else {
+                undrivenDrift = 0
+            }
         } else if moved {
             undrivenDrift += abs(metrics.distanceFromTop - prevOffset)
         }
@@ -314,7 +330,7 @@ final class TranscriptFollowState {
             if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold {
                 guard repinsSpent < Self.repinBudget else { return }
                 repinsSpent += 1
-                markDriven()
+                markDrivenInstant()
                 repin?()
             } else if !pinned,
                 metrics.distanceFromBottom > TranscriptFollow.threshold

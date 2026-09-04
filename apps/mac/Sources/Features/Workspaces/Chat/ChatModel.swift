@@ -563,8 +563,13 @@ final class ChatModel {
         do {
             let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
             guard selectionMatches(id: selected.id, generation: generation) else { return }
-            chats = latest
-            if let current = latest.first(where: { $0.id == selected.id }) {
+            // A poll that found nothing new must not write anything back.
+            // Same rule as the event chunk below: the write is what redraws
+            // the transcript, and most polls of a running turn arrive with
+            // an unchanged list.
+            if chats != latest { chats = latest }
+            if let current = latest.first(where: { $0.id == selected.id }),
+               current != self.selected {
                 self.selected = current
                 #if !os(macOS)
                 if !Task.isCancelled {
@@ -675,6 +680,18 @@ final class ChatModel {
     /// archive and this model only holds a window of it. Folding what is
     /// resident would make the meter climb as somebody read backwards.
     var turnUsage: ChatUsageTotals? {
+        // Read on every draw of the meter, which redraws on every poll.
+        // Folding the whole window that often is what made a long running
+        // chat re-scan thousands of records 2.5x a second.
+        let key = UsageKey(
+            epoch: eventsEpoch,
+            count: events.count,
+            firstSeq: events.first?.seq,
+            lastSeq: events.last?.seq,
+            through: usageThrough,
+            hasBase: conversationUsage != nil
+        )
+        if key == turnUsageKey { return turnUsageCache }
         var totals = conversationUsage ?? .zero
         for timeline in events {
             guard let event = timeline.event, event.kind == "usage" else { continue }
@@ -688,8 +705,25 @@ final class ChatModel {
             totals.cacheWrite += event.cacheWrite ?? 0
             totals.cost += event.costUsd ?? 0
         }
-        return totals.isEmpty ? nil : totals
+        let answer: ChatUsageTotals? = totals.isEmpty ? nil : totals
+        turnUsageCache = answer
+        turnUsageKey = key
+        return answer
     }
+
+    /// What a cached usage fold was folded from. Same window identity as the
+    /// row cache, plus what the fold itself filters on.
+    private struct UsageKey: Equatable {
+        var epoch: UInt64
+        var count: Int
+        var firstSeq: UInt64?
+        var lastSeq: UInt64?
+        var through: UInt64
+        var hasBase: Bool
+    }
+
+    @ObservationIgnored private var turnUsageCache: ChatUsageTotals?
+    @ObservationIgnored private var turnUsageKey: UsageKey?
 
     var hasStarted: Bool {
         !events.isEmpty || selected?.resumeToken != nil
@@ -1022,7 +1056,9 @@ final class ChatModel {
         do {
             let loaded = try await Bridge.chatApprovals(id: id, peer: peer)
             guard selectionMatches(id: id, generation: generation) else { return }
-            approvals = loaded
+            // Unchanged approvals must not write back: the write redraws the
+            // transcript, and this runs on every poll of a running turn.
+            if approvals != loaded { approvals = loaded }
             settleNotifications()
         } catch {
             if selectionMatches(id: id, generation: generation) {

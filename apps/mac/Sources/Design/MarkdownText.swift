@@ -416,23 +416,36 @@ private struct InlineMarkdown: View {
 /// a long stretch and a novel-length reply stays a row of cheap ones.
 struct MessageMarkdown: View {
     private let blocks: [MarkdownBlock]
+    private let cachedSegments: [Segment]
     private let bodyFont: Font
     private let codeFont: Font
     private let style: MarkdownStyle
+    /// Selectable text owns a SelectionOverlay per chain and a hit-test
+    /// entry per chain. On the one row that is rewritten on every token
+    /// that is rebuilt 2.5x a second for the whole reply; settled rows
+    /// keep it, the live row gets it back when the turn ends.
+    private let selectable: Bool
 
     init(
         _ markdown: String,
         bodyFont: Font = Theme.body,
         codeFont: Font = Theme.monoText(12, relativeTo: .body),
-        style: MarkdownStyle = .document
+        style: MarkdownStyle = .document,
+        selectable: Bool = true
     ) {
-        blocks = MarkdownCache.blocks.value(for: markdown) {
+        let parsed = MarkdownCache.blocks.value(for: markdown) {
             var parser = MarkdownParser(markdown)
             return parser.blocks()
         }
+        blocks = parsed
         self.bodyFont = bodyFont
         self.codeFont = codeFont
         self.style = style
+        self.selectable = selectable
+        // Built once per message text, not once per body evaluation.
+        // Body re-runs on every hover, scroll and token while streaming;
+        // rebuilding every Text chain there was the per-frame cost.
+        cachedSegments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
     }
 
     private enum Segment {
@@ -444,7 +457,7 @@ struct MessageMarkdown: View {
     /// one drag, short enough that no single `Text` ever costs a frame.
     private static let chainCharCap = 8000
 
-    private func segments() -> [Segment] {
+    private static func makeSegments(blocks: [MarkdownBlock], bodyFont: Font, style: MarkdownStyle) -> [Segment] {
         var out: [Segment] = []
         var chain: Text? = nil
         var chainLength = 0
@@ -513,7 +526,7 @@ struct MessageMarkdown: View {
             case let .heading(level, text):
                 push(
                     Text(MarkdownInline.attributed(text))
-                        .font(headingFont(level)),
+                        .font(Self.headingFont(style: style, bodyFont: bodyFont, level: level)),
                     length: text.count
                 )
             case let .paragraph(text):
@@ -566,12 +579,23 @@ struct MessageMarkdown: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ForEach(Array(segments().enumerated()), id: \.offset) { _, segment in
+            ForEach(Array(cachedSegments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
                 case let .text(chain):
-                    chain
-                        .tint(Theme.accent)
-                        .textSelection(.enabled)
+                    Group {
+                        if selectable {
+                            chain
+                                .tint(Theme.accent)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            chain
+                                .tint(Theme.accent)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 case let .block(block):
@@ -585,6 +609,20 @@ struct MessageMarkdown: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static func headingFont(style: MarkdownStyle, bodyFont: Font, level: Int) -> Font {
+        switch style {
+        case .aside:
+            return bodyFont.weight(level <= 2 ? .bold : .semibold)
+        case .document:
+            switch level {
+            case 1: return Theme.title
+            case 2: return Theme.title2
+            case 3: return Theme.title3
+            default: return Theme.headline
+            }
+        }
     }
 
     private func headingFont(_ level: Int) -> Font {
