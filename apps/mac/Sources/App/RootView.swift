@@ -2579,7 +2579,12 @@ struct RootView: View {
         ForEach(visible) { conversation in
             ChatSidebarConversationRow(
                 conversation: conversation,
-                isSelected: chat.selected?.id == conversation.id,
+                // A chat is the lit row only while the chat screen is the one
+                // in front. The model keeps its selection when you leave, so
+                // without the route test a conversation stayed marked under
+                // Notes, Home or a server, beside whatever row you did pick.
+                isSelected: chat.selected?.id == conversation.id
+                    && route == .workspace(id: folder.id, section: .chat),
                 select: {
                     openSection(.chat, in: folder.id) {
                         Task { await chat.select(conversation) }

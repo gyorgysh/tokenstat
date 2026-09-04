@@ -344,9 +344,7 @@ impl Parser {
                     }
                     self.last_session = Some(id.clone());
                 }
-                Event::ToolStart {
-                    call_id, input, ..
-                } => {
+                Event::ToolStart { call_id, input, .. } => {
                     if !self.open_tools.iter().any(|id| id == call_id) {
                         self.open_tools.push(call_id.clone());
                     }
@@ -1839,8 +1837,8 @@ mod tests {
         );
 
         let mut headless = Parser::new("claude");
-        let headless_events = headless
-            .push_events("/login isn't available in this environment\n".as_bytes());
+        let headless_events =
+            headless.push_events("/login isn't available in this environment\n".as_bytes());
         assert!(
             matches!(
                 headless_events.first(),
@@ -2141,9 +2139,7 @@ mod tests {
         // target and no diff.
         let mut parser = Parser::new("opencode2");
         let events = parser.push_events(
-            concat!(
-                "{\"type\":\"tool_use\",\"timestamp\":1788490846932,\"part\":{\"partID\":\"prt_1\",\"type\":\"tool\",\"id\":\"call_1\",\"tool\":\"read\",\"state\":{\"status\":\"completed\",\"input\":{\"path\":\"/tmp/a.txt\"},\"output\":\"Read file /tmp/a.txt, lines 1-1\\n1: hi\",\"title\":\"read\"}}}\n",
-            )
+            "{\"type\":\"tool_use\",\"timestamp\":1788490846932,\"part\":{\"partID\":\"prt_1\",\"type\":\"tool\",\"id\":\"call_1\",\"tool\":\"read\",\"state\":{\"status\":\"completed\",\"input\":{\"path\":\"/tmp/a.txt\"},\"output\":\"Read file /tmp/a.txt, lines 1-1\\n1: hi\",\"title\":\"read\"}}}\n"
             .as_bytes(),
         );
         assert!(
@@ -2166,9 +2162,7 @@ mod tests {
     fn opencode_edit_end_carries_the_real_patch() {
         let mut parser = Parser::new("opencode2");
         let events = parser.push_events(
-            concat!(
-                "{\"type\":\"tool_use\",\"part\":{\"partID\":\"prt_2\",\"type\":\"tool\",\"id\":\"call_2\",\"tool\":\"edit\",\"state\":{\"status\":\"completed\",\"input\":{\"newString\":\"hello world\",\"oldString\":\"hello\",\"path\":\"note.txt\"},\"output\":\"Edited note.txt (1 replacement)\",\"title\":\"edit\",\"metadata\":{\"metadata\":{\"files\":[{\"file\":\"note.txt\",\"patch\":\"Index: note.txt\\n--- note.txt\\n+++ note.txt\\n@@ -1,1 +1,1 @@\\n-hello\\n+hello world\\n\",\"status\":\"modified\",\"additions\":1,\"deletions\":1}]}}}}}\n",
-            )
+            "{\"type\":\"tool_use\",\"part\":{\"partID\":\"prt_2\",\"type\":\"tool\",\"id\":\"call_2\",\"tool\":\"edit\",\"state\":{\"status\":\"completed\",\"input\":{\"newString\":\"hello world\",\"oldString\":\"hello\",\"path\":\"note.txt\"},\"output\":\"Edited note.txt (1 replacement)\",\"title\":\"edit\",\"metadata\":{\"metadata\":{\"files\":[{\"file\":\"note.txt\",\"patch\":\"Index: note.txt\\n--- note.txt\\n+++ note.txt\\n@@ -1,1 +1,1 @@\\n-hello\\n+hello world\\n\",\"status\":\"modified\",\"additions\":1,\"deletions\":1}]}}}}}\n"
             .as_bytes(),
         );
         let detail = events
@@ -2180,7 +2174,10 @@ mod tests {
             .expect("edit end keeps a detail");
         assert!(detail.contains("-hello"), "{detail}");
         assert!(detail.contains("+hello world"), "{detail}");
-        assert!(detail.contains("Edited note.txt (1 replacement)"), "{detail}");
+        assert!(
+            detail.contains("Edited note.txt (1 replacement)"),
+            "{detail}"
+        );
         assert!(
             events.iter().any(|e| matches!(
                 e,
@@ -2194,9 +2191,7 @@ mod tests {
     fn opencode_edit_end_survives_sibling_without_patch() {
         let mut parser = Parser::new("opencode2");
         let events = parser.push_events(
-            concat!(
-                "{\"type\":\"tool_use\",\"part\":{\"partID\":\"prt_3\",\"type\":\"tool\",\"id\":\"call_3\",\"tool\":\"edit\",\"state\":{\"status\":\"completed\",\"input\":{\"path\":\"note.txt\"},\"output\":\"Edited note.txt\",\"title\":\"edit\",\"metadata\":{\"metadata\":{\"files\":[{\"file\":\"empty.txt\",\"status\":\"created\"},{\"file\":\"note.txt\",\"patch\":\"Index: note.txt\\n--- note.txt\\n+++ note.txt\\n@@ -1,1 +1,1 @@\\n-foo\\n+bar\\n\",\"status\":\"modified\",\"additions\":1,\"deletions\":1}]}}}}}\n",
-            )
+            "{\"type\":\"tool_use\",\"part\":{\"partID\":\"prt_3\",\"type\":\"tool\",\"id\":\"call_3\",\"tool\":\"edit\",\"state\":{\"status\":\"completed\",\"input\":{\"path\":\"note.txt\"},\"output\":\"Edited note.txt\",\"title\":\"edit\",\"metadata\":{\"metadata\":{\"files\":[{\"file\":\"empty.txt\",\"status\":\"created\"},{\"file\":\"note.txt\",\"patch\":\"Index: note.txt\\n--- note.txt\\n+++ note.txt\\n@@ -1,1 +1,1 @@\\n-foo\\n+bar\\n\",\"status\":\"modified\",\"additions\":1,\"deletions\":1}]}}}}}\n"
             .as_bytes(),
         );
         let detail = events
