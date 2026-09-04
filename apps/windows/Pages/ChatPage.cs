@@ -574,6 +574,7 @@ internal sealed class ChatPage : Page
         ItemKind.Tool => ToolRow(item),
         ItemKind.Edit => EditRow(item),
         ItemKind.Approval => ApprovalCard(item),
+        ItemKind.Attachment => AttachmentRow(item),
         ItemKind.Usage => UsageLine(item),
         ItemKind.Failed => new TextBlock
         {
@@ -794,6 +795,46 @@ internal sealed class ChatPage : Page
         var border = (Border)Card("Permission", body);
         border.BorderBrush = pending ? Theme.Brush(Theme.Accent) : Theme.BorderBrush;
         return border;
+    }
+
+    private static UIElement AttachmentRow(DisplayItem item)
+    {
+        var detail = item.MediaType;
+        if (item.Size > 0)
+        {
+            var size = item.Size >= 1024 * 1024
+                ? string.Format(CultureInfo.InvariantCulture, "{0:0.#} MB", item.Size / (1024.0 * 1024.0))
+                : item.Size >= 1024
+                    ? string.Format(CultureInfo.InvariantCulture, "{0:0.#} KB", item.Size / 1024.0)
+                    : item.Size + " B";
+            detail = string.IsNullOrEmpty(detail) ? size : detail + " · " + size;
+        }
+        var body = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        body.Children.Add(new SymbolIcon(ActionIcon.Attach.Symbol())
+        {
+            Foreground = Theme.AccentBrush,
+        });
+        var text = new StackPanel { Spacing = 2 };
+        text.Children.Add(new TextBlock
+        {
+            Text = item.Name,
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        });
+        if (!string.IsNullOrEmpty(detail))
+        {
+            text.Children.Add(new TextBlock
+            {
+                Text = detail,
+                FontSize = 12,
+                Opacity = 0.78,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+            });
+        }
+        body.Children.Add(text);
+        return Card("Attachment", body);
     }
 
     private static UIElement UsageLine(DisplayItem item)
@@ -1174,7 +1215,10 @@ internal sealed class ChatPage : Page
     {
         if (_openId is null || Busy()) return;
         var text = _draft.Text.Trim();
-        if (text.Length == 0) return;
+        // An attached image is content on its own: text is only mandatory
+        // when there is nothing attached. The host substitutes the viewing
+        // prompt for an empty caption.
+        if (text.Length == 0 && _attachments.Count == 0) return;
         var ids = new JsonArray();
         foreach (var file in _attachments) ids.Add(file.Id);
         try
@@ -1574,6 +1618,18 @@ internal sealed class ChatPage : Page
                         Cost = Format.Number(ev, "costUsd"),
                     });
                     break;
+                case "attachment":
+                    FlushText();
+                    FlushThinking();
+                    items.Add(new DisplayItem
+                    {
+                        Id = "attachment-" + Format.Text(ev, "id", items.Count.ToString()),
+                        Kind = ItemKind.Attachment,
+                        Name = Format.Text(ev, "name", "Attachment"),
+                        MediaType = Format.Text(ev, "mediaType"),
+                        Size = Format.Long(ev, "size"),
+                    });
+                    break;
                 case "failed":
                     FlushText();
                     FlushThinking();
@@ -1729,7 +1785,7 @@ internal sealed class ChatPage : Page
 
     private enum ItemKind
     {
-        User, Assistant, Thinking, Tool, Edit, Approval, Usage, Failed,
+        User, Assistant, Thinking, Tool, Edit, Approval, Attachment, Usage, Failed,
     }
 
     private struct DisplayItem
@@ -1749,6 +1805,9 @@ internal sealed class ChatPage : Page
         public string Patch;
         public JsonNode? Approval;
         public bool Pending;
+        public string Name;
+        public string MediaType;
+        public long Size;
         public long Input;
         public long Output;
         public double Cost;
@@ -1764,6 +1823,8 @@ internal sealed class ChatPage : Page
             Duration = "";
             Path = "";
             Patch = "";
+            Name = "";
+            MediaType = "";
         }
     }
 
