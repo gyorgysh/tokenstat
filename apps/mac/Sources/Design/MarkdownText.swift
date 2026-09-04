@@ -184,6 +184,11 @@ private enum MarkdownCache {
     /// made a conversation full of code hitch. The colouring is now done once
     /// and what is kept is the answer.
     static let rendered = ParsedTextCache<AttributedString>(limit: 600)
+    /// Finished prose chains per message, keyed by the caller's font set,
+    /// style and markdown (see `MessageMarkdown`). A whole-card hover or a
+    /// scroll re-runs the row's `init`, and without this every one of those
+    /// rebuilt every `Text` chain of the reply from scratch.
+    static let segments = ParsedTextCache<[MessageSegment]>(limit: 800)
 }
 
 /// A short, stable name for a piece of text.
@@ -414,9 +419,15 @@ private struct InlineMarkdown: View {
 /// used to freeze long readers. Chains flush every few thousand characters
 /// (at block boundaries, sooner for pathological blocks), so a drag covers
 /// a long stretch and a novel-length reply stays a row of cheap ones.
+/// One prose chain or one block needing its own view. File scope so the
+/// segment cache can hold finished chains across view inits.
+private enum MessageSegment {
+    case text(Text)
+    case block(MarkdownBlock)
+}
+
 struct MessageMarkdown: View {
-    private let blocks: [MarkdownBlock]
-    private let cachedSegments: [Segment]
+    private let cachedSegments: [MessageSegment]
     private let bodyFont: Font
     private let codeFont: Font
     private let style: MarkdownStyle
@@ -431,34 +442,34 @@ struct MessageMarkdown: View {
         bodyFont: Font = Theme.body,
         codeFont: Font = Theme.monoText(12, relativeTo: .body),
         style: MarkdownStyle = .document,
-        selectable: Bool = true
+        selectable: Bool = true,
+        cacheScope: String = "chat"
     ) {
         let parsed = MarkdownCache.blocks.value(for: markdown) {
             var parser = MarkdownParser(markdown)
             return parser.blocks()
         }
-        blocks = parsed
         self.bodyFont = bodyFont
         self.codeFont = codeFont
         self.style = style
         self.selectable = selectable
-        // Built once per message text, not once per body evaluation.
-        // Body re-runs on every hover, scroll and token while streaming;
-        // rebuilding every Text chain there was the per-frame cost.
-        cachedSegments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
-    }
-
-    private enum Segment {
-        case text(Text)
-        case block(MarkdownBlock)
+        // Built once per message text and held across inits. A whole-card
+        // hover or a scroll re-runs this `init` without changing the text;
+        // rebuilding every `Text` chain there was the per-edge cost that
+        // brought the hitches back. The scope names the caller's font set,
+        // which is baked into the chains and cannot be keyed from `Font`.
+        let key = "\(cacheScope):\(style == .aside ? "a" : "d"):\(markdown)"
+        cachedSegments = MarkdownCache.segments.value(for: key) {
+            Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
+        }
     }
 
     /// Characters per selectable chain. Long enough that a normal reply is
     /// one drag, short enough that no single `Text` ever costs a frame.
     private static let chainCharCap = 8000
 
-    private static func makeSegments(blocks: [MarkdownBlock], bodyFont: Font, style: MarkdownStyle) -> [Segment] {
-        var out: [Segment] = []
+    private static func makeSegments(blocks: [MarkdownBlock], bodyFont: Font, style: MarkdownStyle) -> [MessageSegment] {
+        var out: [MessageSegment] = []
         var chain: Text? = nil
         var chainLength = 0
         func gap() -> Text { Text("\n\n").font(bodyFont) }

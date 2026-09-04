@@ -72,7 +72,8 @@ struct ClientChatEventRow: View {
                 bodyFont: ClientType.caption,
                 codeFont: Theme.monoText(10, relativeTo: .caption),
                 style: .aside,
-                selectable: !isLive
+                selectable: !isLive,
+                cacheScope: "client-thinking"
             )
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)

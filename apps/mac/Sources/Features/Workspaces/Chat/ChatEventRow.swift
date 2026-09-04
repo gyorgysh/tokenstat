@@ -116,7 +116,8 @@ struct ChatEventRow: View {
                     bodyFont: Theme.subheadline,
                     codeFont: Theme.monoText(11, relativeTo: .subheadline),
                     style: .aside,
-                    selectable: !isLive
+                    selectable: !isLive,
+                    cacheScope: "thinking"
                 )
             }
             .foregroundStyle(.secondary)
