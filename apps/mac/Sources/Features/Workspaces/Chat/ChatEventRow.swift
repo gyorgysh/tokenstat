@@ -18,24 +18,47 @@ struct ChatEventRow: View {
     /// The conversation's face, used when a turn fails so the same character
     /// that was thinking is the one that droops.
     var faceSeed: UInt64 = 0
+    #if os(macOS)
+    /// Block hover for the copy actions. The buttons below stay hidden until
+    /// the pointer is over the row; each button then lights up on its own
+    /// hover and pins its copied tick in place.
+    @State private var hovering = false
+    #endif
 
     var body: some View {
         switch item.kind {
         case let .user(text):
-            HStack {
+            HStack(spacing: Theme.Space.s) {
                 Spacer(minLength: 48)
+                #if os(macOS)
+                RowCopyButton(text: text, help: "Copy prompt", visible: hovering)
+                #endif
                 Text(text)
                     .font(Theme.chatBody)
+                    .textSelection(.enabled)
                     .padding(Theme.Space.m)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .contextMenu {
+                        Button("Copy") { ChatClipboard.copy(text) }
+                    }
             }
+            #if os(macOS)
+            .onHover { hovering = $0 }
+            #endif
         case let .assistant(text, backend):
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
-                    .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-                MarkdownText(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode)
-                    .textSelection(.enabled)
+                HStack(spacing: Theme.Space.s) {
+                    Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
+                        .font(Theme.caption.weight(.medium))
+                        .foregroundStyle(Theme.accent)
+                    Spacer(minLength: 0)
+                    #if os(macOS)
+                    RowCopyButton(text: text, help: "Copy response", visible: hovering)
+                    #else
+                    RowCopyButton(text: text, help: "Copy response")
+                    #endif
+                }
+                MessageMarkdown(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode)
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -43,6 +66,12 @@ struct ChatEventRow: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
+            }
+            #if os(macOS)
+            .onHover { hovering = $0 }
+            #endif
+            .contextMenu {
+                Button("Copy response") { ChatClipboard.copy(text) }
             }
         case let .turnSeparator(backend):
             HStack(spacing: Theme.Space.s) {
@@ -62,16 +91,29 @@ struct ChatEventRow: View {
             // so a plain Text left `##` and `**` on screen as punctuation.
             // Quiet headings, because this is an aside and has to keep
             // reading as one.
-            MarkdownText(
-                text,
-                bodyFont: Theme.subheadline,
-                codeFont: Theme.monoText(11, relativeTo: .subheadline),
-                style: .aside
-            )
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Spacer(minLength: 0)
+                    #if os(macOS)
+                    RowCopyButton(text: text, help: "Copy reasoning", visible: hovering)
+                    #else
+                    RowCopyButton(text: text, help: "Copy reasoning")
+                    #endif
+                }
+                MessageMarkdown(
+                    text,
+                    bodyFont: Theme.subheadline,
+                    codeFont: Theme.monoText(11, relativeTo: .subheadline),
+                    style: .aside
+                )
+            }
             .foregroundStyle(.secondary)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
+            #if os(macOS)
+            .onHover { hovering = $0 }
+            #endif
         case let .tool(state):
             ToolRow(
                 verb: state.verb,
@@ -106,7 +148,11 @@ struct ChatEventRow: View {
                 Text(text)
                     .font(Theme.callout)
                     .foregroundStyle(Theme.danger)
+                    .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contextMenu {
+                        Button("Copy") { ChatClipboard.copy(text) }
+                    }
             }
         }
     }

@@ -1129,10 +1129,39 @@ struct ChatToolState: Equatable {
 
     var snippet: [String] {
         guard let detail, !detail.isEmpty else { return [] }
-        return detail
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { "| \($0)" }
+        let lines = detail.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        // An edit's red/green lines must reach the row unprefixed: a blanket
+        // "| " is what made every Tool row read as grey output and broke the
+        // Show edit label. This covers both the old/new rendering ("- old")
+        // and unified patches ("-hello", "@@" hunks stay grey). Other verbs
+        // keep the output marker on every line, so a shell trace like
+        // "+ set -x" never poses as a diff.
+        let diffVerbs = ["Edit", "NotebookEdit"]
+        let isDiff = diffVerbs.contains(verb)
+        var out = lines.prefix(Self.snippetLineCap).map { line in
+            if isDiff, Self.isDiffLine(line) {
+                return line
+            }
+            return "| \(line)"
+        }
+        if lines.count > Self.snippetLineCap {
+            out.append("| … (\(lines.count - Self.snippetLineCap) more)")
+        }
+        return Array(out)
     }
+
+    /// A unified or old/new diff body line. File headers ("--- a/…",
+    /// "+++ b/…") are not changes and stay grey.
+    static func isDiffLine(_ line: String) -> Bool {
+        guard line.count > 1 else { return false }
+        let first = line.first
+        guard first == "+" || first == "-" else { return false }
+        return !(line.hasPrefix("+++ ") || line.hasPrefix("--- "))
+    }
+
+    /// A 500-line stdout must not become 500 rows. The full text stays in
+    /// `detail` for copy; the row only ever draws this many.
+    private static let snippetLineCap = 60
 }
 
 /// Equatable so a transcript can skip the rows that did not move. A chat

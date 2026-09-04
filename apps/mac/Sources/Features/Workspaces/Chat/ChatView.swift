@@ -28,6 +28,9 @@ struct ChatView: View {
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
     @State private var settleMood: PersonaMood?
+    /// Bumped on send so the transcript scrolls to the end synchronously,
+    /// instead of waiting for the first streamed token to trigger a pin.
+    @State private var followPulse = 0
     /// Whether rows are reporting where they are. Set from the scroll
     /// callback as the top of the loaded conversation comes near, so the
     /// geometry readers exist for the stretch that can need an anchor and
@@ -239,11 +242,17 @@ struct ChatView: View {
                 window.note(metrics)
             }
             .overlay(alignment: .bottom) {
-                if follow.showJump && model.approvals.isEmpty {
-                    JumpToLatestButton {
-                        follow.jump()
-                        Task { await returnToLatest(proxy) }
-                    }
+                if model.approvals.isEmpty {
+                    TranscriptFollowPill(
+                        showJump: follow.showJump,
+                        busy: model.busy,
+                        paused: follow.paused,
+                        resume: {
+                            follow.jump()
+                            Task { await returnToLatest(proxy) }
+                        },
+                        pause: { follow.pause() }
+                    )
                 }
             }
             .transcriptEarlierPages(model, window: window, proxy: proxy)
@@ -252,6 +261,9 @@ struct ChatView: View {
             }
             .onChange(of: streamToken) { _, _ in
                 pinToLatest(proxy, animated: false)
+            }
+            .onChange(of: followPulse) { _, _ in
+                pinToLatest(proxy, animated: true)
             }
             .onChange(of: chat.running) { _, _ in
                 pinToLatest(proxy, animated: true)
@@ -374,6 +386,7 @@ struct ChatView: View {
         let model = model
         state.repin = { [weak state] in
             guard let state, state.pinned, model.approvals.isEmpty else { return }
+            state.markDriven()
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
         }
     }
@@ -437,6 +450,9 @@ struct ChatView: View {
     }
 
     private func scrollTo(_ id: String, _ proxy: ScrollViewProxy, animated: Bool) {
+        // Every scroll here is programmatic. Say so, or the frames of the
+        // animation read as the reader leaving and unpin mid-flight.
+        follow.markDriven()
         if !animated || reduceMotion {
             proxy.scrollTo(id, anchor: .bottom)
         } else {
@@ -455,8 +471,15 @@ struct ChatView: View {
 
     private func submit(from chat: ChatConversation) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !model.busy else { return }
+        // An attached image is content on its own: text is only mandatory
+        // when there is nothing attached.
+        guard !text.isEmpty || !model.attachments.isEmpty, !model.busy else { return }
         draft = ""
+        // Sending is engaging: follow is the default, so a new turn resumes
+        // it even if it was paused before. Pausing again is one tap. The
+        // pulse scrolls now; the token pins take over as content arrives.
+        follow.jump()
+        followPulse += 1
         Task { await model.send(text) }
     }
 

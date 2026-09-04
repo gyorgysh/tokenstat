@@ -209,7 +209,8 @@ struct ChatComposer: View {
     }
 
     private var cannotSend: Bool {
-        running || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        running
+            || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
     }
 
     private func ingest(urls: [URL]) {

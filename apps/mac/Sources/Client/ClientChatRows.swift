@@ -24,15 +24,23 @@ struct ClientChatEventRow: View {
                 Spacer(minLength: 36)
                 Text(text)
                     .font(Theme.chatBody)
+                    .textSelection(.enabled)
                     .padding(Theme.Space.m)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .contextMenu {
+                        Button("Copy") { ChatClipboard.copy(text) }
+                    }
             }
         case let .assistant(text, backend):
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
-                    .font(ClientType.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-                MarkdownText(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode)
+                HStack(spacing: Theme.Space.s) {
+                    Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
+                        .font(ClientType.caption.weight(.medium))
+                        .foregroundStyle(Theme.accent)
+                    Spacer(minLength: 0)
+                    RowCopyButton(text: text, help: "Copy response")
+                }
+                MessageMarkdown(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode)
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -56,14 +64,13 @@ struct ClientChatEventRow: View {
             .accessibilityLabel("New turn with \(agentLabel(backend))")
         case let .thinking(text):
             // Same as the Mac: reasoning is markdown, and it stays an aside.
-            MarkdownText(
+            MessageMarkdown(
                 text,
                 bodyFont: ClientType.caption,
                 codeFont: Theme.monoText(10, relativeTo: .caption),
                 style: .aside
             )
             .foregroundStyle(.secondary)
-            .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
         case let .tool(state):
             ToolRow(

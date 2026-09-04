@@ -7,6 +7,11 @@
 
 import Foundation
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Small, read-only Markdown for pull-request conversations and chat.
 ///
@@ -392,6 +397,211 @@ private struct InlineMarkdown: View {
     }
 }
 
+/// A chat message body whose prose selects as one element.
+///
+/// Separate SwiftUI `Text` views are each their own selection: a drag that
+/// starts in one paragraph dies at its end, which is why responses only ever
+/// selected a line or a bullet at a time. `Text` values joined with `+` are
+/// the opposite: one element, one selection, mixed styling intact. So every
+/// prose block here (headings, paragraphs, list items) joins a single chain
+/// and one mouse drag covers the whole reply, line breaks and bullets
+/// included. Anything that cannot live inline (fences with backgrounds and
+/// scrollers, tables, quotes, rules) keeps its own view between chains and
+/// stays individually selectable with its own copy action.
+///
+/// One chain never grows without bound: a whole reply as a single `Text`
+/// lays out up front on the main thread, which is exactly the stall that
+/// used to freeze long readers. Chains flush every few thousand characters
+/// (at block boundaries, sooner for pathological blocks), so a drag covers
+/// a long stretch and a novel-length reply stays a row of cheap ones.
+struct MessageMarkdown: View {
+    private let blocks: [MarkdownBlock]
+    private let bodyFont: Font
+    private let codeFont: Font
+    private let style: MarkdownStyle
+
+    init(
+        _ markdown: String,
+        bodyFont: Font = Theme.body,
+        codeFont: Font = Theme.monoText(12, relativeTo: .body),
+        style: MarkdownStyle = .document
+    ) {
+        blocks = MarkdownCache.blocks.value(for: markdown) {
+            var parser = MarkdownParser(markdown)
+            return parser.blocks()
+        }
+        self.bodyFont = bodyFont
+        self.codeFont = codeFont
+        self.style = style
+    }
+
+    private enum Segment {
+        case text(Text)
+        case block(MarkdownBlock)
+    }
+
+    /// Characters per selectable chain. Long enough that a normal reply is
+    /// one drag, short enough that no single `Text` ever costs a frame.
+    private static let chainCharCap = 8000
+
+    private func segments() -> [Segment] {
+        var out: [Segment] = []
+        var chain: Text? = nil
+        var chainLength = 0
+        func gap() -> Text { Text("\n\n").font(bodyFont) }
+        func flush() {
+            if let current = chain {
+                out.append(.text(current))
+                chain = nil
+                chainLength = 0
+            }
+        }
+        func push(_ piece: Text, length: Int, separator: Text? = nil) {
+            if chain != nil, chainLength + length > Self.chainCharCap {
+                flush()
+            }
+            if let current = chain {
+                chain = current + (separator ?? gap()) + piece
+                chainLength += length + 2
+            } else {
+                chain = piece
+                chainLength = length
+            }
+        }
+        /// Split an oversized block on blank lines (then lines), so no
+        /// single piece can blow past the cap on its own.
+        func chunks(_ text: String) -> [String] {
+            if text.count <= Self.chainCharCap { return [text] }
+            var pieces: [String] = []
+            for para in text.components(separatedBy: "\n\n") {
+                if para.count <= Self.chainCharCap {
+                    if !para.isEmpty { pieces.append(para) }
+                    continue
+                }
+                var current = ""
+                for line in para.components(separatedBy: "\n") {
+                    if !current.isEmpty, current.count + 1 + line.count > Self.chainCharCap {
+                        pieces.append(current)
+                        current = ""
+                    }
+                    current = current.isEmpty ? line : current + "\n" + line
+                }
+                if !current.isEmpty { pieces.append(current) }
+            }
+            return pieces.isEmpty ? [text] : pieces
+        }
+        func listRow(_ item: MarkdownListItem, text: AttributedString) -> Text {
+            var row = Text(String(repeating: "  ", count: item.depth * 2))
+                .font(bodyFont)
+            if item.checked != nil {
+                row = row + Text(item.checked == true ? "☑ " : "☐ ")
+                    .font(bodyFont)
+                    .foregroundStyle(Theme.accent)
+            } else if let ordinal = item.ordinal {
+                row = row + Text("\(ordinal). ")
+                    .font(Theme.numeric(11, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+            } else {
+                row = row + Text("• ")
+                    .font(bodyFont)
+                    .foregroundStyle(Theme.accent)
+            }
+            return row + Text(text).font(bodyFont)
+        }
+        for block in blocks {
+            switch block.kind {
+            case let .heading(level, text):
+                push(
+                    Text(MarkdownInline.attributed(text))
+                        .font(headingFont(level)),
+                    length: text.count
+                )
+            case let .paragraph(text):
+                for chunk in chunks(text) {
+                    push(
+                        Text(MarkdownInline.attributed(chunk))
+                            .font(bodyFont),
+                        length: chunk.count
+                    )
+                }
+            case let .list(items):
+                let total = items.reduce(0) { $0 + $1.text.count }
+                if total <= Self.chainCharCap {
+                    var list: Text? = nil
+                    for item in items {
+                        let row = listRow(item, text: MarkdownInline.attributed(item.text))
+                        if let acc = list {
+                            list = acc + Text("\n").font(bodyFont) + row
+                        } else {
+                            list = row
+                        }
+                    }
+                    if let list { push(list, length: total) }
+                } else {
+                    // Huge lists chain item by item; a giant item chunks
+                    // further, marker on its first piece only.
+                    for (index, item) in items.enumerated() {
+                        let parts = chunks(item.text)
+                        for (part, chunk) in parts.enumerated() {
+                            let piece = (part == 0)
+                                ? listRow(item, text: MarkdownInline.attributed(chunk))
+                                : Text(MarkdownInline.attributed(chunk)).font(bodyFont)
+                            push(
+                                piece,
+                                length: chunk.count,
+                                separator: index == 0 && part == 0
+                                    ? nil : Text("\n").font(bodyFont)
+                            )
+                        }
+                    }
+                }
+            case .code, .table, .quote, .rule:
+                flush()
+                out.append(.block(block))
+            }
+        }
+        flush()
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            ForEach(Array(segments().enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case let .text(chain):
+                    chain
+                        .tint(Theme.accent)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case let .block(block):
+                    MarkdownBlockView(
+                        block: block,
+                        bodyFont: bodyFont,
+                        codeFont: codeFont,
+                        style: style
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+        switch style {
+        case .aside:
+            return bodyFont.weight(level <= 2 ? .bold : .semibold)
+        case .document:
+            switch level {
+            case 1: return Theme.title
+            case 2: return Theme.title2
+            case 3: return Theme.title3
+            default: return Theme.headline
+            }
+        }
+    }
+}
+
 private struct MarkdownCodeBlock: View {
     let language: String?
     let source: String
@@ -403,6 +613,7 @@ private struct MarkdownCodeBlock: View {
     var style: MarkdownStyle = .document
 
     @State private var coloured: AttributedString?
+    @State private var hovering = false
 
     private var isDiff: Bool {
         ["diff", "patch"].contains(language?.lowercased())
@@ -447,13 +658,21 @@ private struct MarkdownCodeBlock: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     if let language {
-                        Text(language.uppercased())
-                            .font(Theme.mono(10, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
-                            .padding(.horizontal, Theme.Space.m)
-                            .padding(.vertical, Theme.Space.s)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Theme.accentSoft)
+                        HStack(spacing: Theme.Space.s) {
+                            Text(language.uppercased())
+                                .font(Theme.mono(10, weight: .semibold))
+                                .foregroundStyle(Theme.accent)
+                            Spacer(minLength: 0)
+                            #if os(macOS)
+                            RowCopyButton(text: source, help: "Copy code", visible: hovering)
+                            #else
+                            RowCopyButton(text: source, help: "Copy code")
+                            #endif
+                        }
+                        .padding(.horizontal, Theme.Space.m)
+                        .padding(.vertical, Theme.Space.s)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.accentSoft)
                     }
 
                     // An aside wraps its code instead of scrolling it. The
@@ -483,6 +702,20 @@ private struct MarkdownCodeBlock: View {
         .overlay {
             RoundedRectangle(cornerRadius: Theme.cardRadius - 2, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1)
+        }
+        #if os(macOS)
+        .overlay(alignment: .topTrailing) {
+            // Fences without a language have no header row; the copy action
+            // lives overlaid instead, on the same block hover.
+            if language == nil {
+                RowCopyButton(text: source, help: "Copy code", visible: hovering)
+                    .padding(Theme.Space.xs)
+            }
+        }
+        .onHover { hovering = $0 }
+        #endif
+        .contextMenu {
+            Button("Copy code") { ChatClipboard.copy(source) }
         }
         .task(id: key) {
             // `ForEach` identifies blocks by their position in one message.
@@ -1123,5 +1356,75 @@ private struct MarkdownParser {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         let count = trimmed.prefix { $0 == opening.marker }.count
         return count >= opening.count && trimmed.dropFirst(count).isEmpty
+    }
+}
+
+/// One clipboard for both apps. Mac uses AppKit, the phone UIKit.
+enum ChatClipboard {
+    static func copy(_ text: String) {
+        guard !text.isEmpty else { return }
+        #if os(macOS)
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(text, forType: .string)
+        #else
+        UIPasteboard.general.string = text
+        #endif
+    }
+}
+
+/// Small hover copy action for chat rows and code fences.
+///
+/// Two states, owned in two places. The *block* owns visibility: it passes
+/// `visible` from its own hover, so the button only ever appears while the
+/// pointer is over the message or fence. The *button* owns the highlight and
+/// the copied tick: hovering the icon itself brightens it, and pressing pins
+/// a checkmark in the same fixed frame for a moment, so the confirmation
+/// plays in place even if the pointer has already left the block.
+///
+/// The frame is always laid out and only the opacity changes, so appearing
+/// never shifts the text. Hit testing follows visibility.
+///
+/// Selection across separate SwiftUI `Text` views is per-block by design, so
+/// a mouse drag selects within one paragraph or fence. This button (plus the
+/// right-click menu on the row) is the whole-message path: no drag needed.
+struct RowCopyButton: View {
+    let text: String
+    var help: String = "Copy"
+    var visible: Bool = true
+    @State private var hovering = false
+    @State private var copied = false
+
+    private var opacity: Double {
+        if copied { return 1 }
+        guard visible else { return 0 }
+        return hovering ? 1 : 0.55
+    }
+
+    var body: some View {
+        Button {
+            ChatClipboard.copy(text)
+            copied = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.2))
+                copied = false
+            }
+        } label: {
+            Image(systemName: copied ? "checkmark" : ActionIcon.copy.symbol)
+                .font(Theme.font(11, weight: .medium))
+                .foregroundStyle(copied ? Theme.accent : hovering ? .primary : .secondary)
+                .frame(width: 22, height: 22, alignment: .center)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .opacity(opacity)
+        .animation(.easeOut(duration: 0.15), value: opacity)
+        .allowsHitTesting(visible || copied)
+        .accessibilityHidden(!(visible || copied))
+        .help(copied ? "Copied" : help)
+        #if os(macOS)
+        .onHover { hovering = $0 }
+        #endif
+        .accessibilityLabel(help)
     }
 }

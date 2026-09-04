@@ -3551,7 +3551,7 @@ private struct ChatSidebarConversationRow: View {
                 HStack(spacing: Theme.Space.s) {
                     Image(systemName: conversation.running ? "ellipsis.message.fill" : "message")
                         .font(Theme.fit(10))
-                        .foregroundStyle(conversation.running ? Theme.accent : Color.secondary)
+                        .foregroundStyle(conversation.running || isSelected ? Theme.accent : Color.secondary)
                         .frame(width: 14)
                     Text(conversation.title)
                         .font(Theme.fit(11.5, weight: isSelected ? .medium : .regular))
@@ -3597,7 +3597,16 @@ private struct ChatSidebarConversationRow: View {
         // The height the row has when the trash is showing, held at all
         // times, so the list cannot move under the pointer.
         .frame(minHeight: 24)
-        .background(isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(
+                    isSelected
+                        ? Theme.rowSelectedNested
+                        : (isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
+                )
+                .padding(.leading, Theme.Space.xl)
+                .padding(.trailing, Theme.Space.xs)
+        )
         .contentShape(.rect)
         .onHover { isHovering = $0 }
         .contextMenu {

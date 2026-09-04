@@ -109,18 +109,29 @@ extension TranscriptMetrics {
 /// the bottom. Growth is ignored so a stream cannot unpin the view. A height
 /// that did not change, with a larger gap, is a person moving away.
 ///
-/// A reference type, and `showJump` is the only thing on it Observation
-/// watches. Everything here is written on every frame of every scroll, and a
-/// transcript that redraws itself that often is a transcript nobody can
+/// A reference type, and `showJump`, `paused` and `arrived` are the only
+/// things on it Observation watches: all three change on transitions, never
+/// per frame. Everything else here is written on every frame of every scroll,
+/// and a transcript that redraws itself that often is a transcript nobody can
 /// scroll. The redraw is owed to the button appearing, not to the offset
 /// moving by a point.
 @Observable
 final class TranscriptFollowState {
     private(set) var showJump = false
+    /// Paused by hand from the Following pill. Unlike an unpin from a scroll,
+    /// this survives arriving at the bottom on a streaming frame: only coming
+    /// back to the latest turn with a scroll of one's own, or pressing Follow
+    /// again, clears it. Observed (rare transitions only, never per-frame).
+    private(set) var paused = false
     @ObservationIgnored var pinned = true
     @ObservationIgnored var suppressed = false {
         didSet { if suppressed { set(jump: false) } }
     }
+    /// Our own scrolls are in flight until this date. An animated pin travels
+    /// through frames that look exactly like a reader leaving (far from the
+    /// end, offset moving), and without this the pin unpinned itself midway.
+    /// Written on scroll calls only, read on every scroll callback: ignored.
+    @ObservationIgnored private var programmaticUntil: Date = .distantPast
     /// A conversation that has just opened is still finding its real heights,
     /// and every one of those frames says the end is far below. Taking that
     /// as a reader who scrolled away is what left a long chat open in its
@@ -149,6 +160,12 @@ final class TranscriptFollowState {
     @ObservationIgnored private var lastContentHeight: CGFloat = 0
     @ObservationIgnored private var lastOffset: CGFloat = 0
     @ObservationIgnored private var lastDistanceFromBottom: CGFloat = 0
+    /// Offset drift outside our own scrolls, accumulated across frames. Scroll
+    /// callbacks run per frame, so a slow reading scroll moves less than the
+    /// per-frame `moved` epsilon every frame and would otherwise read as
+    /// stationary forever. Our own pins reset this (they move the viewport a
+    /// lot and must never count as the reader leaving).
+    @ObservationIgnored private var undrivenDrift: CGFloat = 0
     /// Repins spent since the end was last actually reached.
     ///
     /// The pin and the lazy stack can argue forever, and did. Asking a
@@ -163,8 +180,10 @@ final class TranscriptFollowState {
     ///
     /// A repin that works costs one frame and resets this, so following a
     /// stream is unaffected. A repin that changes nothing spends one, and
-    /// when they run out the transcript stops arguing and offers Jump to
-    /// latest instead. A conversation the reader can leave is better than one
+    /// when they run out the transcript stops asking for walks while the
+    /// pin itself stays: streaming still follows through the token pins,
+    /// and a conversation the reader left still offers Jump to latest.
+    /// A conversation the reader can leave is better than one
     /// nobody can use.
     @ObservationIgnored private var repinsSpent = 0
     /// Whether the last frame put the end under the viewport.
@@ -203,10 +222,22 @@ final class TranscriptFollowState {
         steadyFrames = 0
         abandoned = false
         repinsSpent = 0
+        undrivenDrift = 0
         if active {
+            paused = false
             pinned = true
             set(jump: false)
         }
+    }
+
+    /// Mark that a scroll about to happen is ours, not the reader's.
+    ///
+    /// Called beside every programmatic `scrollTo` (pins, repins, jump
+    /// chases, approval jumps). The animation lands within a few frames;
+    /// anything inside the window that shrinks the gap to the end is the
+    /// arrival, not a departure.
+    func markDriven() {
+        programmaticUntil = Date().addingTimeInterval(0.4)
     }
 
     /// Whether the end is under the viewport *and* the content has stopped
@@ -247,6 +278,9 @@ final class TranscriptFollowState {
             set(jump: false)
             return
         }
+        let prevBottom = lastDistanceFromBottom
+        let prevOffset = lastOffset
+        let driven = Date() < programmaticUntil
         lastDistanceFromBottom = metrics.distanceFromBottom
         if suppressed {
             set(jump: false)
@@ -261,31 +295,72 @@ final class TranscriptFollowState {
         // scrolling, and that frame still says where they are.
         lastContentHeight = metrics.contentHeight
         lastOffset = metrics.distanceFromTop
+        if driven {
+            undrivenDrift = 0
+        } else if moved {
+            undrivenDrift += abs(metrics.distanceFromTop - prevOffset)
+        }
         if grew, !moved {
             // Growth nobody scrolled for. It must not unpin the view, and if
             // the view was following the end it has to be put back on it:
             // the height changed under a viewport that did not move, so the
             // end is now further down than it was a frame ago.
+            //
+            // Auto-follow is the default: streaming grows this way for
+            // hundreds of frames, and unpinning here is what stalled a reply
+            // mid-screen. Only a person's own scroll below may unpin. The
+            // budget only stops asking the lazy stack for another walk,
+            // never the pin itself.
             if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold {
-                guard repinsSpent < Self.repinBudget else {
-                    // Out of argument. Let go of the end rather than spend
-                    // another walk over the rows on a scroll that has not
-                    // moved anything for several frames running.
-                    pinned = false
-                    set(jump: true)
-                    return
-                }
+                guard repinsSpent < Self.repinBudget else { return }
                 repinsSpent += 1
+                markDriven()
                 repin?()
+            } else if !pinned,
+                metrics.distanceFromBottom > TranscriptFollow.threshold
+            {
+                // Drifted away while not following (paused, or a page that
+                // landed above): offer the way back.
+                set(jump: true)
             }
             return
         }
+        let retreating = metrics.distanceFromBottom > prevBottom + 2
         if metrics.distanceFromBottom > TranscriptFollow.threshold {
-            pinned = false
-            set(jump: true)
+            // Far from the end. Unpinning takes a moved viewport: only the
+            // reader's own scroll proves a hand leaving. Stationary far
+            // frames must hold, because the lazy stack routinely parks here
+            // on its own: a repin that landed on estimated heights, or a
+            // streaming stall longer than the driven window, both sit far
+            // with nobody touching anything. Unpinning those is what flipped
+            // Following to Jump to latest mid-reply and then never came back,
+            // since every later pin is guarded on the pin this cleared.
+            // (A pin arriving reads as moved + shrinking inside its own
+            // window, so it still cannot unpin itself; a grab mid-flight
+            // reads as retreating and still wins immediately. And because
+            // callbacks run per frame, a slow scroll that never clears the
+            // per-frame epsilon still counts once its drift adds up.)
+            let userMoved = moved || undrivenDrift > 6
+            if userMoved, !driven || retreating {
+                pinned = false
+                undrivenDrift = 0
+                set(jump: true)
+            }
         } else if metrics.distanceFromBottom <= 10 {
-            pinned = true
-            set(jump: false)
+            // Back on the latest turn with a scroll of one's own: follow
+            // again, clearing a manual pause. A stationary paused frame must
+            // not resume itself, or pausing at the bottom could never stick.
+            // Home also clears the drift tab: micro-scrolls from a while ago
+            // must not unpin a far frame later.
+            undrivenDrift = 0
+            if moved {
+                paused = false
+            }
+            if !paused {
+                pinned = true
+                undrivenDrift = 0
+                set(jump: false)
+            }
         }
         if metrics.distanceFromBottom <= TranscriptFollow.threshold {
             // The end is under the viewport, so whatever was spent getting
@@ -296,9 +371,23 @@ final class TranscriptFollowState {
     }
 
     func jump() {
+        paused = false
         pinned = true
         repinsSpent = 0
+        undrivenDrift = 0
+        markDriven()
         set(jump: false)
+    }
+
+    /// Stop following by hand, from the Following pill.
+    ///
+    /// The button state is left alone: if the end drifts away the scroll
+    /// callback offers Jump to latest on its own, and if the reader is
+    /// already on it the pill flips to Follow so there is always a way back.
+    func pause() {
+        paused = true
+        pinned = false
+        undrivenDrift = 0
     }
 
     /// Observation does not compare before it notifies, so writing the same
@@ -399,13 +488,54 @@ struct TranscriptSkeleton: View {
     }
 }
 
-struct JumpToLatestButton: View {
-    var action: () -> Void
+/// The follow control at the bottom of a transcript: three states, one seat.
+///
+/// - Scrolled away: a solid **Jump to latest** that chases the end.
+/// - Following a live turn: a quiet **Following** pill. It is the lock the
+///   transcript was missing: pressing it pauses, pressing Follow resumes.
+/// - Paused while live: an outlined **Follow** so there is always a way back
+///   without scrolling.
+/// - Idle and pinned: nothing. A control nobody needs is clutter, not state.
+struct TranscriptFollowPill: View {
+    var showJump: Bool
+    var busy: Bool
+    var paused: Bool
+    var resume: () -> Void
+    var pause: () -> Void
 
     var body: some View {
-        Button("Jump to latest", .next, action: action)
-            .buttonStyle(AccentButtonStyle(small: true))
-            .padding(.bottom, Theme.Space.m)
+        Group {
+            if showJump {
+                Button("Jump to latest", .next, action: resume)
+                    .buttonStyle(AccentButtonStyle(small: true))
+            } else if busy, paused {
+                Button(action: resume) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down")
+                        Text("Follow")
+                    }
+                    .font(Theme.caption.weight(.medium))
+                }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .help("Follow new responses as they arrive")
+            } else if busy {
+                Button(action: pause) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text("Following")
+                    }
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .help("Pause auto-follow")
+            }
+        }
+        .padding(.bottom, Theme.Space.m)
+        .animation(.easeOut(duration: 0.15), value: showJump)
     }
 }
 
@@ -710,10 +840,22 @@ final class TranscriptWindow {
             // rows on screen, so this costs a dictionary lookup rather than
             // another measurement.
             let reported = rowFramesStamp != heldStamp
-            let drifted = reported
-                ? rowFrames[held.id].map { abs($0.minY - held.top) > Self.holdSlack }
-                : nil
-            if drifted != false {
+            if !reported {
+                // Nothing has reported since the hold was armed, so what the
+                // frames hold is pre-insertion geometry and the first height
+                // change IS the page landing: correct blind, once.
+                restore?(held)
+                // A frame spent putting the reader back is not a frame to
+                // judge the boundary from: the offset it reports is the one
+                // being corrected.
+                return
+            }
+            // A missing frame means the anchor row isn't built right now:
+            // the reader scrolled away from it or the lazy stack dropped it.
+            // Scrolling it back on a stale offset is the yank that made long
+            // chats impossible to read back, so hands off until it reports.
+            guard let frame = rowFrames[held.id] else { return }
+            if abs(frame.minY - held.top) > Self.holdSlack {
                 restore?(held)
                 // A frame spent putting the reader back is not a frame to
                 // judge the boundary from: the offset it reports is the one
