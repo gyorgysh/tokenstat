@@ -78,6 +78,7 @@ mod machine;
 /// Descriptor headroom. See the module for why 256 is not enough.
 pub mod open_files;
 pub mod ownership;
+pub(crate) mod presence;
 pub mod pricing;
 mod proxy_http;
 #[cfg(feature = "local-host")]
@@ -143,7 +144,8 @@ pub use tokenstat_pty::warm_shell_pool;
 /// library and screen input work. 3 is the password vault: `ssh.vault.password.set`,
 /// `ssh.vault.lock`, `ssh.vault.recovery.rotate`, and enrollment gone from the
 /// public methods. 4 adds `ssh.session.suggest` and `chat.eventPage`. 6 adds
-/// the `refresh` parameter on `chat.backends` and `automation.backends`.
+/// the `refresh` parameter on `chat.backends` and `automation.backends`, and
+/// `app.watching` / `app.stoppedWatching`.
 ///
 /// That last one is a parameter, not a method, which is the weaker case: an
 /// older host deserializes the call, ignores the field it does not

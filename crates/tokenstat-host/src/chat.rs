@@ -631,7 +631,12 @@ impl Store {
             // This fixed reason carries no prompt, path, or tool details.
             // Paired devices learn only that an answer is needed, then fetch
             // the ordinary protected conversation API themselves.
-            if !already_waiting {
+            //
+            // Not while somebody has this conversation on screen. The approval
+            // card is already in front of them, and a phone buzzing about the
+            // question its own screen is asking is the app talking over
+            // itself. See `crate::presence`.
+            if !already_waiting && !crate::presence::is_watched(conversation_id) {
                 tokenstat_sync::push::notify_in_background(
                     tokenstat_sync::push::Reason::RunNeedsInput,
                 );
@@ -1770,7 +1775,10 @@ impl Store {
             }],
         );
         let _ = self.mark_last_message(id, now_ms(), "agent");
-        if let Some(reason) = chat_notification(status) {
+        // Same rule as the approval above: a turn that ended in front of
+        // somebody has already told them.
+        if let Some(reason) = chat_notification(status).filter(|_| !crate::presence::is_watched(id))
+        {
             tokenstat_sync::push::notify_in_background(reason);
         }
         manager.forget_reader(pty, &reader);

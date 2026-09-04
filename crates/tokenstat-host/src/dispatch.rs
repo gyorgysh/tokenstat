@@ -2721,6 +2721,25 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
             "coreVersion": tokenstat_core::VERSION,
         })));
     }
+    // Somebody is looking at a conversation, or has stopped. Sessionless
+    // because it is called on a ten-second heartbeat from every client that
+    // has a chat on screen, and opening an archive to record a boolean would
+    // be the most expensive thing either app does on a timer.
+    if matches!(method, "app.watching" | "app.stoppedWatching") {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase", default)]
+        struct Watching {
+            conversation_id: Option<String>,
+        }
+        let p: Watching = serde_json::from_str(params).unwrap_or_default();
+        let id = p.conversation_id.unwrap_or_default();
+        if method == "app.watching" {
+            crate::presence::claim(&id);
+        } else {
+            crate::presence::release(&id);
+        }
+        return Some(Ok(json!({ "ok": true })));
+    }
     if let Some(answer) = crate::cloud_import::call(method, params) {
         return Some(answer);
     }

@@ -942,6 +942,33 @@ extension Bridge {
         return (workspaceID, nil)
     }
 
+    /// Tell the host somebody has this conversation on screen, so it does not
+    /// push to this account's phones about a reply they are watching arrive.
+    ///
+    /// A lease, renewed on a timer: see `presence` on the host. Failures are
+    /// ignored because the consequence of one is a notification that was not
+    /// needed, and taking a chat screen down with an alert about a heartbeat
+    /// would be the worse trade by a distance.
+    static func watching(conversationID: String, peer: String? = nil) async {
+        struct Ack: Codable, Sendable { var ok: Bool? }
+        _ = try? await chatInvoke(
+            peer: peer,
+            "app.watching",
+            ["conversationId": conversationID],
+            as: Ack.self
+        )
+    }
+
+    static func stoppedWatching(conversationID: String, peer: String? = nil) async {
+        struct Ack: Codable, Sendable { var ok: Bool? }
+        _ = try? await chatInvoke(
+            peer: peer,
+            "app.stoppedWatching",
+            ["conversationId": conversationID],
+            as: Ack.self
+        )
+    }
+
     /// `refresh` asks the host to probe the agent CLIs now instead of serving
     /// its cached lists. Only send it to a host that understands it: an older
     /// one ignores the field and answers from the cache, which looks to a

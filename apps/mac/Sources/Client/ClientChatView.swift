@@ -327,6 +327,9 @@ struct ClientChatThread: View {
                 await model.poll()
             }
         }
+        // The host is on the other computer and cannot see this screen. Until
+        // it is told, a turn finishing here pushed to this very phone.
+        .watching(conversationID: chatID, peer: model.peer)
         .alert("Chat unavailable", isPresented: Binding(
             get: { model.error != nil },
             set: { if !$0 { model.error = nil } }

@@ -229,19 +229,18 @@ final class RunNotifications {
         guard isOn, chatsPrimed else { return }
         for (id, chat) in current {
             guard let before = lastChats[id] else { continue }
-            if !before.pending, chat.pending {
-                // The card is already the notification while this app and
-                // conversation are in front. A background app is not visible,
-                // even if its route still happens to be Chat.
-                if id != selectedID || !NSApp.isActive {
-                    post(
-                        "chat.\(id)",
-                        title: "Waiting for you",
-                        body: "\(chat.title) needs an answer."
-                    )
-                }
+            // The conversation on screen is its own notification. Whoever is
+            // reading it watched the card appear and the reply land, so a
+            // banner about either only repeats what they are looking at.
+            let watching = UserPresence.shared.isWatching(conversation: id)
+            if !before.pending, chat.pending, !watching {
+                post(
+                    "chat.\(id)",
+                    title: "Waiting for you",
+                    body: "\(chat.title) needs an answer."
+                )
             }
-            guard before.running, !chat.running else { continue }
+            guard before.running, !chat.running, !watching else { continue }
             switch chat.doneStatus {
             case "ok":
                 post("chat.\(id)", title: "Chat finished", body: "\(chat.title) is done.")
