@@ -107,6 +107,84 @@ struct ClientEmptyState: View {
     }
 }
 
+/// The first connection to another Mac needs a diagnosis, not a retry loop.
+/// iOS and iPadOS cannot change the Mac's Remote Reach setting, so the two
+/// Mac-side actions are visible and ordered here.
+struct RemoteReachRecoveryCard: View {
+    let name: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(spacing: Theme.Space.m) {
+            // This is a setup state, not an alarm. Giving the animation its
+            // own quiet stage makes the direction of the connection legible
+            // before somebody has to read the instructions.
+            ClientEmptyArt(kind: .remoteReach)
+                .frame(width: 128, height: 84)
+                .background(Theme.accentSoft.opacity(0.58), in: RoundedRectangle(cornerRadius: 18))
+
+            VStack(spacing: 5) {
+                Text("Connect this Mac")
+                    .font(ClientType.screenTitle)
+                Text("\(name) is not ready for remote access yet.")
+                    .font(ClientType.label)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Text("Complete these steps on the Mac, then check again here.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                recoveryStep(
+                    symbol: "laptopcomputer",
+                    title: "Wake the Mac and open tokenstat",
+                    detail: "The Mac must be awake while tokenstat is running."
+                )
+                recoveryStep(
+                    symbol: "switch.2",
+                    title: "Turn on Remote Reach on the Mac",
+                    detail: "In tokenstat, open Devices and switch on “Reach devices from anywhere.”"
+                )
+            }
+
+            Button("Check connection", .refresh, action: retry)
+                .labelStyle(ActionLabelStyle())
+                .clientProminentStyle()
+                .controlSize(.large)
+                .tint(Theme.accent)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(Theme.Space.l)
+        .cardSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Connect \(name). On the Mac, wake it, open tokenstat, then turn on Reach devices from anywhere in Devices.")
+    }
+
+    private func recoveryStep(symbol: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            Image(systemName: symbol)
+                .font(Theme.font(15, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 34, height: 34)
+                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(ClientType.label.weight(.semibold))
+                Text(detail)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
 /// A failure, drawn like part of the app rather than like a crash log.
 ///
 /// One component for every error surface in the client, so a device that is

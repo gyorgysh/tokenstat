@@ -25,6 +25,9 @@ enum EmptyArtKind {
     /// The host has not answered yet. Deliberately not one of the others: a
     /// question nobody replied to is not an empty answer.
     case waiting
+    /// A Mac has not answered a phone or iPad. The scene shows the outgoing
+    /// reach and the Remote Reach switch that must be changed on the Mac.
+    case remoteReach
     /// Cross-device SSH vault, shown when the plan does not include it.
     case vault
     /// Remote screen, shown when the plan does not include Legend.
@@ -63,6 +66,7 @@ struct ClientEmptyArt: View {
             case .changes: ChangesScene(reduceMotion: reduceMotion)
             case .files: FilesScene(reduceMotion: reduceMotion)
             case .waiting: WaitingScene(reduceMotion: reduceMotion)
+            case .remoteReach: RemoteReachScene(reduceMotion: reduceMotion)
             case .vault: VaultScene(reduceMotion: reduceMotion)
             case .screen: ScreenScene(reduceMotion: reduceMotion)
             case .workspaceAccess: WorkspaceAccessScene(reduceMotion: reduceMotion)
@@ -465,6 +469,73 @@ private struct WaitingScene: View {
             .frame(width: 38, height: 60)
         }
         .onAppear { out = true }
+    }
+}
+
+// MARK: - Remote Reach
+
+/// A phone calling a Mac whose Remote Reach switch is still off. The pulse
+/// ends at the switch, making this an actionable setup state rather than a
+/// vague network failure. Reduce Motion gets its final, still frame.
+private struct RemoteReachScene: View {
+    var reduceMotion: Bool
+    @State private var sending = false
+
+    var body: some View {
+        ZStack {
+            phone.offset(x: -42, y: 8)
+            mac.offset(x: 28, y: -3)
+            signal.offset(x: -2, y: 6)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.45).repeatForever(autoreverses: true)) {
+                sending = true
+            }
+        }
+    }
+
+    private var phone: some View {
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
+            .strokeBorder(Ink.quiet, style: Ink.style)
+            .frame(width: 26, height: 45)
+            .overlay {
+                VStack(spacing: 5) {
+                    Ghost(width: 12, color: Ink.second)
+                    Circle().fill(Ink.lead).frame(width: 5, height: 5)
+                }
+            }
+    }
+
+    private var mac: some View {
+        VStack(spacing: 3) {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .strokeBorder(Ink.quiet, style: Ink.style)
+                .frame(width: 50, height: 34)
+                .overlay(alignment: .bottomTrailing) {
+                    Capsule()
+                        .fill(sending && !reduceMotion ? Ink.lead : Ink.quiet)
+                        .frame(width: 17, height: 10)
+                        .overlay(alignment: sending && !reduceMotion ? .trailing : .leading) {
+                            Circle().fill(Color.white).padding(2)
+                        }
+                        .padding(5)
+                }
+            Capsule().fill(Ink.quiet).frame(width: 34, height: Ink.width)
+        }
+    }
+
+    private var signal: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Ink.lead)
+                    .frame(width: 4, height: 4)
+                    .opacity(reduceMotion ? 0.45 : (sending
+                        ? (index == 2 ? 0.18 : 0.85)
+                        : (index == 0 ? 0.18 : 0.85)))
+            }
+        }
     }
 }
 

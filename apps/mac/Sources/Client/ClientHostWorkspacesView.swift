@@ -40,7 +40,12 @@ struct ClientHostWorkspacesView: View {
                     showsOpenWork: false
                 )
 
-                if let message = model.errorMessage {
+                // When content is already visible, keep an unobtrusive error
+                // above it. With no content, the recovery card below is the
+                // whole answer; a banner plus an empty state used to repeat
+                // the same failure without clarifying what to do on the Mac.
+                if let message = model.errorMessage,
+                   !model.folders.isEmpty || !model.sessions.isEmpty {
                     ClientErrorCard(message: message) {
                         Task { await model.connect(peerKey: peerKey, name: hostName) }
                     }
@@ -73,20 +78,17 @@ struct ClientHostWorkspacesView: View {
                         }
                     }
                 } else if model.folders.isEmpty, model.sessions.isEmpty {
-                    ClientEmptyState(
-                        kind: model.errorMessage == nil ? .nothingYet : .unreachable,
-                        title: model.errorMessage == nil
-                            ? "No folders on \(hostName) yet"
-                            : "Could not reach \(hostName)",
-                        message: model.errorMessage == nil
-                            ? "Folders added on that computer show up here."
-                            : "It has to be awake with tokenstat running. If it has never "
-                                + "been reachable from here, open Devices on that computer and "
-                                + "turn on \"Reach devices from anywhere\".",
-                        actionTitle: "Try again",
-                        actionIcon: .refresh,
-                        action: { Task { await model.connect(peerKey: peerKey, name: hostName) } }
-                    )
+                    if model.errorMessage != nil {
+                        RemoteReachRecoveryCard(name: hostName) {
+                            Task { await model.connect(peerKey: peerKey, name: hostName) }
+                        }
+                    } else {
+                        ClientEmptyState(
+                            kind: .nothingYet,
+                            title: "No folders on \(hostName) yet",
+                            message: "Folders added on that computer show up here."
+                        )
+                    }
                 }
 
                 ClientRecentChatsSection(

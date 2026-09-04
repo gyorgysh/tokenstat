@@ -418,15 +418,27 @@ struct MachinesView: View {
                 let planExpired = status.tunnel
                     && status.tunnelError?.contains("not_on_this_plan") == true
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    // A setting, not a dashboard card. Keeping its label,
+                    // explanation and switch in one compact preference row
+                    // makes the control easy to spot without overpowering the
+                    // identity details above it.
                     HStack(alignment: .center, spacing: Theme.Space.m) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Reach devices from anywhere").font(Theme.callout)
-                            Text("Connections are end to end encrypted. Screen sharing prefers a direct LAN or router-mapped route and otherwise uses the tunnel. Automatic router mappings are leased only while Remote Reach is on. The service can see which machines talked, when, and how much on relayed connections, but not what they said.")
-                                .font(Theme.caption)
-                                .foregroundStyle(.secondary)
+                        HStack(spacing: Theme.Space.s) {
+                            Image(systemName: "rectangle.3.group.bubble.left")
+                                .font(Theme.font(15, weight: .medium))
+                                .foregroundStyle(Theme.accent)
+                                .frame(width: 30, height: 30)
+                                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Reach devices from anywhere")
+                                    .font(Theme.callout.weight(.semibold))
+                                Text("Connect to this Mac from your signed-in devices.")
+                                    .font(Theme.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Spacer(minLength: Theme.Space.m)
-                        Toggle("", isOn: Binding(
+                        Toggle("Reach devices from anywhere", isOn: Binding(
                             get: { allowed && status.tunnel },
                             set: { enabled in Task { await model.setTunnel(enabled) } }
                         ))
@@ -436,6 +448,25 @@ struct MachinesView: View {
                         .disabled(!allowed)
                         .fixedSize()
                     }
+                    // Keep controls in the inspector's shared trailing
+                    // column. `Toggle` does not distribute its label and
+                    // track by itself, so this explicit spacer pins the track
+                    // to the same edge as every other control.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Label(
+                        allowed && status.tunnel
+                            ? "Remote access is on. This Mac will be reachable while tokenstat is running."
+                            : "Turn this on to make this Mac reachable from your other devices.",
+                        systemImage: allowed && status.tunnel ? "checkmark.circle.fill" : "info.circle"
+                    )
+                    .font(Theme.caption)
+                    .foregroundStyle(allowed && status.tunnel ? Theme.accent : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text("Connections are end-to-end encrypted. Screen sharing prefers a direct local route and otherwise uses the tunnel.")
+                        .font(Theme.caption)
+                        .foregroundStyle(.tertiary)
 
                     if !allowed {
                         // The relay enforces the plan at every HELLO; this is
