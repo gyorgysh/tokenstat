@@ -91,6 +91,13 @@ extension AgentBackend {
 
 extension [AgentBackend] {
     /// Picker list: hidden tiles stay out, unless this card or job already uses one.
+    ///
+    /// Shell goes last. The host lists it first because it is the plainest
+    /// backend, and a picker that opens on it offers a shell as the obvious
+    /// way to run a scheduled job, which is the one thing almost nobody wants
+    /// here: the prompt field is where a command belongs. It stays in the
+    /// list, because a shell job is a real thing to want, just not the thing
+    /// somebody lands on.
     @MainActor
     func visibleForPicker(keeping id: String? = nil, scope: String = "local") -> [AgentBackend] {
         var out = filter { !$0.isHiddenFromLaunchers(scope: scope) }
@@ -98,6 +105,18 @@ extension [AgentBackend] {
            let extra = first(where: { $0.id == id }) {
             out.append(extra)
         }
+        if let at = out.firstIndex(where: { $0.id == "sh" }) {
+            out.append(out.remove(at: at))
+        }
         return out
+    }
+
+    /// What a new card or job should start on: an agent, never the shell.
+    ///
+    /// `first` was doing this, and the host's list opens with Shell.
+    @MainActor
+    func defaultForPicker(keeping id: String? = nil, scope: String = "local") -> AgentBackend? {
+        let out = visibleForPicker(keeping: id, scope: scope)
+        return out.first { $0.id != "sh" } ?? out.first
     }
 }

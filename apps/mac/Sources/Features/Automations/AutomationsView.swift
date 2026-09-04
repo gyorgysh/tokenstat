@@ -988,8 +988,8 @@ struct NewAutomationSheet: View {
                     backendID = template.backendID
                 }
             }
-            if backendID.isEmpty, let first = model.pickerBackends(keeping: existing?.backend).first {
-                backendID = first.id
+            if backendID.isEmpty, let agent = model.defaultBackend(keeping: existing?.backend) {
+                backendID = agent.id
             }
             if workspaceID.isEmpty {
                 workspaceID = model.scope ?? folders.first?.id ?? ""

@@ -98,6 +98,11 @@ final class AutomationsModel {
         backends.visibleForPicker(keeping: id)
     }
 
+    /// What a new job starts on. See `defaultForPicker`.
+    func defaultBackend(keeping id: String? = nil) -> AgentBackend? {
+        backends.defaultForPicker(keeping: id)
+    }
+
     func load() async {
         do {
             async let j = Bridge.automations()
