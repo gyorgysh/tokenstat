@@ -62,7 +62,13 @@ fun ChatSection(
         }
     }
     LaunchedEffect(workspace) { loadChats() }
-    LaunchedEffect(openId) { openId?.let { scope.launch { loadEvents(it) } } }
+    LaunchedEffect(openId) {
+        val id = openId ?: return@LaunchedEffect
+        while (true) {
+            loadEvents(id)
+            kotlinx.coroutines.delay(2000)
+        }
+    }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionLabel("Conversations")
@@ -107,11 +113,30 @@ fun ChatSection(
             LazyColumn(Modifier.weight(1f, false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(events, key = { it.str("seq") ?: it.hashCode().toString() }) { ev ->
                     val kind = ev.str("kind") ?: ev.str("role") ?: "event"
-                    val text = ev.str("text") ?: ev.str("body") ?: ev.toString().take(400)
-                    Card { Column(Modifier.padding(10.dp)) {
-                        Text(kind, style = MaterialTheme.typography.labelSmall)
-                        Text(text, style = MaterialTheme.typography.bodySmall)
-                    } }
+                    val innerEv = ev["event"] as? JsonObject
+                    val text = ev.str("text")
+                        ?: innerEv?.str("delta")
+                        ?: innerEv?.str("text")
+                        ?: innerEv?.str("target")?.let { target -> "${innerEv.str("verb") ?: "Tool"}: $target" }
+                        ?: innerEv?.str("name")?.let { name -> "Attachment: $name" }
+                        ?: ev.str("body")
+                        ?: ""
+                    val timeMs = ev["atMs"]?.jsonPrimitive?.longOrNull
+                    val timeLabel = timeMs?.let { RelativeClock.label(it) } ?: ""
+                    Card {
+                        Column(Modifier.padding(10.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(kind, style = MaterialTheme.typography.labelSmall)
+                                if (timeLabel.isNotEmpty()) {
+                                    Text(timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                }
+                            }
+                            if (text.isNotEmpty()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(text, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -131,8 +156,6 @@ fun ChatSection(
                 })
             }
             Text("Times shown relatively; full transcript pinning ships next.", style = MaterialTheme.typography.labelSmall)
-            val _tick = RelativeClock.label(System.currentTimeMillis())
-            @Suppress("UNUSED_EXPRESSION") _tick
         }
     }
 }

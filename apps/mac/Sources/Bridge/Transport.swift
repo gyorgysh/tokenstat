@@ -503,7 +503,8 @@ private final class Connection {
             let tail = pending.dropFirst(scanned)
             if let end = tail.firstIndex(of: 0x0A) {
                 let line = pending[..<end]
-                pending = pending[pending.index(after: end)...]
+                let rest = pending[pending.index(after: end)...]
+                pending = rest.isEmpty ? Data() : rest
                 return String(decoding: line, as: UTF8.self)
             }
             scanned = pending.count

@@ -1518,12 +1518,14 @@ fn opencode_patch(part: &Value) -> Option<String> {
         .and_then(Value::as_array)?;
     let mut patches: Vec<&str> = Vec::new();
     for file in files.iter().take(MAX_FILES) {
-        let patch = file
+        if let Some(patch) = file
             .get("patch")
             .and_then(Value::as_str)
             .map(str::trim)
-            .filter(|s| !s.is_empty())?;
-        patches.push(patch);
+            .filter(|s| !s.is_empty())
+        {
+            patches.push(patch);
+        }
     }
     if patches.is_empty() {
         return None;
@@ -2186,6 +2188,26 @@ mod tests {
             )),
             "{events:?}"
         );
+    }
+
+    #[test]
+    fn opencode_edit_end_survives_sibling_without_patch() {
+        let mut parser = Parser::new("opencode2");
+        let events = parser.push_events(
+            concat!(
+                "{\"type\":\"tool_use\",\"part\":{\"partID\":\"prt_3\",\"type\":\"tool\",\"id\":\"call_3\",\"tool\":\"edit\",\"state\":{\"status\":\"completed\",\"input\":{\"path\":\"note.txt\"},\"output\":\"Edited note.txt\",\"title\":\"edit\",\"metadata\":{\"metadata\":{\"files\":[{\"file\":\"empty.txt\",\"status\":\"created\"},{\"file\":\"note.txt\",\"patch\":\"Index: note.txt\\n--- note.txt\\n+++ note.txt\\n@@ -1,1 +1,1 @@\\n-foo\\n+bar\\n\",\"status\":\"modified\",\"additions\":1,\"deletions\":1}]}}}}}\n",
+            )
+            .as_bytes(),
+        );
+        let detail = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ToolEnd { detail, .. } => detail.clone(),
+                _ => None,
+            })
+            .expect("edit end keeps a detail");
+        assert!(detail.contains("-foo"), "{detail}");
+        assert!(detail.contains("+bar"), "{detail}");
     }
 
     #[test]

@@ -33,7 +33,6 @@ internal sealed class ChatPage : Page
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _transcript = new() { Spacing = Theme.SpaceM };
     private ScrollViewer? _scroll;
-    private readonly HashSet<string> _renderedKeys = new();
     private bool _followEnd = true;
     private readonly StackPanel _attachStrip = new()
     {
@@ -115,7 +114,6 @@ internal sealed class ChatPage : Page
         _attachments.Clear();
         _events = new JsonArray();
         _offset = 0;
-        _renderedKeys.Clear();
         _transcript.Children.Clear();
         _followEnd = true;
         _root.Children.Clear();
@@ -328,7 +326,6 @@ internal sealed class ChatPage : Page
         }
         _root.Children.Add(_titleBox);
 
-        _renderedKeys.Clear();
         _transcript.Children.Clear();
         _followEnd = true;
         RebuildTranscript(full: true);
@@ -537,32 +534,91 @@ internal sealed class ChatPage : Page
         return button;
     }
 
+    private static string ItemContentKey(DisplayItem item) => item.Kind switch
+    {
+        ItemKind.User => $"{item.Id}|{item.Text}",
+        ItemKind.Assistant => $"{item.Id}|{item.Text}",
+        ItemKind.Thinking => $"{item.Id}|{item.Text}",
+        ItemKind.Tool => $"{item.Id}|{item.Verb}|{item.Target}|{item.Running}|{item.Failed}|{item.Duration}|{item.Detail}",
+        ItemKind.Edit => $"{item.Id}|{item.Path}|{item.Added}|{item.Removed}|{item.Patch}",
+        ItemKind.Approval => $"{item.Id}|{item.Pending}|{item.Approval?.ToJsonString()}",
+        ItemKind.Attachment => $"{item.Id}|{item.Name}|{item.MediaType}|{item.Size}",
+        ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}",
+        ItemKind.Failed => $"{item.Id}|{item.Text}",
+        _ => item.Id,
+    };
+
     private void RebuildTranscript(bool full = false)
     {
         if (full)
         {
             _transcript.Children.Clear();
-            _renderedKeys.Clear();
         }
-        foreach (var item in Coalesce(_events))
+        var items = Coalesce(_events);
+        var desiredCount = items.Count + (Busy() ? 1 : 0);
+
+        for (int i = 0; i < items.Count; i++)
         {
-            var key = item.Kind + "|" + item.Text.GetHashCode(StringComparison.Ordinal);
-            if (!full && !_renderedKeys.Add(key)) continue;
-            _transcript.Children.Add(Render(item));
+            var item = items[i];
+            var key = ItemContentKey(item);
+
+            if (i < _transcript.Children.Count)
+            {
+                var existing = _transcript.Children[i] as FrameworkElement;
+                if (existing?.Tag as string == key)
+                {
+                    continue;
+                }
+                var updated = Render(item);
+                if (updated is FrameworkElement fe) fe.Tag = key;
+                _transcript.Children.RemoveAt(i);
+                _transcript.Children.Insert(i, updated);
+            }
+            else
+            {
+                var created = Render(item);
+                if (created is FrameworkElement fe) fe.Tag = key;
+                _transcript.Children.Add(created);
+            }
         }
+
         if (Busy())
         {
-            _transcript.Children.Add(new TextBlock
+            var workingIdx = items.Count;
+            const string workingKey = "__working__";
+            if (workingIdx < _transcript.Children.Count)
             {
-                Text = "Working",
-                Foreground = Theme.AccentBrush,
-                FontSize = 12,
-            });
+                var existing = _transcript.Children[workingIdx] as FrameworkElement;
+                if (existing?.Tag as string != workingKey)
+                {
+                    var workingBlock = new TextBlock
+                    {
+                        Text = "Working",
+                        Foreground = Theme.AccentBrush,
+                        FontSize = 12,
+                        Tag = workingKey,
+                    };
+                    _transcript.Children.RemoveAt(workingIdx);
+                    _transcript.Children.Insert(workingIdx, workingBlock);
+                }
+            }
+            else
+            {
+                _transcript.Children.Add(new TextBlock
+                {
+                    Text = "Working",
+                    Foreground = Theme.AccentBrush,
+                    FontSize = 12,
+                    Tag = workingKey,
+                });
+            }
         }
-        else if (full)
+
+        while (_transcript.Children.Count > desiredCount)
         {
-            // Keys were rebuilt above; keep the set in sync.
+            _transcript.Children.RemoveAt(_transcript.Children.Count - 1);
         }
+
         if (_followEnd) _scroll?.ChangeView(null, _scroll.ScrollableHeight, null, true);
     }
 

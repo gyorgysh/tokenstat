@@ -99,6 +99,7 @@ fun WorkspaceSection(
     hostLabel: String,
     section: String,
     modifier: Modifier = Modifier,
+    protocol: Long? = null,
     onOpenTerminal: (String?) -> Unit,
     onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
 ) {
@@ -128,8 +129,8 @@ fun WorkspaceSection(
     val reload: () -> Unit = { scope.launch { load() } }
     when (section) {
         "Sessions" -> SessionsSection(data, error, loading, onOpenTerminal, reload, modifier)
-        "Chat" -> ChatSection(model, peer, workspace, protocol = null, modifier)
-        "Pulls" -> PullsSection(model, peer, workspace, protocol = null, modifier)
+        "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier)
+        "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier)
         "Changes" -> ChangesSection(model, peer, workspace, data, error, loading, modifier)
         "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier)
         "Notes" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = false, onChanged = reload, modifier)

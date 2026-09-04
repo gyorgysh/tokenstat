@@ -156,12 +156,14 @@ final class TerminalStackView: NSView {
         }
 
         var requestPaint = !reparented.isEmpty
+        var flippedVisible = Set<ObjectIdentifier>()
         for view in views {
             let visible = view === leading || view === trailing
             let needsFlip = view.isHidden == visible
             if needsFlip {
                 view.isHidden = !visible
                 if visible {
+                    flippedVisible.insert(ObjectIdentifier(view))
                     requestPaint = true
                     onReturnToFront?(view)
                 }
@@ -194,7 +196,9 @@ final class TerminalStackView: NSView {
         // session's size and repaint, the same thing a window resize forces.
         if focusReturning {
             for view in views where !view.isHidden {
-                onReturnToFront?(view)
+                if !flippedVisible.contains(ObjectIdentifier(view)) {
+                    onReturnToFront?(view)
+                }
             }
             scheduleFullPaint()
         }

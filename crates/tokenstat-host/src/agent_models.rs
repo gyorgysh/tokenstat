@@ -157,9 +157,13 @@ fn fill(id: &str, fetch: impl FnOnce() -> Option<Vec<String>>) {
     let Some(list) = fetch().filter(|list| !list.is_empty()) else {
         // A failed probe must not evict a good list: the picker would
         // silently downgrade to fallbacks until the next success. Record a
-        // miss only when there is nothing to keep.
-        if cache_lock().get(id).is_none() {
-            cache_lock().insert(
+        // miss only when there is nothing to keep; otherwise refresh its
+        // timestamp so we back off and do not storm probes on every request.
+        let mut lock = cache_lock();
+        if let Some(entry) = lock.get_mut(id) {
+            entry.at = Instant::now();
+        } else {
+            lock.insert(
                 id.to_string(),
                 Entry {
                     at: Instant::now(),
@@ -597,5 +601,23 @@ not-a-model
                 "lmstudio/qwen/qwen3-coder-30b".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn failed_probe_keeps_live_entry_and_bumps_timestamp() {
+        let test_id = "test-probe-fail";
+        fill(test_id, || Some(vec!["test-model-1".into()]));
+        assert_eq!(for_backend(test_id, &[]), vec!["test-model-1"]);
+
+        // Wind the timestamp back past LIVE_TTL to simulate staleness
+        let past = Instant::now() - (LIVE_TTL + Duration::from_secs(1));
+        cache_lock().get_mut(test_id).unwrap().at = past;
+
+        // Failing probe should keep the live model list and refresh its timestamp
+        fill(test_id, || None);
+        assert_eq!(for_backend(test_id, &[]), vec!["test-model-1"]);
+
+        let entry_at = cache_lock().get(test_id).unwrap().at;
+        assert!(entry_at.elapsed() < Duration::from_secs(5));
     }
 }

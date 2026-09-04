@@ -67,6 +67,7 @@ import ai.tokenstat.tokenstat.ui.components.cardPaddingDp
 import ai.tokenstat.tokenstat.ui.heatmap.DayDetailSheet
 import ai.tokenstat.tokenstat.ui.heatmap.YearHeatmap
 import ai.tokenstat.tokenstat.ui.logic.HomeGreeting
+import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
 import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
@@ -1559,6 +1560,7 @@ private fun WorkspaceDetail(
             workspace = workspace,
             hostLabel = host.string("label") ?: "Host",
             section = section,
+            protocol = HostContracts.protocolOf(host),
             modifier = Modifier.verticalScroll(rememberScrollState()),
             onOpenTerminal = onOpenTerminal,
             onOpenBrowser = onOpenBrowser,
