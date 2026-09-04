@@ -111,15 +111,14 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// else, which is what lets one stack hold both kinds of session.
     var terminalViewIfLoaded: TerminalView? { terminalView }
 
-    /// Settle local predictions on return to this session. Unconfirmed
-    /// guesses cannot survive an interruption: coming back to stale ones
-    /// reads as a frozen line until the next output corrects it. Fresh
-    /// guesses keep their chance — their echo is still on its way.
+    /// Settle local predictions on return to this session. Standing guesses
+    /// cannot survive the trip away: a resize on the way drops their
+    /// tracking without repainting them, and a same-size remount fires no
+    /// resize at all, so coming back to them reads as a frozen line until
+    /// the next output corrects it. Withdrawing is always safe — an echo
+    /// still in flight simply draws the characters again when it lands —
+    /// and a no-op when nothing stands.
     func terminalReturnedToFront() {
-        guard !predicted.isEmpty,
-              let since = predictedSince,
-              Date().timeIntervalSince(since) > Self.maxEchoAge
-        else { return }
         withdrawPredictions()
     }
 
