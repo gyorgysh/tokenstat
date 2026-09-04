@@ -23,9 +23,11 @@ protocol TerminalPresentable: AnyObject, Identifiable {
     /// connecting: the pane draws a starting state over those instead.
     var terminalViewIfLoaded: TerminalView? { get }
 
-    /// This session's view just flipped from hidden to visible. Sessions
-    /// with no per-visibility state ignore it; sessions holding unconfirmed
-    /// local predictions use it to settle those before the next output.
+    /// This session's view came back to the front: it flipped from hidden to
+    /// visible, or the surface holding it returned from under another
+    /// destination. Sessions with no per-visibility state ignore it; sessions
+    /// holding unconfirmed local predictions use it to settle those before
+    /// the next output.
     func terminalReturnedToFront()
 }
 

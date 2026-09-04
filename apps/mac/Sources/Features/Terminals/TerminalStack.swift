@@ -116,8 +116,9 @@ final class TerminalStackView: NSView {
     /// Which of the visible halves took the last click. Set by the
     /// representable, which is the only piece that knows about sessions.
     var onViewClicked: ((TerminalView) -> Void)?
-    /// A view flipped from hidden to visible. Set by the representable with
-    /// a session lookup; the stack itself only knows views.
+    /// A view flipped from hidden to visible, or the whole surface came back
+    /// from under another destination. Set by the representable with a
+    /// session lookup; the stack itself only knows views.
     var onReturnToFront: ((TerminalView) -> Void)?
     private weak var leadingView: TerminalView?
     private weak var trailingView: TerminalView?
@@ -183,6 +184,20 @@ final class TerminalStackView: NSView {
         let focusReturning = !lastClaimsFocus
         lastClaimsFocus = true
         installClickMonitor()
+
+        // A return can leave everything above untouched: kept mounted under
+        // another destination (Home, Chat, Tasks, …), the surface is the
+        // same stack holding the same still-unhidden views, so no flip and
+        // no re-parent fired. Its buffer can still be stale — an occluded
+        // subtree is not drawn — and a quiet session has no output coming to
+        // heal it. Do what a flip would have done: replay each visible
+        // session's size and repaint, the same thing a window resize forces.
+        if focusReturning {
+            for view in views where !view.isHidden {
+                onReturnToFront?(view)
+            }
+            scheduleFullPaint()
+        }
 
         let key = focused ?? leading
         if let key, focusReturning || shown !== key {
