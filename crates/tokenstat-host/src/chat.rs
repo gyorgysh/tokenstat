@@ -1381,10 +1381,20 @@ impl Store {
         text: &str,
         attachment_ids: &[String],
     ) -> Result<Conversation, String> {
-        let prompt = text.trim();
-        if prompt.is_empty() {
-            return Err("chat.send needs text".into());
+        let typed = text.trim();
+        if typed.is_empty() && attachment_ids.is_empty() {
+            return Err("chat.send needs text or an attachment".into());
         }
+        // An image can be the whole message. The CLIs still need words on
+        // argv, so an empty caption sends a neutral viewing prompt. The
+        // timeline records what actually went out, attachments included.
+        let viewing;
+        let prompt = if typed.is_empty() {
+            viewing = "What is shown in the attached images?".to_string();
+            viewing.as_str()
+        } else {
+            typed
+        };
         let chat = self.get(id)?;
         if chat.running {
             return Err("this chat is already responding".into());
@@ -1594,12 +1604,26 @@ impl Store {
         self.append(
             id,
             &StoredEvent::User {
-                text: text.trim().into(),
+                text: prompt.into(),
                 at_ms: user_at,
             },
         )?;
+        // What the person attached rides the timeline as its own rows, so a
+        // sent image stays visible instead of vanishing into the turn. The
+        // bytes already live beside the chat; these records are only the
+        // names the rows render and the ids they fetch by.
+        for (attachment_id, path) in attachment_ids.iter().zip(attachments.iter()) {
+            let _ = self.append(
+                id,
+                &StoredEvent::Agent {
+                    event: attachment_event(attachment_id, path),
+                    at_ms: now_ms(),
+                    backend: chat.backend.clone(),
+                },
+            );
+        }
         self.mark_last_message(id, user_at, "user")?;
-        self.retitle_if_untitled(id, text.trim())?;
+        self.retitle_if_untitled(id, prompt)?;
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -2225,8 +2249,28 @@ fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
     file.write_all(bytes).map_err(|e| e.to_string())
 }
 
-fn safe_file_name(name: &str) -> String {
-    let leaf = std::path::Path::new(name)
+/// One timeline row for a file the person attached to their own message.
+///
+/// Derived from the staged file, never from client text: the name is the
+/// leaf on disk, the size is measured, and the media type comes from the
+/// extension table, so a row cannot claim an image it does not have.
+fn attachment_event(id: &str, path: &Path) -> Event {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(safe_file_name)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "attachment".into());
+    let size = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    Event::Attachment {
+        id: id.into(),
+        name,
+        media_type: media_type_for_path(path),
+        size,
+    }
+}
+
+fn safe_file_name(name: &str) -> String {    let leaf = std::path::Path::new(name)
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("attachment");
@@ -3406,6 +3450,28 @@ mod tests {
             backend: "claude",
         });
         assert!(spoken.user_text.contains("diagram.png"));
+    }
+
+    #[test]
+    fn sent_attachments_become_timeline_rows() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("photo.png");
+        fs::write(&file, b"fake-png").unwrap();
+        let event = attachment_event("att-1", &file);
+        match event {
+            Event::Attachment {
+                id,
+                name,
+                media_type,
+                size,
+            } => {
+                assert_eq!(id, "att-1");
+                assert_eq!(name, "photo.png");
+                assert_eq!(media_type.as_deref(), Some("image/png"));
+                assert_eq!(size, 8);
+            }
+            other => panic!("expected an attachment row, got {other:?}"),
+        }
     }
 
     #[test]
