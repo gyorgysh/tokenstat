@@ -212,7 +212,11 @@ final class TerminalStackView: NSView {
             // Hidden views keep the last frame they were shown at. Resizing
             // them here would SIGWINCH a session nobody can see.
         } else {
-            for sub in subviews {
+            // Visible views only. Hidden ones keep the frame they were shown
+            // at: resizing them here would SIGWINCH a session nobody can see,
+            // and a zero-bounds pass would collapse the pty and leave the
+            // session broken until input forced a resize and repaint.
+            for sub in subviews where !sub.isHidden {
                 if sub.frame != bounds { sub.frame = bounds }
             }
         }

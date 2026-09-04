@@ -30,6 +30,12 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// Characters drawn here the moment they were typed, before the far end
     /// has echoed them. See `predict`.
     @ObservationIgnored private var predicted: [UInt8] = []
+    /// When the oldest still-standing guess was drawn. Guesses only confirm
+    /// against output that arrives promptly: under lag, unrelated output that
+    /// merely starts with the same bytes would be swallowed as echo and the
+    /// real echo would then double-draw, which is the wrong display with the
+    /// right bytes.
+    @ObservationIgnored private var predictedSince: Date?
     /// Set once a control key has moved the cursor away from the end of the
     /// guessed text, after which the guesses can no longer be rubbed out
     /// with backspaces: the cells behind the cursor are no longer ours.
@@ -528,6 +534,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 return
             }
             if lineEchoes {
+                if predicted.isEmpty { predictedSince = Date() }
                 predicted.append(byte)
                 view.feed(byteArray: ArraySlice([byte]))
             } else if !lineSilent {
@@ -595,6 +602,16 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         guard !predicted.isEmpty else { return ArraySlice(data) }
         if predictionsDetachedFromCursor {
             predicted.removeAll()
+            predictedSince = nil
+            return ArraySlice(data)
+        }
+        if let since = predictedSince,
+           Date().timeIntervalSince(since) > Self.maxEchoAge {
+            // Lagged guesses are evidence of nothing. Confirming them
+            // against output that merely starts the same way swallows real
+            // output as echo and double-draws when the echo lands. Rub out
+            // and let the far end repaint the truth instead.
+            eraseRemainingPredictions()
             return ArraySlice(data)
         }
         var confirmed = 0
@@ -636,6 +653,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         undo.reserveCapacity(predicted.count * Self.eraseCell.count)
         for _ in predicted { undo.append(contentsOf: Self.eraseCell) }
         predicted.removeAll()
+        predictedSince = nil
         view.feed(byteArray: ArraySlice(undo))
     }
 
@@ -643,6 +661,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// a repaint from the far end is the correction.
     private func forgetPredictions() {
         predicted.removeAll()
+        predictedSince = nil
         predictionsDetachedFromCursor = false
         probing.removeAll()
         recentOutput.removeAll()
@@ -754,6 +773,11 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// Enough to span a few characters echoed one at a time with the escape
     /// sequences a colouring shell puts between them, and no more.
     private static let echoWindow = 256
+
+    /// How long a guess may stand unconfirmed before output stops counting
+    /// as its echo. Generous on purpose: only real lag trips it, and under
+    /// lag the far end's repaint is the truth anyway.
+    private static let maxEchoAge: TimeInterval = 3
 
     /// Whether a drag scrolls the buffer rather than reaching the program.
     ///

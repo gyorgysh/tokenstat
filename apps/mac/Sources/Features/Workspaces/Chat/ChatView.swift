@@ -290,6 +290,9 @@ struct ChatView: View {
             .onChange(of: model.approvals.isEmpty) { _, empty in
                 follow.suppressed = !empty
             }
+            .onChange(of: isActive, initial: true) { _, active in
+                follow.active = active
+            }
             // A request that arrives while a reply is still streaming would
             // otherwise be pushed off the top of the page before anyone saw
             // it. Bring the card to them.
@@ -315,6 +318,11 @@ struct ChatView: View {
                 // arrive: the intermediate ones all say the end is far below,
                 // and believing one of them is how a long conversation used to
                 // open in its middle.
+                //
+                // Only while in front. This pane stays mounted behind other
+                // destinations, and scrolling a zero-size proxy to estimated
+                // heights is how it came back painted off-origin.
+                guard isActive else { return }
                 follow.settle(true)
                 defer { follow.settle(false) }
                 // Hold the end until the conversation has stopped arriving,
@@ -325,7 +333,7 @@ struct ChatView: View {
                 var quiet = 0
                 for _ in 0..<Self.settleFrames {
                     try? await Task.sleep(for: .milliseconds(50))
-                    guard !Task.isCancelled, model.approvals.isEmpty else { return }
+                    guard !Task.isCancelled, isActive, model.approvals.isEmpty else { return }
                     // Only when it is not already there. Each of these is a
                     // walk over every row between here and the end.
                     if !follow.atEnd { pinToLatest(proxy, animated: false) }
@@ -401,7 +409,7 @@ struct ChatView: View {
         let state = follow
         let model = model
         state.repin = { [weak state] in
-            guard let state, state.pinned, model.approvals.isEmpty else { return }
+            guard let state, state.active, state.pinned, model.approvals.isEmpty else { return }
             state.markDrivenInstant()
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
         }
@@ -461,7 +469,10 @@ struct ChatView: View {
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
         // A pending request owns the view. Streaming text must not scroll it
         // back out from under somebody who is reading it to decide.
-        guard follow.pinned, model.approvals.isEmpty else { return }
+        // And a hidden pane owns no viewport: this view stays mounted behind
+        // other destinations, and scrolling its zero-size proxy is what left
+        // it painted off-origin until a resize.
+        guard isActive, follow.pinned, model.approvals.isEmpty else { return }
         scrollTo(TranscriptFollow.bottomID, proxy, animated: animated)
     }
 
@@ -470,6 +481,8 @@ struct ChatView: View {
         // animation read as the reader leaving and unpin mid-flight.
         // Instant pins land on the same frame and only need a short window;
         // the long one is what locked out slow scrollback during streams.
+        // Hidden panes do not scroll at all (see pinToLatest).
+        guard isActive else { return }
         let animate = animated && !reduceMotion
         follow.markDriven(duration: animate ? 0.4 : 0.08)
         if !animate {

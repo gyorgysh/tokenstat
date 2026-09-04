@@ -222,6 +222,11 @@ final class TranscriptFollowState {
     deinit {
         scrollReset?.cancel()
     }
+    /// Whether this pane is the one in front. Set by the transcript, which is
+    /// the only reader: repins fire from scroll callbacks, and a hidden pane
+    /// is still laid out (sized) behind other destinations, so without this
+    /// they would drive a proxy nobody can see.
+    @ObservationIgnored var active = true
     /// Whether the last frame put the end under the viewport.
     ///
     /// Read by the loops that hold the end while a conversation opens. One
