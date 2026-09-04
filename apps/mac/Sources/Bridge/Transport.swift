@@ -490,14 +490,23 @@ private final class Connection {
     /// The daemon never emits a bare newline inside a value, which is the
     /// reason the protocol is line delimited in the first place, so a newline
     /// is unambiguously the end of a frame.
+    ///
+    /// Only bytes that arrived since the last look are scanned. Scanning
+    /// from zero every 64 KB chunk turned a multi-megabyte frame (a screen
+    /// capture, a tool-heavy transcript page) into hundreds of megabytes of
+    /// re-scanning on a worker thread, which is what parked the bridge and
+    /// hung the app behind it.
     private func readLine() throws -> String {
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        var scanned = 0
         while true {
-            if let end = pending.firstIndex(of: 0x0A) {
+            let tail = pending.dropFirst(scanned)
+            if let end = tail.firstIndex(of: 0x0A) {
                 let line = pending[..<end]
                 pending = pending[pending.index(after: end)...]
                 return String(decoding: line, as: UTF8.self)
             }
+            scanned = pending.count
             let n = read(fd, &buffer, buffer.count)
             if n > 0 {
                 pending.append(contentsOf: buffer[..<n])
