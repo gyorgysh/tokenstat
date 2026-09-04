@@ -949,22 +949,22 @@ extension Bridge {
     /// ignored because the consequence of one is a notification that was not
     /// needed, and taking a chat screen down with an alert about a heartbeat
     /// would be the worse trade by a distance.
-    static func watching(conversationID: String, peer: String? = nil) async {
+    static func watching(conversationID: String, watcherID: String, peer: String? = nil) async {
         struct Ack: Codable, Sendable { var ok: Bool? }
         _ = try? await chatInvoke(
             peer: peer,
             "app.watching",
-            ["conversationId": conversationID],
+            ["conversationId": conversationID, "watcherId": watcherID],
             as: Ack.self
         )
     }
 
-    static func stoppedWatching(conversationID: String, peer: String? = nil) async {
+    static func stoppedWatching(conversationID: String, watcherID: String, peer: String? = nil) async {
         struct Ack: Codable, Sendable { var ok: Bool? }
         _ = try? await chatInvoke(
             peer: peer,
             "app.stoppedWatching",
-            ["conversationId": conversationID],
+            ["conversationId": conversationID, "watcherId": watcherID],
             as: Ack.self
         )
     }

@@ -2730,13 +2730,18 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         #[serde(rename_all = "camelCase", default)]
         struct Watching {
             conversation_id: Option<String>,
+            watcher_id: Option<String>,
         }
         let p: Watching = serde_json::from_str(params).unwrap_or_default();
         let id = p.conversation_id.unwrap_or_default();
+        // Clients before watcher ids shared one legacy lease. Keeping that
+        // spelling makes the parameter additive; current clients identify
+        // their own lease so one device cannot release another's.
+        let watcher = p.watcher_id.unwrap_or_else(|| "legacy".into());
         if method == "app.watching" {
-            crate::presence::claim(&id);
+            crate::presence::claim(&id, &watcher);
         } else {
-            crate::presence::release(&id);
+            crate::presence::release(&id, &watcher);
         }
         return Some(Ok(json!({ "ok": true })));
     }

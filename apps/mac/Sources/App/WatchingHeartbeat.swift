@@ -32,6 +32,10 @@ struct WatchingHeartbeat: ViewModifier {
     /// False while this pane is mounted but behind another destination.
     var isActive: Bool = true
 
+    /// One stable id for this mounted chat surface. A host uses it to keep
+    /// separate leases for a Mac and phone viewing the same conversation.
+    @State private var watcherID = UUID().uuidString
+
     /// Comfortably inside the host's 30 second lease, so one slow or dropped
     /// request does not let a notification through.
     private static let beat: Duration = .seconds(10)
@@ -45,11 +49,17 @@ struct WatchingHeartbeat: ViewModifier {
                     // saying so makes the next half minute behave correctly.
                     let leaving = id
                     let host = peer
-                    Task { await Bridge.stoppedWatching(conversationID: leaving, peer: host) }
+                    Task {
+                        await Bridge.stoppedWatching(
+                            conversationID: leaving,
+                            watcherID: watcherID,
+                            peer: host
+                        )
+                    }
                 }
                 while !Task.isCancelled {
                     if UserPresence.shared.isAtTheKeyboard {
-                        await Bridge.watching(conversationID: id, peer: peer)
+                        await Bridge.watching(conversationID: id, watcherID: watcherID, peer: peer)
                     }
                     try? await Task.sleep(for: Self.beat)
                 }
