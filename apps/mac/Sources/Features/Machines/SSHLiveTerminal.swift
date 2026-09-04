@@ -120,6 +120,21 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// and a no-op when nothing stands.
     func terminalReturnedToFront() {
         withdrawPredictions()
+        reassertSize()
+    }
+
+    /// Re-send the emulator's size. Return trips can silently desync the pty
+    /// (a missed or swallowed resize), and a full-screen program then draws
+    /// for the wrong grid until something forces a repaint: rows leak out as
+    /// scrollback, the rest stays black. A same-size SIGWINCH only repaints.
+    private func reassertSize() {
+        guard let terminal = terminalView?.getTerminal() else { return }
+        let cols = terminal.cols, rows = terminal.rows
+        guard cols > 0, rows > 0 else { return }
+        let handle = id
+        Task {
+            try? await Bridge.resizeSSHSession(id: handle, rows: rows, cols: cols)
+        }
     }
 
     init(handle: SSHSessionHandle, title: String, hostID: String? = nil) {

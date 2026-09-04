@@ -237,6 +237,15 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// The live emulator, if this session has one. Does not create it.
     var terminalViewIfLoaded: TerminalView? { terminalView }
 
+    /// Re-register this viewer's size on return. Trips away can silently
+    /// desync the pty, and a same-size return fires no `sizeChanged` to heal
+    /// it; the host skips the SIGWINCH when the agreement did not move, so a
+    /// redundant claim costs nothing and a drifted one repaints.
+    func terminalReturnedToFront() {
+        guard rows > 0, cols > 0 else { return }
+        eventStream.continuation.yield(.resize(rows: rows, cols: cols))
+    }
+
     /// The emulator, created on first access. Only call after attach.
     var view: TerminalView {
         if let terminalView { return terminalView }
