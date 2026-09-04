@@ -46,7 +46,73 @@ fn cache_lock() -> std::sync::MutexGuard<'static, HashMap<String, Entry>> {
 
 /// Ask every listable CLI, in parallel, so one `automation.backends` call
 /// waits one timeout rather than one per backend.
+///
+/// Off the request path: each probe shells a CLI with an 8s timeout, and a
+/// hung one (a broken grok install hangs rather than failing) used to stall
+/// the whole backends call for seconds, every minute, on every screen that
+/// asked. Callers serve the cache (or the curated fallback) immediately; the
+/// probes refill it in the background. First call after daemon start answers
+/// from fallbacks and the live lists arrive a moment later.
 pub fn refresh() {
+    if !needs_refresh() || !claim_refresh() {
+        return;
+    }
+    std::thread::spawn(refresh_blocking);
+}
+
+/// Whether any entry is missing or past its TTL. Pure cache read, no probes.
+fn needs_refresh() -> bool {
+    let cache = cache_lock();
+    for id in ["grok", "cursor", "agy", "opencode", "opencode2"] {
+        let stale = match cache.get(id) {
+            None => true,
+            Some(entry) => {
+                let ttl = match entry.value {
+                    Cached::Live(_) => LIVE_TTL,
+                    Cached::Miss => MISS_TTL,
+                };
+                entry.at.elapsed() >= ttl
+            }
+        };
+        if stale {
+            return true;
+        }
+    }
+    false
+}
+
+/// One background refresh at a time. A second caller while probes are in
+/// flight serves the cache instead of doubling the subprocesses.
+static REFRESH_IN_FLIGHT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn claim_refresh() -> bool {
+    REFRESH_IN_FLIGHT
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_ok()
+}
+
+fn release_refresh() {
+    REFRESH_IN_FLIGHT.store(false, std::sync::atomic::Ordering::Release);
+}
+
+/// The probes themselves, on a background thread: same parallel fan-out as
+/// before, one timeout rather than one per backend, but no request waits
+/// for it. The claim releases even on panic, so one bad probe run cannot
+/// wedge every later refresh.
+fn refresh_blocking() {
+    struct ReleaseOnDrop;
+    impl Drop for ReleaseOnDrop {
+        fn drop(&mut self) {
+            release_refresh();
+        }
+    }
+    let _release = ReleaseOnDrop;
     std::thread::scope(|scope| {
         scope.spawn(|| fill("grok", || list("grok", &["models"], parse_grok_models)));
         scope.spawn(|| {
