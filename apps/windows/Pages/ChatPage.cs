@@ -344,7 +344,7 @@ internal sealed class ChatPage : Page
         var bypassOnly = gate == "bypassOnly";
         var running = Format.Flag(chat, "running");
         var body = new StackPanel { Spacing = Theme.SpaceM };
-        body.Children.Add(ActionIconGlyph.Button("Done", ActionIcon.Done, (_, _) =>)
+        body.Children.Add(ActionIconGlyph.Button("Done", ActionIcon.Done, (_, _) =>
         {
             _setupExpanded = false;
             PaintConversation();
