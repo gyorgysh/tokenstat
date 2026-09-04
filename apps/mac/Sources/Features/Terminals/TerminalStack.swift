@@ -60,6 +60,10 @@ struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
         // Only sessions that already have an emulator. Pending ones have no
         // view on purpose: the pane draws a starting state over them instead.
         let loaded = sessions.compactMap(\.terminalViewIfLoaded)
+        nsView.onReturnToFront = { [sessions] view in
+            sessions.first(where: { $0.terminalViewIfLoaded === view })?
+                .terminalReturnedToFront()
+        }
         nsView.sync(
             views: loaded,
             leading: leading.flatMap(\.terminalViewIfLoaded),
@@ -112,6 +116,9 @@ final class TerminalStackView: NSView {
     /// Which of the visible halves took the last click. Set by the
     /// representable, which is the only piece that knows about sessions.
     var onViewClicked: ((TerminalView) -> Void)?
+    /// A view flipped from hidden to visible. Set by the representable with
+    /// a session lookup; the stack itself only knows views.
+    var onReturnToFront: ((TerminalView) -> Void)?
     private weak var leadingView: TerminalView?
     private weak var trailingView: TerminalView?
     private var splitAxis: Axis?
@@ -153,7 +160,10 @@ final class TerminalStackView: NSView {
             let needsFlip = view.isHidden == visible
             if needsFlip {
                 view.isHidden = !visible
-                if visible { requestPaint = true }
+                if visible {
+                    requestPaint = true
+                    onReturnToFront?(view)
+                }
             }
         }
         needsLayout = true

@@ -111,6 +111,18 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// else, which is what lets one stack hold both kinds of session.
     var terminalViewIfLoaded: TerminalView? { terminalView }
 
+    /// Settle local predictions on return to this session. Unconfirmed
+    /// guesses cannot survive an interruption: coming back to stale ones
+    /// reads as a frozen line until the next output corrects it. Fresh
+    /// guesses keep their chance — their echo is still on its way.
+    func terminalReturnedToFront() {
+        guard !predicted.isEmpty,
+              let since = predictedSince,
+              Date().timeIntervalSince(since) > Self.maxEchoAge
+        else { return }
+        withdrawPredictions()
+    }
+
     init(handle: SSHSessionHandle, title: String, hostID: String? = nil) {
         self.id = handle.id
         self.title = title

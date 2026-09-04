@@ -22,4 +22,13 @@ protocol TerminalPresentable: AnyObject, Identifiable {
     /// The emulator, if one has been made. Nil for a session that is still
     /// connecting: the pane draws a starting state over those instead.
     var terminalViewIfLoaded: TerminalView? { get }
+
+    /// This session's view just flipped from hidden to visible. Sessions
+    /// with no per-visibility state ignore it; sessions holding unconfirmed
+    /// local predictions use it to settle those before the next output.
+    func terminalReturnedToFront()
+}
+
+extension TerminalPresentable {
+    func terminalReturnedToFront() {}
 }
