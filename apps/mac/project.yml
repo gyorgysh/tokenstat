@@ -37,7 +37,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.8.1"
+    MARKETING_VERSION: "0.8.2"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -131,8 +131,9 @@ settings:
     # 70 went up: delivery 5d81ff14-c2b9-40ac-ada2-31adc45d4ed5.
     # 71 is 0.8.1, the PATH hotfix.
     # 71 went up: delivery bcaa4a44-63fa-42b7-a12c-29af82069d43.
-    # Next free Apple build number is 72.
-    CURRENT_PROJECT_VERSION: "71"
+    # 72 is 0.8.2.
+    # Next free Apple build number is 73.
+    CURRENT_PROJECT_VERSION: "72"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

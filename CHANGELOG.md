@@ -11,6 +11,57 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one, rather than reconstructing release notes from
 commits at the end.
 
+## [0.8.2] - 2026-09-04
+
+Chat on the Mac keeps up with the conversation, and a terminal you come back
+to draws what is on it.
+
+### Added
+
+- Claude's higher effort levels, xhigh and max, are on the picker. Opus at max
+  effort is now a conversation you can start.
+- Windows and Android previews catch up with the Mac. Both open the year at a
+  glance from a single call instead of rebuilding it from a report. Windows
+  grows a diff viewer and a transcript that appends a turn rather than redrawing
+  the thread. Android grows the Chat and Pull requests sections and keeps a
+  conversation current while you watch it. Each hides what the computer it is
+  paired with is too old to answer, rather than failing at the tap.
+
+### Fixed
+
+- A long conversation no longer hitches. Scrolling a turn full of tool output
+  stays smooth, a streaming reply no longer rebuilds the thread on every frame,
+  and a shell command that ran to megabytes costs one pass instead of one per
+  redraw.
+- Following a live turn no longer fights you. It holds the end while the reply
+  grows, lets go when you scroll back, and stops yanking the thread on
+  tool-heavy turns. A pill says whether you are following, and takes you back
+  to the end.
+- A whole reply can be selected in one sweep, and copy appears on the card you
+  are pointing at with a tick where you pressed it.
+- A tool row reads as what it did. It shows the verb, the file and how many
+  lines moved, opens a small diff on its own, and follows a diff that is still
+  arriving unless you have opened or closed it yourself.
+- Sending an image with nothing typed works, and the image stays in the
+  transcript as a row of its own rather than vanishing into a turn with no
+  visible content.
+- A conversation loaded to its first message says Start of chat instead of
+  reading as stuck part way through history.
+- The sidebar marks the conversation you are in, and clears that mark when you
+  leave. Picking Notes, Home or a server used to leave the old chat lit beside
+  the row you had chosen.
+- A terminal you navigate away from and come back to repaints. It could show a
+  stale or half-drawn screen, and a full-screen program kept the old window
+  size until you typed something.
+- Characters that SSH drew ahead of the far end no longer freeze on screen when
+  you return to a session. Guesses that have gone unconfirmed are withdrawn and
+  the far end repaints them.
+- A terminal nobody can see is left at the size it had. Hidden sessions were
+  being resized, which could collapse one until input revived it.
+- The list of agents and their models answers immediately. One agent whose
+  command hung held it up for seconds at a time, every minute, and a failed
+  check no longer throws away the models it found last time.
+
 ## [0.8.1] - 2026-09-03
 
 A hotfix for agents that would not start from chat.
