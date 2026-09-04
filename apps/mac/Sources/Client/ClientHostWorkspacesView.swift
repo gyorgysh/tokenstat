@@ -80,7 +80,9 @@ struct ClientHostWorkspacesView: View {
                             : "Could not reach \(hostName)",
                         message: model.errorMessage == nil
                             ? "Folders added on that computer show up here."
-                            : "It has to be awake, with remote reach turned on.",
+                            : "It has to be awake with tokenstat running. If it has never "
+                                + "been reachable from here, open Devices on that computer and "
+                                + "turn on \"Reach devices from anywhere\".",
                         actionTitle: "Try again",
                         actionIcon: .refresh,
                         action: { Task { await model.connect(peerKey: peerKey, name: hostName) } }

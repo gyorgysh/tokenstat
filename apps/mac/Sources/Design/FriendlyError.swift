@@ -338,6 +338,28 @@ struct FriendlyError {
             )
         }
 
+        // The relay has no record of that computer. Every word of this arrives
+        // from the transport ("no direct address", "tunnel: no_such_peer") and
+        // every word of it is the wrong thing to read on a phone: it names the
+        // mechanism and not one thing a person can do.
+        //
+        // Almost always the same cause, and it is a switch nobody has found:
+        // the computer has never been turned on for remote reach, so it has
+        // never registered with the relay. Say where the switch is.
+        if lower.contains("no_such_peer") || lower.contains("no direct address")
+            || lower.contains("peer_not_found") || lower.contains("no such peer")
+        {
+            return FriendlyError(
+                title: "That computer is not reachable",
+                message: "It has to be awake with tokenstat running, and set up for remote "
+                    + "reach. On that computer, open Devices and turn on \"Reach devices from "
+                    + "anywhere\". Until that is on, it never tells the relay where it is.",
+                symbol: "antenna.radiowaves.left.and.right.slash",
+                actionTitle: "Try again",
+                raw: raw
+            )
+        }
+
         // Nothing matched. Say that something failed and show the words the
         // machine used, rather than inventing a cause.
         return FriendlyError(
