@@ -109,12 +109,12 @@ extension TranscriptMetrics {
 /// the bottom. Growth is ignored so a stream cannot unpin the view. A height
 /// that did not change, with a larger gap, is a person moving away.
 ///
-/// A reference type, and `showJump`, `paused` and `arrived` are the only
-/// things on it Observation watches: all three change on transitions, never
-/// per frame. Everything else here is written on every frame of every scroll,
-/// and a transcript that redraws itself that often is a transcript nobody can
-/// scroll. The redraw is owed to the button appearing, not to the offset
-/// moving by a point.
+/// A reference type, and `showJump`, `paused`, `arrived` and `scrolling` are
+/// the only things on it Observation watches: all four change on
+/// transitions, never per frame. Everything else here is written on every
+/// frame of every scroll, and a transcript that redraws itself that often
+/// is a transcript nobody can scroll. The redraw is owed to the button
+/// appearing, not to the offset moving by a point.
 @Observable
 final class TranscriptFollowState {
     private(set) var showJump = false
@@ -123,6 +123,12 @@ final class TranscriptFollowState {
     /// back to the latest turn with a scroll of one's own, or pressing Follow
     /// again, clears it. Observed (rare transitions only, never per-frame).
     private(set) var paused = false
+    /// The viewport moved recently. Rows drop out of hit testing while this
+    /// is true: a scroll slides content under a stationary pointer, and each
+    /// row it crosses would otherwise enter/exit hover, rebuild, and join
+    /// the hit-test walk on every mouse-move event. Observed on transitions
+    /// only; flips back a beat after the last moved frame.
+    private(set) var scrolling = false
     @ObservationIgnored var pinned = true
     @ObservationIgnored var suppressed = false {
         didSet { if suppressed { set(jump: false) } }
@@ -190,6 +196,32 @@ final class TranscriptFollowState {
     /// pay off, so repins coalesce to ~6 a second (see the throttle below).
     /// Reset wherever a new pursuit starts so Jump and send act at once.
     @ObservationIgnored private var lastRepinAt = Date.distantPast
+    /// A beat of quiet after the last moved frame before rows rejoin hit
+    /// testing. Long enough to cover scroll momentum, short enough that a
+    /// button is never dead when reached for.
+    private static let scrollQuiet: TimeInterval = 0.35
+
+    @ObservationIgnored private var scrollReset: DispatchWorkItem?
+
+    /// Mark scroll motion. Called on every scroll callback frame; only
+    /// transitions touch the observed flag, so one gesture costs two draws.
+    private func trackScrolling(moved: Bool) {
+        guard moved else { return }
+        setScrolling(true)
+        scrollReset?.cancel()
+        let reset = DispatchWorkItem { [weak self] in self?.setScrolling(false) }
+        scrollReset = reset
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.scrollQuiet, execute: reset)
+    }
+
+    private func setScrolling(_ value: Bool) {
+        guard scrolling != value else { return }
+        scrolling = value
+    }
+
+    deinit {
+        scrollReset?.cancel()
+    }
     /// Whether the last frame put the end under the viewport.
     ///
     /// Read by the loops that hold the end while a conversation opens. One
@@ -265,6 +297,9 @@ final class TranscriptFollowState {
         let grew = metrics.contentHeight > lastContentHeight + 0.5
         let shrank = metrics.contentHeight < lastContentHeight - 0.5
         let moved = abs(metrics.distanceFromTop - lastOffset) > 0.5
+        // Motion only: growth under a still viewport is a stream arriving,
+        // not a gesture, and rows stay interactive while it is followed.
+        trackScrolling(moved: moved)
 
         if settling {
             // Moving away from the end, on a frame where nothing grew, is a

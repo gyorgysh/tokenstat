@@ -202,6 +202,15 @@ struct ChatView: View {
                             isLive: model.busy && item.id == model.displayItems.last?.id
                         )
                         .equatable()
+                        #if os(macOS)
+                        // Out of hit testing while the viewport moves, and
+                        // outside the equatable boundary so the rows themselves
+                        // do not rebuild for it. A scroll slides content under
+                        // a stationary pointer; every row it crosses would
+                        // otherwise enter/exit hover and join the hit-test
+                        // walk on each mouse-move event.
+                        .allowsHitTesting(!follow.scrolling)
+                        #endif
                         .frame(
                             maxWidth: item.prefersWideReadingRoom
                                 ? .infinity
