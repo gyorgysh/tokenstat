@@ -231,8 +231,23 @@ struct PullsView: View {
         }
     }
 
+    /// Where GitHub keeps the repository selection for tokenstat's app.
+    ///
+    /// `installUrl` comes back on the states that need it and is absent once a
+    /// repository works, which is exactly when somebody wants to add another
+    /// one. The fallback is the same address the Account screen uses.
+    private var installationURL: URL? {
+        if let raw = model.availability?.installUrl, let url = URL(string: raw) {
+            return url
+        }
+        return URL(string: "https://github.com/apps/tokenstat/installations/new")
+    }
+
     private func connectionCard(_ availability: PullAvailability) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
+            // Centred across the card. Concentric rings around a glyph read as
+            // a centred mark wherever else they appear, so left-aligning this
+            // one against a column of text looked like a layout mistake.
             ZStack {
                 Circle().fill(Theme.accent.opacity(0.08)).frame(width: 104, height: 104)
                 Circle().stroke(Theme.accent.opacity(0.18), lineWidth: 1).frame(width: 78, height: 78)
@@ -240,6 +255,7 @@ struct PullsView: View {
                     .font(Theme.fixed(30, weight: .light))
                     .foregroundStyle(Theme.accent)
             }
+            .frame(maxWidth: .infinity)
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text("Bring the review into tokenstat")
                     .font(Theme.title3.weight(.semibold))
@@ -320,6 +336,16 @@ struct PullsView: View {
                     Text("\(model.rows.count) shown")
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
+                }
+                // Choosing repositories existed only while the connection was
+                // incomplete, and the card offering it disappeared the moment
+                // this repository worked. Adding a second one then meant
+                // finding a card on the Account screen, which is not where
+                // anybody looks for it.
+                if canConnectHere, let url = installationURL {
+                    Button("Repositories", .external) { openURL(url) }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .help("Choose which repositories tokenstat may open")
                 }
             }
 
