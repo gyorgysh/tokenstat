@@ -13,6 +13,7 @@
 //! freezes the app. This module turns complete events into short display text
 //! while a run drains.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -103,6 +104,10 @@ pub struct Parser {
     /// Failed, or [`Self::finish_events`], so a cancelled grok call cannot
     /// leave the row spinning after the turn is over.
     open_tools: Vec<String>,
+    /// Start inputs for the tools above, kept only when they carry an edit
+    /// pair. The end event is the only thing chat keeps, so without this the
+    /// red/green of what changed would die with the start.
+    tool_inputs: HashMap<String, Value>,
     /// Claude repeats the final assistant text in its `result` record. Keep the
     /// last assistant payload so structured chat events can drop that summary
     /// copy while retaining result-only output from older CLI versions.
@@ -124,6 +129,7 @@ impl Parser {
             last_block: String::new(),
             last_was_text: false,
             open_tools: Vec::new(),
+            tool_inputs: HashMap::new(),
             last_claude_assistant: None,
             last_session: None,
         }
@@ -330,24 +336,34 @@ impl Parser {
 
     fn take_events(&mut self, events: Vec<Event>) -> Vec<Event> {
         let mut out = Vec::with_capacity(events.len() + self.open_tools.len());
-        for event in events {
-            match &event {
+        for mut event in events {
+            match &mut event {
                 Event::Session { id } => {
                     if self.last_session.as_deref() == Some(id.as_str()) {
                         continue;
                     }
                     self.last_session = Some(id.clone());
-                    out.push(event);
                 }
-                Event::ToolStart { call_id, .. } => {
+                Event::ToolStart {
+                    call_id, input, ..
+                } => {
                     if !self.open_tools.iter().any(|id| id == call_id) {
                         self.open_tools.push(call_id.clone());
                     }
-                    out.push(event);
+                    // Only edit pairs are worth holding: whole-file writes
+                    // must not sit in memory for the length of a turn.
+                    if has_edit_pair(input) {
+                        self.tool_inputs.insert(call_id.clone(), input.clone());
+                    }
                 }
-                Event::ToolEnd { call_id, .. } => {
+                Event::ToolEnd {
+                    call_id, detail, ..
+                } => {
                     self.open_tools.retain(|id| id != call_id);
-                    out.push(event);
+                    if let Some(input) = self.tool_inputs.remove(call_id) {
+                        let taken = detail.take();
+                        *detail = attach_edit_snippet(&input, taken);
+                    }
                 }
                 Event::Done { status, .. } => {
                     let cancelled = matches!(status.as_str(), "cancelled" | "canceled" | "error");
@@ -359,18 +375,20 @@ impl Parser {
                     // own tool calls is refused even though the process exits
                     // successfully. The chat drain observes the real exit and
                     // writes the conversation's single terminal Done event.
+                    continue;
                 }
                 Event::Failed { text } => {
                     out.extend(self.close_open_tools(false, Some(text.clone())));
-                    out.push(event);
                 }
-                _ => out.push(event),
+                _ => {}
             }
+            out.push(event);
         }
         out
     }
 
     fn close_open_tools(&mut self, ok: bool, detail: Option<String>) -> Vec<Event> {
+        self.tool_inputs.clear();
         std::mem::take(&mut self.open_tools)
             .into_iter()
             .map(|call_id| Event::ToolEnd {
@@ -395,6 +413,25 @@ impl Parser {
 fn cli_refusal_text(line: &str) -> Option<String> {
     let lower = line.to_ascii_lowercase();
     if lower.contains("please run /login") {
+        return Some(
+            "Claude Code is not signed in on this Mac. Open a terminal, run claude, and use /login."
+                .into(),
+        );
+    }
+    // Headless `claude -p` cannot sign in by itself: /login only exists in
+    // the interactive terminal, so a logged-out turn dies with this instead
+    // of the usual "please run /login". Say where the login actually lives.
+    if lower.contains("/login")
+        && (lower.contains("isn't available")
+            || lower.contains("not available")
+            || lower.contains("not supported"))
+    {
+        return Some(
+            "Claude Code is not signed in, and signing in needs the interactive terminal. Open a terminal, run claude, use /login there, then start the chat again."
+                .into(),
+        );
+    }
+    if lower.contains("not logged in") || lower.contains("not signed in") {
         return Some(
             "Claude Code is not signed in on this Mac. Open a terminal, run claude, and use /login."
                 .into(),
@@ -716,25 +753,45 @@ fn events_opencode(value: &Value) -> Vec<Event> {
                 .cloned()
                 .unwrap_or(Value::Null);
             let id = item_id(part);
+            // OpenCode shapes vary: `tool`, `name`, `title`, or nested under
+            // `state`. Prefer an actual tool name and never record a status
+            // word ("running", "completed") as the verb.
+            let tool_name = part
+                .get("tool")
+                .or_else(|| part.get("name"))
+                .or_else(|| part.pointer("/state/tool"))
+                .or_else(|| part.pointer("/state/name"))
+                .and_then(Value::as_str)
+                .filter(|s| {
+                    !s.is_empty()
+                        && !matches!(
+                            s.to_ascii_lowercase().as_str(),
+                            "running" | "completed" | "error" | "failed"
+                        )
+                })
+                .unwrap_or("tool");
             let status = part
                 .pointer("/state/status")
                 .and_then(Value::as_str)
                 .unwrap_or("running");
             if matches!(status, "completed" | "error" | "failed") {
-                vec![Event::ToolEnd {
-                    call_id: id,
-                    ok: status == "completed",
-                    detail: part
-                        .pointer("/state/output")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                }]
+                // OpenCode usually reports a call exactly once, already
+                // finished: there is no earlier running line to open the row
+                // from, and an end without a start renders as a generic
+                // "Tool" with no verb, no target and no diff. Synthesize the
+                // start from the same part so the row reads Edit/Read/Bash
+                // with its path, and the end carries the red/green.
+                let start = tool_start_with_id(&id, tool_name, input.clone());
+                vec![
+                    start,
+                    Event::ToolEnd {
+                        call_id: id,
+                        ok: status == "completed",
+                        detail: opencode_tool_detail(part, &input),
+                    },
+                ]
             } else {
-                vec![tool_start_with_id(
-                    &id,
-                    part.get("tool").and_then(Value::as_str).unwrap_or("tool"),
-                    input,
-                )]
+                vec![tool_start_with_id(&id, tool_name, input)]
             }
         }
         Some("error") => event_failed(
@@ -838,7 +895,9 @@ fn tool_start(source: &Value, name: &str, input: Value) -> Event {
     tool_start_with_id(&item_id(source), name, input)
 }
 fn tool_start_with_id(id: &str, name: &str, input: Value) -> Event {
-    let target = tool_arg(Some(&input)).unwrap_or("").to_string();
+    let target = tool_arg(Some(&input))
+        .map(|s| one_line(s, 160))
+        .unwrap_or_default();
     Event::ToolStart {
         call_id: id.to_string(),
         verb: display_verb(name),
@@ -1289,7 +1348,36 @@ fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
         "FilePath",
         "Command",
     ];
-    lookup_str(value, &KEYS)
+    if let Some(hit) = lookup_str(value, &KEYS) {
+        return Some(hit);
+    }
+    // Fallback: shell description, link, or prompt text. Keeps the collapsed
+    // tool row informative when a backend sends no path-like key.
+    const FALLBACK_KEYS: [&str; 10] = [
+        "cmd",
+        "script",
+        "commandline",
+        "url",
+        "urls",
+        "description",
+        "title",
+        "message",
+        "prompt",
+        "text",
+    ];
+    lookup_str(value, &FALLBACK_KEYS)
+}
+
+fn one_line(s: &str, max: usize) -> String {
+    let first = s.lines().next().unwrap_or("").trim();
+    if first.len() <= max {
+        return first.to_string();
+    }
+    let mut end = max;
+    while end > 0 && !first.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", first[..end].trim_end())
 }
 
 fn lookup_str<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
@@ -1392,6 +1480,87 @@ fn edit_snippet(input: Option<&serde_json::Value>) -> Option<String> {
     Some(render_edit_snippet(old, new))
 }
 
+/// True when a tool input carries an old/new pair worth holding for the end.
+fn has_edit_pair(input: &Value) -> bool {
+    edit_snippet(Some(input)).is_some()
+}
+
+/// Detail for a finished OpenCode call: stdout plus, for edits, the real diff.
+///
+/// The unified patch the CLI embeds in `state.metadata` is authoritative
+/// (it covers multi-file edits a single old/new pair cannot), so it wins.
+/// Otherwise the old/new pair from the input renders the red/green.
+fn opencode_tool_detail(part: &Value, input: &Value) -> Option<String> {
+    let output = part
+        .pointer("/state/output")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(patch) = opencode_patch(part) {
+        return Some(match output {
+            Some(out) => format!("{patch}\n{out}"),
+            None => patch,
+        });
+    }
+    if has_edit_pair(input) {
+        return attach_edit_snippet(input, output.map(str::to_string));
+    }
+    output.map(str::to_string)
+}
+
+/// Joined unified patches from an OpenCode tool state, capped so a huge
+/// refactor stays a timeline entry rather than a dump of the file.
+fn opencode_patch(part: &Value) -> Option<String> {
+    const MAX_FILES: usize = 3;
+    const MAX_CHARS: usize = 4000;
+    let files = part
+        .pointer("/state/metadata/metadata/files")
+        .and_then(Value::as_array)?;
+    let mut patches: Vec<&str> = Vec::new();
+    for file in files.iter().take(MAX_FILES) {
+        let patch = file
+            .get("patch")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())?;
+        patches.push(patch);
+    }
+    if patches.is_empty() {
+        return None;
+    }
+    let mut out = patches.join("\n");
+    if out.len() > MAX_CHARS {
+        let mut end = MAX_CHARS;
+        while end > 0 && !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+        out.push_str("\n…");
+    }
+    Some(out)
+}
+
+/// Put an edit's red/green lines onto its end event.
+///
+/// Chat keeps the end and drops the start, so without this the row knows a
+/// file changed but cannot show what. Skipped when the output already reads
+/// as a diff, so the same lines never print twice.
+fn attach_edit_snippet(input: &Value, detail: Option<String>) -> Option<String> {
+    let snippet = edit_snippet(Some(input))?;
+    let out = detail.filter(|d| !d.trim().is_empty());
+    let already_diff = out.as_ref().is_some_and(|d| {
+        d.lines()
+            .any(|l| (l.starts_with('+') || l.starts_with('-')) && l.len() > 1)
+    });
+    if already_diff {
+        return out;
+    }
+    match out {
+        Some(out) => Some(format!("{snippet}\n{out}")),
+        None => Some(snippet),
+    }
+}
+
 /// Cap a preview so the inspector stays a timeline, not a dump of the file.
 fn render_edit_snippet(old: &str, new: &str) -> String {
     const MAX_EACH: usize = 6;
@@ -1425,6 +1594,29 @@ fn render_edit_snippet(old: &str, new: &str) -> String {
 /// Canonical inspector verb. Grok titles are snake_case (`read_file`);
 /// Claude already sends `Read`. The Swift timeline matches these words.
 fn display_verb(name: &str) -> String {
+    // OpenCode sends lowercase single words (`read`, `bash`, `edit`).
+    // Normalise before matching so they land on the same verbs/icons.
+    let lower = name.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "read" | "read_file" | "view_file" | "view_file_outline" | "view_code_item" => {
+            return "Read".into();
+        }
+        "write" | "write_file" | "write_to_file" | "create_file" => return "Write".into(),
+        "edit" | "edit_file" | "str_replace" | "search_replace" | "replace_file_content" => {
+            return "Edit".into();
+        }
+        "bash" => return "Bash".into(),
+        "shell" | "run_command" | "run_terminal_command" | "shell_exec" | "run" => {
+            return "Shell".into();
+        }
+        "grep" | "grep_search" | "code_search" | "search" => return "Grep".into(),
+        "glob" | "find_by_name" | "list_dir" | "list_directory" | "ls" => return "Glob".into(),
+        "webfetch" | "web_fetch" | "read_url_content" | "fetch" => return "WebFetch".into(),
+        "websearch" | "web_search" | "search_web" => return "WebSearch".into(),
+        "todowrite" | "todo_write" => return "TodoWrite".into(),
+        "task" | "get_command_or_subagent_output" | "subagent" => return "Subagent".into(),
+        _ => {}
+    }
     let leaf = name
         .rsplit("__")
         .next()
@@ -1642,6 +1834,17 @@ mod tests {
                 Some(Event::Failed { text }) if text.contains("can only use Auto")
             ),
             "{cursor_events:?}"
+        );
+
+        let mut headless = Parser::new("claude");
+        let headless_events = headless
+            .push_events("/login isn't available in this environment\n".as_bytes());
+        assert!(
+            matches!(
+                headless_events.first(),
+                Some(Event::Failed { text }) if text.contains("interactive terminal")
+            ),
+            "{headless_events:?}"
         );
     }
 
@@ -1927,6 +2130,85 @@ mod tests {
         assert!(out.contains("Read /tmp/a.txt"), "{out}");
         assert!(out.contains("| ok"), "{out}");
         assert!(out.contains(':'), "{out}");
+    }
+
+    #[test]
+    fn opencode_completed_only_call_opens_its_own_row() {
+        // Real `opencode run --format json`: one tool_use per call, already
+        // finished. Without a synthesized start the row has no verb, no
+        // target and no diff.
+        let mut parser = Parser::new("opencode2");
+        let events = parser.push_events(
+            concat!(
+                "{\"type\":\"tool_use\",\"timestamp\":1788490846932,\"part\":{\"partID\":\"prt_1\",\"type\":\"tool\",\"id\":\"call_1\",\"tool\":\"read\",\"state\":{\"status\":\"completed\",\"input\":{\"path\":\"/tmp/a.txt\"},\"output\":\"Read file /tmp/a.txt, lines 1-1\\n1: hi\",\"title\":\"read\"}}}\n",
+            )
+            .as_bytes(),
+        );
+        assert!(
+            matches!(
+                events.as_slice(),
+                [
+                    Event::ToolStart {
+                        verb,
+                        target,
+                        ..
+                    },
+                    Event::ToolEnd { .. }
+                ] if verb == "Read" && target == "/tmp/a.txt"
+            ),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn opencode_edit_end_carries_the_real_patch() {
+        let mut parser = Parser::new("opencode2");
+        let events = parser.push_events(
+            concat!(
+                "{\"type\":\"tool_use\",\"part\":{\"partID\":\"prt_2\",\"type\":\"tool\",\"id\":\"call_2\",\"tool\":\"edit\",\"state\":{\"status\":\"completed\",\"input\":{\"newString\":\"hello world\",\"oldString\":\"hello\",\"path\":\"note.txt\"},\"output\":\"Edited note.txt (1 replacement)\",\"title\":\"edit\",\"metadata\":{\"metadata\":{\"files\":[{\"file\":\"note.txt\",\"patch\":\"Index: note.txt\\n--- note.txt\\n+++ note.txt\\n@@ -1,1 +1,1 @@\\n-hello\\n+hello world\\n\",\"status\":\"modified\",\"additions\":1,\"deletions\":1}]}}}}}\n",
+            )
+            .as_bytes(),
+        );
+        let detail = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ToolEnd { detail, .. } => detail.clone(),
+                _ => None,
+            })
+            .expect("edit end keeps a detail");
+        assert!(detail.contains("-hello"), "{detail}");
+        assert!(detail.contains("+hello world"), "{detail}");
+        assert!(detail.contains("Edited note.txt (1 replacement)"), "{detail}");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::ToolStart { verb, .. } if verb == "Edit"
+            )),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn opencode_edit_end_carries_the_red_green_lines() {
+        let mut parser = Parser::new("opencode");
+        let events = parser.push_events(
+            concat!(
+                "{\"type\":\"tool_use\",\"part\":{\"id\":\"e1\",\"tool\":\"edit\",\"state\":{\"status\":\"running\",\"input\":{\"filePath\":\"a.rs\",\"old_string\":\"foo\",\"new_string\":\"bar\"}}}}\n",
+                "{\"type\":\"tool_use\",\"part\":{\"id\":\"e1\",\"tool\":\"edit\",\"state\":{\"status\":\"completed\",\"output\":\"edited\"}}}\n",
+            )
+            .as_bytes(),
+        );
+        let end = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ToolEnd { detail, .. } => Some(detail.clone()),
+                _ => None,
+            })
+            .flatten()
+            .expect("edit end keeps a detail");
+        assert!(end.contains("- foo"), "{end}");
+        assert!(end.contains("+ bar"), "{end}");
+        assert!(end.contains("edited"), "{end}");
     }
 
     #[test]
