@@ -847,7 +847,8 @@ pub fn backends() -> Vec<serde_json::Value> {
             // tier. Full ids change with every release and need an account to
             // enumerate, so the aliases are the stable contract.
             &["fable", "opus", "sonnet", "haiku"],
-            serde_json::json!(["low", "medium", "high"]),
+            // `--effort` per `claude --help`: low, medium, high, xhigh, max.
+            serde_json::json!(["low", "medium", "high", "xhigh", "max"]),
         ),
         ("codex", "Codex", "codex exec … -- \"…\"", &[], serde_json::json!([])),
         (
