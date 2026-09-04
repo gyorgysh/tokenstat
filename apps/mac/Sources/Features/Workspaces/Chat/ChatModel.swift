@@ -1157,6 +1157,11 @@ struct ChatToolState: Equatable {
     var detail: String?
     var startedAtMs: Int64
     var endedAtMs: Int64?
+    /// Display lines, split once at construction. `snippet` used to split
+    /// the whole detail on every read, and a row reads it half a dozen
+    /// times per draw: Codex shell outputs reach megabytes, so one live
+    /// row cost several full multi-megabyte splits per poll.
+    var snippet: [String]
 
     var duration: String? {
         guard let endedAtMs else { return nil }
@@ -1169,7 +1174,8 @@ struct ChatToolState: Equatable {
         return "\(Int(seconds.rounded()))s"
     }
 
-    var snippet: [String] {
+    /// Display lines for one detail string, split once. See `snippet`.
+    static func makeSnippet(verb: String, detail: String?) -> [String] {
         guard let detail, !detail.isEmpty else { return [] }
         let lines = detail.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         // An edit's red/green lines must reach the row unprefixed: a blanket
@@ -1285,7 +1291,10 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 guard case .tool(var state) = items[index].kind, state.running else { continue }
                 state.running = false
                 state.failed = failed
-                if state.detail == nil { state.detail = detail }
+                if state.detail == nil {
+                    state.detail = detail
+                    state.snippet = ChatToolState.makeSnippet(verb: state.verb, detail: detail)
+                }
                 state.endedAtMs = at
                 items[index] = ChatDisplayItem(id: items[index].id, kind: .tool(state))
             }
@@ -1381,7 +1390,8 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     failed: false,
                     detail: nil,
                     startedAtMs: event.atMs ?? 0,
-                    endedAtMs: nil
+                    endedAtMs: nil,
+                    snippet: []
                 )
                 toolIndex[callId] = items.count
                 items.append(ChatDisplayItem(id: rowID, kind: .tool(state)))
@@ -1393,23 +1403,26 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     state.running = false
                     state.failed = !(agent.ok ?? true)
                     state.detail = agent.detail
+                    state.snippet = ChatToolState.makeSnippet(verb: state.verb, detail: agent.detail)
                     state.endedAtMs = event.atMs
                     items[index] = ChatDisplayItem(id: items[index].id, kind: .tool(state))
                 } else {
                     let fallback = callId.isEmpty ? "end-\(stamp(event, items.count))" : callId
+                    let fallbackVerb = agent.verb ?? "Tool"
                     items.append(
                         ChatDisplayItem(
                             id: "tool-\(fallback)",
                             kind: .tool(
                                 ChatToolState(
                                     callId: fallback,
-                                    verb: agent.verb ?? "Tool",
+                                    verb: fallbackVerb,
                                     target: agent.target ?? "",
                                     running: false,
                                     failed: !(agent.ok ?? true),
                                     detail: agent.detail,
                                     startedAtMs: event.atMs ?? 0,
-                                    endedAtMs: event.atMs
+                                    endedAtMs: event.atMs,
+                                    snippet: ChatToolState.makeSnippet(verb: fallbackVerb, detail: agent.detail)
                                 )
                             )
                         )
