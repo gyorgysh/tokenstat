@@ -834,6 +834,10 @@ final class ChatModel {
             hasEarlier = page.hasEarlier
             conversationUsage = page.usage
             usageThrough = page.nextOffset
+            // Opened where the archive begins, with content on screen: say
+            // so. Otherwise a fully loaded conversation is indistinguishable
+            // from one stuck mid-history. Empty chats stay quiet.
+            if !page.hasEarlier, !page.events.isEmpty { reachedStart = true }
             warmMarkdown()
             settleNotifications()
             var pulled = 0
@@ -968,9 +972,11 @@ final class ChatModel {
             if reset {
                 eventsEpoch &+= 1
                 events = chunk.events
-                // The whole timeline, so there is nothing before it.
+                // The whole timeline, so there is nothing before it. Say so
+                // when there is something on screen; empty chats stay quiet.
                 earlierCursor = nil
                 hasEarlier = false
+                if !chunk.events.isEmpty { reachedStart = true }
             } else {
                 events.append(contentsOf: chunk.events)
             }

@@ -7,22 +7,6 @@ import AppKit
 
 /// One coalesced transcript block: a user turn, assistant markdown, a tool,
 /// an edit, an approval, or a quiet usage line.
-#if os(macOS)
-/// Hover state for a row's copy action, owned by a leaf.
-///
-/// Revealing the button from whole-row `@State` re-ran the markdown beside
-/// it on every enter/exit (per hang report). Scoped here, only the header
-/// re-runs.
-private struct HoverReveal<Content: View>: View {
-    @ViewBuilder let content: (Bool) -> Content
-    @State private var hovering = false
-
-    var body: some View {
-        content(hovering)
-            .onHover { hovering = $0 }
-    }
-}
-#endif
 struct ChatEventRow: View {
     let item: ChatDisplayItem
     let defaultAgentName: String
@@ -38,18 +22,24 @@ struct ChatEventRow: View {
     /// so selectable chains (one SelectionOverlay each) are held back until
     /// the turn ends. Copy buttons stay live throughout.
     var isLive = false
+    #if os(macOS)
+    /// Whole-card hover for the copy action. Scoping this to the header
+    /// saved nothing measurable once segment init was cached and the pin
+    /// storms were fixed, and it made the button undiscoverable.
+    @State private var hovering = false
+    #endif
 
     var body: some View {
         switch item.kind {
         case let .user(text):
             #if os(macOS)
-            HoverReveal { hovering in
-                HStack(spacing: Theme.Space.s) {
-                    Spacer(minLength: 48)
-                    RowCopyButton(text: text, help: "Copy prompt", visible: hovering)
-                    userBubble(text)
-                }
+            HStack(spacing: Theme.Space.s) {
+                Spacer(minLength: 48)
+                RowCopyButton(text: text, help: "Copy prompt", visible: hovering)
+                userBubble(text)
             }
+            .contentShape(.rect)
+            .onHover { hovering = $0 }
             #else
             HStack(spacing: Theme.Space.s) {
                 Spacer(minLength: 48)
@@ -59,14 +49,12 @@ struct ChatEventRow: View {
         case let .assistant(text, backend):
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 #if os(macOS)
-                HoverReveal { hovering in
-                    HStack(spacing: Theme.Space.s) {
-                        Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
-                            .font(Theme.caption.weight(.medium))
-                            .foregroundStyle(Theme.accent)
-                        Spacer(minLength: 0)
-                        RowCopyButton(text: text, help: "Copy response", visible: hovering)
-                    }
+                HStack(spacing: Theme.Space.s) {
+                    Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
+                        .font(Theme.caption.weight(.medium))
+                        .foregroundStyle(Theme.accent)
+                    Spacer(minLength: 0)
+                    RowCopyButton(text: text, help: "Copy response", visible: hovering)
                 }
                 #else
                 HStack(spacing: Theme.Space.s) {
@@ -86,6 +74,10 @@ struct ChatEventRow: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
             }
+            #if os(macOS)
+            .contentShape(.rect)
+            .onHover { hovering = $0 }
+            #endif
             .contextMenu {
                 Button("Copy response") { ChatClipboard.copy(text) }
             }
@@ -109,11 +101,9 @@ struct ChatEventRow: View {
             // reading as one.
             VStack(alignment: .leading, spacing: 2) {
                 #if os(macOS)
-                HoverReveal { hovering in
-                    HStack {
-                        Spacer(minLength: 0)
-                        RowCopyButton(text: text, help: "Copy reasoning", visible: hovering)
-                    }
+                HStack {
+                    Spacer(minLength: 0)
+                    RowCopyButton(text: text, help: "Copy reasoning", visible: hovering)
                 }
                 #else
                 HStack {
@@ -133,6 +123,10 @@ struct ChatEventRow: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
+            #if os(macOS)
+            .contentShape(.rect)
+            .onHover { hovering = $0 }
+            #endif
         case let .tool(state):
             ToolRow(
                 verb: state.verb,
