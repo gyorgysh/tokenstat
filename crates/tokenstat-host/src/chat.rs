@@ -1612,15 +1612,20 @@ impl Store {
         // sent image stays visible instead of vanishing into the turn. The
         // bytes already live beside the chat; these records are only the
         // names the rows render and the ids they fetch by.
+        debug_assert_eq!(
+            attachment_ids.len(),
+            attachments.len(),
+            "attachment ids and staged paths travel 1:1"
+        );
         for (attachment_id, path) in attachment_ids.iter().zip(attachments.iter()) {
-            let _ = self.append(
+            self.append(
                 id,
                 &StoredEvent::Agent {
                     event: attachment_event(attachment_id, path),
                     at_ms: now_ms(),
                     backend: chat.backend.clone(),
                 },
-            );
+            )?;
         }
         self.mark_last_message(id, user_at, "user")?;
         self.retitle_if_untitled(id, prompt)?;
@@ -2270,7 +2275,8 @@ fn attachment_event(id: &str, path: &Path) -> Event {
     }
 }
 
-fn safe_file_name(name: &str) -> String {    let leaf = std::path::Path::new(name)
+fn safe_file_name(name: &str) -> String {
+    let leaf = std::path::Path::new(name)
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("attachment");

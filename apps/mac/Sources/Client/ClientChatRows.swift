@@ -52,6 +52,9 @@ struct ClientChatEventRow: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
             }
+            .contextMenu {
+                Button("Copy response") { ChatClipboard.copy(text) }
+            }
         case let .turnSeparator(backend):
             HStack(spacing: Theme.Space.s) {
                 Rectangle()
@@ -77,6 +80,9 @@ struct ClientChatEventRow: View {
             )
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contextMenu {
+                Button("Copy reasoning") { ChatClipboard.copy(text) }
+            }
         case let .tool(state):
             ToolRow(
                 verb: state.verb,
@@ -111,7 +117,11 @@ struct ClientChatEventRow: View {
                 Text(text)
                     .font(ClientType.label)
                     .foregroundStyle(Theme.danger)
+                    .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contextMenu {
+                        Button("Copy") { ChatClipboard.copy(text) }
+                    }
             }
         }
     }

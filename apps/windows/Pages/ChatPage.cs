@@ -1202,7 +1202,16 @@ internal sealed class ChatPage : Page
                 ["name"] = file.Name,
                 ["data"] = Convert.ToBase64String(data),
             });
-            _attachments.Add(new StagedFile(Format.Text(attached, "id"), file.Name));
+            // An id-less reply stages nothing: without it the send-guard
+            // below would count an empty chip as content and fire a turn
+            // with no content at all.
+            var id = Format.Text(attached, "id");
+            if (string.IsNullOrEmpty(id))
+            {
+                Banner("Attachment was rejected.");
+                return;
+            }
+            _attachments.Add(new StagedFile(id, file.Name));
             RebuildAttachStrip();
         }
         catch (Exception ex)
@@ -1211,9 +1220,14 @@ internal sealed class ChatPage : Page
         }
     }
 
+    /// A send is in flight. Set synchronously before the first await so a
+    /// second Enter or Send click cannot slip through `Busy()` mid-flight
+    /// and double-send the turn.
+    private bool _sending;
+
     private async Task SendAsync()
     {
-        if (_openId is null || Busy()) return;
+        if (_openId is null || Busy() || _sending) return;
         var text = _draft.Text.Trim();
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached. The host substitutes the viewing
@@ -1221,6 +1235,7 @@ internal sealed class ChatPage : Page
         if (text.Length == 0 && _attachments.Count == 0) return;
         var ids = new JsonArray();
         foreach (var file in _attachments) ids.Add(file.Id);
+        _sending = true;
         try
         {
             var updated = await AppServices.Host.CallAsync("chat.send", new JsonObject
@@ -1240,6 +1255,10 @@ internal sealed class ChatPage : Page
         catch (Exception ex)
         {
             Banner(ex.Message);
+        }
+        finally
+        {
+            _sending = false;
         }
     }
 
@@ -1621,11 +1640,12 @@ internal sealed class ChatPage : Page
                 case "attachment":
                     FlushText();
                     FlushThinking();
+                    var attachmentName = Format.Text(ev, "name", "Attachment");
                     items.Add(new DisplayItem
                     {
                         Id = "attachment-" + Format.Text(ev, "id", items.Count.ToString()),
                         Kind = ItemKind.Attachment,
-                        Name = Format.Text(ev, "name", "Attachment"),
+                        Name = string.IsNullOrEmpty(attachmentName) ? "Attachment" : attachmentName,
                         MediaType = Format.Text(ev, "mediaType"),
                         Size = Format.Long(ev, "size"),
                     });

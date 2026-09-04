@@ -2948,6 +2948,25 @@ mod tests {
         assert!(ids.contains(&"opencode2".into()));
     }
 
+    #[test]
+    fn claude_advertises_the_full_effort_ladder() {
+        // Additive contract: older clients validate against low/medium/high,
+        // so this pins the ladder rather than letting it drift silently.
+        let claude = backends()
+            .into_iter()
+            .find(|v| v.get("id").and_then(|id| id.as_str()) == Some("claude"))
+            .expect("claude backend is advertised");
+        let efforts: Vec<String> = claude
+            .get("efforts")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+        assert_eq!(efforts, ["low", "medium", "high", "xhigh", "max"]);
+    }
+
     /// Register `dir` in the shared registry and return its id.
     ///
     /// The registry is process-wide, so this adds rather than replaces. Tests

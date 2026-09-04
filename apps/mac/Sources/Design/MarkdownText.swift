@@ -607,8 +607,6 @@ struct MessageMarkdown: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 case let .block(block):
                     MarkdownBlockView(
                         block: block,
@@ -623,20 +621,6 @@ struct MessageMarkdown: View {
     }
 
     private static func headingFont(style: MarkdownStyle, bodyFont: Font, level: Int) -> Font {
-        switch style {
-        case .aside:
-            return bodyFont.weight(level <= 2 ? .bold : .semibold)
-        case .document:
-            switch level {
-            case 1: return Theme.title
-            case 2: return Theme.title2
-            case 3: return Theme.title3
-            default: return Theme.headline
-            }
-        }
-    }
-
-    private func headingFont(_ level: Int) -> Font {
         switch style {
         case .aside:
             return bodyFont.weight(level <= 2 ? .bold : .semibold)

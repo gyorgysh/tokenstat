@@ -15,6 +15,10 @@ struct ToolRow: View {
     var running: Bool = false
     var failed: Bool = false
     @State private var showSnippet = false
+    /// Set once the person toggles the snippet by hand. Auto-expand must
+    /// not overrule it: lazy rows re-run `onAppear` scrolling back, and a
+    /// diff that streams in after appear must still open on its own.
+    @State private var snippetToggled = false
 
     private var snippetIsOutput: Bool {
         snippet.contains { $0.hasPrefix("|") }
@@ -33,15 +37,26 @@ struct ToolRow: View {
 
     /// A unified or old/new body line. File headers ("+++ b/…") stay out.
     private static func isDiffLine(_ line: String, added: Bool) -> Bool {
-        guard line.count > 1 else { return false }
+        guard let first = line.first else { return false }
         let want: Character = added ? "+" : "-"
-        guard line.first == want else { return false }
+        guard first == want else { return false }
         return !(line.hasPrefix("+++ ") || line.hasPrefix("--- "))
     }
 
     /// Few-line edits open on their own; anything bigger stays a stat with
     /// the full diff one tap away.
     private static let autoExpandLines = 10
+
+    /// Open a small diff on arrival. Never overrules a hand toggle, and runs
+    /// on changes as well as appear: the diff only arrives in the end event,
+    /// after appear, and lazy rows re-appear on every scroll back.
+    private func autoExpand() {
+        // A two-line change reads better open. A hundred-line one stays
+        // shut behind its stat until asked.
+        if !snippetToggled, hasDiff, !running, snippet.count <= Self.autoExpandLines {
+            showSnippet = true
+        }
+    }
 
     /// One line shown while collapsed so a row is never just "Tool".
     /// The header already shows the target (command/path); this is the
@@ -101,6 +116,7 @@ struct ToolRow: View {
                 }
                 if !snippet.isEmpty && !running {
                     Button(showSnippet ? hideLabel : showLabel, .preview) {
+                        snippetToggled = true
                         showSnippet.toggle()
                     }
                     .buttonStyle(AccentButtonStyle(small: true))
@@ -132,12 +148,10 @@ struct ToolRow: View {
             }
         }
         .onAppear {
-            // A two-line change reads better open. A hundred-line one stays
-            // shut behind its stat until asked.
-            if hasDiff, !running, snippet.count <= Self.autoExpandLines {
-                showSnippet = true
-            }
+            autoExpand()
         }
+        .onChange(of: snippet.count) { _, _ in autoExpand() }
+        .onChange(of: running) { _, _ in autoExpand() }
         .padding(Theme.Space.s)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -187,8 +201,8 @@ struct ToolRow: View {
     }
 
     private func snippetColor(_ line: String) -> Color {
-        if line.hasPrefix("+") { return Theme.diffAdded }
-        if line.hasPrefix("-") { return Theme.diffRemoved }
+        if Self.isDiffLine(line, added: true) { return Theme.diffAdded }
+        if Self.isDiffLine(line, added: false) { return Theme.diffRemoved }
         return .secondary
     }
 }

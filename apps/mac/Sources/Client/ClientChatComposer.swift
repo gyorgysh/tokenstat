@@ -169,6 +169,7 @@ struct ClientChatComposer: View {
 
     private var cannotSend: Bool {
         running
+            || model.sending
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
     }
 

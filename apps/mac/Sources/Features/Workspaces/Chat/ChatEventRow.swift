@@ -99,18 +99,10 @@ struct ChatEventRow: View {
             // so a plain Text left `##` and `**` on screen as punctuation.
             // Quiet headings, because this is an aside and has to keep
             // reading as one.
+            //
+            // The copy action floats overlaid, never in layout: a header row
+            // would put a blank strip over every aside even while hidden.
             VStack(alignment: .leading, spacing: 2) {
-                #if os(macOS)
-                HStack {
-                    Spacer(minLength: 0)
-                    RowCopyButton(text: text, help: "Copy reasoning", visible: hovering)
-                }
-                #else
-                HStack {
-                    Spacer(minLength: 0)
-                    RowCopyButton(text: text, help: "Copy reasoning")
-                }
-                #endif
                 MessageMarkdown(
                     text,
                     bodyFont: Theme.subheadline,
@@ -125,9 +117,15 @@ struct ChatEventRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
             #if os(macOS)
+            .overlay(alignment: .topTrailing) {
+                RowCopyButton(text: text, help: "Copy reasoning", visible: hovering)
+            }
             .contentShape(.rect)
             .onHover { hovering = $0 }
             #endif
+            .contextMenu {
+                Button("Copy reasoning") { ChatClipboard.copy(text) }
+            }
         case let .tool(state):
             ToolRow(
                 verb: state.verb,

@@ -396,8 +396,17 @@ final class ChatModel {
         }
     }
 
+    /// A send is in flight. Set synchronously on entry (the main actor runs
+    /// one task at a time, so a second tap cannot slip between the check and
+    /// the set) and cleared when the bridge answers. The composer disables
+    /// Send on this; without it a double-tap re-sent the same attachments,
+    /// which image-only sends made reachable.
+    private(set) var sending = false
+
     func send(_ text: String) async {
-        guard let selected else { return }
+        guard let selected, !sending else { return }
+        sending = true
+        defer { sending = false }
         let generation = selectionGeneration
         let attachmentIDs = attachments.map(\.id)
         do {
@@ -1201,8 +1210,7 @@ struct ChatToolState: Equatable {
     /// A unified or old/new diff body line. File headers ("--- a/…",
     /// "+++ b/…") are not changes and stay grey.
     static func isDiffLine(_ line: String) -> Bool {
-        guard line.count > 1 else { return false }
-        let first = line.first
+        guard let first = line.first else { return false }
         guard first == "+" || first == "-" else { return false }
         return !(line.hasPrefix("+++ ") || line.hasPrefix("--- "))
     }
@@ -1452,7 +1460,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                         kind: .attachment(
                             ChatAttachment(
                                 id: id,
-                                name: agent.name ?? "Attachment",
+                                name: agent.name.flatMap { $0.isEmpty ? nil : $0 } ?? "Attachment",
                                 mediaType: agent.mediaType,
                                 size: agent.size
                             )

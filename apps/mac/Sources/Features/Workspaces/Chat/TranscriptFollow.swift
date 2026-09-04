@@ -244,9 +244,9 @@ final class TranscriptFollowState {
     /// Leaving the settle always reveals, whether the end was reached or the
     /// frames simply ran out. A wireframe that can outlast its content is
     /// worse than the build-up it hides.
-    func settle(_ active: Bool) {
-        chase(active)
-        set(arrived: !active)
+    func settle(_ holding: Bool) {
+        chase(holding)
+        set(arrived: !holding)
     }
 
     /// Hold the end without hiding anything.

@@ -83,8 +83,7 @@ fn needs_refresh() -> bool {
 
 /// One background refresh at a time. A second caller while probes are in
 /// flight serves the cache instead of doubling the subprocesses.
-static REFRESH_IN_FLIGHT: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static REFRESH_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn claim_refresh() -> bool {
     REFRESH_IN_FLIGHT
@@ -155,15 +154,26 @@ fn fill(id: &str, fetch: impl FnOnce() -> Option<Vec<String>>) {
             return;
         }
     }
-    let value = match fetch() {
-        Some(list) if !list.is_empty() => Cached::Live(list),
-        _ => Cached::Miss,
+    let Some(list) = fetch().filter(|list| !list.is_empty()) else {
+        // A failed probe must not evict a good list: the picker would
+        // silently downgrade to fallbacks until the next success. Record a
+        // miss only when there is nothing to keep.
+        if cache_lock().get(id).is_none() {
+            cache_lock().insert(
+                id.to_string(),
+                Entry {
+                    at: Instant::now(),
+                    value: Cached::Miss,
+                },
+            );
+        }
+        return;
     };
     cache_lock().insert(
         id.to_string(),
         Entry {
             at: Instant::now(),
-            value,
+            value: Cached::Live(list),
         },
     );
 }
