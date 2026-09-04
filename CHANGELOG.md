@@ -11,6 +11,41 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one, rather than reconstructing release notes from
 commits at the end.
 
+## [0.8.3] - 2026-09-04
+
+The model picker has a search, and notifications wait until you have looked
+away.
+
+### Added
+
+- Type to filter the model list. An agent CLI can offer forty models or more,
+  and "meta 1.3" finds meta/muse-spark-1.3. Agent, model and effort share one
+  panel, each section showing what it is set to. Lists under ten entries stay
+  a plain menu.
+- A Refresh sits beside the models. The list comes from the agent's own CLI
+  and is held for ten minutes, so a provider you added an API key for a minute
+  ago was missing until that expired. Refresh reads the CLI again.
+- Codex models. A Codex chat had no model picker, so it ran only the model set
+  in its own config file.
+
+### Fixed
+
+- Notifications hold off while you are watching. A turn that ended in the
+  conversation on screen still posted a banner and buzzed your phone. Now both
+  wait for another app to be in front, the window to be away, or the keyboard
+  to go untouched for a while. A phone driving a chat on a desktop no longer
+  notifies itself.
+- A new automation starts on an agent. It opened on Shell, and a shell command
+  belongs in the prompt field. Shell is still in the picker, at the end.
+- A phone that cannot reach a computer names the fix. It showed the
+  transport's own words, "no direct address" and "no_such_peer". Usually that
+  computer has never had "Reach devices from anywhere" turned on, so the relay
+  has never been told where it is.
+- On pull requests, the art on the connect card is centred. Choosing which
+  repositories tokenstat may open also stays on that screen after you connect.
+  It used to vanish as soon as one repository worked, which left the Account
+  screen as the only way back to it.
+
 ## [0.8.2] - 2026-09-04
 
 Chat on the Mac keeps up with the conversation, and a terminal you come back
