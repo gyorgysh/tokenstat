@@ -312,153 +312,54 @@ struct ChatComposerControls: View {
 }
 
 /// Nested Agent / Model / Effort from one compact field.
+/// Agent, model and effort in one panel you can type into.
+///
+/// This was three nested menus, declared twice: once for macOS and once for
+/// iOS, because iOS renders a nested `Menu` bottom-up inside the glass sheet
+/// and the only way to keep the visual order the same on both was to write the
+/// sections out backwards. That is gone. One panel, three sections, one
+/// declaration, and the filter runs across all of them, so typing "meta" in a
+/// forty-model list gets there in four keystrokes instead of a scroll.
+///
+/// The Refresh lives here, not in the app's settings, because this is where
+/// somebody notices the list is short: they added an API key to a CLI a minute
+/// ago and the provider it unlocked is not in the list yet. See
+/// `ChatModel.reloadBackends`.
 private struct ChatAgentMenu: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     var locked: Bool
 
+    @State private var isPresented = false
+    @State private var canRefresh = false
+    @State private var favorites = ModelFavoritesStore.shared
+
+    /// One row of the panel. Three kinds of choice share a list, so they share
+    /// a value: the section a row came from is what says which of the three
+    /// the person just changed.
+    private enum Choice: Hashable {
+        case agent(String)
+        /// Empty is the agent's own default.
+        case model(String)
+        case effort(String)
+    }
+
     var body: some View {
-        Menu {
-            #if os(macOS)
-            Menu("Agent") {
-                ForEach(agentOptions, id: \.value) { option in
-                    Button {
-                        Task {
-                            if model.backend(for: option.value)?.gateTier == "bypassOnly" {
-                                await model.update(backend: option.value, autonomy: "bypass")
-                            } else {
-                                await model.update(backend: option.value)
-                            }
-                        }
-                    } label: {
-                        if option.value == chat.backend {
-                            Label(option.label, systemImage: "checkmark")
-                        } else {
-                            Text(option.label)
-                        }
-                    }
-                }
+        PickerPanel(title: "Agent, model and effort", isPresented: $isPresented) {
+            PickerOptionList(
+                choices: choices,
+                isSelected: isSelected,
+                prompt: "Filter agents, models and efforts",
+                emptyMessage: "No agents available",
+                caption: "Three settings for this conversation.",
+                refresh: canRefresh ? { await model.reloadBackends() } : nil,
+                sectionValue: currentValue,
+                pick: pick,
+                accessory: { value in AnyView(star(for: value)) }
+            )
+            .task(id: model.peer ?? "local") {
+                canRefresh = await RemoteHostFeature.modelRefresh.isSupported(peer: model.peer)
             }
-            if let backend, !backend.models.isEmpty {
-                Menu("Model") {
-                    Button {
-                        Task { await model.update(model: "") }
-                    } label: {
-                        if (chat.model ?? "").isEmpty {
-                            Label("Default", systemImage: "checkmark")
-                        } else {
-                            Text("Default")
-                        }
-                    }
-                    ForEach(modelIDs, id: \.self) { id in
-                        Button {
-                            Task { await model.update(model: id) }
-                        } label: {
-                            if chat.model == id {
-                                Label(id, systemImage: "checkmark")
-                            } else {
-                                Text(id)
-                            }
-                        }
-                    }
-                }
-            }
-            if let backend, !backend.efforts.isEmpty {
-                Menu("Effort") {
-                    Button {
-                        Task { await model.update(effort: "") }
-                    } label: {
-                        if (chat.effort ?? "").isEmpty {
-                            Label("Default", systemImage: "checkmark")
-                        } else {
-                            Text("Default")
-                        }
-                    }
-                    ForEach(backend.efforts, id: \.self) { id in
-                        Button {
-                            Task { await model.update(effort: id) }
-                        } label: {
-                            if chat.effort == id {
-                                Label(id, systemImage: "checkmark")
-                            } else {
-                                Text(id)
-                            }
-                        }
-                    }
-                }
-            }
-            #else
-            // iOS renders nested Menus bottom-up in the glass sheet, so the
-            // declaration order is reversed to keep the visual order Agent ·
-            // Model · Effort (top to bottom) identical to macOS.
-            if let backend, !backend.efforts.isEmpty {
-                Menu("Effort") {
-                    Button {
-                        Task { await model.update(effort: "") }
-                    } label: {
-                        if (chat.effort ?? "").isEmpty {
-                            Label("Default", systemImage: "checkmark")
-                        } else {
-                            Text("Default")
-                        }
-                    }
-                    ForEach(backend.efforts, id: \.self) { id in
-                        Button {
-                            Task { await model.update(effort: id) }
-                        } label: {
-                            if chat.effort == id {
-                                Label(id, systemImage: "checkmark")
-                            } else {
-                                Text(id)
-                            }
-                        }
-                    }
-                }
-            }
-            if let backend, !backend.models.isEmpty {
-                Menu("Model") {
-                    Button {
-                        Task { await model.update(model: "") }
-                    } label: {
-                        if (chat.model ?? "").isEmpty {
-                            Label("Default", systemImage: "checkmark")
-                        } else {
-                            Text("Default")
-                        }
-                    }
-                    ForEach(modelIDs, id: \.self) { id in
-                        Button {
-                            Task { await model.update(model: id) }
-                        } label: {
-                            if chat.model == id {
-                                Label(id, systemImage: "checkmark")
-                            } else {
-                                Text(id)
-                            }
-                        }
-                    }
-                }
-            }
-            Menu("Agent") {
-                ForEach(agentOptions, id: \.value) { option in
-                    Button {
-                        Task {
-                            if model.backend(for: option.value)?.gateTier == "bypassOnly" {
-                                await model.update(backend: option.value, autonomy: "bypass")
-                            } else {
-                                await model.update(backend: option.value)
-                            }
-                        }
-                    } label: {
-                        if option.value == chat.backend {
-                            Label(option.label, systemImage: "checkmark")
-                        } else {
-                            Text(option.label)
-                        }
-                    }
-                }
-            }
-            #endif
         } label: {
             HStack(spacing: 6) {
                 Text(summary)
@@ -477,11 +378,6 @@ private struct ChatAgentMenu: View {
             }
             .contentShape(.rect)
         }
-        #if os(macOS)
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        #endif
-        .buttonStyle(.plain)
         .disabled(locked)
         .fixedSize(horizontal: true, vertical: true)
         .help("Agent, model and effort")
@@ -489,6 +385,98 @@ private struct ChatAgentMenu: View {
     }
 
     private var backend: ChatBackend? { model.backend(for: chat.backend) }
+
+    /// Every row, in the order the sections have always been read in.
+    private var choices: [PickerChoice<Choice>] {
+        var rows = agentOptions.map {
+            PickerChoice(value: Choice.agent($0.value), label: $0.label, section: "Agent")
+        }
+        if let backend, !backend.models.isEmpty {
+            rows.append(
+                PickerChoice(
+                    value: .model(""),
+                    label: "Default",
+                    detail: "\(backend.label) picks the model",
+                    section: "Model"
+                )
+            )
+            rows += modelIDs.map {
+                PickerChoice(value: Choice.model($0), label: $0, section: "Model")
+            }
+        }
+        if let backend, !backend.efforts.isEmpty {
+            rows.append(PickerChoice(value: .effort(""), label: "Default", section: "Effort"))
+            rows += backend.efforts.map {
+                PickerChoice(value: Choice.effort($0), label: $0, section: "Effort")
+            }
+        }
+        return rows
+    }
+
+    /// What each section is set to, for its heading. The panel is three
+    /// settings, and a heading that only names the group leaves somebody
+    /// scrolling to find which row carries the mark.
+    private func currentValue(_ section: String) -> String? {
+        switch section {
+        case "Agent": backend?.label ?? chat.backend
+        case "Model": (chat.model?.isEmpty == false ? chat.model : "Default")
+        case "Effort": (chat.effort?.isEmpty == false ? chat.effort : "Default")
+        default: nil
+        }
+    }
+
+    /// Three marks in one list, one per section, each reading the
+    /// conversation's own setting.
+    private func isSelected(_ choice: Choice) -> Bool {
+        switch choice {
+        case let .agent(id): id == chat.backend
+        case let .model(id): id == (chat.model ?? "")
+        case let .effort(id): id == (chat.effort ?? "")
+        }
+    }
+
+    private func pick(_ choice: Choice) {
+        switch choice {
+        case let .agent(id):
+            Task {
+                if model.backend(for: id)?.gateTier == "bypassOnly" {
+                    await model.update(backend: id, autonomy: "bypass")
+                } else {
+                    await model.update(backend: id)
+                }
+            }
+        case let .model(id):
+            Task { await model.update(model: id) }
+            isPresented = false
+        case let .effort(id):
+            Task { await model.update(effort: id) }
+            isPresented = false
+        }
+    }
+
+    /// The favourite star, on model rows only. Same store as before, so what
+    /// somebody starred in the old menu is still pinned in this one.
+    @ViewBuilder
+    private func star(for choice: Choice) -> some View {
+        if case let .model(id) = choice, !id.isEmpty, let backend {
+            Button {
+                favorites.toggle(backend: backend.id, model: id)
+            } label: {
+                Image(systemName: favorites.contains(backend: backend.id, model: id)
+                    ? "star.fill" : "star")
+                    .font(Theme.font(10, weight: .semibold))
+                    .foregroundStyle(
+                        favorites.contains(backend: backend.id, model: id)
+                            ? Theme.accent : Color.secondary.opacity(0.4)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                favorites.contains(backend: backend.id, model: id)
+                    ? "Unpin \(id)" : "Pin \(id)"
+            )
+        }
+    }
 
     private var agentOptions: [(value: String, label: String)] {
         model.backends

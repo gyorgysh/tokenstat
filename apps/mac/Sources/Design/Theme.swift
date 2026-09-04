@@ -2004,6 +2004,19 @@ struct AppMenuPicker<Option: Hashable>: View {
     var title: String = ""
     var options: [(value: Option, label: String)]
     @Binding var selection: Option
+    /// Reload the options. Offered in the panel when the list is somebody
+    /// else's answer that can go stale, and nil when it is a fixed set.
+    var refresh: (() async -> Void)?
+    /// Above this many options the control opens a searchable panel instead
+    /// of a menu.
+    ///
+    /// A menu is the better control for a short list: it is one press, it
+    /// needs no filter, and the platform draws it. It stops being the better
+    /// control somewhere around a screenful, which is where reading every
+    /// line to find one starts costing more than typing three letters.
+    var searchThreshold: Int = 10
+
+    @State private var isPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: title.isEmpty ? 0 : 3) {
@@ -2012,42 +2025,79 @@ struct AppMenuPicker<Option: Hashable>: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Menu {
-                ForEach(options, id: \.value) { option in
-                    Button(option.label) {
-                        selection = option.value
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(selectedLabel)
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 4)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Theme.border, lineWidth: 1)
-                )
-                .contentShape(.rect)
+            if usesPanel {
+                panel
+            } else {
+                menu
             }
-            // AppKit menus keep their first item list. A new agent must
-            // remount this control or the previous models stay on screen.
-            .id(optionsIdentity)
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .buttonStyle(.plain)
-            .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var usesPanel: Bool {
+        refresh != nil || options.count >= searchThreshold
+    }
+
+    private var panel: some View {
+        PickerPanel(title: title.isEmpty ? "Choose" : title, isPresented: $isPresented) {
+            PickerOptionList(
+                choices: options.map { PickerChoice(value: $0.value, label: $0.label) },
+                isSelected: { $0 == selection },
+                prompt: title.isEmpty ? "Filter" : "Filter \(title.lowercased())",
+                emptyMessage: "Nothing to choose from",
+                monospaced: false,
+                refresh: refresh,
+                pick: { value in
+                    selection = value
+                    isPresented = false
+                },
+                accessory: nil
+            )
+        } label: {
+            field
+        }
+    }
+
+    private var menu: some View {
+        Menu {
+            ForEach(options, id: \.value) { option in
+                Button(option.label) {
+                    selection = option.value
+                }
+            }
+        } label: {
+            field
+        }
+        // AppKit menus keep their first item list. A new agent must
+        // remount this control or the previous models stay on screen.
+        .id(optionsIdentity)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The control itself. A menu and a panel open from the same field.
+    private var field: some View {
+        HStack(spacing: 6) {
+            Text(selectedLabel)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .contentShape(.rect)
     }
 
     private var optionsIdentity: String {

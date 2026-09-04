@@ -1014,7 +1014,7 @@ pub fn design(
         .map(|job| format!("{} ({})", job.id, job.name))
         .collect::<Vec<_>>()
         .join(", ");
-    let backends = automations::backends()
+    let backends = automations::backends(false)
         .into_iter()
         .filter_map(|b| b.get("id").and_then(Value::as_str).map(str::to_string))
         .collect::<Vec<_>>()
@@ -1818,7 +1818,7 @@ fn pick_design_backend(requested: Option<&str>) -> String {
     if let Some(id) = requested.filter(|id| !id.is_empty()) {
         return id.to_string();
     }
-    let listed: Vec<(String, Vec<String>, Vec<String>)> = automations::backends()
+    let listed: Vec<(String, Vec<String>, Vec<String>)> = automations::backends(false)
         .into_iter()
         .filter_map(|b| {
             let id = b.get("id")?.as_str()?.to_string();
@@ -1866,7 +1866,7 @@ fn design_model_effort(
     model: Option<&str>,
     effort: Option<&str>,
 ) -> (Option<String>, Option<String>) {
-    let listed = automations::backends()
+    let listed = automations::backends(false)
         .into_iter()
         .find(|b| b.get("id").and_then(Value::as_str) == Some(backend));
     let models: Vec<String> = listed

@@ -360,11 +360,26 @@ internal sealed class ChatPage : Page
         var models = backend?["models"] as JsonArray;
         if (models is { Count: > 0 })
         {
-            body.Children.Add(Labeled("Model", OptionPicker(
+            // The list beside the picker is what the host read from the agent
+            // CLI, cached for ten minutes. Add an API key to that CLI and the
+            // provider it unlocks is real everywhere except here until the
+            // cache expires, so the picker carries its own way to ask again.
+            var picker = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = Theme.SpaceS,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            picker.Children.Add(OptionPicker(
                 models,
                 Format.Text(chat, "model"),
                 running,
-                async value => await UpdateAsync(new JsonObject { ["model"] = value }))));
+                async value => await UpdateAsync(new JsonObject { ["model"] = value })));
+            picker.Children.Add(ActionIconGlyph.Button(
+                "Refresh",
+                ActionIcon.Refresh,
+                async (_, _) => await ReloadBackendsAsync()));
+            body.Children.Add(Labeled("Model", picker));
         }
         var efforts = backend?["efforts"] as JsonArray;
         if (efforts is { Count: > 0 })
@@ -1498,6 +1513,19 @@ internal sealed class ChatPage : Page
                 // A dropped poll is retried on the next tick.
             }
         }
+    }
+
+    /// <summary>
+    /// Ask the host to read the agent CLIs' model lists again instead of
+    /// serving the ones it cached. See the comment beside the Model picker.
+    /// </summary>
+    private async Task ReloadBackendsAsync()
+    {
+        var backends = await AppServices.Host.CallAsync(
+            "chat.backends",
+            new JsonObject { ["refresh"] = true });
+        _backends = AsArray(backends);
+        PaintConversation();
     }
 
     private async Task RefreshCatalogAsync()

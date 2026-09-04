@@ -437,6 +437,9 @@ struct AutomationParams {
     prompt: Option<String>,
     model: Option<String>,
     effort: Option<String>,
+    /// `automation.backends` only: probe the agent CLIs now instead of
+    /// serving the cached lists. Somebody pressed Refresh in the picker.
+    refresh: Option<bool>,
 }
 
 #[cfg(feature = "local-host")]
@@ -464,6 +467,8 @@ struct TodoParams {
 struct ChatParams {
     id: Option<String>,
     workspace_id: Option<String>,
+    /// `chat.backends` only. See `AutomationParams::refresh`.
+    refresh: Option<bool>,
     title: Option<String>,
     backend: Option<String>,
     model: Option<String>,
@@ -1847,7 +1852,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             }))
         }
         "chat.instructions" => Ok(store.instructions(&p.id.ok_or("chat.instructions needs id")?)?),
-        "chat.backends" => Ok(Value::Array(crate::chat::backends())),
+        "chat.backends" => Ok(Value::Array(crate::chat::backends(p.refresh == Some(true)))),
         "chat.personas" => {
             Ok(store.personas(&p.workspace_id.ok_or("chat.personas needs a workspaceId")?)?)
         }
@@ -1956,7 +1961,12 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             .envelope()
         }
         "automation.runs" => serde_json::to_value(crate::automations::shared().runs()).envelope(),
-        "automation.backends" => Ok(serde_json::Value::Array(crate::automations::backends())),
+        "automation.backends" => {
+            let p: AutomationParams = parse(params)?;
+            Ok(serde_json::Value::Array(crate::automations::backends(
+                p.refresh == Some(true),
+            )))
+        }
         "automation.interactiveCommand" => {
             let p: AutomationParams = parse(params)?;
             let backend = p

@@ -49,7 +49,7 @@ pub mod account_activity;
 #[cfg(feature = "local-host")]
 pub mod activity;
 #[cfg(feature = "local-host")]
-pub(crate) mod agent_models;
+pub mod agent_models;
 #[cfg(feature = "local-host")]
 pub mod automations;
 pub mod base64;
@@ -142,11 +142,18 @@ pub use tokenstat_pty::warm_shell_pool;
 /// used to print `unknown method: ssh.host.list` at a person. 2 was the SSH
 /// library and screen input work. 3 is the password vault: `ssh.vault.password.set`,
 /// `ssh.vault.lock`, `ssh.vault.recovery.rotate`, and enrollment gone from the
-/// public methods. 4 adds `ssh.session.suggest` and `chat.eventPage`.
+/// public methods. 4 adds `ssh.session.suggest` and `chat.eventPage`. 6 adds
+/// the `refresh` parameter on `chat.backends` and `automation.backends`.
+///
+/// That last one is a parameter, not a method, which is the weaker case: an
+/// older host deserializes the call, ignores the field it does not
+/// know, and answers from its cache. Nothing errors, so nothing on screen can
+/// notice. A client offers the Refresh control only above this version, which
+/// is the whole reason a parameter still spends a number here.
 ///
 /// The helper outlives the app that installed it, so forgetting this is not a
 /// cosmetic miss: a new app talks to the old daemon on the same socket, every
 /// new method answers `unknown method`, and the feature is simply absent with
 /// nothing on screen to say why. `Bridge.connect` replaces a helper whose
 /// number does not match, and that check is the only thing that notices.
-pub const PROTOCOL_VERSION: &str = "5";
+pub const PROTOCOL_VERSION: &str = "6";

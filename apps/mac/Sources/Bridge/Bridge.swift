@@ -942,8 +942,18 @@ extension Bridge {
         return (workspaceID, nil)
     }
 
-    static func chatBackends(peer: String? = nil) async throws -> [ChatBackend] {
-        try await chatInvoke(peer: peer, "chat.backends", as: [ChatBackend].self)
+    /// `refresh` asks the host to probe the agent CLIs now instead of serving
+    /// its cached lists. Only send it to a host that understands it: an older
+    /// one ignores the field and answers from the cache, which looks to a
+    /// person like a Refresh button that does nothing.
+    static func chatBackends(peer: String? = nil, refresh: Bool = false) async throws
+        -> [ChatBackend] {
+        try await chatInvoke(
+            peer: peer,
+            "chat.backends",
+            refresh ? ["refresh": true] : [:],
+            as: [ChatBackend].self
+        )
     }
 
     static func chats(workspaceID: String, peer: String? = nil) async throws -> [ChatConversation] {

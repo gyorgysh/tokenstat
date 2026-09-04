@@ -2617,8 +2617,8 @@ fn last_message_in(path: &Path) -> Option<(i64, &'static str)> {
     })
 }
 
-pub fn backends() -> Vec<Value> {
-    crate::automations::backends()
+pub fn backends(force: bool) -> Vec<Value> {
+    crate::automations::backends(force)
         .into_iter()
         .map(|mut backend| {
             if let Some(map) = backend.as_object_mut() {
@@ -3625,7 +3625,7 @@ mod tests {
 
     #[test]
     fn backends_declare_a_gate_tier_and_keep_the_agent_label() {
-        let rows = backends();
+        let rows = backends(false);
         let grok = rows
             .iter()
             .find(|backend| backend["id"] == "grok")

@@ -834,8 +834,14 @@ fn shell_argv(prompt: &str) -> Vec<&str> {
 /// times out. Claude has no list command: `--help` documents aliases, and
 /// those stay the contract. A backend with an empty list gets no model
 /// picker. Effort values are still the flags each CLI's `--help` names.
-pub fn backends() -> Vec<serde_json::Value> {
-    crate::agent_models::refresh();
+/// `force` is somebody pressing Refresh in the picker: probe the CLIs now and
+/// wait, instead of serving the cache while a background pass catches up.
+pub fn backends(force: bool) -> Vec<serde_json::Value> {
+    if force {
+        crate::agent_models::refresh_now();
+    } else {
+        crate::agent_models::refresh();
+    }
     [
         ("sh", "Shell", "sh -c \"…\"", &[] as &[&str], serde_json::json!([])),
         (
@@ -2253,7 +2259,7 @@ mod tests {
 
     #[test]
     fn grok_models_include_the_current_default() {
-        let grok = backends()
+        let grok = backends(false)
             .into_iter()
             .find(|v| v.get("id").and_then(|id| id.as_str()) == Some("grok"))
             .expect("grok is a backend");
@@ -2940,7 +2946,7 @@ mod tests {
 
     #[test]
     fn backends_include_opencode2() {
-        let ids: Vec<String> = backends()
+        let ids: Vec<String> = backends(false)
             .into_iter()
             .filter_map(|v| v.get("id")?.as_str().map(str::to_string))
             .collect();
@@ -2952,7 +2958,7 @@ mod tests {
     fn claude_advertises_the_full_effort_ladder() {
         // Additive contract: older clients validate against low/medium/high,
         // so this pins the ladder rather than letting it drift silently.
-        let claude = backends()
+        let claude = backends(false)
             .into_iter()
             .find(|v| v.get("id").and_then(|id| id.as_str()) == Some("claude"))
             .expect("claude backend is advertised");

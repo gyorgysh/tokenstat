@@ -12,20 +12,24 @@ import SwiftUI
 enum RemoteHostFeature {
     case chat
     case pulls
+    case modelRefresh
 
     var title: String {
         switch self {
         case .chat: "Chat"
         case .pulls: "Pull requests"
+        case .modelRefresh: "Model list refresh"
         }
     }
 
     /// Version 3 introduced the pull-request host methods. Version 4 added
     /// `chat.eventPage`, which the mobile transcript needs for older pages.
+    /// Version 6 added the `refresh` parameter on `chat.backends`.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
         case .pulls: 3
+        case .modelRefresh: 6
         }
     }
 
@@ -33,7 +37,25 @@ enum RemoteHostFeature {
         switch self {
         case .chat: "bubble.left.and.bubble.right.fill"
         case .pulls: "arrow.triangle.merge"
+        case .modelRefresh: "arrow.clockwise"
         }
+    }
+
+    /// Does this peer speak the feature? For a control that should simply not
+    /// appear, instead of taking the whole screen over.
+    ///
+    /// `RemoteHostFeatureGate` is the other shape, for a whole surface that
+    /// cannot work at all. A Refresh button is not that: the picker is fine
+    /// without it, and an "update your Mac" panel in place of one button would
+    /// be louder than the thing it is explaining.
+    ///
+    /// This computer is always current. `Bridge.connect` replaces a helper
+    /// whose protocol does not match the app, so a local host cannot be behind
+    /// the app asking.
+    func isSupported(peer: String?) async -> Bool {
+        guard let peer, !peer.isEmpty else { return true }
+        guard let version = try? await Bridge.peerProtocolVersion(peer) else { return false }
+        return version >= minimumProtocol
     }
 }
 

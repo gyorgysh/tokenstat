@@ -291,6 +291,21 @@ final class ChatModel {
         }
     }
 
+    /// Ask this conversation's host to read the agent CLIs' model lists again.
+    ///
+    /// The host caches them for ten minutes, which is right for a picker that
+    /// opens on every screen and wrong the moment somebody adds an API key to
+    /// a CLI and comes straight here looking for the models it just gained.
+    /// Errors are swallowed on purpose: the list on screen is still the list,
+    /// and an alert over a picker that already works would be worse than a
+    /// button that changed nothing.
+    func reloadBackends() async {
+        let context = loadGeneration
+        guard let loaded = try? await Bridge.chatBackends(peer: peer, refresh: true) else { return }
+        guard context == loadGeneration else { return }
+        backends = loaded
+    }
+
     func update(
         title: String? = nil,
         backend: String? = nil,

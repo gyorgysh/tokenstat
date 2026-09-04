@@ -60,6 +60,20 @@ pub fn refresh() {
     std::thread::spawn(refresh_blocking);
 }
 
+/// Probe every listable CLI now, ignoring the TTL, and wait for the answers.
+///
+/// This is the picker's Refresh. A provider added to a CLI a minute ago is
+/// invisible until the TTL expires, and "wait ten minutes" is not something a
+/// person can act on. The probes run in parallel and each carries the same
+/// deadline, so the caller waits one `LIST_TIMEOUT` at worst, not one per
+/// backend.
+///
+/// The TTL is bypassed, not the rest: a probe that fails still leaves the
+/// list it could not replace, for the reason `fill` gives.
+pub fn refresh_now() {
+    probe_all(true);
+}
+
 /// Whether any entry is missing or past its TTL. Pure cache read, no probes.
 fn needs_refresh() -> bool {
     let cache = cache_lock();
@@ -112,21 +126,30 @@ fn refresh_blocking() {
         }
     }
     let _release = ReleaseOnDrop;
+    probe_all(false);
+}
+
+/// The fan-out itself. `force` skips each entry's TTL check.
+fn probe_all(force: bool) {
     std::thread::scope(|scope| {
-        scope.spawn(|| fill("grok", || list("grok", &["models"], parse_grok_models)));
         scope.spawn(|| {
-            fill("cursor", || {
+            fill("grok", force, || {
+                list("grok", &["models"], parse_grok_models)
+            })
+        });
+        scope.spawn(|| {
+            fill("cursor", force, || {
                 list("cursor-agent", &["models"], parse_cursor_models)
             })
         });
-        scope.spawn(|| fill("agy", || list("agy", &["models"], parse_agy_models)));
+        scope.spawn(|| fill("agy", force, || list("agy", &["models"], parse_agy_models)));
         scope.spawn(|| {
-            fill("opencode", || {
+            fill("opencode", force, || {
                 list("opencode", &["models"], parse_opencode_models)
             })
         });
         scope.spawn(|| {
-            fill("opencode2", || {
+            fill("opencode2", force, || {
                 list("opencode2", &["models"], parse_opencode_models)
             })
         });
@@ -144,8 +167,8 @@ pub fn for_backend(id: &str, fallback: &[&str]) -> Vec<String> {
     }
 }
 
-fn fill(id: &str, fetch: impl FnOnce() -> Option<Vec<String>>) {
-    if let Some(entry) = cache_lock().get(id) {
+fn fill(id: &str, force: bool, fetch: impl FnOnce() -> Option<Vec<String>>) {
+    if let Some(entry) = cache_lock().get(id).filter(|_| !force) {
         let ttl = match entry.value {
             Cached::Live(_) => LIVE_TTL,
             Cached::Miss => MISS_TTL,
@@ -606,7 +629,7 @@ not-a-model
     #[test]
     fn failed_probe_keeps_live_entry_and_bumps_timestamp() {
         let test_id = "test-probe-fail";
-        fill(test_id, || Some(vec!["test-model-1".into()]));
+        fill(test_id, false, || Some(vec!["test-model-1".into()]));
         assert_eq!(for_backend(test_id, &[]), vec!["test-model-1"]);
 
         // Wind the timestamp back past LIVE_TTL to simulate staleness
@@ -614,10 +637,38 @@ not-a-model
         cache_lock().get_mut(test_id).unwrap().at = past;
 
         // Failing probe should keep the live model list and refresh its timestamp
-        fill(test_id, || None);
+        fill(test_id, false, || None);
         assert_eq!(for_backend(test_id, &[]), vec!["test-model-1"]);
 
         let entry_at = cache_lock().get(test_id).unwrap().at;
         assert!(entry_at.elapsed() < Duration::from_secs(5));
+    }
+
+    /// Refresh in the picker has to reach the CLI even though the cached list
+    /// is minutes from expiring, which is the whole case it exists for: an API
+    /// key was added a moment ago and the provider it unlocked is missing.
+    #[test]
+    fn a_forced_fill_probes_a_fresh_entry() {
+        let test_id = "test-probe-force";
+        fill(test_id, false, || Some(vec!["before".into()]));
+        assert_eq!(for_backend(test_id, &[]), vec!["before"]);
+
+        // Well inside LIVE_TTL: an ordinary fill must not probe.
+        fill(test_id, false, || Some(vec!["after".into()]));
+        assert_eq!(for_backend(test_id, &[]), vec!["before"]);
+
+        fill(test_id, true, || Some(vec!["after".into()]));
+        assert_eq!(for_backend(test_id, &[]), vec!["after"]);
+    }
+
+    /// Forcing skips the TTL, not the rule that a failed probe keeps the list
+    /// it could not replace. Refresh answering with an empty picker would be
+    /// worse than answering with yesterday's models.
+    #[test]
+    fn a_forced_fill_that_fails_keeps_the_list() {
+        let test_id = "test-probe-force-fail";
+        fill(test_id, false, || Some(vec!["kept".into()]));
+        fill(test_id, true, || None);
+        assert_eq!(for_backend(test_id, &[]), vec!["kept"]);
     }
 }

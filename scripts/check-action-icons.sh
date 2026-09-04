@@ -44,6 +44,13 @@ ALLOWED = [
     # labels already carry the branch/check glyph; another action glyph would
     # duplicate the mark instead of clarifying the action.
     ("Features/Workspaces/BranchPicker.swift", "Button { isPresented = true } label:"),
+    # The searchable picker's shell and its rows, same class as the branch
+    # picker above. The control that opens a panel is supplied by the caller
+    # and carries that screen's own glyph, and each option row already draws
+    # its selection mark: a second glyph on every line would be one symbol
+    # repeated down a list.
+    ("Design/SearchablePicker.swift", "Button { isPresented = true } label:"),
+    ("Design/SearchablePicker.swift", "Button { pick(choice.value) } label:"),
     ("Features/Workspaces/BranchPicker.swift", "Task { await checkout(branch) }"),
     ("Features/Automations/AutomationsView.swift", "Button(action, action: perform)"),
     ("Features/Workflows/WorkflowsView.swift", "Button(action: onSelect)"),
