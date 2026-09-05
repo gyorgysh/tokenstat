@@ -825,8 +825,7 @@ fn events_codex(value: &Value) -> Vec<Event> {
                         // No exit code and no output: cancelled/killed, not
                         // success. Stay failed rather than closing green.
                         detail.as_deref().is_some_and(|output| {
-                            !output.trim().is_empty()
-                                && codex_rejection(Some(output)).is_none()
+                            !output.trim().is_empty() && codex_rejection(Some(output)).is_none()
                         })
                     });
                 vec![Event::ToolEnd {
@@ -903,7 +902,10 @@ fn codex_command_kind(command: &str) -> &'static str {
     let tokens: Vec<String> = flat
         .split(|ch: char| ch.is_whitespace() || matches!(ch, '|' | ';' | '&' | '(' | ')'))
         .filter(|part| !part.is_empty())
-        .map(|part| part.trim_matches(|ch: char| "'\";,()".contains(ch)).to_string())
+        .map(|part| {
+            part.trim_matches(|ch: char| "'\";,()".contains(ch))
+                .to_string()
+        })
         .collect();
     let names: Vec<String> = tokens
         .iter()
@@ -960,7 +962,10 @@ fn codex_command_input(command: &str) -> Value {
     let kind = codex_command_kind(command);
     let parts: Vec<String> = command
         .split_whitespace()
-        .map(|part| part.trim_matches(|ch: char| "'\";,()".contains(ch)).to_string())
+        .map(|part| {
+            part.trim_matches(|ch: char| "'\";,()".contains(ch))
+                .to_string()
+        })
         .collect();
     let target = parts
         .iter()
@@ -985,7 +990,11 @@ fn codex_command_input(command: &str) -> Value {
         .or_else(|| {
             // Repo-relative `diff -u src/a.rs src/b.rs`: no absolute path and
             // no .txt/.md, so fall back to the last path-like argument.
-            parts.iter().rev().find(|part| looks_like_path(part)).cloned()
+            parts
+                .iter()
+                .rev()
+                .find(|part| looks_like_path(part))
+                .cloned()
         })
         .unwrap_or_default();
     if target.is_empty() || kind == "shell" {

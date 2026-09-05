@@ -1162,7 +1162,12 @@ mod tests {
             let (stream, _) = listener.accept().expect("a peer connection");
             let connection =
                 handshake_responder(Box::new(stream), &responder_ident).expect("handshake");
-            pump_proxy(connection, "127.0.0.1", echo_port, super::StreamAccess::Unchecked);
+            pump_proxy(
+                connection,
+                "127.0.0.1",
+                echo_port,
+                super::StreamAccess::Unchecked,
+            );
         });
 
         let stream = TcpStream::connect(address).expect("dial the peer");

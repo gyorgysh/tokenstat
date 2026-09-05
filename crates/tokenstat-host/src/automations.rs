@@ -553,10 +553,7 @@ pub fn chat_agent_command(
         }
         if plan {
             let at = headless_flag_at(&argv);
-            argv.splice(
-                at..at,
-                ["--disable-write".into(), "--disable-shell".into()],
-            );
+            argv.splice(at..at, ["--disable-write".into(), "--disable-shell".into()]);
         }
     }
     // Automations are an explicit background action and retain their existing

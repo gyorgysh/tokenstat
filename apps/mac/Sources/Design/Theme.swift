@@ -2066,9 +2066,10 @@ struct AppMenuPicker<Option: Hashable>: View {
                 }
             }
             if refresh != nil {
-                Divider()
-                Button("Refresh list") {
+                Button {
                     Task { await refresh?() }
+                } label: {
+                    Label("Refresh list", systemImage: "arrow.clockwise")
                 }
             }
         } label: {

@@ -451,6 +451,7 @@ fn set_permission(peer_id: &str, view: bool, control: bool) -> Result<(), String
         control,
     });
     save(&store)?;
+    #[cfg(feature = "local-host")]
     invalidate_stream_cache();
     capabilities()
         .lock()

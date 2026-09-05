@@ -98,6 +98,7 @@ pub fn release(conversation_id: &str, watcher_id: &str) {
 }
 
 /// Whether a live claim stands for this conversation.
+#[cfg_attr(not(feature = "local-host"), allow(dead_code))]
 pub fn is_watched(conversation_id: &str) -> bool {
     let now = Instant::now();
     let mut claims = lock();
