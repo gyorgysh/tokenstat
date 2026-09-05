@@ -123,12 +123,10 @@ final class TranscriptFollowState {
     /// back to the latest turn with a scroll of one's own, or pressing Follow
     /// again, clears it. Observed (rare transitions only, never per-frame).
     private(set) var paused = false
-    /// The viewport moved recently. Rows drop out of hit testing while this
-    /// is true: a scroll slides content under a stationary pointer, and each
-    /// row it crosses would otherwise enter/exit hover, rebuild, and join
-    /// the hit-test walk on every mouse-move event. Observed on transitions
-    /// only; flips back a beat after the last moved frame.
-    private(set) var scrolling = false
+    /// The viewport moved recently. Diagnostic only: changing every row's
+    /// hit-testing environment during layout invalidates the hosted text
+    /// selection views while the lazy stack is updating their phases.
+    @ObservationIgnored private(set) var scrolling = false
     @ObservationIgnored var pinned = true
     @ObservationIgnored var suppressed = false {
         didSet { if suppressed { set(jump: false) } }
@@ -162,7 +160,12 @@ final class TranscriptFollowState {
     /// changes a transcript's height (rows measuring themselves, a page the
     /// opening backfill was still fetching, an image decoding) left the
     /// viewport wherever it happened to be.
-    @ObservationIgnored var repin: (() -> Void)?
+    ///
+    /// Answers whether the walk was actually made. The transcript refuses one
+    /// it cannot afford (see `TranscriptWindow.reopenAbove`), and a refusal
+    /// has to stop the following rather than be retried on the next frame.
+    @ObservationIgnored var repin: (() -> Bool)?
+    @ObservationIgnored private let repinDelivery = TranscriptScrollDelivery()
     @ObservationIgnored private var lastContentHeight: CGFloat = 0
     @ObservationIgnored private var lastOffset: CGFloat = 0
     @ObservationIgnored private var lastDistanceFromBottom: CGFloat = 0
@@ -172,6 +175,14 @@ final class TranscriptFollowState {
     /// stationary forever. Our own pins reset this (they move the viewport a
     /// lot and must never count as the reader leaving).
     @ObservationIgnored private var undrivenDrift: CGFloat = 0
+    /// Consecutive far frames with offset motion, and consecutive far frames
+    /// with the end receding. Estimate resolution moves the offset in single
+    /// large frames and pushes the end away for a frame or two; treating one
+    /// such frame as the reader leaving is what unpinned a fresh send and
+    /// parked the transcript mid-screen behind Jump to latest. Unpinning
+    /// takes sustained motion when content is resizing. Ignored.
+    @ObservationIgnored private var farMovedFrames = 0
+    @ObservationIgnored private var retreatingFrames = 0
     /// Repins spent since the end was last actually reached.
     ///
     /// The pin and the lazy stack can argue forever, and did. Asking a
@@ -259,12 +270,15 @@ final class TranscriptFollowState {
     /// way that correct those estimates, and stops short. That is why the
     /// button took several presses.
     func chase(_ active: Bool) {
+        repinDelivery.cancel()
         settling = active
         steadyFrames = 0
         abandoned = false
         repinsSpent = 0
         lastRepinAt = .distantPast
         undrivenDrift = 0
+        farMovedFrames = 0
+        retreatingFrames = 0
         if active {
             paused = false
             pinned = true
@@ -341,6 +355,20 @@ final class TranscriptFollowState {
         atEnd = metrics.contentHeight > 0
             && metrics.distanceFromBottom <= TranscriptFollow.threshold
         guard metrics.viewportHeight > 0, metrics.contentHeight > 0 else { return }
+        // Estimate resolution moves the offset in single large frames and
+        // pushes the end away for a frame or two. Count sustained motion
+        // only while far: one such frame is never a hand leaving.
+        if metrics.distanceFromBottom > TranscriptFollow.threshold {
+            if moved { farMovedFrames += 1 } else { farMovedFrames = 0 }
+            if metrics.distanceFromBottom > prevBottom + 2 {
+                retreatingFrames += 1
+            } else {
+                retreatingFrames = 0
+            }
+        } else {
+            farMovedFrames = 0
+            retreatingFrames = 0
+        }
         // Content that grew where nobody scrolled is a turn arriving, and it
         // must not unpin the view. Content that grew while the offset also
         // moved is a lazy row finding its real height under a reader who is
@@ -382,8 +410,12 @@ final class TranscriptFollowState {
                 guard repinsSpent < Self.repinBudget else { return }
                 lastRepinAt = now
                 repinsSpent += 1
-                markDrivenInstant()
-                repin?()
+                repinDelivery.submit { [weak self] in
+                    guard let self, self.active, self.pinned,
+                          !self.suppressed, !self.settling else { return }
+                    self.markDrivenInstant()
+                    if self.repin?() == false { self.stopFollowing() }
+                }
             } else if !pinned,
                 metrics.distanceFromBottom > TranscriptFollow.threshold
             {
@@ -393,7 +425,6 @@ final class TranscriptFollowState {
             }
             return
         }
-        let retreating = metrics.distanceFromBottom > prevBottom + 2
         if metrics.distanceFromBottom > TranscriptFollow.threshold {
             // Far from the end. Unpinning takes a moved viewport: only the
             // reader's own scroll proves a hand leaving. Stationary far
@@ -403,13 +434,15 @@ final class TranscriptFollowState {
             // with nobody touching anything. Unpinning those is what flipped
             // Following to Jump to latest mid-reply and then never came back,
             // since every later pin is guarded on the pin this cleared.
-            // (A pin arriving reads as moved + shrinking inside its own
-            // window, so it still cannot unpin itself; a grab mid-flight
-            // reads as retreating and still wins immediately. And because
-            // callbacks run per frame, a slow scroll that never clears the
-            // per-frame epsilon still counts once its drift adds up.)
-            let userMoved = moved || undrivenDrift > 6
-            if userMoved, !driven || retreating {
+            // A wheel tick can leave in a single callback. When content is
+            // stable and the offset moves up as the bottom recedes, release
+            // immediately, including during a driven pin. Keep the sustained
+            // motion filter for frames whose content height is changing.
+            let stableRetreat = moved && !grew && !shrank
+                && metrics.distanceFromTop < prevOffset
+                && metrics.distanceFromBottom > prevBottom + 2
+            let userMoved = farMovedFrames >= 4 || (undrivenDrift > 24 && farMovedFrames >= 2)
+            if stableRetreat || (userMoved && (!driven || retreatingFrames >= 4)) {
                 pinned = false
                 undrivenDrift = 0
                 set(jump: true)
@@ -438,12 +471,32 @@ final class TranscriptFollowState {
         }
     }
 
+    /// Stop following the end and offer the way back.
+    ///
+    /// For a transcript refusing a walk it cannot afford. A window grown by
+    /// paging back makes one scroll to the end a resolve of every row in
+    /// between, which is seconds of stopped application per attempt, so the
+    /// answer is the pill: pressing it reopens on the newest page and the
+    /// scroll is bounded again. A settle already owns the pin and is chasing
+    /// the end on purpose, so it keeps it.
+    func stopFollowing() {
+        guard !settling else { return }
+        pinned = false
+        undrivenDrift = 0
+        farMovedFrames = 0
+        retreatingFrames = 0
+        set(jump: true)
+    }
+
     func jump() {
+        repinDelivery.cancel()
         paused = false
         pinned = true
         repinsSpent = 0
         lastRepinAt = .distantPast
         undrivenDrift = 0
+        farMovedFrames = 0
+        retreatingFrames = 0
         markDriven()
         set(jump: false)
     }
@@ -454,9 +507,12 @@ final class TranscriptFollowState {
     /// callback offers Jump to latest on its own, and if the reader is
     /// already on it the pill flips to Follow so there is always a way back.
     func pause() {
+        repinDelivery.cancel()
         paused = true
         pinned = false
         undrivenDrift = 0
+        farMovedFrames = 0
+        retreatingFrames = 0
     }
 
     /// Observation does not compare before it notifies, so writing the same
@@ -606,6 +662,36 @@ struct TranscriptFollowPill: View {
         .padding(.bottom, Theme.Space.m)
         .animation(.easeOut(duration: 0.15), value: showJump)
     }
+}
+
+/// Corrective scrolls must not re-enter the lazy layout that requested them.
+/// Keep only the latest correction and perform it after the current layout
+/// transaction. Geometry samples themselves still reach follow tracking.
+final class TranscriptScrollDelivery {
+    private var pending: DispatchWorkItem?
+    private var latest: (() -> Void)?
+
+    func submit(_ action: @escaping () -> Void) {
+        latest = action
+        guard pending == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let action = self.latest
+            self.latest = nil
+            self.pending = nil
+            action?()
+        }
+        pending = work
+        DispatchQueue.main.async(execute: work)
+    }
+
+    func cancel() {
+        pending?.cancel()
+        pending = nil
+        latest = nil
+    }
+
+    deinit { pending?.cancel() }
 }
 
 /// Report where the transcript is scrolled, by whichever route this system
@@ -781,6 +867,7 @@ final class TranscriptWindow {
     var requestEarlier: (() -> Void)?
     /// Put a row back where it was. Installed beside `requestEarlier`.
     var restore: ((TranscriptAnchor) -> Void)?
+    private let restoreDelivery = TranscriptScrollDelivery()
     /// The row holding the reader's place across an insertion, and how many
     /// more changes of content height it should survive.
     ///
@@ -814,6 +901,7 @@ final class TranscriptWindow {
 
     /// Stop holding, for a page that changed nothing.
     func release() {
+        restoreDelivery.cancel()
         held = nil
         heldFrames = 0
         heldUntil = .distantPast
@@ -913,7 +1001,7 @@ final class TranscriptWindow {
                 // Nothing has reported since the hold was armed, so what the
                 // frames hold is pre-insertion geometry and the first height
                 // change IS the page landing: correct blind, once.
-                restore?(held)
+                scheduleRestore(held)
                 // A frame spent putting the reader back is not a frame to
                 // judge the boundary from: the offset it reports is the one
                 // being corrected.
@@ -925,7 +1013,7 @@ final class TranscriptWindow {
             // chats impossible to read back, so hands off until it reports.
             guard let frame = rowFrames[held.id] else { return }
             if abs(frame.minY - held.top) > Self.holdSlack {
-                restore?(held)
+                scheduleRestore(held)
                 // A frame spent putting the reader back is not a frame to
                 // judge the boundary from: the offset it reports is the one
                 // being corrected.
@@ -941,6 +1029,14 @@ final class TranscriptWindow {
             lastAnchorCheck = now
             lastDistanceFromTopForAnchor = metrics.distanceFromTop
             ask(force: false)
+        }
+    }
+
+    private func scheduleRestore(_ anchor: TranscriptAnchor) {
+        restoreDelivery.submit { [weak self] in
+            guard let self, !self.followingEnd, self.held?.id == anchor.id,
+                  Date() <= self.heldUntil else { return }
+            self.restore?(anchor)
         }
     }
 
@@ -1138,6 +1234,9 @@ extension View {
             Task { await loadEarlier(model, window: window) }
         }
         let restore: (TranscriptAnchor) -> Void = { anchor in
+            #if DEBUG
+            TranscriptProbe.shared.noteScroll("restore")
+            #endif
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {

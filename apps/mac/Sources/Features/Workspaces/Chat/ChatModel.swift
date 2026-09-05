@@ -1244,10 +1244,11 @@ struct ChatToolState: Equatable {
         let diffVerbs = ["Edit", "NotebookEdit", "Diff"]
         let isDiff = diffVerbs.contains(verb)
         var out = lines.prefix(Self.snippetLineCap).map { line in
-            if isDiff, Self.isDiffLine(line) {
-                return line
+            let shown = Self.clip(line)
+            if isDiff, Self.isDiffLine(shown) {
+                return shown
             }
-            return "| \(line)"
+            return "| \(shown)"
         }
         if lines.count > Self.snippetLineCap {
             out.append("| … (\(lines.count - Self.snippetLineCap) more)")
@@ -1263,9 +1264,35 @@ struct ChatToolState: Equatable {
         return !(line.hasPrefix("+++ ") || line.hasPrefix("--- "))
     }
 
+    /// Cut one line down to what a row can draw.
+    ///
+    /// The line cap alone bounds the wrong half. A line is whatever sits
+    /// between two newlines, and a tool that answers in JSON answers in one
+    /// line however many kilobytes it is: a web search result arrives as a
+    /// single forty-kilobyte string. Handing that to one `Text` in a stack
+    /// that grows to fit means laying out forty thousand characters, with
+    /// wrapping, on every measuring pass the lazy stack makes.
+    ///
+    /// That is the hang. It is per row and not per transcript, which is why
+    /// it survived every bound put on the number of rows: thirty-seven rows
+    /// took a second and a half, and a dozen took a third of one.
+    ///
+    /// The full text stays in `detail`, so copy still yields everything.
+    static func clip(_ line: String) -> String {
+        guard line.count > Self.snippetColumnCap else { return line }
+        return String(line.prefix(Self.snippetColumnCap)) + "…"
+    }
+
     /// A 500-line stdout must not become 500 rows. The full text stays in
     /// `detail` for copy; the row only ever draws this many.
     private static let snippetLineCap = 60
+    /// And how much of one line is drawn.
+    ///
+    /// Roughly four wrapped lines of the row's monospace face in a full-width
+    /// reading lane, so ordinary output, long shell commands and minified
+    /// source all still read as themselves. What it stops is the single line
+    /// that is really a document.
+    private static let snippetColumnCap = 600
 }
 
 /// Equatable so a transcript can skip the rows that did not move. A chat
@@ -1441,7 +1468,10 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 let state = ChatToolState(
                     callId: callId,
                     verb: agent.verb ?? "Tool",
-                    target: agent.target ?? "",
+                    // Same reason as the snippet: a shell "target" is the
+                    // whole command, and a heredoc makes that a document.
+                    // `lineLimit` bounds what is drawn, not what is measured.
+                    target: ChatToolState.clip(agent.target ?? ""),
                     running: true,
                     failed: false,
                     detail: nil,
@@ -1472,7 +1502,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                                 ChatToolState(
                                     callId: fallback,
                                     verb: fallbackVerb,
-                                    target: agent.target ?? "",
+                                    target: ChatToolState.clip(agent.target ?? ""),
                                     running: false,
                                     failed: !(agent.ok ?? true),
                                     detail: agent.detail,

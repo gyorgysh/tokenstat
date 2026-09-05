@@ -3,6 +3,7 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+import ImageIO
 #endif
 
 /// One coalesced transcript block: a user turn, assistant markdown, a tool,
@@ -138,8 +139,12 @@ struct ChatEventRow: View {
         case let .edit(path, added, removed, patch):
             ChatEditRow(path: path, added: added, removed: removed, patch: patch)
         case let .attachment(attachment):
+            // Stable identity across attachment polls: the revision prop
+            // still redraws the row through Equatable when bytes arrive, but
+            // recreating the row here restarted the decode and collapsed and
+            // regrew its height on every poll.
             ChatResponseAttachment(attachment: attachment, data: attachmentData)
-                .id("\(attachment.id)-\(attachmentRevision)")
+                .id(attachment.id)
         case let .handoff(to, brief):
             ChatHandoffRow(agent: agentLabel(to), brief: brief)
         case let .approval(approval):
@@ -182,6 +187,35 @@ private func userBubble(_ text: String) -> some View {
         }
 }
 
+#if os(macOS)
+/// Image dimensions from the file header, without decoding pixels. Used to
+/// reserve an attachment row's frame before its image arrives, so the decode
+/// landing shifts no layout mid-scroll.
+private enum ChatImageDims {
+    private static let cache: NSCache<NSData, NSNumber> = {
+        let cache = NSCache<NSData, NSNumber>()
+        cache.countLimit = 32
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
+
+    static func aspect(of data: Data) -> CGFloat? {
+        let key = data as NSData
+        if let cached = cache.object(forKey: key) { return CGFloat(cached.doubleValue) }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Double,
+              let height = props[kCGImagePropertyPixelHeight] as? Double,
+              width > 0, height > 0
+        else { return nil }
+        let orientation = props[kCGImagePropertyOrientation] as? Int ?? 1
+        let aspect = (5...8).contains(orientation) ? height / width : width / height
+        cache.setObject(NSNumber(value: aspect), forKey: key, cost: data.count)
+        return aspect
+    }
+}
+#endif
+
 /// A response file is part of the conversation, not a path printed into it.
 /// Images get a useful inline preview; every other type gets the same compact
 /// openable file card. Data came through the owning host, so this also works
@@ -194,11 +228,16 @@ private struct ChatResponseAttachment: View {
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 0) {
-                if let image {
-                    image
-                        .resizable()
-                        .scaledToFit()
+                if let aspect = imageAspect {
+                    Color.clear
+                        .aspectRatio(aspect, contentMode: .fit)
                         .frame(maxWidth: .infinity, maxHeight: 360)
+                        .overlay {
+                            if let image {
+                                image.resizable().scaledToFit()
+                            }
+                        }
+                        .clipped()
                         .background(Theme.background)
                 }
                 HStack(spacing: Theme.Space.s) {
@@ -239,22 +278,34 @@ private struct ChatResponseAttachment: View {
         .onHover { hovering = $0 }
         .help(data == nil ? "Loading attachment" : "Open \(attachment.name)")
         .task(id: data) {
-            decodedImage = nil
             guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
+            // SwiftUI restarts a row's task when it re-enters the viewport.
+            // Keep its decoded image and geometry on those appearances.
+            guard decodedData != data else { return }
             #if os(macOS)
-            // Decode off the main thread: NSImage(data:) can be tens of
-            // milliseconds for a 12MB file and was hitching scroll decel.
-            if let nsImage = await Task.detached(priority: .userInitiated, operation: { NSImage(data: data) }).value {
-                decodedImage = Image(nsImage: nsImage)
-            }
+            let result = await Task.detached(priority: .userInitiated) { NSImage(data: data) }.value
+            guard !Task.isCancelled else { return }
+            decodedData = data
+            decodedImage = result.map { Image(nsImage: $0) }
             #endif
         }
     }
 
     @State private var decodedImage: Image?
+    @State private var decodedData: Data?
+    // Header metadata is available before the async task starts, so the first
+    // layout already has the final image box. Pixels only paint its overlay.
+    private var imageAspect: CGFloat? {
+        guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return nil }
+        #if os(macOS)
+        return ChatImageDims.aspect(of: data)
+        #else
+        return nil
+        #endif
+    }
 
     private var image: Image? {
-        decodedImage
+        decodedData == data ? decodedImage : nil
     }
 
     private var fileDetail: String {
@@ -361,10 +412,40 @@ private struct ChatEditRow: View {
     let removed: UInt32
     let patch: String
     @State private var expanded = false
+    /// The parsed patch, and how many lines it left out.
+    ///
+    /// Held rather than computed. `FileDiff.fromEditPatch` walks the whole
+    /// patch, and this was calling it from `body`: an open edit re-parsed
+    /// itself on every measuring pass the transcript's lazy stack made over
+    /// the row, which during a scroll is once a frame. Parsed on the press
+    /// instead, and again only if the patch itself changes.
+    @State private var shown: (diff: FileDiff, cut: Int)?
+
+    /// How much of a diff a card in a transcript draws.
+    ///
+    /// `DiffBody` is a `LazyVStack`, but a lazy stack inside a horizontally
+    /// scrolling container has no vertical viewport to be lazy against, so
+    /// every line it holds is built and measured whether or not anybody can
+    /// see it. A thousand-line edit inside a row is a thousand rows inside a
+    /// row. The rest is a line saying how much was left.
+    private static let lineCap = 200
+
+    private func parse() {
+        shown = FileDiff.fromEditPatch(path: path, patch: patch)
+            .clipped(toLines: Self.lineCap)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            // Centre, not `.firstTextBaseline`. A stack with an explicit
+            // alignment cannot resolve it from sizes: it asks every child for
+            // a baseline guide, and a child that is itself a stack has to
+            // place all of *its* children to answer, which recurses through
+            // the whole nest. In a transcript row that runs on every measuring
+            // pass the lazy stack makes, and a live sample of a stopped
+            // application had `ViewLayoutEngine.explicitAlignment` as its
+            // hottest frame by a distance. Centring is read off the size.
+            HStack(alignment: .center, spacing: Theme.Space.s) {
                 Image(systemName: "square.and.pencil")
                     .font(Theme.font(12, weight: .medium))
                     .foregroundStyle(Theme.accent)
@@ -383,17 +464,28 @@ private struct ChatEditRow: View {
                 Spacer(minLength: 0)
                 if !patch.isEmpty {
                     Button(expanded ? "Hide edit" : "Show edit", .preview) {
+                        if shown == nil { parse() }
                         expanded.toggle()
                     }
                     .buttonStyle(AccentButtonStyle(small: true))
                 }
             }
-            if expanded, !patch.isEmpty {
+            if expanded, let shown {
                 ScrollView(.horizontal) {
-                    DiffBody(diff: FileDiff.fromEditPatch(path: path, patch: patch))
+                    DiffBody(diff: shown.diff, lazy: false)
                 }
                 .background(Theme.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                if shown.cut > 0 {
+                    Text("… \(shown.cut) more lines")
+                        .font(Theme.mono(11))
+                        .foregroundStyle(.tertiary)
+                }
             }
+        }
+        .onChange(of: patch) { _, _ in
+            // A turn still being written grows its own patch. Re-read it only
+            // while it is open, so a closed card costs nothing per token.
+            if expanded { parse() } else { shown = nil }
         }
         .padding(Theme.Space.s)
         .frame(maxWidth: .infinity, alignment: .leading)

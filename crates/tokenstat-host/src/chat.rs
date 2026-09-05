@@ -1307,9 +1307,19 @@ impl Store {
         let folder = crate::workspaces::folder(&chat.workspace_id)
             .map(|workspace| workspace.path.display().to_string())
             .unwrap_or_default();
-        let brief = crate::chat_brain::brief(&events, &folder, crate::chat_brain::BUDGET);
+        let mut brief = crate::chat_brain::brief(&events, &folder, crate::chat_brain::BUDGET);
         if brief.is_empty() {
             return Ok(None);
+        }
+        // The inline brief is bounded; a long conversation drops early turns.
+        // Point the new agent at the full export exactly then, so depth is
+        // one file read away and the handover still works when it never reads.
+        if crate::chat_brain::dropped_turns(&events, crate::chat_brain::BUDGET) > 0 {
+            let history = crate::chat_brain::export_markdown(&events, &folder);
+            let path = self.write_history(&chat.id, &history)?;
+            brief.push_str(&format!(
+                "\nFull history: {path}. Read it if the summary above is missing what you need.\n"
+            ));
         }
         Ok(Some(Handover {
             announce: previous.is_some_and(|name| name != chat.backend),
@@ -1320,13 +1330,23 @@ impl Store {
     /// Keep the handover on disk beside the timeline it was folded from.
     ///
     /// Three reasons, all real: a person can read what their agent was told,
-    /// a later parser fix can regenerate it, and a backend with a file-reading
-    /// tool can be pointed at the path rather than handed the whole text.
+    /// a later parser fix can regenerate it, and the full export beside it
+    /// (`history.md`) is what long handovers point the new agent at.
     fn write_brain(&self, id: &str, brief: &str) -> Result<(), String> {
         let path = safe_join(&self.root, id)?.join("brain.md");
         fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
             .map_err(|error| error.to_string())?;
         fs::write(path, brief).map_err(|error| error.to_string())
+    }
+
+    /// Keep the full export beside the brief it outgrew. Returns the absolute
+    /// path, which is what the handover points the new agent at.
+    fn write_history(&self, id: &str, markdown: &str) -> Result<String, String> {
+        let path = safe_join(&self.root, id)?.join("history.md");
+        fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
+            .map_err(|error| error.to_string())?;
+        fs::write(&path, markdown).map_err(|error| error.to_string())?;
+        Ok(path.display().to_string())
     }
 
     pub fn attach(

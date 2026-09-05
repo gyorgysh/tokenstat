@@ -31,6 +31,11 @@ struct ChatView: View {
     /// Bumped on send so the transcript scrolls to the end synchronously,
     /// instead of waiting for the first streamed token to trigger a pin.
     @State private var followPulse = 0
+    /// Last instant (non-animated) pin. A scrollTo on a lazy stack walks
+    /// every row in between, so silent pins from the settle loop, structural
+    /// changes, and pulses share one ~150ms gate, same as the growth repins.
+    /// Animated pins (a jump, an approval card) always go through.
+    @State private var lastSilentPinAt = Date.distantPast
     /// Whether rows are reporting where they are. Set from the scroll
     /// callback as the top of the loaded conversation comes near, so the
     /// geometry readers exist for the stretch that can need an anchor and
@@ -223,14 +228,8 @@ struct ChatView: View {
                             isLive: model.busy && item.id == model.displayItems.last?.id
                         )
                         .equatable()
-                        #if os(macOS)
-                        // Out of hit testing while the viewport moves, and
-                        // outside the equatable boundary so the rows themselves
-                        // do not rebuild for it. A scroll slides content under
-                        // a stationary pointer; every row it crosses would
-                        // otherwise enter/exit hover and join the hit-test
-                        // walk on each mouse-move event.
-                        .allowsHitTesting(!follow.scrolling)
+                        #if DEBUG
+                        .probeRow(item.probeKind)
                         #endif
                         .frame(
                             maxWidth: item.prefersWideReadingRoom
@@ -265,6 +264,11 @@ struct ChatView: View {
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
             .chatScrollMetrics { metrics in
+                #if DEBUG
+                TranscriptProbe.shared.noteMetrics()
+                TranscriptProbe.shared.pinned = follow.pinned
+                TranscriptProbe.shared.scrolling = follow.scrolling
+                #endif
                 follow.note(metrics)
                 // Order matters: the pin is decided from this frame, and the
                 // window has to see that decision before it acts on the same
@@ -321,6 +325,15 @@ struct ChatView: View {
                 scrollTo(target, proxy, animated: true)
                 scrollTarget = nil
             }
+            #if DEBUG
+            .onAppear {
+                TranscriptProbe.shared.install()
+                TranscriptProbe.shared.rows = model.displayItems.count
+            }
+            .onChange(of: model.displayItems.count, initial: true) { _, count in
+                TranscriptProbe.shared.rows = count
+            }
+            #endif
             .onAppear {
                 follow.suppressed = !model.approvals.isEmpty
                 window.nearTopChanged = { measuringRows = $0 }
@@ -352,11 +365,9 @@ struct ChatView: View {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, isActive, model.approvals.isEmpty else { return }
                     // A lazy-stack scroll walks every row between here and
-                    // the end. Limit idle settling corrections, but keep
-                    // pinning while the turn is live and the reader is
-                    // following: late diff/image resizes after pin 3 used to
-                    // strand live followers mid-transcript.
-                    if !follow.atEnd, correctionPins < 3 || model.busy {
+                    // the end. Limit settling corrections; geometry-based
+                    // repinning handles later height changes.
+                    if !follow.atEnd, correctionPins < 3 {
                         correctionPins += 1
                         pinToLatest(proxy, animated: false)
                     }
@@ -432,9 +443,13 @@ struct ChatView: View {
         let state = follow
         let model = model
         state.repin = { [weak state] in
-            guard let state, state.active, state.pinned, model.approvals.isEmpty else { return }
+            guard let state, state.active, state.pinned, model.approvals.isEmpty else { return false }
+            // Same ceiling as `canScrollToEnd`, read here rather than through
+            // the view so the closure does not hold it.
+            guard model.displayItems.count <= TranscriptWindow.reopenAbove else { return false }
             state.markDrivenInstant()
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
+            return true
         }
     }
 
@@ -485,6 +500,19 @@ struct ChatView: View {
         }
     }
 
+    /// Whether a scroll to the end is affordable right now.
+    ///
+    /// `scrollTo` on a lazy stack resolves an estimate for every row between
+    /// here and the target, and resolving one means building it and measuring
+    /// its markdown. On a window grown by paging back that is seconds per
+    /// attempt with the main thread stopped, and the repin budget spends six
+    /// of them: the thirty-six second hang was six walks over a few thousand
+    /// rows. Past this size the way back is Jump to latest, which reopens on
+    /// the newest page first and leaves the walk bounded.
+    private var canScrollToEnd: Bool {
+        model.displayItems.count <= TranscriptWindow.reopenAbove
+    }
+
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
         // A pending request owns the view. Streaming text must not scroll it
         // back out from under somebody who is reading it to decide.
@@ -492,6 +520,18 @@ struct ChatView: View {
         // other destinations, and scrolling its zero-size proxy is what left
         // it painted off-origin until a resize.
         guard isActive, follow.pinned, model.approvals.isEmpty else { return }
+        // The same walk the repin refuses, and for the same reason. A pin
+        // that cannot be afforded is not deferred, it is given up: the pill
+        // takes the reader back through a reopen instead.
+        guard canScrollToEnd else {
+            follow.stopFollowing()
+            return
+        }
+        if !animated {
+            let now = Date()
+            guard now.timeIntervalSince(lastSilentPinAt) > 0.15 else { return }
+            lastSilentPinAt = now
+        }
         scrollTo(TranscriptFollow.bottomID, proxy, animated: animated)
     }
 
@@ -503,6 +543,9 @@ struct ChatView: View {
         // Hidden panes do not scroll at all (see pinToLatest).
         guard isActive else { return }
         let animate = animated && !reduceMotion
+        #if DEBUG
+        TranscriptProbe.shared.noteScroll(id == TranscriptFollow.bottomID ? "pin" : "row")
+        #endif
         follow.markDriven(duration: animate ? 0.4 : 0.08)
         if !animate {
             proxy.scrollTo(id, anchor: .bottom)

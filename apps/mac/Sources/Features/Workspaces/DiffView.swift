@@ -78,9 +78,23 @@ struct DiffBody: View {
     /// At least this wide, so a tint spans the pane rather than stopping at the
     /// last character. Zero is fine: rows then size to their content.
     var minWidth: CGFloat = 0
+    /// Whether the lines build lazily.
+    ///
+    /// True for a viewer that scrolls this on its own, where laziness is the
+    /// whole point. **False inside another lazy stack**, such as a transcript
+    /// row, and the reason is not the building. SwiftUI keeps a phase
+    /// attribute per lazy item and re-stamps every one of them through the
+    /// attribute graph on a pass, and a live sample of a stopped application
+    /// put every single sample of `AG::Graph::propagate_dirty` under
+    /// `LazyLayoutViewCache.updateItemPhases`. A diff card nested a second
+    /// lazy layout inside an item of the first, so one transcript row became
+    /// a few hundred more items to stamp, and stamping them dirtied the row
+    /// that held them. A card is capped at a couple of hundred lines and
+    /// costs nothing to build in full.
+    var lazy = true
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 0) {
+        stack {
             ForEach(diff.hunks) { hunk in
                 Text(hunk.header)
                     .font(Theme.mono(11))
@@ -94,6 +108,15 @@ struct DiffBody: View {
                     DiffRow(line: line, minWidth: minWidth)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func stack<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if lazy {
+            LazyVStack(alignment: .leading, spacing: 0, content: content)
+        } else {
+            VStack(alignment: .leading, spacing: 0, content: content)
         }
     }
 }

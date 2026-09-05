@@ -184,6 +184,8 @@ private enum MarkdownCache {
     /// made a conversation full of code hitch. The colouring is now done once
     /// and what is kept is the answer.
     static let rendered = ParsedTextCache<AttributedString>(limit: 600)
+    /// Parsed diff fences, keyed by the fence's source.
+    static let diffs = ParsedTextCache<FileDiff>(limit: 300)
     /// Finished prose chains per message, keyed by the caller's font set,
     /// style and markdown (see `MessageMarkdown`). A whole-card hover or a
     /// scroll re-runs the row's `init`, and without this every one of those
@@ -669,6 +671,13 @@ private struct MarkdownCodeBlock: View {
         style == .document && widest > 54
     }
 
+    /// One parsed diff per fence, held across the evaluations a scroll causes.
+    private static func parsed(_ source: String) -> FileDiff {
+        MarkdownCache.diffs.value(for: source) {
+            FileDiff.fromEditPatch(path: "Change", patch: source)
+        }
+    }
+
     /// What to draw right now: the coloured version if it has arrived, the
     /// plain one otherwise.
     ///
@@ -685,7 +694,13 @@ private struct MarkdownCodeBlock: View {
         Group {
             if isDiff {
                 MarkdownSideways {
-                    DiffBody(diff: FileDiff.fromEditPatch(path: "Change", patch: source))
+                    // Parsed by the cache rather than here: this ran on every
+                    // evaluation, and a fence is evaluated on every measuring
+                    // pass the transcript makes over the message holding it.
+                    // Not lazy, for the reason on `DiffBody.lazy`: a lazy
+                    // stack nested inside the transcript's own turns one row
+                    // into hundreds of items to re-stamp through the graph.
+                    DiffBody(diff: Self.parsed(source), lazy: false)
                         .padding(.vertical, Theme.Space.xs)
                 }
             } else {

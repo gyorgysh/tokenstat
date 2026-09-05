@@ -2148,6 +2148,31 @@ struct FileDiff: Codable, Sendable, Hashable {
 
     var fileName: String { String(path.split(separator: "/").last ?? "") }
 
+    /// The first `limit` body lines of this diff, and how many were left out.
+    ///
+    /// For a card inside a transcript, which draws a diff beside hundreds of
+    /// other rows and has no viewport of its own to be lazy against. The file
+    /// viewer shows the whole thing and does not call this.
+    func clipped(toLines limit: Int) -> (diff: FileDiff, cut: Int) {
+        let total = hunks.reduce(0) { $0 + $1.lines.count }
+        guard total > limit else { return (self, 0) }
+        var kept: [DiffHunk] = []
+        var room = limit
+        for hunk in hunks {
+            guard room > 0 else { break }
+            if hunk.lines.count <= room {
+                kept.append(hunk)
+                room -= hunk.lines.count
+            } else {
+                kept.append(DiffHunk(header: hunk.header, lines: Array(hunk.lines.prefix(room))))
+                room = 0
+            }
+        }
+        var out = self
+        out.hunks = kept
+        return (out, total - limit)
+    }
+
     /// Build a diff from a chat Edit snippet (`- old` / `+ new` lines).
     ///
     /// Those previews are not unified diffs: they have no hunk header and no

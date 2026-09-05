@@ -477,7 +477,8 @@ impl Parser {
                             .pointer("/correlation_facts/outcome")
                             .and_then(Value::as_str)
                             .map(|outcome| outcome == "success")
-                            .unwrap_or(true),
+                            .unwrap_or(true)
+                            && muse_text_ok(payload),
                         detail: muse_tool_result_detail(payload),
                     });
                     if let Some(edit) = muse_edit_event(payload, call) {
@@ -1089,11 +1090,17 @@ fn muse_tool_name(kind: &str) -> Option<&str> {
 /// Muse's Bash tool returns a JSON document *as the text field* of its normal
 /// tool result. It is useful structured data, not assistant prose: unwrap it
 /// so a chat row reads like the other engines' command and stdout card.
+///
+/// The todo tools answer the same way (`{"ok":true,"revision":2,"items":4}`),
+/// which otherwise lands on the card as raw JSON.
 fn muse_tool_result_detail(payload: &Value) -> Option<String> {
     let text = payload.get("text").and_then(Value::as_str)?;
     let Ok(value) = serde_json::from_str::<Value>(text) else {
         return (!text.is_empty()).then(|| text.to_string());
     };
+    if let Some(todo) = muse_todo_detail(&value) {
+        return Some(todo);
+    }
     let command = value.get("command").and_then(Value::as_str);
     let description = value.get("description").and_then(Value::as_str);
     let output = value.get("output").and_then(Value::as_str);
@@ -1111,6 +1118,76 @@ fn muse_tool_result_detail(payload: &Value) -> Option<String> {
         sections.push(output.to_string());
     }
     (!sections.is_empty()).then(|| sections.join("\n"))
+}
+
+/// A todo write/read answer: a count, or the items themselves. Render the
+/// human line rather than the JSON so the collapsed card reads "4 todos
+/// (revision 2)" instead of `{"ok":true,...}`.
+fn muse_todo_detail(value: &Value) -> Option<String> {
+    // Requires the envelope (`ok`/`revision`) beside `items` so a Bash
+    // document that happens to mention items keeps its command card.
+    if value.get("ok").is_none() && value.get("revision").is_none() {
+        return None;
+    }
+    let items = value.get("items")?;
+    let revision = value.get("revision").and_then(Value::as_u64);
+    let mut line = match items {
+        Value::Number(count) => {
+            let count = count.as_u64()?;
+            let noun = if count == 1 { "todo" } else { "todos" };
+            format!("{count} {noun}")
+        }
+        Value::Array(entries) => {
+            if entries.is_empty() {
+                return Some("no todos".into());
+            }
+            let mut lines: Vec<String> = entries
+                .iter()
+                .take(10)
+                .map(|entry| {
+                    let content = entry
+                        .get("content")
+                        .or_else(|| entry.get("title"))
+                        .or_else(|| entry.get("text"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("todo");
+                    match entry.get("status").and_then(Value::as_str) {
+                        Some(status) if !status.is_empty() => {
+                            format!("• {content} ({status})")
+                        }
+                        _ => format!("• {content}"),
+                    }
+                })
+                .collect();
+            if entries.len() > 10 {
+                lines.push(format!("+{} more", entries.len() - 10));
+            }
+            lines.join("\n")
+        }
+        _ => return None,
+    };
+    if line.contains('\n') {
+        return Some(line);
+    }
+    match revision {
+        Some(revision) => {
+            line.push_str(&format!(" (revision {revision})"));
+            Some(line)
+        }
+        None => Some(line),
+    }
+}
+
+/// A `{"ok":false}` text body is a failed tool even when the lifecycle says
+/// nothing about the outcome. The todo tools answer this way.
+fn muse_text_ok(payload: &Value) -> bool {
+    let Some(text) = payload.get("text").and_then(Value::as_str) else {
+        return true;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return true;
+    };
+    value.get("ok").and_then(Value::as_bool).unwrap_or(true)
 }
 
 /// `edit_facts` has the exact path and line counts that are missing from the
@@ -2298,6 +2375,36 @@ mod tests {
                 event,
                 Event::Edit { call_id, path, added: 1, removed: 1, patch }
                     if call_id == "edit-1" && path == "/tmp/note.txt" && patch.contains("+new")
+            )),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn muse_unwraps_todo_json_into_a_readable_count() {
+        // Captured from Muse Spark: the todo tools answer with a bare
+        // status document inside `tool.result.text`, which used to land on
+        // the card as raw JSON.
+        let raw = concat!(
+            r#"{"payload_type":"tool.result","payload":{"call_id":"todo-1","text":"{\"ok\":true,\"revision\":2,\"items\":4}","correlation_facts":{"tool_name":"write_todos","outcome":"success"}}}"#,
+            "\n",
+            r#"{"payload_type":"tool.result","payload":{"call_id":"todo-2","text":"{\"ok\":false,\"revision\":3,\"items\":[]}","correlation_facts":{"tool_name":"write_todos"}}}"#,
+            "\n"
+        );
+        let mut parser = Parser::new("muse");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, ok: true, detail: Some(detail) }
+                    if call_id == "todo-1" && detail == "4 todos (revision 2)"
+            )),
+            "{events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, ok: false, .. } if call_id == "todo-2"
             )),
             "{events:?}"
         );

@@ -11,10 +11,10 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one, rather than reconstructing release notes from
 commits at the end.
 
-## [0.8.3] - 2026-09-04
+## [0.8.3] - 2026-09-05
 
-The model picker has a search, and notifications wait until you have looked
-away.
+The model picker has a search, chat follows a turn started on another device,
+and notifications wait until you have looked away.
 
 ### Added
 
@@ -24,9 +24,19 @@ away.
   a plain menu.
 - A Refresh sits beside the models. The list comes from the agent's own CLI
   and is held for ten minutes, so a provider you added an API key for a minute
-  ago was missing until that expired. Refresh reads the CLI again.
+  ago was missing until that expired. Refresh reads the CLI again. Short
+  lists keep Refresh inside the menu.
 - Codex models. A Codex chat had no model picker, so it ran only the model set
   in its own config file.
+- Muse backend in chat, automations, and transcripts. Automations run it
+  bypass-only. Plan-mode chat drops the bypass flag and turns off its write
+  and shell tools.
+- Quick section tabs in the agent/model/effort picker. Agent, Model, and
+  Effort read as separate settings before any scrolling.
+- Setup guidance for Remote Reach. The phone shows an empty state and a
+  recovery card when a Mac never registered for remote reach, with the exact
+  steps and a retry. Mac machine settings carry the same switch as a compact
+  preference with status text.
 
 ### Fixed
 
@@ -34,13 +44,45 @@ away.
   conversation on screen still posted a banner and buzzed your phone. Now both
   wait for another app to be in front, the window to be away, or the keyboard
   to go untouched for a while. A phone driving a chat on a desktop no longer
-  notifies itself.
+  notifies itself. Watching one conversation from a Mac and a phone holds a
+  lease per watcher, so leaving on one device no longer drops the other, and
+  iPhone and iPad suppress their own banner for the open chat, same as the
+  Mac.
+- An open conversation keeps reading its events. It polls every 2 seconds
+  while idle and every 400 ms once work appears, so a turn started on another
+  device appears with no tap. A background hiccup no longer pops an error
+  banner on an idle screen.
+- Chat scroll corrections run after layout and combine pending corrections. Image previews keep their frame while decoding and when scrolled
+  back into view, instead of collapsing and growing during row placement.
+- Live follow holds the end while a reply streams and keeps pinning through
+  late resizes from diffs and images. Opening a long chat still settles on
+  the end.
+- Tool rows classify shell intent by program name, so quoted commands land
+  on the right card and `echo "a > b"` stays Shell. Repo-relative paths
+  resolve, multi-file edits name each file, and a cancelled command closes
+  as failed. Muse task starts survive replay order.
+- Model lists parse the Codex answer by id, reap a hung list command with
+  its process group, keep provider-qualified ids visible, and share one run
+  across Refresh taps. Picker Enter stays inside the visible filter and
+  prefers the exact label, so a typed model id no longer selects the Agent
+  row. A stale Effort filter clears when the new agent has no Effort
+  section.
 - A new automation starts on an agent. It opened on Shell, and a shell command
   belongs in the prompt field. Shell is still in the picker, at the end.
 - A phone that cannot reach a computer names the fix. It showed the
   transport's own words, "no direct address" and "no_such_peer". Usually that
   computer has never had "Reach devices from anywhere" turned on, so the relay
-  has never been told where it is.
+  has never been told where it is. The recovery card now shows only for that
+  never registered case. Timeouts and wakeups get a retry card instead.
+- The vault is password-only. No identity-encrypted copy of the key sits on
+  the server or on disk, and the app asks for the password again after a
+  host restart. Password change and recovery rotation replace the key, both
+  wraps, and every enrollment in one step.
+- Android private keys live in the Android Keystore. Each key is verified
+  before its plaintext copy is removed, one bad entry no longer blocks the
+  rest, and a wrong vault password leaves the dialog open for another try.
+- Windows model Refresh reports a host failure in a banner instead of
+  crashing. Old hosts answer from cache.
 - On pull requests, the art on the connect card is centred. Choosing which
   repositories tokenstat may open also stays on that screen after you connect.
   It used to vanish as soon as one repository worked, which left the Account
@@ -65,9 +107,14 @@ to draws what is on it.
 
 ### Fixed
 
-- A long conversation no longer hitches. Scrolling a turn full of tool output
-  stays smooth, a streaming reply stops rebuilding the thread on every frame,
-  and a shell command that ran to megabytes is split once, not on every redraw.
+- A long conversation no longer hitches or freezes. Scrolling a turn full of
+  tool output stays smooth, a streaming reply stops rebuilding the thread on
+  every frame, and a shell command that ran to megabytes is split once, not on
+  every redraw. A tool that answers in one long line, which is every tool
+  that answers in JSON, no longer freezes the thread: a web search result
+  arrived as a single forty-kilobyte line and was laid out in full on every
+  pass the transcript made over it. Output is cut to what a row draws, with
+  the whole of it still on the clipboard.
 - Following a live turn stays out of your way. It holds the end while the reply
   grows, lets go when you scroll back, and stops yanking the thread on
   tool-heavy turns. A pill reads Following, Follow or Jump, and takes you to

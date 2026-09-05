@@ -3,6 +3,7 @@
 #if !os(macOS)
 import SwiftUI
 import UIKit
+import ImageIO
 
 /// Phone-sized transcript blocks. Assistant prose and tools are the same
 /// views as the Mac. Edits use `DiffLineRow` so a hunk does not spend a
@@ -95,8 +96,10 @@ struct ClientChatEventRow: View {
         case let .edit(path, added, removed, patch):
             ClientChatEditRow(path: path, added: added, removed: removed, patch: patch)
         case let .attachment(attachment):
+            // Same as the Mac: stable identity across polls. The revision
+            // still redraws through Equatable; recreating collapsed the row.
             ClientChatResponseAttachment(attachment: attachment, data: attachmentData)
-                .id("\(attachment.id)-\(attachmentRevision)")
+                .id(attachment.id)
         case let .handoff(to, brief):
             ClientChatHandoffRow(agent: agentLabel(to), brief: brief)
         case let .approval(approval):
@@ -143,19 +146,29 @@ private struct ClientChatResponseAttachment: View {
         }
         .task(id: data) {
             exportURL = stage()
-            decodedImage = nil
             guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
-            decodedImage = await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
+            // SwiftUI restarts a row's task when it re-enters the viewport.
+            // Keep its decoded image and geometry on those appearances.
+            guard decodedData != data else { return }
+            let result = await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
+            guard !Task.isCancelled else { return }
+            decodedData = data
+            decodedImage = result
         }
     }
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
+            if let aspect = imageAspect {
+                Color.clear
+                    .aspectRatio(aspect, contentMode: .fit)
                     .frame(maxWidth: .infinity, maxHeight: 320)
+                    .overlay {
+                        if let image {
+                            Image(uiImage: image).resizable().scaledToFit()
+                        }
+                    }
+                    .clipped()
                     .background(Theme.background)
             }
             HStack(spacing: Theme.Space.s) {
@@ -189,7 +202,15 @@ private struct ClientChatResponseAttachment: View {
     }
 
     @State private var decodedImage: UIImage?
-    private var image: UIImage? { decodedImage }
+    @State private var decodedData: Data?
+    // Header metadata is available before the async task starts, so the first
+    // layout already has the final image box. Pixels only paint its overlay.
+    private var imageAspect: CGFloat? {
+        guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return nil }
+        return ClientChatImageDims.aspect(of: data)
+    }
+
+    private var image: UIImage? { decodedData == data ? decodedImage : nil }
 
     private var detail: String {
         let type = attachment.mediaType ?? "File"
@@ -240,6 +261,33 @@ private struct ClientChatResponseAttachment: View {
     }
 }
 
+/// Image dimensions from the file header, without decoding pixels. Used to
+/// reserve an attachment row's frame before its image arrives, so the decode
+/// landing shifts no layout mid-scroll.
+private enum ClientChatImageDims {
+    private static let cache: NSCache<NSData, NSNumber> = {
+        let cache = NSCache<NSData, NSNumber>()
+        cache.countLimit = 32
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
+
+    static func aspect(of data: Data) -> CGFloat? {
+        let key = data as NSData
+        if let cached = cache.object(forKey: key) { return CGFloat(cached.doubleValue) }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Double,
+              let height = props[kCGImagePropertyPixelHeight] as? Double,
+              width > 0, height > 0
+        else { return nil }
+        let orientation = props[kCGImagePropertyOrientation] as? Int ?? 1
+        let aspect = (5...8).contains(orientation) ? height / width : width / height
+        cache.setObject(NSNumber(value: aspect), forKey: key, cost: data.count)
+        return aspect
+    }
+}
+
 private struct ClientChatEditRow: View {
     let path: String
     let added: UInt32
@@ -249,7 +297,15 @@ private struct ClientChatEditRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            // Centre, not `.firstTextBaseline`. A stack with an explicit
+            // alignment cannot resolve it from sizes: it asks every child for
+            // a baseline guide, and a child that is itself a stack has to
+            // place all of *its* children to answer, which recurses through
+            // the whole nest. In a transcript row that runs on every measuring
+            // pass the lazy stack makes, and a live sample of a stopped
+            // application had `ViewLayoutEngine.explicitAlignment` as its
+            // hottest frame by a distance. Centring is read off the size.
+            HStack(alignment: .center, spacing: Theme.Space.s) {
                 Image(systemName: "square.and.pencil")
                     .font(Theme.font(12, weight: .medium))
                     .foregroundStyle(Theme.accent)

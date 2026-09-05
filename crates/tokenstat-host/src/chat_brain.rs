@@ -134,7 +134,7 @@ fn render(folded: &Folded, folder: &str, budget: usize) -> String {
 
     // Sections in the order an agent needs them, and the asks are trimmed
     // first because the earliest ones are the least likely to still matter.
-    let asks = fit(&folded.asks, budget.saturating_sub(fixed_cost(folded)));
+    let (asks, _) = fit(&folded.asks, budget.saturating_sub(fixed_cost(folded)));
     section(&mut out, "What the person asked", &asks);
     section(&mut out, "Files changed", &folded.edits);
     section(&mut out, "Commands that ran", &folded.commands);
@@ -162,7 +162,7 @@ fn fixed_cost(folded: &Folded) -> usize {
 /// asked now. Saying the count out loud matters more than it looks, because an
 /// agent handed a silently truncated history will confidently describe a
 /// conversation it was only shown the end of.
-fn fit(asks: &[String], budget: usize) -> Vec<String> {
+fn fit(asks: &[String], budget: usize) -> (Vec<String>, usize) {
     let mut kept: Vec<String> = Vec::new();
     let mut used = 0;
     for ask in asks.iter().rev() {
@@ -178,7 +178,18 @@ fn fit(asks: &[String], budget: usize) -> Vec<String> {
     if dropped > 0 {
         kept.insert(0, format!("({dropped} earlier turns not included)"));
     }
-    kept
+    (kept, dropped)
+}
+
+/// How many early turns the fold leaves out of the brief. The handover
+/// points at a full export exactly then, so depth is one file read away.
+pub fn dropped_turns(events: &[Value], budget: usize) -> usize {
+    let folded = fold(events);
+    if folded.turns == 0 {
+        return 0;
+    }
+    let (_, dropped) = fit(&folded.asks, budget.saturating_sub(fixed_cost(&folded)));
+    dropped
 }
 
 fn section(out: &mut String, title: &str, items: &[String]) {
@@ -195,6 +206,155 @@ fn push_unique(items: &mut Vec<String>, value: String) {
     if !items.contains(&value) {
         items.push(value);
     }
+}
+
+/// Full chronological export for handovers whose fold dropped turns.
+///
+/// The brief stays inline and bounded; this file carries what the fold left
+/// out, beside `brain.md`, for an agent that needs more than the summary.
+/// Tool output is capped per item: the export is depth on demand, not a
+/// second copy of megabytes of logs.
+pub fn export_markdown(events: &[Value], folder: &str) -> String {
+    const TEXT_CAP: usize = 4_000;
+    const DETAIL_CAP: usize = 2_000;
+    fn flush(out: &mut String, reply: &mut String, backend: &str) {
+        if reply.trim().is_empty() {
+            reply.clear();
+            return;
+        }
+        out.push_str("\n## Agent");
+        if !backend.is_empty() {
+            out.push_str(&format!(" ({backend})"));
+        }
+        out.push('\n');
+        out.push_str(reply.trim());
+        out.push('\n');
+        reply.clear();
+    }
+    fn cap_chars(text: &str, cap: usize) -> String {
+        if text.chars().count() <= cap {
+            return text.to_string();
+        }
+        let kept: String = text.chars().take(cap).collect();
+        format!("{kept}…\n[{cap} chars shown]")
+    }
+    let mut out = String::new();
+    out.push_str("# Conversation history\n");
+    if !folder.is_empty() {
+        out.push_str(&format!("\nFolder: {folder}\n"));
+    }
+    let mut reply = String::new();
+    let mut backend = String::new();
+    for event in events {
+        match event.get("kind").and_then(Value::as_str) {
+            Some("user") => {
+                flush(&mut out, &mut reply, &backend);
+                backend.clear();
+                if let Some(text) = event.get("text").and_then(Value::as_str) {
+                    out.push_str("\n## Person\n");
+                    out.push_str(&cap_chars(text.trim(), TEXT_CAP));
+                    out.push('\n');
+                }
+            }
+            Some("agent") => {
+                let agent = event.get("event").unwrap_or(&Value::Null);
+                match agent.get("kind").and_then(Value::as_str) {
+                    Some("text") | Some("thinking") => {
+                        if let Some(active) = event.get("backend").and_then(Value::as_str) {
+                            if !reply.trim().is_empty() && backend != active {
+                                flush(&mut out, &mut reply, &backend);
+                            }
+                            backend = active.to_string();
+                        }
+                        if let Some(delta) = agent.get("delta").and_then(Value::as_str) {
+                            reply.push_str(delta);
+                        }
+                    }
+                    _ => {
+                        flush(&mut out, &mut reply, &backend);
+                        backend.clear();
+                        match agent.get("kind").and_then(Value::as_str) {
+                            Some("toolStart") => {
+                                let verb =
+                                    agent.get("verb").and_then(Value::as_str).unwrap_or("tool");
+                                let target =
+                                    agent.get("target").and_then(Value::as_str).unwrap_or("");
+                                out.push_str(&format!("\n- {verb} {}\n", target.trim()));
+                            }
+                            Some("toolEnd") => {
+                                let ok = agent.get("ok").and_then(Value::as_bool).unwrap_or(true);
+                                let detail =
+                                    agent.get("detail").and_then(Value::as_str).unwrap_or("");
+                                let mark = if ok { "" } else { " (failed)" };
+                                if detail.trim().is_empty() {
+                                    out.push_str(&format!("\n- tool finished{mark}\n"));
+                                } else {
+                                    out.push_str(&format!(
+                                        "\n- tool finished{mark}: {}\n",
+                                        cap_chars(detail.trim(), DETAIL_CAP)
+                                    ));
+                                }
+                            }
+                            Some("edit") => {
+                                let path = agent.get("path").and_then(Value::as_str).unwrap_or("");
+                                let added = agent.get("added").and_then(Value::as_u64).unwrap_or(0);
+                                let removed =
+                                    agent.get("removed").and_then(Value::as_u64).unwrap_or(0);
+                                out.push_str(&format!("\n- Edit {path} +{added} −{removed}\n"));
+                            }
+                            Some("attachment") => {
+                                let name =
+                                    agent.get("name").and_then(Value::as_str).unwrap_or("file");
+                                out.push_str(&format!("\n- attached {name}\n"));
+                            }
+                            Some("failed") => {
+                                let text = agent.get("text").and_then(Value::as_str).unwrap_or("");
+                                out.push_str(&format!(
+                                    "\n- failed: {}\n",
+                                    cap_chars(text.trim(), DETAIL_CAP)
+                                ));
+                            }
+                            Some("done") => {
+                                let status =
+                                    agent.get("status").and_then(Value::as_str).unwrap_or("");
+                                if !matches!(status, "ok" | "") {
+                                    out.push_str(&format!("\n- turn ended: {status}\n"));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Some("approval") => {
+                flush(&mut out, &mut reply, &backend);
+                backend.clear();
+                let approval = event.get("approval").unwrap_or(&Value::Null);
+                let decision = approval
+                    .get("decision")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let preview = approval
+                    .get("preview")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                out.push_str(&format!(
+                    "\n- Approval {decision}: {}\n",
+                    cap_chars(preview.trim(), 500)
+                ));
+            }
+            Some("handoff") => {
+                flush(&mut out, &mut reply, &backend);
+                backend.clear();
+                if let Some(to) = event.get("to").and_then(Value::as_str) {
+                    out.push_str(&format!("\n- Handed to {to}\n"));
+                }
+            }
+            _ => {}
+        }
+    }
+    flush(&mut out, &mut reply, &backend);
+    out
 }
 
 /// Collapse to one line and cap it. A handover is a list, and a list item that
@@ -275,6 +435,31 @@ mod tests {
     fn the_agent_is_told_not_to_narrate_the_handover() {
         let text = brief(&timeline(), "/repo", BUDGET);
         assert!(text.contains("do not mention or describe this note"));
+    }
+
+    #[test]
+    fn a_full_export_keeps_everything_the_fold_drops() {
+        let text = export_markdown(&timeline(), "/repo");
+        assert!(text.contains("## Person"));
+        assert!(text.contains("Add a retry to the uploader"));
+        assert!(text.contains("Now cover it with a test"));
+        assert!(text.contains("Added a retry with backoff."));
+        assert!(text.contains("Test added, but it is not passing yet."));
+        assert!(text.contains("Bash cargo test"));
+        assert!(text.contains("src/upload.rs +12 −3"));
+        assert!(text.contains("Approval deny: rm -rf target"));
+        assert_eq!(dropped_turns(&timeline(), BUDGET), 0);
+    }
+
+    #[test]
+    fn a_long_conversation_reports_dropped_turns() {
+        let events: Vec<Value> = (0..200)
+            .map(|index| json!({"kind": "user", "text": format!("question number {index} {}", "x".repeat(120))}))
+            .collect();
+        assert!(dropped_turns(&events, 2_000) > 0);
+        let text = export_markdown(&events, "/repo");
+        assert!(text.contains("question number 0"));
+        assert!(text.contains("question number 199"));
     }
 
     /// Reads and edits are not commands. A handover listing every file an

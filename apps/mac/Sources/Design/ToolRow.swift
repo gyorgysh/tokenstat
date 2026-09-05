@@ -75,7 +75,15 @@ struct ToolRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            // Centre, not `.firstTextBaseline`. A stack with an explicit
+            // alignment cannot resolve it from sizes: it asks every child for
+            // a baseline guide, and a child that is itself a stack has to
+            // place all of *its* children to answer, which recurses through
+            // the whole nest. In a transcript row that runs on every measuring
+            // pass the lazy stack makes, and a live sample of a stopped
+            // application had `ViewLayoutEngine.explicitAlignment` as its
+            // hottest frame by a distance. Centring is read off the size.
+            HStack(alignment: .center, spacing: Theme.Space.s) {
                 Group {
                     if running {
                         ProgressView()
