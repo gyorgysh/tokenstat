@@ -51,6 +51,10 @@ ALLOWED = [
     # repeated down a list.
     ("Design/SearchablePicker.swift", "Button { isPresented = true } label:"),
     ("Design/SearchablePicker.swift", "Button { pick(choice.value) } label:"),
+    # The section chips above the list. Each one is a filter whose whole
+    # surface is its own name, and the selected one is already marked by its
+    # fill: a glyph on every chip would repeat one symbol across the row.
+    ("Design/SearchablePicker.swift", "selectedSection = section"),
     ("Features/Workspaces/BranchPicker.swift", "Task { await checkout(branch) }"),
     ("Features/Automations/AutomationsView.swift", "Button(action, action: perform)"),
     ("Features/Workflows/WorkflowsView.swift", "Button(action: onSelect)"),
