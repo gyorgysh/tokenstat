@@ -293,6 +293,12 @@ struct SSHVaultSetupSheet: View {
     @State private var confirmPassword = ""
     @State private var enteredRecovery = ""
     @State private var forgot = false
+    @State private var biometricAccount: String?
+    @State private var biometricName: String?
+    @State private var biometricSaved = false
+    @State private var usePassword = false
+    @State private var enableBiometrics = false
+    @State private var passwordAccepted = false
     @State private var working = false
     @State private var error: String?
     @State private var confirmingReset = false
@@ -307,6 +313,16 @@ struct SSHVaultSetupSheet: View {
     private var exists: Bool { status?.created == true }
     /// Made before password unlock existed and cannot be opened by this build.
     private var stale: Bool { status?.needsRecreate == true }
+
+    private var biometricUnlock: Bool {
+        exists && !stale && !forgot && !usePassword && biometricSaved && biometricName != nil
+    }
+
+    private var sheetHeight: CGFloat {
+        if passwordAccepted { return 320 }
+        if stale || forgot || !exists { return 580 }
+        return biometricUnlock ? 380 : 460
+    }
 
     private var problems: [String] { VaultPassword.problems(password) }
     private var matches: Bool { password == confirmPassword }
@@ -334,6 +350,7 @@ struct SSHVaultSetupSheet: View {
 
     /// Press it and find out. `blocker` is what comes back when it cannot run.
     private func attempt() {
+        guard !working && !passwordAccepted else { return }
         if let blocker {
             error = blocker.message
             focus = blocker.field
@@ -344,6 +361,7 @@ struct SSHVaultSetupSheet: View {
     }
 
     private var title: String {
+        if passwordAccepted { return "Vault unlocked" }
         if stale { return "This vault has to be recreated" }
         return exists ? "Unlock your vault" : "Create your vault"
     }
@@ -353,7 +371,7 @@ struct SSHVaultSetupSheet: View {
             return "It was made before password unlock and cannot be opened by this version."
         }
         return exists
-            ? "One vault for the account, on every device you sign in to."
+            ? "Your saved servers and keys, securely on this device."
             : "One password protects every saved server and key, on all your devices."
     }
 
@@ -365,12 +383,17 @@ struct SSHVaultSetupSheet: View {
             onClose: { dismiss() }
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
-                if stale {
+                if passwordAccepted {
+                    Text("Your vault is unlocked.")
+                } else if stale {
                     staleBody
                 } else if exists {
                     unlockBody
                 } else {
                     createBody
+                }
+                if !stale && !passwordAccepted && !biometricUnlock, let biometricName, biometricAccount != nil {
+                    biometricPreference(name: biometricName)
                 }
                 if let error {
                     Text(FriendlyError.from(error).message)
@@ -381,7 +404,15 @@ struct SSHVaultSetupSheet: View {
         } actions: {
             footer
         }
-        .modalFrame(width: 580, height: 560)
+        .modalFrame(width: 520, height: sheetHeight)
+        .task {
+            biometricName = SSHVaultBiometrics.name
+            biometricAccount = try? await SSHVaultBiometrics.accountKey()
+            if let biometricAccount {
+                biometricSaved = SSHVaultBiometrics.contains(account: biometricAccount)
+                enableBiometrics = biometricSaved
+            }
+        }
         .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
             Button("Delete vault", role: .destructive) { Task { await resetVault() } }
             Button("Cancel", role: .cancel) {}
@@ -412,7 +443,29 @@ struct SSHVaultSetupSheet: View {
 
     private var unlockBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            if forgot {
+            if biometricUnlock, let biometricName {
+                VStack(spacing: Theme.Space.m) {
+                    Image(systemName: biometricName == "Face ID" ? "faceid" : "touchid")
+                        .font(Theme.largeTitle)
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 64, height: 64)
+                        .background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .accessibilityHidden(true)
+                    Text("Unlock with \(biometricName)")
+                        .font(Theme.headline)
+                    Text("Confirm it’s you to open your vault.")
+                        .font(Theme.callout)
+                        .foregroundStyle(.secondary)
+                    Button("Use password instead", .signIn) {
+                        usePassword = true
+                        error = nil
+                        focus = .password
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(working)
+                }
+                .frame(maxWidth: .infinity)
+            } else if forgot {
                 Text("Enter your recovery code and choose a new password. The code is the line you were given when the vault was created.")
                     .font(Theme.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -437,17 +490,51 @@ struct SSHVaultSetupSheet: View {
                 Button("Use the password instead", .back) { forgot = false }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             } else {
+                Text("Vault password")
+                    .font(Theme.headline)
                 SecureField("Vault password", text: $password)
                     .themedFieldBox()
                     .focused($focus, equals: .password)
                     .shake(on: refusals)
                     .onSubmit { attempt() }
-                Button("I forgot the password", .help) { forgot = true }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
+                HStack {
+                    Button("Forgot password?", .help) { forgot = true; error = nil }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                    Spacer(minLength: 0)
+                    if biometricSaved, let biometricName {
+                        Button("Use \(biometricName)", .security) {
+                            usePassword = false
+                            password = ""
+                            error = nil
+                            focus = nil
+                        }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                    }
+                }
+                .disabled(working)
             }
-            Text("Checked on this device. The password never leaves it.")
-                .font(Theme.caption).foregroundStyle(.secondary)
+            if !biometricUnlock {
+                Text("Your password stays on this device.")
+                    .font(Theme.caption).foregroundStyle(.secondary)
+            }
         }
+    }
+
+    private func biometricPreference(name: String) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Toggle("Use \(name) next time", isOn: $enableBiometrics)
+                .toggleStyle(.brandCheckbox)
+                .font(Theme.callout)
+            Text("Only on this device. You can always use your vault password.")
+                .font(Theme.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+        .disabled(working)
     }
 
     private var staleBody: some View {
@@ -455,7 +542,7 @@ struct SSHVaultSetupSheet: View {
             Text("Earlier vaults were opened with 24 recovery words. This one is opened with a password you choose, so the old vault cannot be carried across.")
                 .font(Theme.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Deleting it loses whatever it holds. Anything saved on this Mac stays where it is.")
+            Text("Deleting it loses whatever it holds. Anything saved on this device stays where it is.")
                 .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -466,7 +553,7 @@ struct SSHVaultSetupSheet: View {
         Button("Cancel", .dismiss) { dismiss() }
             .buttonStyle(SecondaryButtonStyle())
             .keyboardShortcut(.cancelAction)
-        if exists {
+        if exists && !passwordAccepted && (forgot || stale) {
             // The way out when the password is gone and no other device
             // can open it. Deleting needs neither, so it is offered here
             // rather than only after a successful unlock.
@@ -478,8 +565,18 @@ struct SSHVaultSetupSheet: View {
         // Written out rather than one button with two ternaries. The two
         // do different things and read differently, and a glyph chosen by
         // an expression is a glyph nobody can grep for.
-        if exists {
-            Button("Unlock", .signIn) { attempt() }
+        if passwordAccepted {
+            Button("Done", .done) { dismiss() }
+                .buttonStyle(AccentButtonStyle())
+        } else if biometricUnlock, let biometricName {
+            Button(working ? "Unlocking…" : "Unlock with \(biometricName)", .security) {
+                Task { await unlockWithBiometrics() }
+            }
+            .buttonStyle(AccentButtonStyle())
+            .disabled(working)
+            .keyboardShortcut(.defaultAction)
+        } else if exists && !stale {
+            Button(working ? "Unlocking…" : "Unlock with password", .signIn) { attempt() }
                 .buttonStyle(AccentButtonStyle())
                 .disabled(working)
                 .keyboardShortcut(.defaultAction)
@@ -494,9 +591,26 @@ struct SSHVaultSetupSheet: View {
     // MARK: - Doing it
 
     private func run() async {
+        let submittedPassword = password
+        let enrollmentAccount = biometricAccount
+        let shouldEnableBiometrics = enableBiometrics
         working = true
         error = nil
+        defer {
+            working = false
+            if passwordAccepted {
+                password = ""
+                confirmPassword = ""
+                enteredRecovery = ""
+            }
+        }
         do {
+            if let biometricAccount = enrollmentAccount {
+                guard try await SSHVaultBiometrics.accountKey() == biometricAccount else {
+                    error = "The signed-in account changed. Reopen the vault to unlock it."
+                    return
+                }
+            }
             if exists {
                 if forgot {
                     // A recovery unlock is a password reset. The code proves
@@ -506,16 +620,24 @@ struct SSHVaultSetupSheet: View {
                     // that replaces the one just spent.
                     let result = try await Bridge.setSSHVaultPassword(
                         recovery: enteredRecovery,
-                        newPassword: password
+                        newPassword: submittedPassword
                     )
                     recovery = result.recovery
                 } else {
-                    recovery = try await Bridge.unlockSSHVault(password: password, tier: tier).recovery
+                    recovery = try await Bridge.unlockSSHVault(password: submittedPassword, tier: tier).recovery
                 }
             } else {
-                recovery = try await Bridge.createSSHVault(password: password, tier: tier).recovery
+                recovery = try await Bridge.createSSHVault(password: submittedPassword, tier: tier).recovery
             }
+            passwordAccepted = true
             status = try await Bridge.sshVaultStatus()
+            if let biometricAccount = enrollmentAccount, try await SSHVaultBiometrics.accountKey() == biometricAccount {
+                if shouldEnableBiometrics {
+                    try await SSHVaultBiometrics.save(password: submittedPassword, account: biometricAccount)
+                } else {
+                    try SSHVaultBiometrics.remove(account: biometricAccount)
+                }
+            }
             dismiss()
         } catch {
             self.error = error.localizedDescription
@@ -532,7 +654,31 @@ struct SSHVaultSetupSheet: View {
                 self.error = "That account already has a vault. Enter its password to open it here."
             }
         }
-        working = false
+    }
+
+    private func unlockWithBiometrics() async {
+        guard !working, let biometricAccount else { return }
+        working = true
+        error = nil
+        defer { working = false }
+        do {
+            let saved = try await SSHVaultBiometrics.load(account: biometricAccount)
+            guard try await SSHVaultBiometrics.accountKey() == biometricAccount else {
+                error = "The signed-in account changed. Reopen the vault to unlock it."
+                return
+            }
+            recovery = try await Bridge.unlockSSHVault(password: saved, tier: tier).recovery
+            if !enableBiometrics { try SSHVaultBiometrics.remove(account: biometricAccount) }
+            status = try await Bridge.sshVaultStatus()
+            dismiss()
+        } catch {
+            if error.localizedDescription.lowercased().contains("wrong password") {
+                try? SSHVaultBiometrics.remove(account: biometricAccount)
+                biometricSaved = false
+                enableBiometrics = false
+            }
+            self.error = "\(error.localizedDescription) You can always unlock with your vault password."
+        }
     }
 
     private func resetVault() async {
@@ -541,6 +687,8 @@ struct SSHVaultSetupSheet: View {
         do {
             try await Bridge.resetSSHVault()
             recovery = nil
+            biometricSaved = false
+            enableBiometrics = false
             password = ""
             confirmPassword = ""
             status = try await Bridge.sshVaultStatus()

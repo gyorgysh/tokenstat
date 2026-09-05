@@ -226,6 +226,7 @@ jobs:
       - name: Sign and notarize macOS archives
         env:
           VERSION: ${{ needs.verify.outputs.version }}
+          DEVELOPER_ID_PROFILE_BASE64: ${{ secrets.DEVELOPER_ID_PROFILE_BASE64 }}
           DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
           DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
@@ -396,29 +397,7 @@ jobs:
               exit 1
             fi
 
-            # The host helper first, by hand. It is a Mach-O executable living
-            # in Resources, and codesign treats anything there as a resource to
-            # hash rather than as code to sign, so --deep walks straight past
-            # it. Notarization then rejects the whole image for one unsigned
-            # binary, which is how v0.2.0 failed: "The binary is not signed with
-            # a valid Developer ID certificate".
-            local helper="${app}/Contents/Resources/tokenstat-hostd"
-            if [ ! -f "${helper}" ]; then
-              echo "no tokenstat-hostd in the bundle; the app cannot install a host" >&2
-              exit 1
-            fi
-            codesign --force --options runtime --timestamp \
-              --sign "${IDENTITY}" "${helper}"
-            codesign --verify --strict --verbose=2 "${helper}"
-
-            # --deep is deprecated for signing but the bundle embeds a Swift
-            # package's frameworks, so the inner code has to be signed first and
-            # the bundle last. Signing inside out by hand is the same thing with
-            # more places to forget one. The helper is already signed above and
-            # --deep leaves a resource's bytes alone, so the seal covers it.
-            codesign --force --deep --options runtime --timestamp \
-              --sign "${IDENTITY}" "${app}"
-            codesign --verify --deep --strict --verbose=2 "${app}"
+            python3 scripts/sign-mac-app.py "${app}" --identity "${IDENTITY}"
 
             local dmg="dist/tokenstat-${VERSION}-macos.dmg"
             scripts/package-mac-dmg.sh "${app}" "${dmg}" "tokenstat ${VERSION}"

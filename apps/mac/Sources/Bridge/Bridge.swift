@@ -1313,6 +1313,7 @@ extension Bridge {
     }
 
     static func signOut() async throws {
+        try SSHVaultBiometrics.remove()
         // Interactive: the Rust side already uses a short HTTP timeout for the
         // revoke, and Sign out must not sit on the default long silence budget.
         _ = try await background(
@@ -2770,7 +2771,8 @@ extension Bridge {
     /// Change the password, or set one after proving the recovery code. A reset
     /// answers with a fresh recovery code, because it retires the one spent.
     static func setSSHVaultPassword(current: String = "", recovery: String = "", newPassword: String) async throws -> SSHVaultPasswordChange {
-        try await background("ssh.vault.password.set", ["password": current, "recovery": recovery, "newPassword": newPassword], patience: Patience.standard, as: SSHVaultPasswordChange.self)
+        try SSHVaultBiometrics.remove()
+        return try await background("ssh.vault.password.set", ["password": current, "recovery": recovery, "newPassword": newPassword], patience: Patience.standard, as: SSHVaultPasswordChange.self)
     }
 
     static func lockSSHVault() async throws {
@@ -2779,6 +2781,7 @@ extension Bridge {
     }
 
     static func resetSSHVault() async throws {
+        try SSHVaultBiometrics.remove()
         _ = try await background("ssh.vault.reset", [:], as: SSHVaultReset.self)
     }
 

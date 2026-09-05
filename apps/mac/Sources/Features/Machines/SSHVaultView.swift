@@ -306,7 +306,7 @@ struct SSHVaultScreen: View {
                 } else if vault.needsRecreate {
                     action(
                         title: "Recreate the vault",
-                        detail: "It was made before password unlock and cannot be opened by this version. Anything saved on this Mac stays where it is.",
+                        detail: "It was made before password unlock and cannot be opened by this version. Anything saved on this device stays where it is.",
                         button: "Recreate",
                         icon: .refresh,
                         prominent: true
@@ -314,13 +314,21 @@ struct SSHVaultScreen: View {
                 } else if vault.locked {
                     action(
                         title: "Unlock the vault",
-                        detail: "Enter your vault password to let this computer read and write the account's saved servers and keys.",
+                        detail: "Use your vault password or biometrics enabled on this device to access the account's saved servers and keys.",
                         button: "Unlock",
                         icon: .signIn,
                         prominent: true
                     ) { showingSetup = true }
                 } else {
                     status
+                    if let name = SSHVaultBiometrics.name {
+                        action(
+                            title: "Unlock with \(name)",
+                            detail: "Enter your vault password to manage biometric unlock on this device.",
+                            button: "Manage biometrics",
+                            icon: .security
+                        ) { showingSetup = true }
+                    }
                     if canWrite {
                         // First, because it is the one thing on this
                         // screen somebody opens it to do. The three below
@@ -354,8 +362,8 @@ struct SSHVaultScreen: View {
                             icon: .refresh
                         ) { confirmingRotation = true }
                         action(
-                            title: "Lock on this Mac",
-                            detail: "This computer will ask for the password again. The vault also locks whenever the host process restarts.",
+                            title: "Lock on this device",
+                            detail: "Unlock again with your vault password or biometrics enabled on this device.",
                             button: "Lock",
                             icon: .signOut
                         ) { Task { await vault.lock() } }
@@ -472,11 +480,11 @@ struct SSHVaultScreen: View {
     /// "0 records" comes looking for the thing that carries their servers into
     /// it, and until now there was nothing here to tell them or to press.
     private var syncDetail: String {
-        let what = "Puts anything saved on this Mac that the vault has not got into it, and takes anything your other devices have added since."
+        let what = "Puts anything saved on this device that the vault has not got into it, and takes anything your other devices have added since."
         guard let library else { return what }
         if library.vaultSyncing { return "\(what)\n\nSyncing now." }
         guard let when = library.vaultSyncedAt else {
-            return "\(what)\n\nNot synced yet on this Mac."
+            return "\(what)\n\nNot synced yet on this device."
         }
         return "\(what)\n\nLast synced \(RelativeClock.phrase(for: when, style: .full))."
     }

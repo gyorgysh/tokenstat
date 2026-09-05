@@ -230,6 +230,7 @@ targets:
       - package: SwiftTerm
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Entitlements/macOS.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: ai.tokenstat.tokenstat
         PRODUCT_NAME: Tokenstat
         # Synthesized from the INFOPLIST_KEY_* settings below, so there is no
@@ -244,6 +245,7 @@ targets:
         # What it costs us is nothing we do, and what it buys is a build Apple
         # will notarize.
         ENABLE_HARDENED_RUNTIME: YES
+        INFOPLIST_KEY_NSFaceIDUsageDescription: "Use Face ID to unlock your SSH vault on this device."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         # Required, not cosmetic: an upload with no orientations declared is
         # rejected outright (error 90474), because an iPad app that does not
@@ -281,8 +283,8 @@ targets:
       #
       # Scoped by SDK on purpose. The Mac notifies itself locally, which needs
       # no entitlement, and putting `aps-environment` on the macOS build would
-      # make the Developer ID release need a provisioning profile it does not
-      # have today.
+      # unnecessarily require push authorization in the Mac profile.
+      # The Mac profile authorizes only the biometric Keychain entitlements.
       #
       # Two files because the value is the environment: a development build's
       # device token belongs to Apple's sandbox host and a TestFlight build's

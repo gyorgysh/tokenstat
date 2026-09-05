@@ -100,9 +100,9 @@ struct FriendlyError {
         if lower.contains("-34018") || lower.contains("errsecmissingentitlement") {
             return FriendlyError(
                 title: "This build cannot use the keychain",
-                message: "An SSH key's private half is stored in this device's keychain, and "
-                    + "this copy of the app is not signed to reach it. A build from the App "
-                    + "Store or TestFlight can. Nothing was saved.",
+                message: "This copy of the app is missing the signing configuration needed for "
+                    + "protected Keychain storage. Use a build signed with its Keychain "
+                    + "entitlement and matching provisioning profile.",
                 symbol: "key.slash",
                 raw: raw
             )

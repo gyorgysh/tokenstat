@@ -3,7 +3,9 @@
 # Fast local macOS build for testing the GUI with the host daemon.
 #
 # Unlike build-mac-app.sh this keeps Xcode's derived data, builds one
-# architecture, skips release packaging/signing, and launches the Debug app.
+# architecture, skips release packaging, and launches the Debug app.
+# Signs with Developer ID when a matching profile is installed, so Touch ID
+# works locally. TOKENSTAT_MAC_PROFILE can select a downloaded profile.
 # The host daemon is still built with the release profile so it is quick to
 # run and exercises the same local-host code as the packaged app.
 #
@@ -104,6 +106,8 @@ cargo build --release --locked -p tokenstat-host --bin tokenstat-hostd
 cp "$ROOT/target/release/tokenstat-hostd" \
     "$APP/Contents/Resources/tokenstat-hostd"
 chmod 755 "$APP/Contents/Resources/tokenstat-hostd"
+
+python3 "$ROOT/scripts/sign-mac-app.py" "$APP" --optional
 
 echo "Launching $APP"
 open "$APP"
