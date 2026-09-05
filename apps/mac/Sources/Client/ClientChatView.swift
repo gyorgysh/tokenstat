@@ -188,6 +188,10 @@ struct ClientChatThread: View {
     /// every row in between, so silent pins share one ~150ms gate, same as
     /// the growth repins. Animated pins always go through.
     @State private var lastSilentPinAt = Date.distantPast
+    /// How many of the conversation's rows the transcript builds. Same rule
+    /// as the Mac: the tail is always built, older rows arrive through the
+    /// button below. Reset on every open.
+    @State private var renderCap = Self.renderWindow
     /// Whether rows are reporting where they are. Set from the scroll
     /// callback as the top of the loaded conversation comes near, so the
     /// geometry readers exist for the stretch that can need an anchor and
@@ -369,7 +373,15 @@ struct ClientChatThread: View {
                     TranscriptEarlierHeader(model: model) {
                         window.ask(force: true)
                     }
-                    ForEach(model.displayItems) { item in
+                    if hiddenAboveCount > 0 {
+                        Button("Show \(hiddenAboveCount) earlier messages", .history) {
+                            renderCap += Self.renderPage
+                        }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .accessibilityLabel("Show earlier messages")
+                    }
+                    ForEach(visibleItems) { item in
                         ClientChatEventRow(
                             item: item,
                             attachmentData: attachmentData(for: item),
@@ -389,7 +401,12 @@ struct ClientChatThread: View {
                         #if DEBUG
                         .probeRow(item.probeKind)
                         #endif
-                        .transcriptRowFrame(item.id, watched: model.hasEarlier && measuringRows)
+                        // No geometry readers mid-fling: each one reports per
+                        // frame, and a fast scroll turns those reports into a
+                        // transaction per frame that placement never drains.
+                        // Readers return 0.35s after the last moved frame, via
+                        // `scrolling`, before any paging decision needs them.
+                        .transcriptRowFrame(item.id, watched: model.hasEarlier && measuringRows && !follow.scrolling)
                     }
                     if let mood = liveMood {
                         ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
@@ -488,6 +505,7 @@ struct ClientChatThread: View {
                 // Hold the end across the frames the real heights take to
                 // arrive: every one of those says the end is far below, and
                 // believing one is how a long chat opened in its middle.
+                renderCap = Self.renderWindow
                 follow.settle(true)
                 defer { follow.settle(false) }
                 // Same as the Mac: hold the end until the conversation has
@@ -633,6 +651,24 @@ struct ClientChatThread: View {
     /// How many frames one press of Jump to latest may spend arriving.
     private static let chaseFrames = 24
 
+    /// Rows built per pass. Same bound as the Mac transcript.
+    private static let renderWindow = 150
+    /// Rows revealed per tap of the window button below.
+    private static let renderPage = 300
+
+    /// Rows the transcript builds this pass: the newest `renderCap`, so one
+    /// pass never places more no matter how far back the window has grown.
+    private var visibleItems: [ChatDisplayItem] {
+        let items = model.displayItems
+        guard items.count > renderCap else { return items }
+        return Array(items.suffix(renderCap))
+    }
+
+    /// Rows above the built window. Zero while the whole conversation fits.
+    private var hiddenAboveCount: Int {
+        max(0, model.displayItems.count - visibleItems.count)
+    }
+
     /// Let the scroll callback put the viewport back on the end. Weak on the
     /// state, which owns the closure.
     private func installRepin(_ proxy: ScrollViewProxy) {
@@ -685,6 +721,15 @@ struct ClientChatThread: View {
         // Every scroll here is programmatic. Say so, or the frames of the
         // animation read as the reader leaving and unpin mid-flight.
         // Instant pins land on the same frame and only need a short window.
+        // The end always exists. Anything else may sit above the built
+        // window: reveal up to it first, or the scroll lands nowhere.
+        if id != TranscriptFollow.bottomID,
+           let at = model.displayItems.firstIndex(where: { $0.id == id })
+        {
+            while model.displayItems.count - renderCap > at {
+                renderCap += Self.renderPage
+            }
+        }
         let animate = animated && !reduceMotion
         #if DEBUG
         TranscriptProbe.shared.noteScroll(id == TranscriptFollow.bottomID ? "pin" : "row")

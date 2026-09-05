@@ -41,6 +41,12 @@ struct ChatView: View {
     /// geometry readers exist for the stretch that can need an anchor and
     /// nowhere else.
     @State private var measuringRows = false
+    /// How many of the conversation's rows the transcript builds. The stack
+    /// is lazy, but every transaction still places what it holds, and a
+    /// window grown by paging back makes one pass cost seconds on any
+    /// conversation size the reader can reach. The tail is always built;
+    /// older rows arrive through the button below. Reset on every open.
+    @State private var renderCap = Self.renderWindow
     @State private var paneDropTargeted = false
     @State private var composerDropTargeted = false
     @State private var dropNotice: String?
@@ -211,7 +217,15 @@ struct ChatView: View {
                     TranscriptEarlierHeader(model: model) {
                         window.ask(force: true)
                     }
-                    ForEach(model.displayItems) { item in
+                    if hiddenAboveCount > 0 {
+                        Button("Show \(hiddenAboveCount) earlier messages", .history) {
+                            renderCap += Self.renderPage
+                        }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .accessibilityLabel("Show earlier messages")
+                    }
+                    ForEach(visibleItems) { item in
                         ChatEventRow(
                             item: item,
                             defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
@@ -238,7 +252,12 @@ struct ChatView: View {
                             alignment: .leading
                         )
                         .frame(maxWidth: .infinity, alignment: item.readingRoomAlignment)
-                        .transcriptRowFrame(item.id, watched: model.hasEarlier && measuringRows)
+                        // No geometry readers mid-fling: each one reports per
+                        // frame, and a fast scroll turns those reports into a
+                        // transaction per frame that placement never drains.
+                        // Readers return 0.35s after the last moved frame, via
+                        // `scrolling`, before any paging decision needs them.
+                        .transcriptRowFrame(item.id, watched: model.hasEarlier && measuringRows && !follow.scrolling)
                     }
                     if let mood = liveMood {
                         ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
@@ -352,6 +371,7 @@ struct ChatView: View {
                 // destinations, and scrolling a zero-size proxy to estimated
                 // heights is how it came back painted off-origin.
                 guard isActive else { return }
+                renderCap = Self.renderWindow
                 follow.settle(true)
                 defer { follow.settle(false) }
                 // Hold the end until the conversation has stopped arriving,
@@ -400,6 +420,22 @@ struct ChatView: View {
     /// open costs.
     private static let settleFrames = 40
 
+    /// Rows the transcript builds this pass: the newest `renderCap`, so one
+    /// pass never places more no matter how far back the window has grown.
+    /// Appends below the viewport shift nothing on screen; earlier pages
+    /// arrive through the paging path, older built rows through the button
+    /// above the list.
+    private var visibleItems: [ChatDisplayItem] {
+        let items = model.displayItems
+        guard items.count > renderCap else { return items }
+        return Array(items.suffix(renderCap))
+    }
+
+    /// Rows above the built window. Zero while the whole conversation fits.
+    private var hiddenAboveCount: Int {
+        max(0, model.displayItems.count - visibleItems.count)
+    }
+
 
     /// Come back to the latest turn, by the cheapest route that works.
     ///
@@ -433,6 +469,13 @@ struct ChatView: View {
 
     /// How many frames one press of Jump to latest may spend arriving.
     private static let chaseFrames = 24
+
+    /// Rows built per pass. Above `reopenAbove` a jump reopens instead of
+    /// scrolling; this is the smaller bound that keeps every ordinary pass
+    /// far below it.
+    private static let renderWindow = 150
+    /// Rows revealed per tap of the window button below.
+    private static let renderPage = 300
 
     /// Let the scroll callback put the viewport back on the end.
     ///
@@ -542,6 +585,15 @@ struct ChatView: View {
         // the long one is what locked out slow scrollback during streams.
         // Hidden panes do not scroll at all (see pinToLatest).
         guard isActive else { return }
+        // The end always exists. Anything else may sit above the built
+        // window: reveal up to it first, or the scroll lands nowhere.
+        if id != TranscriptFollow.bottomID,
+           let at = model.displayItems.firstIndex(where: { $0.id == id })
+        {
+            while model.displayItems.count - renderCap > at {
+                renderCap += Self.renderPage
+            }
+        }
         let animate = animated && !reduceMotion
         #if DEBUG
         TranscriptProbe.shared.noteScroll(id == TranscriptFollow.bottomID ? "pin" : "row")

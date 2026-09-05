@@ -294,6 +294,11 @@ private struct ClientChatEditRow: View {
     let removed: UInt32
     let patch: String
     @State private var expanded = false
+    /// The expanded patch as one colored text, built on press rather than in
+    /// `body`: parsing and hundreds of per-line rows on every evaluation is
+    /// what wedged transcripts mid-scroll.
+    @State private var shownText: AttributedString?
+    @State private var shownCut = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -323,24 +328,32 @@ private struct ClientChatEditRow: View {
                 Spacer(minLength: 0)
                 if !patch.isEmpty {
                     Button(expanded ? "Hide edit" : "Show edit", .preview) {
+                        if expanded {
+                            shownText = nil
+                        } else {
+                            let rendered = diffColoredText(patch, lineLimit: 200)
+                            shownText = rendered.text
+                            shownCut = rendered.cut
+                        }
                         expanded.toggle()
                     }
                     .clientGlassStyle()
                     .controlSize(.small)
                 }
             }
-            if expanded, !patch.isEmpty {
-                let diff = FileDiff.fromEditPatch(path: path, patch: patch)
-                ScrollView(.horizontal, showsIndicators: true) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(diff.hunks) { hunk in
-                            ForEach(hunk.lines) { line in
-                                DiffLineRow(line: line, minWidth: 0)
-                            }
-                        }
-                    }
+            if expanded, let shownText {
+                Text(shownText)
+                    .font(Theme.mono(11))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Theme.Space.s)
+                    .background(Theme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                if shownCut > 0 {
+                    Text("… \(shownCut) more lines")
+                        .font(Theme.mono(11))
+                        .foregroundStyle(.tertiary)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
         .padding(Theme.Space.m)

@@ -187,6 +187,31 @@ private func userBubble(_ text: String) -> some View {
         }
 }
 
+/// One measured text instead of a row per line.
+///
+/// An expanded diff as `DiffBody` is hundreds of attribute-graph nodes that
+/// every transcript measuring pass re-stamps; a live sample of a stopped
+/// application sat in exactly that. One `Text` with colored runs measures
+/// once, selects and copies as a whole, and reads the same.
+func diffColoredText(_ patch: String, lineLimit: Int) -> (text: AttributedString, cut: Int) {
+    var out = AttributedString()
+    var shown = 0
+    var total = 0
+    for raw in patch.split(separator: "\n", omittingEmptySubsequences: false) {
+        total += 1
+        guard shown < lineLimit else { continue }
+        shown += 1
+        var line = AttributedString(String(raw) + "\n")
+        line.foregroundColor =
+            (raw.hasPrefix("+") && !raw.hasPrefix("+++")) ? Theme.diffAdded
+            : (raw.hasPrefix("-") && !raw.hasPrefix("---")) ? Theme.diffRemoved
+            : raw.hasPrefix("@@") ? Color.secondary
+            : Color.primary
+        out += line
+    }
+    return (out, total - shown)
+}
+
 #if os(macOS)
 /// Image dimensions from the file header, without decoding pixels. Used to
 /// reserve an attachment row's frame before its image arrives, so the decode
@@ -420,6 +445,10 @@ private struct ChatEditRow: View {
     /// the row, which during a scroll is once a frame. Parsed on the press
     /// instead, and again only if the patch itself changes.
     @State private var shown: (diff: FileDiff, cut: Int)?
+    /// The expanded patch as one colored text. Built with `shown`, for the
+    /// same reason: hundreds of per-line rows re-stamp through the graph on
+    /// every measuring pass, one text measures once.
+    @State private var shownText: AttributedString?
 
     /// How much of a diff a card in a transcript draws.
     ///
@@ -433,6 +462,7 @@ private struct ChatEditRow: View {
     private func parse() {
         shown = FileDiff.fromEditPatch(path: path, patch: patch)
             .clipped(toLines: Self.lineCap)
+        shownText = diffColoredText(patch, lineLimit: Self.lineCap).text
     }
 
     var body: some View {
@@ -470,11 +500,13 @@ private struct ChatEditRow: View {
                     .buttonStyle(AccentButtonStyle(small: true))
                 }
             }
-            if expanded, let shown {
-                ScrollView(.horizontal) {
-                    DiffBody(diff: shown.diff, lazy: false)
-                }
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            if expanded, let shown, let shownText {
+                Text(shownText)
+                    .font(Theme.mono(11))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Theme.Space.xs)
+                    .background(Theme.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 if shown.cut > 0 {
                     Text("… \(shown.cut) more lines")
                         .font(Theme.mono(11))
@@ -485,7 +517,7 @@ private struct ChatEditRow: View {
         .onChange(of: patch) { _, _ in
             // A turn still being written grows its own patch. Re-read it only
             // while it is open, so a closed card costs nothing per token.
-            if expanded { parse() } else { shown = nil }
+            if expanded { parse() } else { shown = nil; shownText = nil }
         }
         .padding(Theme.Space.s)
         .frame(maxWidth: .infinity, alignment: .leading)
