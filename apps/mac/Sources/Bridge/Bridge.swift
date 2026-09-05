@@ -2764,7 +2764,7 @@ extension Bridge {
 
     /// Open the vault with the password, or with the recovery code.
     static func unlockSSHVault(password: String = "", recovery: String = "", tier: String) async throws -> SSHVaultUnlock {
-        try await background("ssh.vault.unlock", ["password": password, "recovery": recovery, "tier": tier], patience: Patience.standard, as: SSHVaultUnlock.self)
+        try await background("ssh.vault.unlock", ["password": password, "recovery": recovery, "tier": tier, "migrate": true], patience: Patience.standard, as: SSHVaultUnlock.self)
     }
 
     /// Change the password, or set one after proving the recovery code. A reset
@@ -2782,8 +2782,8 @@ extension Bridge {
         _ = try await background("ssh.vault.reset", [:], as: SSHVaultReset.self)
     }
 
-    static func rotateSSHVaultRecovery() async throws -> SSHVaultRecovery {
-        try await background("ssh.vault.recovery.rotate", as: SSHVaultRecovery.self)
+    static func rotateSSHVaultRecovery(password: String) async throws -> SSHVaultRecovery {
+        try await background("ssh.vault.recovery.rotate", ["password": password], as: SSHVaultRecovery.self)
     }
 
     static func sshVaultRecords(recovery: String, tier: String) async throws -> [SSHVaultRecord] {

@@ -225,7 +225,7 @@ pub fn public_key_from_hex(text: &str) -> Result<PublicKey, IdentityError> {
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '-')
         .collect();
-    if cleaned.len() != 64 {
+    if !cleaned.is_ascii() || cleaned.len() != 64 {
         return Err(IdentityError::BadKey(format!(
             "expected 64 hex characters, got {}",
             cleaned.len()

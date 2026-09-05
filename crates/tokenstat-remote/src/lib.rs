@@ -257,6 +257,15 @@ impl Connection {
     /// short read timeout so an idle reader gives the writer the lock back
     /// within milliseconds. An empty message is a clean end-of-stream.
     pub fn split(self) -> (StreamReader, StreamWriter) {
+        self.split_authorized(|| true)
+    }
+
+    /// Re-check the owner's authorization before delivering or sending data,
+    /// and while idle. A revoked stream closes both halves.
+    pub fn split_authorized(
+        self,
+        authorize: impl Fn() -> bool + Send + Sync + 'static,
+    ) -> (StreamReader, StreamWriter) {
         let Connection {
             stream,
             noise,
@@ -267,6 +276,7 @@ impl Connection {
             noise,
             stream,
             closed: std::sync::atomic::AtomicBool::new(false),
+            authorize: Arc::new(authorize),
         };
         let _ = core.stream.set_read_timeout(Some(STREAM_READ_TIMEOUT));
         let core = Arc::new(Mutex::new(core));
@@ -301,6 +311,19 @@ struct Core {
     noise: snow::TransportState,
     stream: Box<dyn Transport>,
     closed: std::sync::atomic::AtomicBool,
+    authorize: Arc<dyn Fn() -> bool + Send + Sync>,
+}
+
+impl Core {
+    fn permitted(&mut self) -> bool {
+        if self.closed.load(std::sync::atomic::Ordering::Relaxed) || !(self.authorize)() {
+            self.closed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.stream.close();
+            return false;
+        }
+        true
+    }
 }
 
 /// The read half of a split connection.
@@ -315,10 +338,14 @@ impl StreamReader {
     pub fn read(&self, max: usize) -> Result<Vec<u8>, RemoteError> {
         loop {
             let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+            if !guard.permitted() {
+                return Err(RemoteError::Closed);
+            }
             let Core {
                 noise,
                 stream,
                 closed,
+                ..
             } = &mut *guard;
             if closed.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(RemoteError::Closed);
@@ -336,6 +363,9 @@ impl StreamReader {
                 other => {
                     if other.is_err() {
                         closed.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    if !guard.permitted() {
+                        return Err(RemoteError::Closed);
                     }
                     return other;
                 }
@@ -363,13 +393,22 @@ pub struct StreamWriter {
 }
 
 impl StreamWriter {
+    /// Also checks revocation when the producer has no output to send.
+    pub fn is_closed(&self) -> bool {
+        self.core.lock().map_or(true, |mut core| !core.permitted())
+    }
+
     /// Send one message. An empty slice is a clean end-of-stream marker.
     pub fn write(&self, payload: &[u8]) -> Result<(), RemoteError> {
         let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+        if !guard.permitted() {
+            return Err(RemoteError::Closed);
+        }
         let Core {
             noise,
             stream,
             closed,
+            ..
         } = &mut *guard;
         if closed.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(RemoteError::Closed);

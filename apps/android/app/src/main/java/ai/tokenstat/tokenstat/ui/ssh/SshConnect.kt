@@ -35,17 +35,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-private const val PREF = "ai.tokenstat.ssh.secrets"
-
-object SshSecrets {
-    fun put(context: Context, ref: String, pem: String) {
-        context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(ref, pem).apply()
-    }
-
-    fun get(context: Context, ref: String): String? =
-        context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(ref, null)
-}
-
 fun JsonObject.sshString(key: String): String? =
     this[key]?.takeUnless { it is kotlinx.serialization.json.JsonNull }?.jsonPrimitive?.contentOrNull
 

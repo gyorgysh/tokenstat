@@ -50,6 +50,26 @@ pub struct CreateVault<'a> {
     pub kdf: &'a str,
 }
 
+/// Compare-and-swap replacement of all encryption material, with old device
+/// enrollments invalidated in the same server transaction.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RotateVault<'a> {
+    pub expected_revision: u64,
+    #[serde(flatten)]
+    pub vault: CreateVault<'a>,
+}
+
+pub fn rotate(body: &RotateVault<'_>) -> Result<Revision, VaultError> {
+    let (host, token, client) = auth()?;
+    send(
+        client
+            .post(format!("{host}/api/v1/vault/ssh/rotate"))
+            .bearer_auth(token)
+            .json(body),
+    )
+}
+
 /// A new password wrap for a vault that already exists.
 ///
 /// The snapshot is not part of this. Changing a password changes the wrap

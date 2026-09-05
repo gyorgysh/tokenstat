@@ -2063,6 +2063,7 @@ pub(crate) fn call_peer_result(
 /// end decodes, so re-wrapping it here would create a second envelope format
 /// that only remote calls use.
 pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, String> {
+    crate::request_context::refuse_remote("remote forwarding")?;
     let request = json!({"id": 0, "method": method, "params": parse_params(params)}).to_string();
     // Held for the whole call, pooled connection included: a connection taken
     // out of the pool is as live as a freshly dialled one while it is in use.
@@ -2131,6 +2132,7 @@ pub(crate) fn dial_peer_for(
     peer_hex: &str,
     purpose: ChannelPurpose,
 ) -> Result<(tokenstat_remote::Connection, &'static str), String> {
+    crate::request_context::refuse_remote("outbound peer connections")?;
     let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
     let store = PeerStore::load().map_err(|e| e.to_string())?;
     let peer = store
@@ -2727,6 +2729,7 @@ fn serve(params: &str) -> Result<Value, String> {
 }
 
 fn forward(params: &str) -> Result<Value, String> {
+    crate::request_context::refuse_remote("remote forwarding")?;
     let p: ForwardParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     if p.peer.is_empty() || p.method.is_empty() {
         return Err("remote.call needs a peer and a method".into());
@@ -2769,6 +2772,19 @@ mod tests {
         crate::request_context::with_remote_peer("phone", || {
             let refused = serve(r#"{"tunnel":false}"#).expect_err("must refuse");
             assert!(refused.contains("local-only"), "{refused}");
+        });
+    }
+
+    #[test]
+    fn inbound_forwarding_is_refused_before_parsing_or_dialing() {
+        crate::request_context::with_remote_peer("untrusted-phone", || {
+            for result in [
+                forward("{}").map(|_| String::new()),
+                call_peer("invalid", "workspace.list", "{}"),
+                dial_peer("invalid").map(|_| String::new()),
+            ] {
+                assert!(result.err().unwrap().contains("local-only"));
+            }
         });
     }
 

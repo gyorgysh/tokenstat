@@ -73,9 +73,9 @@ final class SSHVaultModel {
         await refresh()
     }
 
-    func rotateRecovery() async {
+    func rotateRecovery(password: String) async {
         do {
-            recovery = try await Bridge.rotateSSHVaultRecovery().recovery
+            recovery = try await Bridge.rotateSSHVaultRecovery(password: password).recovery
             status = try await Bridge.sshVaultStatus()
         } catch { self.error = error.localizedDescription }
     }
@@ -234,6 +234,7 @@ struct SSHVaultScreen: View {
     @State private var changingPassword = false
     @State private var showingRecovery = false
     @State private var confirmingRotation = false
+    @State private var rotationPassword = ""
     @State private var deleting = false
 
     var body: some View {
@@ -342,7 +343,7 @@ struct SSHVaultScreen: View {
                         }
                         action(
                             title: "Change the password",
-                            detail: "Ask for the one you use now, then the new one. The records are untouched: only the lock around them changes.",
+                            detail: "Ask for the one you use now, then the new one. Re-encrypts the saved records and creates a new recovery code. Other devices must unlock again.",
                             button: "Change password",
                             icon: .edit
                         ) { changingPassword = true }
@@ -354,7 +355,7 @@ struct SSHVaultScreen: View {
                         ) { confirmingRotation = true }
                         action(
                             title: "Lock on this Mac",
-                            detail: "This computer will ask for the password again, including after the helper restarts, until you unlock it here.",
+                            detail: "This computer will ask for the password again. The vault also locks whenever the host process restarts.",
                             button: "Lock",
                             icon: .signOut
                         ) { Task { await vault.lock() } }
@@ -412,15 +413,19 @@ struct SSHVaultScreen: View {
                 )
             }
         }
-        .confirmationDialog(
+        .alert(
             "Replace the current recovery code?",
-            isPresented: $confirmingRotation,
-            titleVisibility: .visible
+            isPresented: $confirmingRotation
         ) {
-            Button("Generate a new recovery code", role: .destructive) { Task { await vault.rotateRecovery() } }
-            Button("Cancel", role: .cancel) {}
+            SecureField("Vault password", text: $rotationPassword)
+            Button("Generate a new recovery code", role: .destructive) {
+                let password = rotationPassword
+                rotationPassword = ""
+                Task { await vault.rotateRecovery(password: password) }
+            }
+            Button("Cancel", role: .cancel) { rotationPassword = "" }
         } message: {
-            Text("The current code will stop working as soon as the encrypted update succeeds.")
+            Text("Enter the vault password to re-encrypt your saved records and replace the recovery code. Other devices must unlock again.")
         }
         .sheet(isPresented: $deleting) {
             SSHVaultDeleteSheet(vault: vault, tier: tier, canWrite: canWrite, library: library)

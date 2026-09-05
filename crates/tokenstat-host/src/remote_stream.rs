@@ -52,7 +52,47 @@ pub(crate) enum StreamKind {
     },
 }
 
+#[derive(Clone)]
+enum StreamAccess {
+    Workspace,
+    Screen {
+        control: bool,
+    },
+    /// The bridge tests exercise framing, not authorization, and must not
+    /// consult this machine's real peer store.
+    #[cfg(test)]
+    Unchecked,
+}
+
+impl StreamAccess {
+    fn allowed(&self, peer: &str) -> bool {
+        #[cfg(test)]
+        if matches!(self, Self::Unchecked) {
+            return true;
+        }
+        let Ok(key) = tokenstat_identity::public_key_from_hex(peer) else {
+            return false;
+        };
+        if !tokenstat_identity::PeerStore::cached().is_ok_and(|store| store.is_approved(&key)) {
+            return false;
+        }
+        match self {
+            Self::Workspace => crate::workspace_policy::is_allowed(peer),
+            Self::Screen { control } => crate::screen_policy::stream_allowed(peer, *control),
+            #[cfg(test)]
+            Self::Unchecked => true,
+        }
+    }
+
+    fn split(self, connection: Connection) -> (tokenstat_remote::StreamReader, StreamWriter) {
+        let peer = tokenstat_identity::hex(&connection.peer_key());
+        connection.split_authorized(move || self.allowed(&peer))
+    }
+}
+
 struct PendingStream {
+    peer: String,
+    access: StreamAccess,
     /// The connection, and how it reached this machine. The route is only
     /// known when the reservation is claimed, not when it is made.
     tx: mpsc::Sender<(Connection, crate::remote::Route)>,
@@ -66,14 +106,33 @@ fn registry() -> &'static Mutex<HashMap<String, PendingStream>> {
 /// Reserve a stream and start the pump that will serve it. Returns the token
 /// the far side sends on its fresh connection to claim the reservation.
 pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
-    let mut bytes = [0u8; 8];
+    let peer = crate::request_context::remote_peer()
+        .ok_or("streams must be reserved over an authenticated remote connection")?;
+    let access = match &kind {
+        StreamKind::Screen { control, .. } => StreamAccess::Screen { control: *control },
+        _ => StreamAccess::Workspace,
+    };
+    if !access.allowed(&peer) {
+        return Err("stream access has been withdrawn".into());
+    }
+    let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|e| e.to_string())?;
     let token = tokenstat_identity::hex(&bytes);
     let (tx, rx) = mpsc::channel::<(Connection, crate::remote::Route)>();
-    registry()
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(token.clone(), PendingStream { tx });
+    {
+        let mut pending = registry().lock().map_err(|e| e.to_string())?;
+        if pending.len() >= 128 {
+            return Err("too many pending streams".into());
+        }
+        pending.insert(
+            token.clone(),
+            PendingStream {
+                peer,
+                access: access.clone(),
+                tx,
+            },
+        );
+    }
     let answer = token.clone();
     std::thread::spawn(move || {
         let (connection, route) = match rx.recv_timeout(CLAIM_TIMEOUT) {
@@ -86,7 +145,7 @@ pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
             }
         };
         match kind {
-            StreamKind::Proxy { host, port } => pump_proxy(connection, &host, port),
+            StreamKind::Proxy { host, port } => pump_proxy(connection, &host, port, access),
             StreamKind::PtySubscribe { session } => pump_pty_subscribe(connection, &session),
             StreamKind::Screen {
                 id,
@@ -113,7 +172,7 @@ fn pump_screen(
         Ok(capture) => capture,
         Err(_) => return,
     };
-    let (reader, writer) = connection.split();
+    let (reader, writer) = StreamAccess::Screen { control }.split(connection);
     let reader = Arc::new(reader);
     let input_id = id.clone();
     let input_reader = Arc::clone(&reader);
@@ -155,7 +214,16 @@ fn pump_screen(
 /// first message is a stream handshake. Returns false when the token is not a
 /// live reservation, in which case the caller closes the connection.
 pub(crate) fn accept(token: &str, connection: Connection, route: crate::remote::Route) -> bool {
-    let pending = registry().lock().ok().and_then(|mut r| r.remove(token));
+    let peer = tokenstat_identity::hex(&connection.peer_key());
+    let pending = registry().lock().ok().and_then(|mut r| {
+        // A different authenticated peer cannot consume another peer's token.
+        let pending = r.get(token)?;
+        if pending.peer != peer {
+            return None;
+        }
+        let pending = r.remove(token)?;
+        pending.access.allowed(&peer).then_some(pending)
+    });
     match pending {
         Some(pending) => pending.tx.send((connection, route)).is_ok(),
         None => {
@@ -181,8 +249,8 @@ pub(crate) fn parse_handshake(first: &str) -> Option<String> {
 /// Two threads, one per direction. EOF on either side is propagated: a closed
 /// stream sends an empty message (the clean end-of-stream marker) before
 /// closing, and a closed socket shuts the remote TCP end down.
-fn pump_tcp_connection(tcp: TcpStream, connection: Connection) {
-    let (reader, writer) = connection.split();
+fn pump_tcp_connection(tcp: TcpStream, connection: Connection, access: StreamAccess) {
+    let (reader, writer) = access.split(connection);
     let tcp_reader = match tcp.try_clone() {
         Ok(clone) => clone,
         Err(_) => {
@@ -237,7 +305,7 @@ fn pump_tcp_connection(tcp: TcpStream, connection: Connection) {
 
 /// The owning side of a proxy stream: dial the far machine's own loopback and
 /// bridge.
-fn pump_proxy(mut connection: Connection, host: &str, port: u16) {
+fn pump_proxy(mut connection: Connection, host: &str, port: u16, access: StreamAccess) {
     let tcp = match TcpStream::connect((host, port)) {
         Ok(tcp) => tcp,
         Err(error) => {
@@ -249,7 +317,7 @@ fn pump_proxy(mut connection: Connection, host: &str, port: u16) {
         }
     };
     let _ = tcp.set_nodelay(true);
-    pump_tcp_connection(tcp, connection);
+    pump_tcp_connection(tcp, connection, access);
 }
 
 /// Open a proxy stream on a peer and claim a fresh connection for it.
@@ -326,7 +394,7 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
     // attached to a terminal here. That is the keep-awake case. The
     // assertion drops when the stream ends, even if the app is closed.
     let _hold = crate::keep_awake::StreamHold::acquire();
-    let (reader, writer) = connection.split();
+    let (reader, writer) = StreamAccess::Workspace.split(connection);
     // The channel is bidirectional: output flows this way (pushed below),
     // keystrokes flow the other way, straight into the pty. A keystroke is a
     // single frame over the persistent tunnel socket instead of a request and
@@ -350,6 +418,9 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
     let mut offset = 0u64;
     let reader_id = format!("remote-stream:{session}");
     loop {
+        if writer.is_closed() {
+            break;
+        }
         let alive = tokenstat_pty::manager()
             .info(session)
             .map(|info| info.alive)
@@ -1091,7 +1162,7 @@ mod tests {
             let (stream, _) = listener.accept().expect("a peer connection");
             let connection =
                 handshake_responder(Box::new(stream), &responder_ident).expect("handshake");
-            pump_proxy(connection, "127.0.0.1", echo_port);
+            pump_proxy(connection, "127.0.0.1", echo_port, super::StreamAccess::Unchecked);
         });
 
         let stream = TcpStream::connect(address).expect("dial the peer");

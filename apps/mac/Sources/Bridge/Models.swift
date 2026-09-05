@@ -405,7 +405,7 @@ struct SSHVaultPasswordChange: Codable, Sendable, Hashable {
     var changed: Bool
     var recovery: String?
 }
-struct SSHVaultUnlock: Codable, Sendable, Hashable { var unlocked: Bool }
+struct SSHVaultUnlock: Codable, Sendable, Hashable { var unlocked: Bool; var recovery: String? }
 struct SSHVaultRecord: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var version: UInt64

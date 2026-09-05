@@ -3655,6 +3655,7 @@ dependencies = [
  "tokenstat-workspace",
  "tokio",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]

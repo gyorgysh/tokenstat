@@ -510,7 +510,7 @@ struct SSHVaultSetupSheet: View {
                     )
                     recovery = result.recovery
                 } else {
-                    _ = try await Bridge.unlockSSHVault(password: password, tier: tier)
+                    recovery = try await Bridge.unlockSSHVault(password: password, tier: tier).recovery
                 }
             } else {
                 recovery = try await Bridge.createSSHVault(password: password, tier: tier).recovery

@@ -210,6 +210,17 @@ fn verify_legend_account() -> Result<tokenstat_sync::profile::StatusResult, Stri
     Ok(status)
 }
 
+/// Local permission check for every stream read/write; no account requests.
+#[cfg(feature = "local-host")]
+pub(crate) fn stream_allowed(peer: &str, control: bool) -> bool {
+    load().is_ok_and(|store| {
+        store
+            .permissions
+            .iter()
+            .any(|grant| grant.peer_id == peer && grant.view && (!control || grant.control))
+    })
+}
+
 pub(crate) fn verify_view_peer(peer_id: &str) -> Result<(), String> {
     verify_legend_account()?;
     let permission = load()?

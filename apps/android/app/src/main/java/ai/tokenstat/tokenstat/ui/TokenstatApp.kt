@@ -1114,7 +1114,9 @@ private fun AndroidSSHScreen(
         onUnlock = { password ->
             scope.launch {
                 runCatching {
-                    model.core("ssh.vault.unlock", buildJsonObject { put("password", password) })
+                    model.core("ssh.vault.unlock", buildJsonObject {
+                        put("password", password); put("migrate", true)
+                    })?.string("recovery")?.let { recoveryWords = it; showingRecovery = true }
                 }.onSuccess { load() }.onFailure { error = it.message }
                 vaultSetup = false
             }
