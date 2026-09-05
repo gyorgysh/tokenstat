@@ -599,8 +599,14 @@ final class ChatModel {
         }
     }
 
+    /// An idle conversation can receive a turn from another device. Keep
+    /// watching its event offset, then return to fast reads when work appears.
+    var pollInterval: Duration {
+        busy || hasPendingResponseAttachments ? .milliseconds(400) : .seconds(2)
+    }
+
     func poll() async {
-        guard let selected, selected.running || hasRunningTool || hasPendingResponseAttachments else { return }
+        guard !Task.isCancelled, !openingConversation, let selected else { return }
         let generation = selectionGeneration
         await loadEvents(id: selected.id, reset: false, generation: generation)
         guard selectionMatches(id: selected.id, generation: generation) else { return }

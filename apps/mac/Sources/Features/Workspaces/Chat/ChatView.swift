@@ -172,7 +172,8 @@ struct ChatView: View {
             try? await Task.sleep(for: .seconds(2))
             await model.refillBackendsIfIncomplete()
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(400))
+                try? await Task.sleep(for: model.pollInterval)
+                guard !Task.isCancelled else { return }
                 await model.poll()
             }
         }
