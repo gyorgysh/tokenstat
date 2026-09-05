@@ -327,6 +327,15 @@ struct ClientChatThread: View {
                 await model.poll()
             }
         }
+        // What is on screen, for the local notifier. Without this,
+        // `isWatching()` is always false on iOS and on-device banners are
+        // never suppressed (host push suppression still works via heartbeat).
+        .onChange(of: chatID, initial: true) { _, id in
+            UserPresence.shared.chatSurface(showing: id.isEmpty ? nil : id)
+        }
+        .onDisappear {
+            UserPresence.shared.chatSurface(showing: nil)
+        }
         // The host is on the other computer and cannot see this screen. Until
         // it is told, a turn finishing here pushed to this very phone.
         .watching(conversationID: chatID, peer: model.peer)
@@ -463,9 +472,9 @@ struct ClientChatThread: View {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, model.approvals.isEmpty else { return }
                     // A lazy-stack scroll walks every row between here and
-                    // the end. Limit settling corrections; geometry-based
-                    // repinning handles later height changes.
-                    if !follow.atEnd, correctionPins < 3 {
+                    // the end. Limit idle settling corrections, but keep
+                    // pinning while the turn is live and following.
+                    if !follow.atEnd, correctionPins < 3 || model.busy {
                         correctionPins += 1
                         pinToLatest(proxy, animated: false)
                     }

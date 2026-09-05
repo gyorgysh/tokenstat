@@ -78,9 +78,21 @@ struct ClientHostWorkspacesView: View {
                         }
                     }
                 } else if model.folders.isEmpty, model.sessions.isEmpty {
-                    if model.errorMessage != nil {
-                        RemoteReachRecoveryCard(name: hostName) {
-                            Task { await model.connect(peerKey: peerKey, name: hostName) }
+                    if let message = model.errorMessage {
+                        // Only the relay's "never registered" failure is a
+                        // Remote Reach setup problem. A timeout, refusal, or
+                        // LAN drop where Reach is already on needs wake/retry,
+                        // not the 2-step setup card.
+                        let lower = message.lowercased()
+                        if lower.contains("no_such_peer") || lower.contains("no direct address")
+                            || lower.contains("peer_not_found") || lower.contains("no such peer") {
+                            RemoteReachRecoveryCard(name: hostName) {
+                                Task { await model.connect(peerKey: peerKey, name: hostName) }
+                            }
+                        } else {
+                            ClientErrorCard(message: message) {
+                                Task { await model.connect(peerKey: peerKey, name: hostName) }
+                            }
                         }
                     } else {
                         ClientEmptyState(

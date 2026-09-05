@@ -352,9 +352,11 @@ struct ChatView: View {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, isActive, model.approvals.isEmpty else { return }
                     // A lazy-stack scroll walks every row between here and
-                    // the end. Limit settling corrections; geometry-based
-                    // repinning handles later height changes.
-                    if !follow.atEnd, correctionPins < 3 {
+                    // the end. Limit idle settling corrections, but keep
+                    // pinning while the turn is live and the reader is
+                    // following: late diff/image resizes after pin 3 used to
+                    // strand live followers mid-transcript.
+                    if !follow.atEnd, correctionPins < 3 || model.busy {
                         correctionPins += 1
                         pinToLatest(proxy, animated: false)
                     }

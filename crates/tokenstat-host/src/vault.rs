@@ -785,6 +785,9 @@ fn create_v4(password: &str) -> Result<String, String> {
     if revision.revision != 1 {
         return Err("server returned an unexpected initial vault revision".into());
     }
+    // The account now has revision 1. If the local writes below fail, a retry
+    // would hit `AlreadyExists` with no local cache. Say so directly so the
+    // recovery path (reset, then create again) is discoverable.
     write(&VaultStore {
         schema_version: SCHEMA,
         revision: revision.revision,
@@ -799,11 +802,16 @@ fn create_v4(password: &str) -> Result<String, String> {
         locked: false,
         key_id: key_id(&vmk),
         lock_generation: 0,
+    })
+    .map_err(|e| {
+        format!("vault was created but this device could not remember it: {e}. Reset the vault and create it again")
     })?;
     // An unlock, not just a cached key. A lock left over from the vault this
     // one replaces would otherwise still be standing, and the vault this
     // device created seconds ago would answer that it is locked.
-    unlock_session(*vmk)?;
+    unlock_session(*vmk).map_err(|e| {
+        format!("vault was created but this device could not unlock it: {e}. Unlock it with your password")
+    })?;
     Ok(recovery)
 }
 
@@ -1072,6 +1080,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 }
                 unlock_with(&p.password, "")?;
                 let recovery = if read()?.schema_version < SCHEMA {
+                    verify_paid_account()?;
                     if !p.migrate {
                         forget_key();
                         return Err("update tokenstat to upgrade this vault securely".into());
@@ -1243,6 +1252,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 ))
             }
             "ssh.vault.recovery.rotate" => {
+                verify_paid_account()?;
                 let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
                 let recovery = rotate_root(&p.password, "", &p.password)?;
                 Ok(json!({"recovery": recovery}))

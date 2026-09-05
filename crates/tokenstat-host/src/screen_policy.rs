@@ -211,14 +211,74 @@ fn verify_legend_account() -> Result<tokenstat_sync::profile::StatusResult, Stri
 }
 
 /// Local permission check for every stream read/write; no account requests.
+///
+/// Hot path (every frame/tick): served from a 1s in-memory mirror of the
+/// grants so live streams do not do file I/O per frame. `set_permission`
+/// refreshes the mirror on write; a transient I/O error keeps the last known
+/// grants rather than killing live streams. Only the grant row is rechecked
+/// here — Legend-tier revocation is enforced at capability issue, not per
+/// frame, by design.
 #[cfg(feature = "local-host")]
 pub(crate) fn stream_allowed(peer: &str, control: bool) -> bool {
-    load().is_ok_and(|store| {
+    // Fast path: mirror younger than 1s.
+    if let Ok(guard) = stream_cache().lock()
+        && let Some(entry) = guard.as_ref()
+        && entry.at.elapsed() < std::time::Duration::from_secs(1)
+    {
+        return entry
+            .grants
+            .iter()
+            .any(|(id, view, ctrl)| id == peer && *view && (!control || *ctrl));
+    }
+    // Slow path: reload; on I/O error keep the last mirror (fail-open to the
+    // cached grants, fail-closed when there is no mirror yet).
+    let grants: Option<Vec<(String, bool, bool)>> = load().ok().map(|store| {
         store
             .permissions
-            .iter()
-            .any(|grant| grant.peer_id == peer && grant.view && (!control || grant.control))
-    })
+            .into_iter()
+            .map(|grant| (grant.peer_id, grant.view, grant.control))
+            .collect()
+    });
+    let Ok(mut guard) = stream_cache().lock() else {
+        return false;
+    };
+    match grants {
+        Some(grants) => {
+            let allowed = grants
+                .iter()
+                .any(|(id, view, ctrl)| id == peer && *view && (!control || *ctrl));
+            *guard = Some(StreamCacheEntry {
+                at: std::time::Instant::now(),
+                grants,
+            });
+            allowed
+        }
+        None => guard.as_ref().is_some_and(|entry| {
+            entry
+                .grants
+                .iter()
+                .any(|(id, view, ctrl)| id == peer && *view && (!control || *ctrl))
+        }),
+    }
+}
+
+#[cfg(feature = "local-host")]
+struct StreamCacheEntry {
+    at: std::time::Instant,
+    grants: Vec<(String, bool, bool)>,
+}
+
+#[cfg(feature = "local-host")]
+fn stream_cache() -> &'static Mutex<Option<StreamCacheEntry>> {
+    static CACHE: OnceLock<Mutex<Option<StreamCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(feature = "local-host")]
+fn invalidate_stream_cache() {
+    if let Ok(mut guard) = stream_cache().lock() {
+        *guard = None;
+    }
 }
 
 pub(crate) fn verify_view_peer(peer_id: &str) -> Result<(), String> {
@@ -391,6 +451,7 @@ fn set_permission(peer_id: &str, view: bool, control: bool) -> Result<(), String
         control,
     });
     save(&store)?;
+    invalidate_stream_cache();
     capabilities()
         .lock()
         .map_err(|_| "capability lock poisoned")?

@@ -79,10 +79,21 @@ final class UserPresence {
     var isAtTheKeyboard: Bool {
         #if os(macOS)
         guard NSApp.isActive else { return false }
-        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+        // The chat surface is one window among others. A Settings window in
+        // front while chat is occluded must not count as watching: require a
+        // visible, non-miniaturized window on the active Space, preferring
+        // the key/main window but falling back to any window.
+        let candidates = [NSApp.keyWindow, NSApp.mainWindow].compactMap { $0 }
+        let window = candidates.first ?? NSApp.windows.first(where: { $0.isVisible })
+        if let window {
             guard window.isVisible, !window.isMiniaturized, window.isOnActiveSpace else {
                 return false
             }
+        } else if NSApp.windows.contains(where: { $0.isVisible && !$0.isMiniaturized && $0.isOnActiveSpace }) {
+            // No key/main window (e.g. panel-only state) but something is on
+            // screen. Count it rather than failing closed.
+        } else if !NSApp.windows.isEmpty {
+            return false
         }
         return secondsSinceInput < Self.idleAfter
         #else

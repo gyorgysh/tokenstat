@@ -282,6 +282,15 @@ struct PickerOptionList<Value: Hashable>: View {
                 }
             }
             .padding(Theme.Space.s)
+            .onChange(of: sectionTabs) { _, tabs in
+                // The selected filter persists across choice changes. A hidden
+                // filter that no longer exists would show "Nothing matches"
+                // with no affordance, e.g. Effort selected then switching to
+                // an agent without Effort.
+                if !selectedSection.isEmpty, !tabs.contains(selectedSection) {
+                    selectedSection = ""
+                }
+            }
 
             ThemeRule()
 
@@ -417,8 +426,29 @@ struct PickerOptionList<Value: Hashable>: View {
     }
 
     /// Return in the filter field takes the first match, which is what a
-    /// person typing three letters of a model id is asking for.
+    /// person typing three letters of a model id is asking for. Prefer a
+    /// match in the currently filtered section, then an exact label match,
+    /// so typing a model id that substring-matches an Agent row does not
+    /// select the Agent.
     private func submit() {
+        guard !filtered.isEmpty else { return }
+        if let exact = filtered.first(where: { $0.matches(query) && $0.label.lowercased() == query.lowercased().trimmingCharacters(in: .whitespaces) }) {
+            pick(exact.value)
+            return
+        }
+        if !selectedSection.isEmpty, let first = filtered.first {
+            pick(first.value)
+            return
+        }
+        // No section filter: prefer a non-Agent section for Enter, since the
+        // combined panel's Agent rows otherwise shadow model ids like "codex".
+        let sectionsInOrder = sections
+        if sectionsInOrder.count > 1,
+           let nonAgent = sectionsInOrder.first(where: { !$0.0.lowercased().contains("agent") }),
+           let first = nonAgent.1.first {
+            pick(first.value)
+            return
+        }
         guard let first = filtered.first else { return }
         pick(first.value)
     }

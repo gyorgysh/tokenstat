@@ -402,6 +402,7 @@ impl Parser {
 
     fn close_open_tools(&mut self, ok: bool, detail: Option<String>) -> Vec<Event> {
         self.tool_inputs.clear();
+        self.muse_tasks.clear();
         std::mem::take(&mut self.open_tools)
             .into_iter()
             .map(|call_id| Event::ToolEnd {
@@ -442,10 +443,20 @@ impl Parser {
                     .pointer("/event/idempotency_key")
                     .and_then(Value::as_str)
                     .and_then(|key| key.strip_prefix("tool:"));
-                if let (Some(task), Some(call)) = (task, call)
-                    && let Some(name) = self.muse_tasks.remove(task)
-                {
-                    events.push(tool_start_with_id(call, &name, Value::Null));
+                if let (Some(task), Some(call)) = (task, call) {
+                    // Replay/attach can deliver `scheduled` before `proposed`.
+                    // Prefer the proposed name, fall back to the scheduled
+                    // record's own task kind so the start is not lost.
+                    let name = self.muse_tasks.remove(task).or_else(|| {
+                        payload
+                            .pointer("/event/task_kind")
+                            .and_then(Value::as_str)
+                            .and_then(muse_tool_name)
+                            .map(str::to_string)
+                    });
+                    if let Some(name) = name {
+                        events.push(tool_start_with_id(call, &name, Value::Null));
+                    }
                 }
             }
             Some("tool.result") => {
@@ -811,9 +822,12 @@ fn events_codex(value: &Value) -> Vec<Event> {
                     .and_then(json_i32)
                     .map(|code| code == 0)
                     .unwrap_or_else(|| {
-                        !detail
-                            .as_deref()
-                            .is_some_and(|output| codex_rejection(Some(output)).is_some())
+                        // No exit code and no output: cancelled/killed, not
+                        // success. Stay failed rather than closing green.
+                        detail.as_deref().is_some_and(|output| {
+                            !output.trim().is_empty()
+                                && codex_rejection(Some(output)).is_none()
+                        })
                     });
                 vec![Event::ToolEnd {
                     call_id: item_id(item),
@@ -851,12 +865,13 @@ fn codex_rejection(text: Option<&str>) -> Option<String> {
     if !(lower.contains("codex_core::tools::router")
         || lower.contains("exec_command failed")
         || lower.contains("rejected(")
+        || lower.contains("rejected:")
         || lower.contains("commands are not permitted"))
     {
         return None;
     }
-    if let Some((_, reason)) = text.rsplit_once("rejected:") {
-        let reason = reason
+    if let Some(idx) = lower.rfind("rejected:") {
+        let reason = text[idx + "rejected:".len()..]
             .trim()
             .trim_matches(|ch| ch == '"' || ch == '}' || ch == ']');
         return Some(format!("Codex tool rejected: {reason}"));
@@ -880,49 +895,123 @@ fn codex_file_change_input(item: &Value) -> Value {
 /// the timeline can use the same Read/Write/Diff/Grep cards as other engines.
 /// Mixed or unknown commands remain Shell and retain their complete command.
 fn codex_command_kind(command: &str) -> &'static str {
-    let lower = command.to_ascii_lowercase();
-    if lower.contains("diff ") || lower.contains(" diff") || lower.starts_with("diff") {
+    // Tokenize the shell line so `echo "a > b"` is not a Write and
+    // `/bin/zsh -lc 'cp a b'` is still a copy. Quotes group arguments for
+    // execution, but the intent is inside them, so strip quote characters and
+    // split on whitespace/operators instead of respecting grouping.
+    let flat = command.replace(['\'', '"'], " ");
+    let tokens: Vec<String> = flat
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, '|' | ';' | '&' | '(' | ')'))
+        .filter(|part| !part.is_empty())
+        .map(|part| part.trim_matches(|ch: char| "'\";,()".contains(ch)).to_string())
+        .collect();
+    let names: Vec<String> = tokens
+        .iter()
+        .filter(|part| !part.starts_with('-') || *part == "-")
+        .map(|part| {
+            part.rsplit('/')
+                .next()
+                .unwrap_or(part)
+                .trim_matches(|ch: char| "'\"".contains(ch))
+                .to_ascii_lowercase()
+        })
+        .filter(|name| {
+            !name.is_empty()
+                && !matches!(
+                    name.as_str(),
+                    "sudo" | "env" | "sh" | "bash" | "zsh" | "-lc" | "-c"
+                )
+        })
+        .collect();
+    let has = |name: &str| names.iter().any(|candidate| candidate == name);
+    if has("diff") || has("patch") {
         return "diff";
     }
-    if lower.contains("rg ") || lower.contains("grep ") || lower.contains("grep -") {
+    if has("rg") || has("grep") {
         return "grep";
     }
-    if lower.contains("cat ")
-        || lower.contains("sed ")
-        || lower.contains("head ")
-        || lower.contains("tail ")
-        || lower.contains(" od ")
-    {
+    if has("cat") || has("sed") || has("head") || has("tail") || has("od") || has("less") {
         return "read_file";
     }
-    if lower.contains("mkdir ")
-        || lower.contains("touch ")
-        || lower.contains(" cp ")
-        || lower.contains(" mv ")
-        || lower.contains(" rm ")
-        || lower.contains("> ")
-        || lower.contains(" | tee ")
+    if has("mkdir")
+        || has("touch")
+        || has("cp")
+        || has("mv")
+        || has("rm")
+        || has("tee")
+        || command.contains('>')
     {
-        return "write_file";
+        // `>` alone is still a redirect even when no copier ran, but an
+        // `echo` whose quoted text merely mentions one is not a Write.
+        if has("cp") || has("mv") || has("rm") || has("mkdir") || has("touch") || has("tee") {
+            return "write_file";
+        }
+        if command.contains('>') && !has("echo") {
+            return "write_file";
+        }
+        if command.contains('>') && has("echo") && command.contains("> ") {
+            return "write_file";
+        }
     }
     "shell"
 }
 
 fn codex_command_input(command: &str) -> Value {
     let kind = codex_command_kind(command);
-    let target = command
+    let parts: Vec<String> = command
         .split_whitespace()
-        .map(|part| part.trim_matches(|ch: char| "'\";,()".contains(ch)))
+        .map(|part| part.trim_matches(|ch: char| "'\";,()".contains(ch)).to_string())
+        .collect();
+    let target = parts
+        .iter()
         .find(|part| {
-            (part.starts_with('/') || part.ends_with(".txt") || part.ends_with(".md"))
-                && !matches!(*part, "/bin/sh" | "/bin/bash" | "/bin/zsh")
+            (part.starts_with('/')
+                || part.ends_with(".txt")
+                || part.ends_with(".md")
+                || part.ends_with(".rs")
+                || part.ends_with(".ts")
+                || part.ends_with(".tsx")
+                || part.ends_with(".js")
+                || part.ends_with(".jsx")
+                || part.ends_with(".py")
+                || part.ends_with(".go")
+                || part.ends_with(".swift")
+                || part.ends_with(".kt")
+                || part.ends_with(".rs")
+                || looks_like_path(part))
+                && !matches!(part.as_str(), "/bin/sh" | "/bin/bash" | "/bin/zsh")
         })
-        .unwrap_or("");
+        .cloned()
+        .or_else(|| {
+            // Repo-relative `diff -u src/a.rs src/b.rs`: no absolute path and
+            // no .txt/.md, so fall back to the last path-like argument.
+            parts.iter().rev().find(|part| looks_like_path(part)).cloned()
+        })
+        .unwrap_or_default();
     if target.is_empty() || kind == "shell" {
         serde_json::json!({"command": command})
     } else {
         serde_json::json!({"path": target, "command": command})
     }
+}
+
+fn looks_like_path(part: &str) -> bool {
+    if part.is_empty() || part.starts_with('-') {
+        return false;
+    }
+    if part.contains('/') || part.contains('.') {
+        let trimmed = part.trim_matches(|ch: char| "'\";,()".contains(ch));
+        if trimmed.contains('/') {
+            return true;
+        }
+        // `src/a.rs`: has an extension and no spaces.
+        if let Some((_, ext)) = trimmed.rsplit_once('.') {
+            return !ext.is_empty()
+                && ext.len() <= 5
+                && ext.chars().all(|c| c.is_ascii_alphanumeric());
+        }
+    }
+    false
 }
 
 fn codex_file_change_detail(item: &Value) -> Option<String> {
@@ -939,7 +1028,8 @@ fn codex_file_change_detail(item: &Value) -> Option<String> {
                 .and_then(Value::as_str)
                 .filter(|patch| !patch.trim().is_empty())
             {
-                return Some(patch.to_string());
+                // Keep attribution when several files share one card.
+                return Some(format!("--- {path}\n{patch}"));
             }
             if let (Some(old), Some(new)) = (
                 change.get("old_content").and_then(Value::as_str),
@@ -964,7 +1054,15 @@ fn codex_file_change_detail(item: &Value) -> Option<String> {
             Some(format!("{label}: {path}"))
         })
         .collect();
-    (!lines.is_empty()).then(|| lines.join("\n"))
+    (!lines.is_empty()).then(|| {
+        let joined = lines.join("\n");
+        // Inspector text, not a patch dump: cap multi-file output.
+        if joined.len() > 4000 {
+            format!("{}…", &joined[..4000])
+        } else {
+            joined
+        }
+    })
 }
 
 /// Muse `exec --json` stamps every record with the session that `--session-id`
@@ -1015,7 +1113,9 @@ fn muse_edit_event(payload: &Value, call_id: &str) -> Option<Event> {
         return None;
     }
     let path = facts.get("path").and_then(Value::as_str)?;
-    let patch = payload.get("text").and_then(Value::as_str)?;
+    // The patch can arrive in a separate record. Emit the card with counts
+    // rather than dropping the edit entirely.
+    let patch = payload.get("text").and_then(Value::as_str).unwrap_or("");
     Some(Event::Edit {
         call_id: call_id.into(),
         path: path.into(),
@@ -2553,7 +2653,7 @@ mod tests {
         let events = Parser::new("codex").push_events(raw.as_bytes());
         assert!(events.iter().any(|event| matches!(
             event,
-            Event::ToolEnd { detail: Some(detail), .. } if detail == "-old\n+new"
+            Event::ToolEnd { detail: Some(detail), .. } if detail.contains("-old\n+new")
         )));
     }
 

@@ -47,12 +47,14 @@ struct WatchingHeartbeat: ViewModifier {
                 defer {
                     // Leaving the screen. The lease would expire anyway, and
                     // saying so makes the next half minute behave correctly.
+                    // Detached: the view may already be gone when this runs.
                     let leaving = id
                     let host = peer
-                    Task {
+                    let watcher = watcherID
+                    Task.detached {
                         await Bridge.stoppedWatching(
                             conversationID: leaving,
-                            watcherID: watcherID,
+                            watcherID: watcher,
                             peer: host
                         )
                     }

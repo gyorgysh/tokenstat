@@ -69,8 +69,19 @@ pub fn refresh() {
 /// backend.
 ///
 /// The TTL is bypassed, not the rest: a probe that fails still leaves the
-/// list it could not replace, for the reason `fill` gives.
+/// list it could not replace, for the reason `fill` gives. Concurrent Refresh
+/// taps share one run instead of spawning duplicate subprocesses.
 pub fn refresh_now() {
+    if !claim_refresh() {
+        return;
+    }
+    struct ReleaseOnDrop;
+    impl Drop for ReleaseOnDrop {
+        fn drop(&mut self) {
+            release_refresh();
+        }
+    }
+    let _release = ReleaseOnDrop;
     probe_all(true);
 }
 
@@ -284,14 +295,20 @@ fn run_list(bin: &str, args: &[&str]) -> Option<String> {
 /// want from it.
 fn codex_models() -> Option<Vec<String>> {
     let bin = crate::launcher::resolve_command("codex")?;
-    let mut child = Command::new(bin)
+    let path_var = crate::launcher::search_path_var();
+    let mut command = Command::new(bin);
+    command
         .arg("app-server")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .env("PATH", crate::launcher::search_path_var())
-        .spawn()
-        .ok()?;
+        .env("PATH", path_var);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn().ok()?;
 
     // `initialize` first: the server answers nothing else until it has been
     // told who is asking.
@@ -317,8 +334,13 @@ fn codex_models() -> Option<Vec<String>> {
         let reader = std::io::BufReader::new(stdout.take(LIST_CAP as u64));
         for line in reader.lines().map_while(Result::ok) {
             // Notifications arrive on the same pipe. Only the answer to id 2
-            // is being waited for.
-            if line.contains("\"id\":2") {
+            // is being waited for: parse the line so a payload mentioning
+            // `"id":2` elsewhere does not match.
+            let is_answer = serde_json::from_str::<serde_json::Value>(&line)
+                .ok()
+                .and_then(|value| value.get("id")?.as_u64())
+                .is_some_and(|id| id == 2);
+            if is_answer {
                 let _ = tx.send(line);
                 return;
             }
@@ -326,6 +348,13 @@ fn codex_models() -> Option<Vec<String>> {
     });
     let answer = rx.recv_timeout(LIST_TIMEOUT);
     let _ = child.kill();
+    #[cfg(unix)]
+    {
+        let pid = child.id();
+        let _ = Command::new("kill")
+            .args(["-9", &format!("-{pid}")])
+            .status();
+    }
     let _ = child.wait();
     parse_codex_models(&answer.ok()?)
 }
@@ -458,6 +487,23 @@ pub(crate) fn sanitize_cli_model(backend: &str, model: Option<&str>) -> Option<S
     }
 }
 
+/// A stored effort becomes one `-c` value or one flag value. Keep it a single
+/// token so a crafted value cannot smuggle `=`/spaces into the CLI invocation.
+pub(crate) fn sanitize_cli_effort(effort: Option<&str>) -> Option<String> {
+    let raw = effort?.trim();
+    if raw.is_empty() || raw.len() > 32 {
+        return None;
+    }
+    if raw
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        Some(raw.to_string())
+    } else {
+        None
+    }
+}
+
 /// `opencode models` prints `provider/model` lines.
 pub(crate) fn parse_opencode_models(out: &str) -> Vec<String> {
     out.lines()
@@ -529,7 +575,7 @@ fn is_model_id(id: &str) -> bool {
         && id.len() <= 128
         && id
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'))
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '/' | ':'))
 }
 
 #[cfg(test)]

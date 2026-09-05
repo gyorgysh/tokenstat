@@ -143,7 +143,8 @@ pub use tokenstat_pty::warm_shell_pool;
 /// used to print `unknown method: ssh.host.list` at a person. 2 was the SSH
 /// library and screen input work. 3 is the password vault: `ssh.vault.password.set`,
 /// `ssh.vault.lock`, `ssh.vault.recovery.rotate`, and enrollment gone from the
-/// public methods. 4 adds `ssh.session.suggest` and `chat.eventPage`. 6 adds
+/// public methods. 4 adds `ssh.session.suggest` and `chat.eventPage`. 5 covers
+/// the automation backend and Codex model-list work in the 0.8.3 cycle. 6 adds
 /// the `refresh` parameter on `chat.backends` and `automation.backends`, and
 /// `app.watching` / `app.stoppedWatching`.
 ///

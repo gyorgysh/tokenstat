@@ -2035,7 +2035,7 @@ struct AppMenuPicker<Option: Hashable>: View {
     }
 
     private var usesPanel: Bool {
-        refresh != nil || options.count >= searchThreshold
+        options.count >= searchThreshold
     }
 
     private var panel: some View {
@@ -2063,6 +2063,12 @@ struct AppMenuPicker<Option: Hashable>: View {
             ForEach(options, id: \.value) { option in
                 Button(option.label) {
                     selection = option.value
+                }
+            }
+            if refresh != nil {
+                Divider()
+                Button("Refresh list") {
+                    Task { await refresh?() }
                 }
             }
         } label: {

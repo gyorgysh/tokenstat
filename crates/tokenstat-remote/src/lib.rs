@@ -249,13 +249,11 @@ impl Connection {
         self.stream.close();
     }
 
-    /// Split into independent read and write halves for a byte stream.
-    ///
-    /// The proxy and the terminal subscription both need bytes moving in both
-    /// directions at once, which a single request/response owner cannot do.
-    /// The halves share one Noise session behind a mutex; the read half uses a
-    /// short read timeout so an idle reader gives the writer the lock back
-    /// within milliseconds. An empty message is a clean end-of-stream.
+    /// Split into independent read and write halves for a byte stream, without
+    /// authorization checks. Only for the claiming (client) side and tests:
+    /// serving-side pumps must use [`Self::split_authorized`] so revocation
+    /// closes both halves. Do not call this for a connection this machine is
+    /// serving.
     pub fn split(self) -> (StreamReader, StreamWriter) {
         self.split_authorized(|| true)
     }

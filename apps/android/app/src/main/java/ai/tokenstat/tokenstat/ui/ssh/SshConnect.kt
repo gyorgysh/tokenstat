@@ -17,6 +17,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -117,7 +119,7 @@ fun SshConnectDialog(
                             val keyRef = host.sshString("keyId") ?: host.sshString("identity")
                             val pem = keyRef?.let { id ->
                                 val rec = keys.filterIsInstance<JsonObject>().find { it.sshString("id") == id }
-                                rec?.sshString("secretRef")?.let { SshSecrets.get(context, it) }
+                                rec?.sshString("secretRef")?.let { withContext(Dispatchers.IO) { SshSecrets.get(context, it) } }
                             }
                             val auth = if (!pem.isNullOrBlank()) {
                                 buildJsonObject {
@@ -234,7 +236,7 @@ private suspend fun persistKey(context: Context, model: AppViewModel, label: Str
     val privateKey = material.sshString("privateKey") ?: error("The key had no private material.")
     val id = java.util.UUID.randomUUID().toString()
     val ref = "android:$id"
-    SshSecrets.put(context, ref, privateKey)
+    withContext(Dispatchers.IO) { SshSecrets.put(context, ref, privateKey) }
     model.core(
         "ssh.key.save",
         buildJsonObject {

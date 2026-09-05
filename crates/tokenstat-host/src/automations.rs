@@ -242,6 +242,8 @@ pub fn agent_command(
 
     let model = crate::agent_models::sanitize_cli_model(backend, model);
     let model = model.as_deref();
+    let effort = crate::agent_models::sanitize_cli_effort(effort);
+    let effort = effort.as_deref();
     let mut args: Vec<String> = Vec::new();
     match backend {
         "sh" => {
@@ -550,8 +552,9 @@ pub fn chat_agent_command(
             argv.remove(index);
         }
         if plan {
+            let at = headless_flag_at(&argv);
             argv.splice(
-                headless_flag_at(&argv)..headless_flag_at(&argv),
+                at..at,
                 ["--disable-write".into(), "--disable-shell".into()],
             );
         }
@@ -730,16 +733,29 @@ pub fn chat_agent_command(
         insert_flags(&mut argv, extra);
     }
     if backend == "codex" && launch.resume.is_some_and(|token| !token.trim().is_empty()) {
-        // `--sandbox` belongs to `codex exec`, not its `resume` subcommand.
-        // `insert_flags` correctly puts normal exec flags before the prompt,
-        // but after `resume <session>`; move this pair back across the
-        // subcommand so resumed Plan turns parse on current Codex CLIs.
-        if let Some(at) = argv.iter().position(|arg| arg == "--sandbox")
-            && let Some(value) = argv.get(at + 1).cloned()
-            && let Some(exec) = argv.iter().position(|arg| arg == "exec")
-        {
-            argv.drain(at..=at + 1);
-            argv.splice(exec + 1..exec + 1, ["--sandbox".into(), value]);
+        // `--sandbox` and `--dangerously-bypass-hook-trust` belong to
+        // `codex exec`, not its `resume` subcommand. `insert_flags` and the
+        // resume splice can leave them after `resume <session>`; move both
+        // back across the subcommand so resumed turns parse.
+        if let Some(exec) = argv.iter().position(|arg| arg == "exec") {
+            if let Some(at) = argv.iter().position(|arg| arg == "--sandbox")
+                && let Some(value) = argv.get(at + 1).cloned()
+            {
+                argv.drain(at..=at + 1);
+                let exec = argv.iter().position(|arg| arg == "exec").unwrap_or(exec);
+                argv.splice(exec + 1..exec + 1, ["--sandbox".into(), value]);
+            }
+            if let Some(at) = argv
+                .iter()
+                .position(|arg| arg == "--dangerously-bypass-hook-trust")
+            {
+                argv.remove(at);
+                let exec = argv.iter().position(|arg| arg == "exec").unwrap_or(exec);
+                argv.splice(
+                    exec + 1..exec + 1,
+                    ["--dangerously-bypass-hook-trust".into()],
+                );
+            }
         }
     }
     Ok(argv)
@@ -761,6 +777,8 @@ pub fn interactive_agent_command(
 
     let model = crate::agent_models::sanitize_cli_model(backend, model);
     let model = model.as_deref();
+    let effort = crate::agent_models::sanitize_cli_effort(effort);
+    let effort = effort.as_deref();
     let mut args: Vec<String> = Vec::new();
     match backend {
         "sh" => {

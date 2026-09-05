@@ -608,7 +608,7 @@ final class ChatModel {
     func poll() async {
         guard !Task.isCancelled, !openingConversation, let selected else { return }
         let generation = selectionGeneration
-        await loadEvents(id: selected.id, reset: false, generation: generation)
+        await loadEvents(id: selected.id, reset: false, generation: generation, quiet: true)
         guard selectionMatches(id: selected.id, generation: generation) else { return }
         await loadApprovals(id: selected.id, generation: generation)
         guard selectionMatches(id: selected.id, generation: generation) else { return }
@@ -1008,7 +1008,7 @@ final class ChatModel {
     /// How many extra pages one opening may pull to reach that.
     private static let openExtraPages = 6
 
-    private func loadEvents(id: String, reset: Bool, generation: UInt64) async {
+    private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async {
         let requestedOffset = reset ? 0 : offset
         do {
             let chunk = try await Bridge.chatEvents(id: id, offset: requestedOffset, peer: peer)
@@ -1036,7 +1036,9 @@ final class ChatModel {
             settleNotifications()
             await loadResponseAttachments(id: id, generation: generation)
         } catch {
-            if selectionMatches(id: id, generation: generation) {
+            // Background polls must not pop an error banner on an idle
+            // screen; user-initiated loads still surface.
+            if !quiet, selectionMatches(id: id, generation: generation) {
                 self.error = error.localizedDescription
             }
         }

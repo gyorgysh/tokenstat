@@ -1521,11 +1521,21 @@ internal sealed class ChatPage : Page
     /// </summary>
     private async Task ReloadBackendsAsync()
     {
-        var backends = await AppServices.Host.CallAsync(
-            "chat.backends",
-            new JsonObject { ["refresh"] = true });
-        _backends = AsArray(backends);
-        PaintConversation();
+        // Old hosts ignore the unknown `refresh` field and answer from cache
+        // (protocol 6). That silent no-op is acceptable; a failure is not, so
+        // banner it like every other host call from this page.
+        try
+        {
+            var backends = await AppServices.Host.CallAsync(
+                "chat.backends",
+                new JsonObject { ["refresh"] = true });
+            _backends = AsArray(backends);
+            PaintConversation();
+        }
+        catch (Exception ex)
+        {
+            Banner(ex.Message);
+        }
     }
 
     private async Task RefreshCatalogAsync()

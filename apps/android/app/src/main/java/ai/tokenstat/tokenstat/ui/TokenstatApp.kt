@@ -1107,8 +1107,7 @@ private fun AndroidSSHScreen(
             scope.launch {
                 runCatching {
                     model.core("ssh.vault.create", buildJsonObject { put("password", password) }).jsonObject.string("recovery")!!
-                }.onSuccess { recoveryWords = it; showingRecovery = true; load() }.onFailure { error = it.message }
-                vaultSetup = false
+                }.onSuccess { recoveryWords = it; showingRecovery = true; load(); vaultSetup = false }.onFailure { error = it.message }
             }
         },
         onUnlock = { password ->
@@ -1117,8 +1116,7 @@ private fun AndroidSSHScreen(
                     model.core("ssh.vault.unlock", buildJsonObject {
                         put("password", password); put("migrate", true)
                     })?.string("recovery")?.let { recoveryWords = it; showingRecovery = true }
-                }.onSuccess { load() }.onFailure { error = it.message }
-                vaultSetup = false
+                }.onSuccess { load(); vaultSetup = false }.onFailure { error = it.message }
             }
         },
         onReset = { code, password ->
@@ -1134,8 +1132,8 @@ private fun AndroidSSHScreen(
                         showingRecovery = true
                     }
                     load()
+                    vaultSetup = false
                 }.onFailure { error = it.message }
-                vaultSetup = false
             }
         },
         onDrop = { vaultSetup = false; confirmDrop = true },
