@@ -1115,7 +1115,7 @@ private fun AndroidSSHScreen(
                 runCatching {
                     model.core("ssh.vault.unlock", buildJsonObject {
                         put("password", password); put("migrate", true)
-                    })?.string("recovery")?.let { recoveryWords = it; showingRecovery = true }
+                    }).jsonObject.string("recovery")?.let { recoveryWords = it; showingRecovery = true }
                 }.onSuccess { load(); vaultSetup = false }.onFailure { error = it.message }
             }
         },
