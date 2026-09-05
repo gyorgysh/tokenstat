@@ -810,7 +810,11 @@ fn events_codex(value: &Value) -> Vec<Event> {
                     .get("exit_code")
                     .and_then(json_i32)
                     .map(|code| code == 0)
-                    .unwrap_or_else(|| !detail.as_deref().is_some_and(|output| codex_rejection(Some(output)).is_some()));
+                    .unwrap_or_else(|| {
+                        !detail
+                            .as_deref()
+                            .is_some_and(|output| codex_rejection(Some(output)).is_some())
+                    });
                 vec![Event::ToolEnd {
                     call_id: item_id(item),
                     ok,
@@ -852,7 +856,9 @@ fn codex_rejection(text: Option<&str>) -> Option<String> {
         return None;
     }
     if let Some((_, reason)) = text.rsplit_once("rejected:") {
-        let reason = reason.trim().trim_matches(|ch| ch == '"' || ch == '}' || ch == ']');
+        let reason = reason
+            .trim()
+            .trim_matches(|ch| ch == '"' || ch == '}' || ch == ']');
         return Some(format!("Codex tool rejected: {reason}"));
     }
     Some("Codex tool execution failed or was rejected.".into())
