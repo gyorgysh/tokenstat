@@ -56,11 +56,22 @@ and notifications wait until you have looked away.
   back into view, instead of collapsing and growing during row placement.
 - Live follow holds the end while a reply streams and keeps pinning through
   late resizes from diffs and images. Opening a long chat still settles on
-  the end.
+  the end. Sending a message locks follow until a scroll of your own leaves;
+  estimate shifts no longer park the transcript behind Jump to latest.
+- Scrolling a long transcript no longer stalls the app to a force-quit. The
+  transcript builds a bounded window of rows with a control to reveal earlier
+  ones, an open diff draws as one text instead of hundreds of rows, and hover
+  stays off mid-fling. Fast scrolls stay responsive on conversations of any
+  size.
 - Tool rows classify shell intent by program name, so quoted commands land
   on the right card and `echo "a > b"` stays Shell. Repo-relative paths
   resolve, multi-file edits name each file, and a cancelled command closes
-  as failed. Muse task starts survive replay order.
+  as failed. Muse task starts survive replay order. Muse todo answers read
+  as "4 todos (revision 2)" instead of raw JSON, and a failed one fails its
+  card.
+- Handing a long conversation to another agent keeps early turns. The inline
+  summary is unchanged; when turns fall out of it, the new agent gets the
+  path to the full history beside it and reads further only when needed.
 - Model lists parse the Codex answer by id, reap a hung list command with
   its process group, keep provider-qualified ids visible, and share one run
   across Refresh taps. Picker Enter stays inside the visible filter and
@@ -77,7 +88,12 @@ and notifications wait until you have looked away.
 - The vault is password-only. No identity-encrypted copy of the key sits on
   the server or on disk, and the app asks for the password again after a
   host restart. Password change and recovery rotation replace the key, both
-  wraps, and every enrollment in one step.
+  wraps, and every enrollment in one step. Recovery rotation needs Supporter
+  or higher, like the rest of vault sync.
+- A remote machine cannot be talked into reaching a third one: forwarding
+  sent over a peer's own connection is refused at the door. Screen and
+  terminal streams re-check permission for as long as they run, so taking
+  access away ends a live stream, and vault rollbacks are refused.
 - Android private keys live in the Android Keystore. Each key is verified
   before its plaintext copy is removed, one bad entry no longer blocks the
   rest, and a wrong vault password leaves the dialog open for another try.

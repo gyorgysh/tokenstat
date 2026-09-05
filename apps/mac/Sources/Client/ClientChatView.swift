@@ -413,6 +413,10 @@ struct ClientChatThread: View {
                     }
                     TranscriptBottomSentinel()
                 }
+                // One gate for the whole stack, not one per row: hit testing
+                // sleeps mid-fling and wakes 0.35s after the last moved frame.
+                // The pill rides outside this stack and never loses taps.
+                .allowsHitTesting(!follow.scrolling)
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.top, Theme.Space.m)
                 .padding(.bottom, Theme.Space.l)

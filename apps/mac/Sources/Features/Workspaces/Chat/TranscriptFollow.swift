@@ -123,10 +123,10 @@ final class TranscriptFollowState {
     /// back to the latest turn with a scroll of one's own, or pressing Follow
     /// again, clears it. Observed (rare transitions only, never per-frame).
     private(set) var paused = false
-    /// The viewport moved recently. Diagnostic only: changing every row's
-    /// hit-testing environment during layout invalidates the hosted text
-    /// selection views while the lazy stack is updating their phases.
-    @ObservationIgnored private(set) var scrolling = false
+    /// The viewport moved recently. Observed, transitions only: the transcript
+    /// redraws twice per gesture (scroll start and 0.35s after it ends), and
+    /// readers use it to shed hit testing and geometry reporting mid-fling.
+    private(set) var scrolling = false
     @ObservationIgnored var pinned = true
     @ObservationIgnored var suppressed = false {
         didSet { if suppressed { set(jump: false) } }

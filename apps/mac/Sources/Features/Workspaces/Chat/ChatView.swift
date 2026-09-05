@@ -264,6 +264,12 @@ struct ChatView: View {
                     }
                     TranscriptBottomSentinel()
                 }
+                // One gate for the whole stack, not one per row: hit testing
+                // sleeps mid-fling so sliding rows under a stationary pointer
+                // fire no hover enter/exit traffic, and wakes 0.35s after the
+                // last moved frame. The pill rides outside this stack and
+                // never loses taps.
+                .allowsHitTesting(!follow.scrolling)
                 .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
                 .padding(.vertical, Theme.Space.xl)
                 .padding(.horizontal, Theme.Space.l)
