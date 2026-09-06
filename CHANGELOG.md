@@ -13,8 +13,9 @@ commits at the end.
 
 ## [Unreleased]
 
-Chat can carry files, Account is split into panes, and the vault can unlock
-with Touch ID or Face ID.
+Chat can carry files, Account is split into panes, the vault can unlock with
+Touch ID or Face ID, and a connected computer shows whether the path is
+direct or relayed.
 
 ### Added
 
@@ -32,6 +33,10 @@ with Touch ID or Face ID.
   This Mac. On the phone: Account, This device, and Legal. Deleting the account
   sits at the end of Account, behind its own rule, rather than among the legal
   documents.
+- Account shows this device's own direct and relayed traffic, counted since
+  tokenstat started, separate from the account relay allowance.
+- Workspaces and the device page show whether this phone reached the computer
+  directly or through the encrypted relay. The screen viewer already did.
 - The phone composer reads as glass, with the conversation moving under it.
   Send appears when there is something to send instead of sitting greyed out,
   and a toggle at the top right grows the box for a longer message.
@@ -41,13 +46,16 @@ with Touch ID or Face ID.
 - Touch ID on the Mac and Face ID or Touch ID on the phone can unlock the
   vault. The password remains the fallback, and a changed biometric set
   forgets the saved one.
-- Relayed file transfers share a monthly allowance with screen: 100 MB on
-  Free, 1 GB on Supporter, 5 GB on Patron, and 20 GB on Legend. A direct
-  connection does not count.
+- Relayed traffic shares one allowance: 100 MB on Free, 1 GB on Supporter,
+  5 GB on Patron, and 20 GB on Legend, covering today and the previous 29
+  UTC days. Direct connections do not count. This is not a daily refill or a
+  calendar-month reset.
 
 ### Fixed
 
 - Downloading one attachment no longer rebuilds every card in the transcript.
+- A downloaded chat file on the phone opens, instead of reporting that the
+  file name is invalid.
 
 ## [0.8.3] - 2026-09-05
 
