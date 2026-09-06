@@ -2012,6 +2012,22 @@ fn direct_is_worth_trying(peer_hex: &str) -> bool {
     !misses.get(peer_hex).is_some_and(DirectMiss::suppresses)
 }
 
+/// Backoff measures failed attempts, not how often callers use the relay.
+fn try_direct_with_backoff<T>(
+    peer_hex: &str,
+    has_candidates: bool,
+    dial: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if !direct_is_worth_trying(peer_hex) {
+        return Err("the direct candidates did not answer recently".into());
+    }
+    let result = dial();
+    if has_candidates && result.is_err() {
+        note_direct_miss(peer_hex);
+    }
+    result
+}
+
 fn note_direct_miss(peer_hex: &str) {
     if let Ok(mut misses) = direct_misses().lock() {
         let strikes = misses
@@ -2166,11 +2182,9 @@ pub(crate) fn dial_peer_for(
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     let peer_hex = tokenstat_identity::hex(&key);
     let candidates = candidates_for_peer(&peer_hex, address.as_deref());
-    let direct = if !direct_is_worth_trying(&peer_hex) {
-        Err("the direct candidates did not answer recently".into())
-    } else {
+    let direct = try_direct_with_backoff(&peer_hex, !candidates.is_empty(), || {
         dial_direct_candidates(&peer_hex, candidates, &identity, key, &label)
-    };
+    });
     match direct {
         Ok((connection, address)) => {
             clear_direct_miss(&peer_hex);
@@ -2179,13 +2193,8 @@ pub(crate) fn dial_peer_for(
             let _ = remember_direct_address(&peer_hex, &address);
             Ok((connection, "direct"))
         }
-        Err(error) => {
-            if !candidates_for_peer(&peer_hex, address.as_deref()).is_empty() {
-                note_direct_miss(&peer_hex);
-            }
-            tunnel_dial(&settings(), key, &identity, &label, purpose, error)
-                .map(|connection| (connection, "relay"))
-        }
+        Err(error) => tunnel_dial(&settings(), key, &identity, &label, purpose, error)
+            .map(|connection| (connection, "relay")),
     }
 }
 
@@ -3172,6 +3181,45 @@ mod tests {
         assert!(
             direct_is_worth_trying(peer),
             "a direct dial that worked forgives the misses before it"
+        );
+    }
+
+    #[test]
+    fn relay_calls_during_direct_backoff_do_not_extend_it() {
+        let peer = "direct-backoff-relay-test";
+        clear_direct_miss(peer);
+        let failed = try_direct_with_backoff::<()>(peer, true, || Err("offline".into()));
+        assert!(failed.is_err());
+        let first = *direct_misses()
+            .lock()
+            .expect("lock")
+            .get(peer)
+            .expect("miss");
+        for _ in 0..20 {
+            let skipped = try_direct_with_backoff::<()>(peer, true, || {
+                panic!("cooldown must skip the direct dial")
+            });
+            assert!(skipped.is_err());
+        }
+        let after = *direct_misses()
+            .lock()
+            .expect("lock")
+            .get(peer)
+            .expect("miss");
+        assert_eq!(after.since_ms, first.since_ms);
+        assert_eq!(after.strikes, first.strikes);
+        direct_misses()
+            .lock()
+            .expect("lock")
+            .get_mut(peer)
+            .expect("miss")
+            .since_ms -= DIRECT_MISS_FLOOR_MS + 1;
+        assert!(try_direct_with_backoff(peer, true, || Ok(())).is_ok());
+        clear_direct_miss(peer);
+        assert!(try_direct_with_backoff::<()>(peer, false, || Err("no address".into())).is_err());
+        assert!(
+            direct_is_worth_trying(peer),
+            "no candidates must not start backoff"
         );
     }
 
