@@ -71,6 +71,68 @@ enum TranscriptFollow {
     }
 }
 
+/// How many rows a transcript ForEach may hold.
+///
+/// `LazyVStack.measureEstimates` walks every item it is given, and measuring
+/// a markdown row is the hang: a debug build spent thirty seconds in that
+/// walk with `ProbeTimedRow.sizeThatFits` on the stack. Growing the list
+/// (the old "show earlier" control added 300 rows per tap) is how a
+/// conversation of any size became a stopped application. The slice stays
+/// this wide. Older built rows are reached by sliding it, not by widening it.
+enum TranscriptSlice {
+    static let length = 150
+    /// How far one "show earlier" tap slides toward the start.
+    static let step = 100
+
+    static func clampOffset(_ offset: Int, count: Int) -> Int {
+        guard count > length else { return 0 }
+        return min(max(0, offset), count - length)
+    }
+
+    /// `olderOffset` is how many newest rows sit below the slice. Zero glues
+    /// it to the end, which is the default and the follow pin.
+    static func range(count: Int, olderOffset: Int) -> Range<Int> {
+        guard count > 0 else { return 0..<0 }
+        guard count > length else { return 0..<count }
+        let end = count - clampOffset(olderOffset, count: count)
+        return (end - length)..<end
+    }
+
+    static func items(_ items: [ChatDisplayItem], olderOffset: Int) -> [ChatDisplayItem] {
+        let span = range(count: items.count, olderOffset: olderOffset)
+        guard !span.isEmpty else { return [] }
+        return Array(items[span])
+    }
+
+    static func hiddenAbove(count: Int, olderOffset: Int) -> Int {
+        range(count: count, olderOffset: olderOffset).lowerBound
+    }
+
+    static func revealingEarlier(count: Int, olderOffset: Int) -> Int {
+        clampOffset(olderOffset + step, count: count)
+    }
+
+    /// Offset that puts `id` in the slice as its last row, so a scroll to
+    /// that row has newer context below it rather than above it.
+    static func revealing(_ id: String, in items: [ChatDisplayItem]) -> Int {
+        guard let at = items.firstIndex(where: { $0.id == id }) else { return 0 }
+        return clampOffset(items.count - at - 1, count: items.count)
+    }
+
+    /// Offset that keeps `id` as the first row of the slice.
+    ///
+    /// The offset is counted from the end, so a turn appending below would
+    /// slide the window forward and a page prepended above would replace
+    /// what is on screen. Pinning the first visible id stops both. If that
+    /// row has left the list, `current` is clamped instead of jumping home.
+    static func holding(_ id: String, in items: [ChatDisplayItem], current: Int) -> Int {
+        guard let at = items.firstIndex(where: { $0.id == id }) else {
+            return clampOffset(current, count: items.count)
+        }
+        return clampOffset(items.count - at - length, count: items.count)
+    }
+}
+
 /// Where a transcript is scrolled to, in the one shape everything that cares
 /// about it reads.
 ///
@@ -128,6 +190,12 @@ final class TranscriptFollowState {
     /// readers use it to shed hit testing and geometry reporting mid-fling.
     private(set) var scrolling = false
     @ObservationIgnored var pinned = true
+    /// The ForEach has dropped the newest rows so the reader can look at
+    /// earlier ones. Geometry at the bottom of that slice is not the
+    /// conversation's end, and pinning it would pin a sentinel under old
+    /// messages. Written on the button that slides the slice, ignored so a
+    /// scroll frame cannot invalidate the transcript.
+    @ObservationIgnored var sliceHidesNewest = false
     @ObservationIgnored var suppressed = false {
         didSet { if suppressed { set(jump: false) } }
     }
@@ -319,6 +387,17 @@ final class TranscriptFollowState {
         // Motion only: growth under a still viewport is a stream arriving,
         // not a gesture, and rows stay interactive while it is followed.
         trackScrolling(moved: moved)
+
+        if sliceHidesNewest {
+            // The bottom of this slice is older messages. Treat it as far
+            // from the end so a follow pin cannot fire under them.
+            atEnd = false
+            lastContentHeight = metrics.contentHeight
+            lastOffset = metrics.distanceFromTop
+            lastDistanceFromBottom = metrics.distanceFromBottom
+            if pinned { stopFollowing() }
+            return
+        }
 
         if settling {
             // Moving away from the end, on a frame where nothing grew, is a

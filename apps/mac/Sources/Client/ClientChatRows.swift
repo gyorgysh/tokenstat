@@ -314,13 +314,12 @@ private struct ClientChatEditRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .truncationMode(.middle)
-                Text("+\(added)")
-                    .font(ClientType.diffFigure)
-                    .foregroundStyle(Theme.diffAdded)
-                Text("−\(removed)")
-                    .font(ClientType.diffFigure)
-                    .foregroundStyle(Theme.diffRemoved)
-                Spacer(minLength: 0)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                DiffStat(
+                    added: Int(added),
+                    removed: Int(removed),
+                    font: ClientType.diffFigure
+                )
                 if !patch.isEmpty {
                     Button(expanded ? "Hide edit" : "Show edit", .preview) {
                         if expanded {
@@ -334,6 +333,7 @@ private struct ClientChatEditRow: View {
                     }
                     .clientGlassStyle()
                     .controlSize(.small)
+                    .fixedSize()
                 }
             }
             if expanded, let shownText {

@@ -2108,6 +2108,7 @@ struct RootView: View {
         HStack(spacing: Theme.Space.s) {
             Avatar(
                 url: account.account?.avatar,
+                name: account.account?.title,
                 handle: account.account?.handle,
                 size: Self.accountAvatarSize
             )

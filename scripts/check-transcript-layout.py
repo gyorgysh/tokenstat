@@ -12,6 +12,7 @@ source = (root / "apps/mac/Sources/Features/Workspaces/Chat/TranscriptFollow.swi
 metrics = source[source.index("struct TranscriptMetrics:"):source.index("@available(macOS 15.0")]
 follow = source[source.index("@Observable\nfinal class TranscriptFollowState"):source.index("struct ChatScrollContentKey:")]
 delivery = source[source.index("final class TranscriptScrollDelivery"):source.index("/// Report where the transcript is scrolled,")]
+slice = source[source.index("enum TranscriptSlice"):source.index("struct TranscriptMetrics:")]
 tests = r'''
 func metrics(_ top: CGFloat, _ height: CGFloat = 1000) -> TranscriptMetrics {
     TranscriptMetrics(distanceFromTop: top, distanceFromBottom: height - top - 400,
@@ -82,9 +83,35 @@ let estimate = TranscriptFollowState()
 estimate.note(metrics(600))
 estimate.note(metrics(500, 1100))
 assert(estimate.pinned, "a single lazy-height correction must not release follow")
-print("PASS: deferred/coalesced corrections, no re-entry, cancellation, wheel gestures, growth, departure, pause, estimate resizing")
+
+let hidden = TranscriptFollowState()
+hidden.note(metrics(600))
+hidden.sliceHidesNewest = true
+hidden.note(metrics(0, 400))
+assert(!hidden.pinned && hidden.showJump, "a slice that hid the newest rows is not the end")
+
+assert(TranscriptSlice.range(count: 10, olderOffset: 0) == 0..<10, "short lists are the whole list")
+assert(TranscriptSlice.range(count: 200, olderOffset: 0) == 50..<200, "glued to the end is a suffix")
+assert(TranscriptSlice.range(count: 200, olderOffset: 50) == 0..<150, "full slide reaches the start")
+assert(TranscriptSlice.hiddenAbove(count: 200, olderOffset: 0) == 50, "suffix hides the prefix")
+assert(TranscriptSlice.revealingEarlier(count: 200, olderOffset: 0) == 50, "one tap cannot overshoot")
+assert(TranscriptSlice.clampOffset(999, count: 200) == 50, "offset cannot exceed the slice")
+let ids = (0..<200).map { ChatDisplayItem(id: "\($0)") }
+assert(TranscriptSlice.holding("0", in: ids, current: 50) == 50, "holding the first visible row keeps the start")
+let grown = (0..<210).map { ChatDisplayItem(id: "\($0)") }
+assert(TranscriptSlice.holding("0", in: grown, current: 50) == 60, "a turn below must not slide the window")
+let earlier = (0..<100).map { ChatDisplayItem(id: "p\($0)") } + ids
+assert(TranscriptSlice.holding("0", in: earlier, current: 50) == 50, "a page above must not replace the window")
+assert(TranscriptSlice.range(count: 300, olderOffset: 50) == 100..<250, "held offset after a prepend is the original rows")
+assert(TranscriptSlice.holding("missing", in: ids, current: 50) == 50, "a gone row keeps the last offset")
+print("PASS: deferred/coalesced corrections, no re-entry, cancellation, wheel gestures, growth, departure, pause, estimate resizing, hidden slice, bounded window")
 '''
 with tempfile.TemporaryDirectory(prefix="tokenstat-layout-test-") as directory:
     path = Path(directory) / "main.swift"
-    path.write_text("import Foundation\nimport Observation\nenum TranscriptFollow { static let threshold: CGFloat = 56 }\n" + metrics + delivery + follow + tests)
+    path.write_text(
+        "import Foundation\nimport Observation\n"
+        "enum TranscriptFollow { static let threshold: CGFloat = 56 }\n"
+        "struct ChatDisplayItem: Identifiable { let id: String }\n"
+        + slice + metrics + delivery + follow + tests
+    )
     subprocess.run(["swift", str(path)], check=True)

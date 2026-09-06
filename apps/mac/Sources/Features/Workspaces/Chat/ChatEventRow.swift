@@ -32,6 +32,18 @@ struct ChatEventRow: View {
     @State private var hovering = false
     #endif
 
+    /// AppKit's SelectionOverlay is an NSTextField per chain. Lazy-stack
+    /// estimate walks measure every row, and a hang report sat in
+    /// `setAttributedStringValue` for those overlays. Pointer-gated on Mac
+    /// so only the row under the cursor pays for them. Copy buttons stay.
+    private var allowsSelection: Bool {
+        #if os(macOS)
+        !isLive && hovering
+        #else
+        !isLive
+        #endif
+    }
+
     var body: some View {
         switch item.kind {
         case let .user(text):
@@ -39,14 +51,14 @@ struct ChatEventRow: View {
             HStack(spacing: Theme.Space.s) {
                 Spacer(minLength: 48)
                 RowCopyButton(text: text, help: "Copy prompt", visible: hovering)
-                userBubble(text)
+                userBubble(text, selectable: allowsSelection)
             }
             .contentShape(.rect)
             .onHover { hovering = $0 }
             #else
             HStack(spacing: Theme.Space.s) {
                 Spacer(minLength: 48)
-                userBubble(text)
+                userBubble(text, selectable: allowsSelection)
             }
             #endif
         case let .assistant(text, backend):
@@ -68,7 +80,12 @@ struct ChatEventRow: View {
                     RowCopyButton(text: text, help: "Copy response")
                 }
                 #endif
-                MessageMarkdown(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode, selectable: !isLive)
+                MessageMarkdown(
+                    text,
+                    bodyFont: Theme.chatBody,
+                    codeFont: Theme.chatCode,
+                    selectable: allowsSelection
+                )
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -111,12 +128,11 @@ struct ChatEventRow: View {
                     bodyFont: Theme.subheadline,
                     codeFont: Theme.monoText(11, relativeTo: .subheadline),
                     style: .aside,
-                    selectable: !isLive,
+                    selectable: allowsSelection,
                     cacheScope: "thinking"
                 )
             }
             .foregroundStyle(.secondary)
-            .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
             #if os(macOS)
@@ -171,26 +187,44 @@ struct ChatEventRow: View {
                 Text(text)
                     .font(Theme.callout)
                     .foregroundStyle(Theme.danger)
-                    .textSelection(.enabled)
+                    .modifier(SelectableWhen(allowsSelection))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contextMenu {
                         Button("Copy") { ChatClipboard.copy(text) }
                     }
             }
+            #if os(macOS)
+            .contentShape(.rect)
+            .onHover { hovering = $0 }
+            #endif
         }
     }
 }
 
 /// The user turn bubble, shared by the hover and plain layouts above.
-private func userBubble(_ text: String) -> some View {
+private func userBubble(_ text: String, selectable: Bool) -> some View {
     Text(text)
         .font(Theme.chatBody)
-        .textSelection(.enabled)
+        .modifier(SelectableWhen(selectable))
         .padding(Theme.Space.m)
         .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contextMenu {
             Button("Copy") { ChatClipboard.copy(text) }
         }
+}
+
+/// `.textSelection(.enabled)` only when the row is meant to pay for an overlay.
+private struct SelectableWhen: ViewModifier {
+    var enabled: Bool
+    init(_ enabled: Bool) { self.enabled = enabled }
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.textSelection(.enabled)
+        } else {
+            content
+        }
+    }
 }
 
 /// One measured text instead of a row per line.
@@ -475,19 +509,19 @@ private struct ChatEditRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .truncationMode(.middle)
-                Text("+\(added)")
-                    .font(Theme.mono(11, weight: .medium))
-                    .foregroundStyle(Theme.diffAdded)
-                Text("−\(removed)")
-                    .font(Theme.mono(11, weight: .medium))
-                    .foregroundStyle(Theme.diffRemoved)
-                Spacer(minLength: 0)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                DiffStat(
+                    added: Int(added),
+                    removed: Int(removed),
+                    font: Theme.mono(11, weight: .medium)
+                )
                 if !patch.isEmpty {
                     Button(expanded ? "Hide edit" : "Show edit", .preview) {
                         if shown == nil { parse() }
                         expanded.toggle()
                     }
                     .buttonStyle(AccentButtonStyle(small: true))
+                    .fixedSize()
                 }
             }
             if expanded, let shown, let shownText {

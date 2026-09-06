@@ -301,6 +301,7 @@ struct HomeView: View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             Avatar(
                 url: account.account?.avatar,
+                name: account.account?.title,
                 handle: account.account?.handle,
                 size: 52
             )

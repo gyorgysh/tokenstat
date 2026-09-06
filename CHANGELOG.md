@@ -11,7 +11,7 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
-## [0.9.0] - 2026-09-06
+## [0.9.0] - 2026-09-07
 
 Chat can carry files, Account splits into panes, the vault unlocks with Touch
 ID or Face ID, and a connected computer shows which path it took, direct or
@@ -83,6 +83,18 @@ relayed.
   screen. It stays circular. The chat composer on those versions packed agent,
   pills and send against the trailing edge with a gap after attach, and keeps
   those controls next to attach.
+- A long conversation keeps a fixed window of rows and slides it to
+  earlier turns, instead of growing the stack until layout stalls. On a
+  Mac, a message is selectable once the pointer is on it.
+- Edit and tool rows keep +/− on the right, next to the time and the
+  button. A short path used to leave the counts after the name, and a long
+  one shoved them against the button.
+- Last sync on Account sits with its time and Sync now on one row, at
+  the same size as the rest of the card. It used to be a large title
+  stretched across the panel.
+- An account with no photo shows initials from the name, the same filled
+  bubble the phone already draws. The picture still shows when one is
+  uploaded.
 
 ## [0.8.3] - 2026-09-05
 

@@ -215,7 +215,7 @@ private struct ClientAccountContent: View {
     private func identity(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: .center, spacing: Theme.Space.m) {
-                Avatar(url: account.avatar, handle: account.handle, size: 72)
+                Avatar(url: account.avatar, name: account.title, handle: account.handle, size: 72)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: Theme.Space.s) {
                         Text(account.title ?? "Signed in")
@@ -368,12 +368,16 @@ private struct ClientAccountContent: View {
     }
 
     private func lastSync(_ account: Account) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
             ClientSectionTitle(title: "Last sync", mark: "mark_sync")
-            Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
-                .font(ClientType.figureSmall)
-                .foregroundStyle(Theme.accent)
-            Text("From any device on this account. This phone reads that data; it does not upload an archive of its own.")
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                Text("From any device")
+                    .foregroundStyle(.secondary)
+                Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
+                    .monospacedDigit()
+            }
+            .font(ClientType.label)
+            Text("This phone reads that data. It does not upload an archive of its own.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

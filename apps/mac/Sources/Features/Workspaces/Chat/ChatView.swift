@@ -41,12 +41,17 @@ struct ChatView: View {
     /// geometry readers exist for the stretch that can need an anchor and
     /// nowhere else.
     @State private var measuringRows = false
-    /// How many of the conversation's rows the transcript builds. The stack
-    /// is lazy, but every transaction still places what it holds, and a
-    /// window grown by paging back makes one pass cost seconds on any
-    /// conversation size the reader can reach. The tail is always built;
-    /// older rows arrive through the button below. Reset on every open.
-    @State private var renderCap = Self.renderWindow
+    /// How many newest rows sit below the built slice. Zero glues the
+    /// ForEach to the end. Raised when the reader asks for older built
+    /// rows, reset when they jump back. The stack is lazy, but every
+    /// transaction still measures what it holds, so the slice stays a
+    /// fixed width rather than growing.
+    @State private var olderOffset = 0
+    /// First row of the built slice, when it is not glued to the end.
+    /// `olderOffset` is counted from the newest row, so a turn arriving
+    /// below or a page landing above would otherwise replace what is on
+    /// screen. This id is what keeps those rows still.
+    @State private var sliceAnchor: String?
     @State private var paneDropTargeted = false
     @State private var composerDropTargeted = false
     @State private var dropNotice: String?
@@ -222,7 +227,7 @@ struct ChatView: View {
                     }
                     if hiddenAboveCount > 0 {
                         Button("Show \(hiddenAboveCount) earlier messages", .history) {
-                            renderCap += Self.renderPage
+                            revealEarlier()
                         }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -249,9 +254,6 @@ struct ChatView: View {
                             isLive: model.busy && item.id == model.displayItems.last?.id
                         )
                         .equatable()
-                        #if DEBUG
-                        .probeRow(item.probeKind)
-                        #endif
                         .frame(
                             maxWidth: item.prefersWideReadingRoom
                                 ? .infinity
@@ -266,10 +268,12 @@ struct ChatView: View {
                         // `scrolling`, before any paging decision needs them.
                         .transcriptRowFrame(item.id, watched: model.hasEarlier && measuringRows && !follow.scrolling)
                     }
-                    if let mood = liveMood {
-                        ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
+                    if sliceOffset == 0 {
+                        if let mood = liveMood {
+                            ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
+                        }
+                        TranscriptBottomSentinel()
                     }
-                    TranscriptBottomSentinel()
                 }
                 // One gate for the whole stack, not one per row: hit testing
                 // sleeps mid-fling so sliding rows under a stationary pointer
@@ -300,12 +304,14 @@ struct ChatView: View {
                 TranscriptProbe.shared.noteMetrics()
                 TranscriptProbe.shared.pinned = follow.pinned
                 TranscriptProbe.shared.scrolling = follow.scrolling
+                TranscriptProbe.shared.built = visibleItems.count
                 #endif
+                // The slice flag first: note() treats a hidden newest as
+                // far from the end. Then the pin, then the window, which
+                // has to see that decision on the same frame.
+                follow.sliceHidesNewest = sliceOffset > 0
                 follow.note(metrics)
-                // Order matters: the pin is decided from this frame, and the
-                // window has to see that decision before it acts on the same
-                // frame.
-                window.followingEnd = follow.pinned || follow.settling
+                window.followingEnd = (follow.pinned || follow.settling) && sliceOffset == 0
                 window.note(metrics)
             }
             .overlay(alignment: .bottom) {
@@ -315,6 +321,7 @@ struct ChatView: View {
                         busy: model.busy,
                         paused: follow.paused,
                         resume: {
+                            showNewest()
                             follow.jump()
                             Task { await returnToLatest(proxy) }
                         },
@@ -357,13 +364,18 @@ struct ChatView: View {
                 scrollTo(target, proxy, animated: true)
                 scrollTarget = nil
             }
+            .onChange(of: model.displayItems.count, initial: true) { _, _ in
+                follow.sliceHidesNewest = sliceOffset > 0
+                #if DEBUG
+                TranscriptProbe.shared.rows = model.displayItems.count
+                TranscriptProbe.shared.built = visibleItems.count
+                #endif
+            }
             #if DEBUG
             .onAppear {
                 TranscriptProbe.shared.install()
                 TranscriptProbe.shared.rows = model.displayItems.count
-            }
-            .onChange(of: model.displayItems.count, initial: true) { _, count in
-                TranscriptProbe.shared.rows = count
+                TranscriptProbe.shared.built = visibleItems.count
             }
             #endif
             .onAppear {
@@ -384,7 +396,7 @@ struct ChatView: View {
                 // destinations, and scrolling a zero-size proxy to estimated
                 // heights is how it came back painted off-origin.
                 guard isActive else { return }
-                renderCap = Self.renderWindow
+                showNewest()
                 follow.settle(true)
                 defer { follow.settle(false) }
                 // Hold the end until the conversation has stopped arriving,
@@ -433,30 +445,64 @@ struct ChatView: View {
     /// open costs.
     private static let settleFrames = 40
 
-    /// Rows the transcript builds this pass: the newest `renderCap`, so one
-    /// pass never places more no matter how far back the window has grown.
-    /// Appends below the viewport shift nothing on screen; earlier pages
-    /// arrive through the paging path, older built rows through the button
-    /// above the list.
+    /// Rows the transcript builds this pass. A fixed-width slice, never a
+    /// growing suffix: appending below the viewport shifts nothing, earlier
+    /// pages arrive through the paging path, older built rows by sliding.
     private var visibleItems: [ChatDisplayItem] {
-        let items = model.displayItems
-        guard items.count > renderCap else { return items }
-        return Array(items.suffix(renderCap))
+        TranscriptSlice.items(model.displayItems, olderOffset: sliceOffset)
     }
 
-    /// Rows above the built window. Zero while the whole conversation fits.
+    /// Rows above the built slice. Zero while the whole conversation fits.
     private var hiddenAboveCount: Int {
-        max(0, model.displayItems.count - visibleItems.count)
+        TranscriptSlice.hiddenAbove(count: model.displayItems.count, olderOffset: sliceOffset)
+    }
+
+    /// `olderOffset` counted from the live end, or the offset that still
+    /// starts on `sliceAnchor` after rows arrived above or below.
+    private var sliceOffset: Int {
+        if olderOffset > 0, let anchor = sliceAnchor {
+            return TranscriptSlice.holding(anchor, in: model.displayItems, current: olderOffset)
+        }
+        return TranscriptSlice.clampOffset(olderOffset, count: model.displayItems.count)
+    }
+
+    private func showNewest() {
+        applySlice(0)
+    }
+
+    private func revealEarlier() {
+        follow.stopFollowing()
+        applySlice(
+            TranscriptSlice.revealingEarlier(
+                count: model.displayItems.count, olderOffset: sliceOffset
+            )
+        )
+    }
+
+    /// Slide the built window and remember its first row so later inserts
+    /// cannot replace what is on screen.
+    private func applySlice(_ offset: Int) {
+        let clamped = TranscriptSlice.clampOffset(offset, count: model.displayItems.count)
+        olderOffset = clamped
+        if clamped > 0 {
+            sliceAnchor = TranscriptSlice.items(
+                model.displayItems, olderOffset: clamped
+            ).first?.id
+            follow.sliceHidesNewest = true
+        } else {
+            sliceAnchor = nil
+            follow.sliceHidesNewest = false
+        }
     }
 
 
     /// Come back to the latest turn, by the cheapest route that works.
     ///
-    /// On a window grown by paging back, scrolling there means the lazy stack
-    /// resolving every row in between, several times over as the press is
-    /// made to land. Reopening on the newest page is one bounded read and
-    /// leaves the transcript small enough that the scroll is instant.
+    /// The ForEach is a bounded slice, so scrolling it is cheap. Reopening
+    /// still drops a host window grown by paging back, which is the memory
+    /// and the event list, not the walk.
     private func returnToLatest(_ proxy: ScrollViewProxy) async {
+        showNewest()
         if model.displayItems.count > TranscriptWindow.reopenAbove {
             await model.reopenAtLatest()
         }
@@ -483,13 +529,6 @@ struct ChatView: View {
     /// How many frames one press of Jump to latest may spend arriving.
     private static let chaseFrames = 24
 
-    /// Rows built per pass. Above `reopenAbove` a jump reopens instead of
-    /// scrolling; this is the smaller bound that keeps every ordinary pass
-    /// far below it.
-    private static let renderWindow = 150
-    /// Rows revealed per tap of the window button below.
-    private static let renderPage = 300
-
     /// Let the scroll callback put the viewport back on the end.
     ///
     /// Weak, because the state owns the closure and the closure would
@@ -499,10 +538,8 @@ struct ChatView: View {
         let state = follow
         let model = model
         state.repin = { [weak state] in
-            guard let state, state.active, state.pinned, model.approvals.isEmpty else { return false }
-            // Same ceiling as `canScrollToEnd`, read here rather than through
-            // the view so the closure does not hold it.
-            guard model.displayItems.count <= TranscriptWindow.reopenAbove else { return false }
+            guard let state, state.active, state.pinned, !state.sliceHidesNewest,
+                  model.approvals.isEmpty else { return false }
             state.markDrivenInstant()
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
             return true
@@ -561,18 +598,12 @@ struct ChatView: View {
         }
     }
 
-    /// Whether a scroll to the end is affordable right now.
+    /// Whether a scroll to the end is the actual latest turn.
     ///
-    /// `scrollTo` on a lazy stack resolves an estimate for every row between
-    /// here and the target, and resolving one means building it and measuring
-    /// its markdown. On a window grown by paging back that is seconds per
-    /// attempt with the main thread stopped, and the repin budget spends six
-    /// of them: the thirty-six second hang was six walks over a few thousand
-    /// rows. Past this size the way back is Jump to latest, which reopens on
-    /// the newest page first and leaves the walk bounded.
-    private var canScrollToEnd: Bool {
-        model.displayItems.count <= TranscriptWindow.reopenAbove
-    }
+    /// The ForEach is a bounded slice, so walking it is cheap. A slice that
+    /// has dropped the newest rows is not the end, and pinning it would pin
+    /// a sentinel under old messages.
+    private var canScrollToEnd: Bool { sliceOffset == 0 }
 
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
         // A pending request owns the view. Streaming text must not scroll it
@@ -581,9 +612,6 @@ struct ChatView: View {
         // other destinations, and scrolling its zero-size proxy is what left
         // it painted off-origin until a resize.
         guard isActive, follow.pinned, model.approvals.isEmpty else { return }
-        // The same walk the repin refuses, and for the same reason. A pin
-        // that cannot be afforded is not deferred, it is given up: the pill
-        // takes the reader back through a reopen instead.
         guard canScrollToEnd else {
             follow.stopFollowing()
             return
@@ -603,14 +631,12 @@ struct ChatView: View {
         // the long one is what locked out slow scrollback during streams.
         // Hidden panes do not scroll at all (see pinToLatest).
         guard isActive else { return }
-        // The end always exists. Anything else may sit above the built
-        // window: reveal up to it first, or the scroll lands nowhere.
-        if id != TranscriptFollow.bottomID,
-           let at = model.displayItems.firstIndex(where: { $0.id == id })
-        {
-            while model.displayItems.count - renderCap > at {
-                renderCap += Self.renderPage
-            }
+        // The end always exists. Anything else may sit outside the built
+        // slice: slide to it first, or the scroll lands nowhere.
+        if id != TranscriptFollow.bottomID {
+            applySlice(TranscriptSlice.revealing(id, in: model.displayItems))
+        } else {
+            showNewest()
         }
         let animate = animated && !reduceMotion
         #if DEBUG
@@ -642,6 +668,7 @@ struct ChatView: View {
         // Sending is engaging: follow is the default, so a new turn resumes
         // it even if it was paused before. Pausing again is one tap. The
         // pulse scrolls now; the token pins take over as content arrives.
+        showNewest()
         follow.jump()
         followPulse += 1
         Task { await model.send(text) }

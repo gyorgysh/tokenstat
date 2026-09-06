@@ -107,30 +107,30 @@ struct ToolRow: View {
                 Text(verb)
                     .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(tint)
+                    .fixedSize()
                 if !arg.isEmpty {
                     Text(arg)
                         .font(Theme.mono(11))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .truncationMode(.middle)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
                 if hasDiff, !running {
-                    Text("+\(diffAdded)")
-                        .font(Self.diffFigure)
-                        .foregroundStyle(Theme.diffAdded)
-                    Text("−\(diffRemoved)")
-                        .font(Self.diffFigure)
-                        .foregroundStyle(Theme.diffRemoved)
+                    DiffStat(added: diffAdded, removed: diffRemoved, font: Self.diffFigure)
                 }
                 if running {
                     Text("Running")
                         .font(Theme.mono(10))
                         .foregroundStyle(Theme.accent)
+                        .fixedSize()
                 } else if let time, !time.isEmpty {
                     Text(time)
                         .font(Theme.mono(10))
                         .foregroundStyle(.tertiary)
+                        .fixedSize()
                 }
                 if !snippet.isEmpty && !running {
                     Button(showSnippet ? hideLabel : showLabel, .preview) {
@@ -138,6 +138,7 @@ struct ToolRow: View {
                         showSnippet.toggle()
                     }
                     .buttonStyle(AccentButtonStyle(small: true))
+                    .fixedSize()
                 }
             }
             // Collapsed but with something to show: a shell command's first
@@ -223,5 +224,29 @@ struct ToolRow: View {
         if Self.isDiffLine(line, added: true) { return Theme.diffAdded }
         if Self.isDiffLine(line, added: false) { return Theme.diffRemoved }
         return .secondary
+    }
+}
+
+/// +/− counts for an edit, as one trailing cluster.
+///
+/// A path of varying width used to sit them after the name, so a short
+/// target left them mid-row and a long one shoved them against the
+/// button. `fixedSize` keeps the pair off the path's leftover space.
+struct DiffStat: View {
+    var added: Int
+    var removed: Int
+    var font: Font
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("+\(added)")
+                .foregroundStyle(Theme.diffAdded)
+            Text("−\(removed)")
+                .foregroundStyle(Theme.diffRemoved)
+        }
+        .font(font)
+        .monospacedDigit()
+        .fixedSize()
+        .accessibilityLabel("\(added) added, \(removed) removed")
     }
 }

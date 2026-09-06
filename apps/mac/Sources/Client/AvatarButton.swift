@@ -105,15 +105,12 @@ struct AvatarButton: View {
 
     private var name: String { account.account?.title ?? "your account" }
 
-    /// One letter, uppercased, from the display name or the handle. A name that
-    /// begins with an emoji or a non-Latin script keeps its own first
-    /// character, which is the right monogram for that person and not a
-    /// question mark.
+    /// Initials from the display name, then the handle. Same function the
+    /// website and the Mac `Avatar` use.
     private var monogram: String {
-        guard let first = account.account?.title?.trimmingCharacters(in: .whitespaces).first else {
-            return "t"
-        }
-        return String(first).uppercased()
+        Avatar.initials(from: account.account?.title)
+            ?? Avatar.initials(from: account.account?.handle)
+            ?? "t"
     }
 }
 

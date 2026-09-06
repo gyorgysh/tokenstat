@@ -91,13 +91,22 @@ final class AvatarCache {
     }
 
     func image(for url: String) async -> Image? {
+        let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { return nil }
         if let hit = decoded[url] { return hit }
         if let running = pending[url] { return await running.value }
 
         let task = Task<Image?, Never> {
             guard let parsed = URL(string: url),
-                  let (data, _) = try? await URLSession.shared.data(from: parsed)
+                  let (data, response) = try? await URLSession.shared.data(from: parsed)
             else {
+                return nil
+            }
+            // A 404 body is not a picture. Treating any bytes as an image is
+            // how a missing upload became a random face.
+            if let http = response as? HTTPURLResponse,
+               !(200..<300).contains(http.statusCode)
+            {
                 return nil
             }
             #if os(macOS)
@@ -114,7 +123,11 @@ final class AvatarCache {
     }
 }
 
-/// The account's profile picture, or a letter tile until it loads.
+/// The account's profile picture, or initials when there is none.
+///
+/// Same rule as the website and the phone toolbar. A real upload is the
+/// picture. A missing one is letters from the display name, first letter
+/// of the first two words, on a filled bubble.
 ///
 /// **Not `AsyncImage`.** That view reports the *remote pixel size* as its own
 /// ideal size, so any parent that asks a child what it would like rather than
@@ -130,11 +143,15 @@ final class AvatarCache {
 /// fixed where it happened, in `RootView.accountRow`.
 struct Avatar: View {
     var url: String?
+    /// The name the person is shown as. Initials come from this first, then
+    /// `handle`, matching the website's `initials()`.
+    var name: String? = nil
     var handle: String?
     var size: CGFloat = 22
-    /// Colour of the letter tile. Left at the app's accent for the account's
-    /// own picture; a per-person colour where several people appear in one
-    /// list, so a row is recognisable before the name is read.
+    /// Colour of the bubble when this is not the signed-in account. Left at
+    /// the app's accent for our own picture. A per-person colour where
+    /// several people appear in one list, so a row is recognisable before
+    /// the name is read.
     var tint: Color = Theme.accent
 
     /// Seeded from the cache so a picture already fetched paints on the first
@@ -158,18 +175,37 @@ struct Avatar: View {
         return Array(palette)[Int(hash % UInt64(palette.count))]
     }
 
+    /// One or two letters, uppercased, from a display name or a handle.
+    ///
+    /// First letter of the first two words, the same function the website
+    /// uses. A name that begins with an emoji or a non-Latin script keeps
+    /// its own first character.
+    static func initials(from name: String?) -> String? {
+        let parts = (name ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isWhitespace)
+            .filter { !$0.isEmpty }
+        guard let first = parts.first, let ch = first.first else { return nil }
+        var letters = String(ch)
+        if parts.count > 1, let second = parts[1].first {
+            letters.append(second)
+        }
+        return letters.uppercased()
+    }
+
     var body: some View {
         Color.clear
             .frame(width: size, height: size)
             .overlay {
                 ZStack {
-                    Circle().fill(tint.opacity(0.18))
+                    bubble
+                    // Under the photo, so a slow or failed load still shows
+                    // the letters rather than a hole.
+                    letter
                     if let image {
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        letter
+                            .scaledToFill()
                     }
                 }
             }
@@ -177,8 +213,8 @@ struct Avatar: View {
             .contentShape(Circle())
             // Refuse growth when a parent (Menu label) offers more space.
             .fixedSize()
-            .task(id: url) {
-                guard let url else {
+            .task(id: pictureURL) {
+                guard let url = pictureURL else {
                     image = nil
                     return
                 }
@@ -193,17 +229,47 @@ struct Avatar: View {
             }
     }
 
+    /// Only a real upload URL is fetched. Empty and blank are "no picture".
+    private var pictureURL: String? {
+        guard let raw = url?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty
+        else { return nil }
+        return raw
+    }
+
+    private var bubble: some View {
+        Circle().fill(
+            LinearGradient(
+                colors: brandGradient
+                    ? [Theme.accent, Theme.secondary]
+                    : [tint, tint.opacity(0.72)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+    }
+
+    /// The signed-in account uses the same two-stop fill as the phone's
+    /// toolbar bubble. A per-person tint stays that person's colour.
+    private var brandGradient: Bool { tint == Theme.accent }
+
+    private var monogram: String {
+        Self.initials(from: name) ?? Self.initials(from: handle) ?? ""
+    }
+
+    @ViewBuilder
     private var letter: some View {
-        Group {
-            if let initial = handle?.first {
-                Text(String(initial).uppercased())
-                    .font(Theme.fixed(size * 0.5, weight: .semibold))
-                    .foregroundStyle(tint)
-            } else {
-                Image(systemName: "person.fill")
-                    .font(Theme.fixed(size * 0.45))
-                    .foregroundStyle(.secondary)
-            }
+        if monogram.isEmpty {
+            Image(systemName: "person.fill")
+                .font(Theme.fixed(size * 0.44, weight: .medium))
+                .foregroundStyle(.white)
+        } else {
+            Text(monogram)
+                .font(Theme.fixed(
+                    size * (monogram.count > 1 ? 0.34 : 0.42),
+                    weight: .semibold
+                ))
+                .foregroundStyle(.white)
         }
     }
 }
@@ -222,7 +288,7 @@ struct AuthorHoverCard: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: Theme.Space.s) {
-            Avatar(url: url, handle: name, size: 36, tint: tint)
+            Avatar(url: url, name: name, handle: name, size: 36, tint: tint)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
                     .font(Theme.font(13, weight: .semibold))

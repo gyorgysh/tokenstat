@@ -261,7 +261,7 @@ struct AccountView: View {
     /// first.
     private func identity(_ account: Account) -> some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
-            Avatar(url: account.avatar, handle: account.handle, size: 64)
+            Avatar(url: account.avatar, name: account.title, handle: account.handle, size: 64)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Theme.Space.s) {
@@ -314,35 +314,20 @@ struct AccountView: View {
             mark: "mark_sync"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                HStack(alignment: .center, spacing: Theme.Space.l) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("LAST SYNC")
-                            .font(Theme.sectionHeader)
-                            .foregroundStyle(.tertiary)
-                        // Relative, with the exact time on hover. "12 minutes ago"
-                        // is the answer to the question; a date and a clock time
-                        // makes you work it out.
+                HStack(alignment: .center, spacing: Theme.Space.m) {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                        Text("Last sync")
+                            .foregroundStyle(.secondary)
                         Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
-                            .font(Theme.font(17, weight: .medium))
-                            .help(formatServerDate(account.lastSyncAt) ?? "This account has never synced")
+                            .monospacedDigit()
                     }
-
-                    Spacer()
+                    .font(Theme.callout)
+                    .help(formatServerDate(account.lastSyncAt) ?? "This account has never synced")
 
                     #if os(macOS)
-                    Button {
+                    Button(model.isSyncing ? "Syncing…" : "Sync now", .refresh) {
                         Task { await model.sync() }
-                    } label: {
-                        if model.isSyncing {
-                            HStack(spacing: Theme.Space.xs) {
-                                ProgressView().controlSize(.small)
-                                Text("Syncing…")
-                            }
-                        } else {
-                            ActionIcon.refresh.label("Sync now")
-                        }
                     }
-                    .buttonStyle(.borderedProminent)
                     .disabled(model.isSyncing || model.syncCooldownUntil != nil)
                     #endif
                 }

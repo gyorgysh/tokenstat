@@ -269,19 +269,20 @@ private struct MarkdownBlockView: View {
     let bodyFont: Font
     let codeFont: Font
     var style: MarkdownStyle = .document
+    var selectable: Bool = true
 
     @ViewBuilder
     var body: some View {
         switch block.kind {
         case let .heading(level, text):
-            InlineMarkdown(text, font: headingFont(level))
+            InlineMarkdown(text, font: headingFont(level), selectable: selectable)
                 .padding(.top, level <= 2 ? Theme.Space.xs : 0)
         case let .paragraph(text):
-            InlineMarkdown(text, font: bodyFont)
+            InlineMarkdown(text, font: bodyFont, selectable: selectable)
         case let .list(items):
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    MarkdownListRow(item: item, bodyFont: bodyFont)
+                    MarkdownListRow(item: item, bodyFont: bodyFont, selectable: selectable)
                 }
             }
         case let .quote(text):
@@ -295,7 +296,7 @@ private struct MarkdownBlockView: View {
                         )
                     )
                     .frame(width: 3)
-                InlineMarkdown(text, font: bodyFont)
+                InlineMarkdown(text, font: bodyFont, selectable: selectable)
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, Theme.Space.xs)
@@ -303,7 +304,10 @@ private struct MarkdownBlockView: View {
             .background(Theme.accentSoft.opacity(0.62))
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius - 4, style: .continuous))
         case let .code(language, text, key, widest):
-            MarkdownCodeBlock(language: language, source: text, key: key, widest: widest, font: codeFont, style: style)
+            MarkdownCodeBlock(
+                language: language, source: text, key: key, widest: widest,
+                font: codeFont, style: style, selectable: selectable
+            )
         case .rule:
             Capsule(style: .continuous)
                 .fill(
@@ -316,7 +320,7 @@ private struct MarkdownBlockView: View {
                 .frame(height: 1)
                 .padding(.vertical, Theme.Space.xs)
         case let .table(header, rows):
-            MarkdownTable(header: header, rows: rows, bodyFont: bodyFont)
+            MarkdownTable(header: header, rows: rows, bodyFont: bodyFont, selectable: selectable)
         }
     }
 
@@ -338,12 +342,13 @@ private struct MarkdownBlockView: View {
 private struct MarkdownListRow: View {
     let item: MarkdownListItem
     let bodyFont: Font
+    var selectable: Bool = true
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             marker
                 .frame(width: 20, alignment: .trailing)
-            InlineMarkdown(item.text, font: bodyFont)
+            InlineMarkdown(item.text, font: bodyFont, selectable: selectable)
         }
         .padding(.leading, CGFloat(item.depth) * Theme.Space.l)
     }
@@ -388,19 +393,25 @@ private enum MarkdownInline {
 private struct InlineMarkdown: View {
     private let attributed: AttributedString
     private let font: Font
+    private let selectable: Bool
 
-    init(_ source: String, font: Font) {
+    init(_ source: String, font: Font, selectable: Bool = true) {
         self.font = font
+        self.selectable = selectable
         attributed = MarkdownInline.attributed(source)
     }
 
     var body: some View {
-        Text(attributed)
+        let text = Text(attributed)
             .font(font)
             .tint(Theme.accent)
-            .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
+        if selectable {
+            text.textSelection(.enabled)
+        } else {
+            text
+        }
     }
 }
 
@@ -614,7 +625,8 @@ struct MessageMarkdown: View {
                         block: block,
                         bodyFont: bodyFont,
                         codeFont: codeFont,
-                        style: style
+                        style: style,
+                        selectable: selectable
                     )
                 }
             }
@@ -646,6 +658,7 @@ private struct MarkdownCodeBlock: View {
     let widest: Int
     let font: Font
     var style: MarkdownStyle = .document
+    var selectable: Bool = true
 
     @State private var coloured: AttributedString?
     @State private var hovering = false
@@ -731,14 +744,14 @@ private struct MarkdownCodeBlock: View {
                         ScrollView(.horizontal) {
                             Text(shown)
                                 .font(font)
-                                .textSelection(.enabled)
+                                .modifier(MarkdownSelectable(selectable))
                                 .fixedSize(horizontal: true, vertical: false)
                                 .padding(Theme.Space.m)
                         }
                     } else {
                         Text(shown)
                             .font(font)
-                            .textSelection(.enabled)
+                            .modifier(MarkdownSelectable(selectable))
                             .padding(Theme.Space.m)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -866,10 +879,24 @@ private struct MarkdownSideways<Content: View>: View {
     }
 }
 
+private struct MarkdownSelectable: ViewModifier {
+    var enabled: Bool
+    init(_ enabled: Bool) { self.enabled = enabled }
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.textSelection(.enabled)
+        } else {
+            content
+        }
+    }
+}
+
 private struct MarkdownTable: View {
     let header: [String]
     let rows: [[String]]
     let bodyFont: Font
+    var selectable: Bool = true
 
     private var columnCount: Int {
         max(header.count, rows.map(\.count).max() ?? 0)
@@ -898,7 +925,8 @@ private struct MarkdownTable: View {
             ForEach(0..<columnCount, id: \.self) { column in
                 InlineMarkdown(
                     column < values.count ? values[column] : "",
-                    font: header ? Theme.headline : bodyFont
+                    font: header ? Theme.headline : bodyFont,
+                    selectable: selectable
                 )
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
