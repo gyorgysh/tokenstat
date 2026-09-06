@@ -281,9 +281,6 @@ struct ClientChatThread: View {
         .sheet(isPresented: $showingSetup) {
             setupSheet
         }
-        .sheet(isPresented: $showingPersonas) {
-            PersonaEditor(model: model, onClose: { showingPersonas = false })
-        }
         .task {
             guard let chat = model.chats.first(where: { $0.id == chatID }) else { return }
             // Already open, with rows on screen. Re-selecting would empty the
@@ -628,6 +625,15 @@ struct ClientChatThread: View {
                     Button("Done", .done) { showingSetup = false }
                 }
             }
+        }
+        // Presented from this sheet, because the button that opens it is in
+        // this sheet. Two `.sheet` modifiers on one view are not two
+        // presentations: while the first is up the second is ignored, so
+        // Personas did nothing until Done put the setup sheet away, and then
+        // opened over the transcript. Done here comes back to setup. The
+        // account sheet already learned this for its paywall.
+        .sheet(isPresented: $showingPersonas) {
+            PersonaEditor(model: model, onClose: { showingPersonas = false })
         }
         .presentationDetents([.medium, .large])
         .presentationBackground(Theme.background)
