@@ -4064,11 +4064,17 @@ struct RemoteTrafficPeer: Codable, Sendable, Hashable, Identifiable {
     var idle: Int
     var id: String { peer }
 
-    var routeLabel: String {
+    var routeLabel: String { Self.knownLabel(route) ?? "Unknown" }
+
+    /// Nil when this process has not yet observed a path, so a machine
+    /// screen can stay quiet rather than invent Encrypted relay.
+    var knownRouteLabel: String? { Self.knownLabel(route) }
+
+    static func knownLabel(_ route: String?) -> String? {
         switch route {
         case "direct": return "Direct connection"
         case "relay": return "Encrypted relay"
-        default: return "Unknown"
+        default: return nil
         }
     }
 }

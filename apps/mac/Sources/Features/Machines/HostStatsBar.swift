@@ -59,6 +59,34 @@ enum HostStatsFormat {
     static func cpuLabel(_ cpu: Double) -> String {
         "\(Int((cpu * 100).rounded()))%"
     }
+
+    /// Direct vs relay for a live peer, from this device's `remote.status`.
+    ///
+    /// Missing stays missing. The screen must not invent Encrypted relay
+    /// for a path nobody has observed yet.
+    @MainActor
+    static func loadRoute(for peer: String) async -> String? {
+        guard let traffic = try? await Bridge.remoteStatus().traffic else { return nil }
+        return traffic.peers.first { $0.peer.caseInsensitiveCompare(peer) == .orderedSame }?.route
+    }
+}
+
+/// The same wording and colours the screen viewer uses, on a machine row.
+struct ConnectionRouteMark: View {
+    let route: String?
+
+    var body: some View {
+        if let label = RemoteTrafficPeer.knownLabel(route) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(route == "direct" ? Theme.success : Theme.warning)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text(label)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
 }
 
 /// Compact power, CPU and memory for a machine, filled after a tunnel hop.
@@ -73,6 +101,7 @@ struct HostStatsBar: View {
 
     @State private var stats: HostStats?
     @State private var failed = false
+    @State private var route: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -82,6 +111,11 @@ struct HostStatsBar: View {
                 ramCell
             }
             .frame(minHeight: 44)
+            if !local {
+                ConnectionRouteMark(route: route)
+                    .font(Theme.caption)
+                    .foregroundStyle(.secondary)
+            }
             Text(local
                 ? "Sampled on this machine. Not uploaded with usage."
                 : "Read from this computer over the encrypted tunnel. It is not uploaded with usage.")
@@ -209,12 +243,16 @@ struct HostStatsBar: View {
         do {
             if local {
                 stats = try await Bridge.hostStats()
+                route = nil
             } else if let peer {
                 stats = try await Bridge.hostStats(peer: peer)
             }
             failed = false
         } catch {
             failed = true
+        }
+        if !local, let peer {
+            route = await HostStatsFormat.loadRoute(for: peer)
         }
     }
 }
@@ -236,11 +274,12 @@ private extension View {
 
 #if !os(macOS)
 
-/// The same readings as `HostStatsBar`, on one line.
+/// The same readings as `HostStatsBar`, on a host row.
 ///
-/// A row in a list has one line to spend, so this drops the captions, the
-/// meters and the surface and keeps the three figures. The full bar stays on
-/// the device screen, where there is room to say where the numbers came from.
+/// A row in a list has little height to spend, so this drops the captions,
+/// the meters and the surface and keeps the three figures plus the path
+/// (direct or relay) once this device has one. The full bar stays on the
+/// device screen, where there is room to say where the numbers came from.
 ///
 /// Nothing is dialled for an offline host, and a reading that is missing is
 /// left out rather than drawn as zero.
@@ -250,21 +289,27 @@ struct HostStatsStrip: View {
 
     @State private var stats: HostStats?
     @State private var failed = false
+    @State private var route: String?
 
     var body: some View {
-        HStack(spacing: Theme.Space.m) {
-            cell(icon: HostStatsFormat.powerSymbol(stats),
-                 text: HostStatsFormat.powerLabel(stats, failed: failed))
-            if let cpu = stats?.cpu {
-                cell(icon: "cpu", text: HostStatsFormat.cpuLabel(cpu))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: Theme.Space.m) {
+                cell(icon: HostStatsFormat.powerSymbol(stats),
+                     text: HostStatsFormat.powerLabel(stats, failed: failed))
+                if let cpu = stats?.cpu {
+                    cell(icon: "cpu", text: HostStatsFormat.cpuLabel(cpu))
+                }
+                if let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 {
+                    // Used of total, not used alone. One figure with nothing to
+                    // measure it against is a figure nobody can read: "24 GB" says
+                    // nothing until the 32 is beside it.
+                    cell(icon: "memorychip", text: HostStatsFormat.ramLabel(used: used, total: total))
+                        .help(HostStatsFormat.ramExplanation)
+                }
             }
-            if let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 {
-                // Used of total, not used alone. One figure with nothing to
-                // measure it against is a figure nobody can read: "24 GB" says
-                // nothing until the 32 is beside it.
-                cell(icon: "memorychip", text: HostStatsFormat.ramLabel(used: used, total: total))
-                    .help(HostStatsFormat.ramExplanation)
-            }
+            ConnectionRouteMark(route: route)
+                .font(ClientType.caption)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -298,6 +343,7 @@ struct HostStatsStrip: View {
         if let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 {
             parts.append("Memory \(HostStatsFormat.ramLabel(used: used, total: total)) used. \(HostStatsFormat.ramExplanation)")
         }
+        if let label = RemoteTrafficPeer.knownLabel(route) { parts.append(label) }
         return parts.joined(separator: ", ")
     }
 
@@ -308,6 +354,7 @@ struct HostStatsStrip: View {
         } catch {
             failed = true
         }
+        route = await HostStatsFormat.loadRoute(for: peer)
     }
 }
 

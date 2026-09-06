@@ -17,56 +17,6 @@ struct ChatPreviewedFile: Identifiable, Hashable {
     let name: String
 }
 
-/// Writing a downloaded attachment somewhere the system can open it.
-///
-/// The bytes live in memory and in a hashed cache file with no extension, and
-/// neither is something Quick Look, the share sheet or Save to Files can be
-/// pointed at. This is the copy with the real name on it.
-enum ChatFileStaging {
-    /// Where staged copies go. The attachment cache prunes this directory on
-    /// the same budget as the downloads, so a copy can be gone by the next
-    /// time a row is tapped. Staging is therefore cheap and repeatable rather
-    /// than done once.
-    static var directory: URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("tokenstat-chat-files", isDirectory: true)
-    }
-
-    /// The staged copy, made if it is not already there.
-    ///
-    /// Throws rather than returning nil. A silent failure here is a card that
-    /// does nothing when tapped and says nothing about why, which is exactly
-    /// what it did.
-    static func stage(_ data: Data, id: String, name: String) throws -> URL {
-        let folder = directory.appendingPathComponent(sanitized(id), isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(sanitized(name))
-        guard url.standardizedFileURL.path.hasPrefix(folder.standardizedFileURL.path) else {
-            throw CocoaError(.fileWriteInvalidFileName)
-        }
-        if let existing = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           existing == data.count {
-            return url
-        }
-        try data.write(to: url, options: .atomic)
-        return url
-    }
-
-    /// One path component, whatever the host called the file.
-    static func sanitized(_ raw: String) -> String {
-        let leaf = (raw as NSString).lastPathComponent
-        let cleaned = leaf
-            .filter { !$0.isNewline && !$0.unicodeScalars.contains(where: \.properties.isDefaultIgnorableCodePoint) }
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\0", with: "")
-        if cleaned.isEmpty || cleaned == "." || cleaned == ".." { return "attachment" }
-        let flat = cleaned
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "\\", with: "_")
-        return flat.isEmpty ? "attachment" : flat
-    }
-}
-
 /// The system's own file viewer, with the system's own share sheet in it.
 ///
 /// Quick Look is what reads every kind of file an agent might hand back: it
