@@ -11,10 +11,9 @@ import SwiftUI
 
 /// A device is asking for something. Say yes, yes to less, or no.
 ///
-/// Opened from the sidebar card, from a notification, or from Devices, and
-/// never on its own: the question waits in the corner until somebody goes to
-/// it. Once it is open it is a sheet, because the answer decides whether
-/// another machine can watch this screen or open every file on it.
+/// Opened when a request arrives, from the sidebar card, from a notification,
+/// or from Devices. Once it is open it is a sheet, because the answer decides
+/// whether another machine can watch this screen or open every file on it.
 ///
 /// The whole surface is painted in the app's own colours. A sheet that leaves
 /// its background to the system draws the platform's grey, which is the one

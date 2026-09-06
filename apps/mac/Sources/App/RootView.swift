@@ -367,8 +367,8 @@ struct RootView: View {
             }
         }
         // Above the route switch, because a device can ask while somebody is
-        // anywhere in the app. Nothing opens this on its own: it is raised by
-        // the toast below, by that toast's notification, or from Devices.
+        // anywhere in the app. Raised when a request arrives, from the
+        // sidebar card, from a notification, or from Devices.
         .sheet(item: $deviceRequests.asking) { request in
             DeviceAccessRequestSheet(request: request, model: deviceRequests)
         }

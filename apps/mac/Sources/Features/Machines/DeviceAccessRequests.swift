@@ -22,11 +22,10 @@ import UserNotifications
 /// of these is now a separate yes from whoever is at the machine.
 ///
 /// A request travels the tunnel and lands in a policy file. This polls for it
-/// and surfaces it the way the app surfaces everything else worth knowing and
-/// not worth interrupting for: a card in the sidebar above the account row,
-/// beside what update and sync say, staying until the question is answered.
-/// Away from the app it is a local notification carrying the answers. The
-/// sheet that actually asks is opened from either, never on its own.
+/// and surfaces it two ways: a card in the sidebar above the account row, and
+/// the sheet itself as soon as a new request arrives. A Mac asking another
+/// Mac is two people looking at two screens, and a quiet card on the host is
+/// easy to miss. Away from the app it is also a local notification.
 @MainActor
 @Observable
 final class DeviceAccessRequests {
@@ -35,10 +34,8 @@ final class DeviceAccessRequests {
     private(set) var pending: [DeviceAccessPending] = []
     private(set) var errorMessage: String?
 
-    /// The request the sheet is asking about, set by the sidebar card's View
-    /// button, by a notification, or by the Devices card. Nothing opens it on
-    /// its own: a question about a device is worth answering, not worth
-    /// stopping what somebody was in the middle of.
+    /// The request the sheet is asking about. Set when a new request arrives,
+    /// by the sidebar card's View button, by a notification, or from Devices.
     var asking: DeviceAccessPending?
 
     /// The oldest question still standing, which is the one the sidebar card
@@ -59,6 +56,11 @@ final class DeviceAccessRequests {
     /// keying on the device alone meant that second ask arrived in silence.
     private var announced: Set<String> = []
     private var polling: Task<Void, Never>?
+    /// System Screen Recording / Accessibility, asked the moment a screen
+    /// grant is given. The Devices toggles already did this. Answering the
+    /// sheet did not, so Mac-to-Mac could approve a device and still have no
+    /// capture prompt.
+    private let screenAccess = ScreenAccess()
 
     private func stamp(_ request: DeviceAccessPending) -> String {
         "\(request.id):\(request.control):\(request.askedAt)"
@@ -104,6 +106,13 @@ final class DeviceAccessRequests {
             // the sheet under somebody's cursor every five seconds.
             if live != asking { self.asking = live }
         }
+        // Bring the question forward. A notification only posts while the app
+        // is in the background, and Mac-to-Mac usually has this app in front
+        // on the host, so without this the only signal was a sidebar card.
+        if self.asking == nil, let first = arrived.min(by: { $0.askedAt < $1.askedAt }) {
+            self.asking = first
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
         for request in arrived {
             announced.insert(stamp(request))
             announce(request)
@@ -118,6 +127,13 @@ final class DeviceAccessRequests {
         do {
             switch request.kind {
             case .screen:
+                // Ask macOS before the grant lands, so the prompt is up while
+                // the other device retries rather than after it has already
+                // failed to get a picture.
+                if view {
+                    _ = screenAccess.requestScreenRecording()
+                    if control { _ = screenAccess.requestAccessibility() }
+                }
                 try await Bridge.answerScreenAccess(
                     peerID: request.peerID,
                     view: view,

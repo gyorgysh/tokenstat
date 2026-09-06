@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Link
@@ -57,7 +58,7 @@ enum class ActionIcon {
     Delete,
     External, Next, Back, More, Search, Reveal, Docs, Source, Profile, Home, Help,
     Send, Apply, Calculate, Compare, Benchmarks,
-    Dismiss, Done, Scheduled, CurrentPlan,
+    Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
     ;
 
     val vector: ImageVector
@@ -79,6 +80,7 @@ enum class ActionIcon {
             AutoRenew, Refresh -> Icons.Default.Refresh
             Downgrade, Move -> Icons.AutoMirrored.Filled.ArrowForward
             CancelPlan, Dismiss, Disconnect -> Icons.Default.Close
+            HideKeyboard -> Icons.Default.KeyboardArrowDown
             Token, Pair -> Icons.Default.Key
             Preview, Visibility -> Icons.Default.Visibility
             Theme -> Icons.Default.Palette

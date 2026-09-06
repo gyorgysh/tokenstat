@@ -449,6 +449,14 @@ impl TunnelSession {
             .clone()
     }
 
+    /// Queue one channel frame for the IO thread.
+    ///
+    /// Direct TCP `write` waits when the kernel buffer is full. This used to
+    /// `try_send` and fail the moment 64 frames were in flight, about 2 MiB of
+    /// Noise: a 5 MB chat file over the relay died with "tunnel outbound queue
+    /// is full" while the same file over a direct connection arrived. Blocking
+    /// here is that same backpressure, so a large attachment waits for the
+    /// socket instead of failing the download.
     fn send_channel_frame(&self, op: u8, ch: u32, payload: &[u8]) -> Result<(), RemoteError> {
         if payload.len() > MAX_OUTBOUND_QUEUE {
             return Err(RemoteError::Tunnel("channel frame is too large".into()));
@@ -482,13 +490,9 @@ impl TunnelSession {
                 Err(observed) => current = observed,
             }
         }
-        match writer.sender.try_send(frame) {
+        match writer.sender.send(frame) {
             Ok(()) => Ok(()),
-            Err(mpsc::TrySendError::Full(_)) => {
-                writer.bytes.fetch_sub(size, Ordering::AcqRel);
-                Err(RemoteError::Tunnel("tunnel outbound queue is full".into()))
-            }
-            Err(mpsc::TrySendError::Disconnected(_)) => {
+            Err(_) => {
                 writer.bytes.fetch_sub(size, Ordering::AcqRel);
                 Err(RemoteError::Tunnel("tunnel is not connected".into()))
             }
@@ -1278,6 +1282,32 @@ mod tests {
         );
         assert!(full.contains("paid-plan"), "{full}");
         assert!(full.contains("expired"), "{full}");
+    }
+
+    #[test]
+    fn a_burst_larger_than_the_frame_queue_still_sends() {
+        let session = inert_session();
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(2);
+        *session.writer.lock().unwrap() = Some(Writer {
+            sender: tx,
+            bytes: Arc::clone(&session.writer_bytes),
+        });
+        let n = 200u32;
+        let producer = Arc::clone(&session);
+        let handle = std::thread::spawn(move || {
+            for i in 0..n {
+                producer
+                    .send_channel_frame(CH_DATA, 1, &[i as u8])
+                    .expect("backpressure waits instead of failing the burst");
+            }
+        });
+        let mut got = 0u32;
+        while got < n {
+            rx.recv_timeout(Duration::from_secs(2))
+                .unwrap_or_else(|_| panic!("IO thread drained frame {got} of {n}"));
+            got += 1;
+        }
+        handle.join().expect("producer");
     }
 
     fn inert_session() -> Arc<TunnelSession> {

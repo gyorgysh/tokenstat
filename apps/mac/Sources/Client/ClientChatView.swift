@@ -3,6 +3,7 @@
 #if !os(macOS)
 import Observation
 import SwiftUI
+import UIKit
 
 /// Conversations in this folder, on the machine that owns it.
 ///
@@ -440,6 +441,9 @@ struct ClientChatThread: View {
                     }
                     TranscriptBottomSentinel()
                 }
+                // Empty space still takes taps so a short transcript can hide
+                // the keyboard, not only a fling on a long one.
+                .contentShape(Rectangle())
                 // One gate for the whole stack, not one per row: hit testing
                 // sleeps mid-fling and wakes 0.35s after the last moved frame.
                 // The pill rides outside this stack and never loses taps.
@@ -449,7 +453,12 @@ struct ClientChatThread: View {
                 .padding(.bottom, Theme.Space.l)
                 .chatScrollContent()
             }
-            .scrollDismissesKeyboard(.interactively)
+            .scrollDismissesKeyboard(.immediately)
+            .simultaneousGesture(TapGesture().onEnded {
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+                )
+            })
             // Only the bottom. The composer sits right under it and draws
             // its own edge, while the top is where the system's own fade
             // keeps the first "Web search:" chip off the navigation bar.

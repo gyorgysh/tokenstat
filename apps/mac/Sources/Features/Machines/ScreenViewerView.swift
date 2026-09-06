@@ -41,6 +41,7 @@ struct ScreenViewerView: View {
     #if os(macOS)
     @State private var mode: ScreenPointerMode = .direct
     @State private var viewerIsFullScreen = false
+    @State private var viewerWindow: NSWindow?
     #else
     @State private var mode: ScreenPointerMode = .trackpad
     /// The chrome is hidden and the picture has the whole display.
@@ -181,7 +182,9 @@ struct ScreenViewerView: View {
                     viewerIsFullScreen ? "Exit full screen" : "Full screen",
                     viewerIsFullScreen ? .exitFullScreen : .enterFullScreen
                 ) {
-                    NSApp.keyWindow?.toggleFullScreen(nil)
+                    // The viewer's window, not the key window. A sheet's
+                    // parent is key, which is why this used to no-op.
+                    (viewerWindow ?? NSApp.keyWindow)?.toggleFullScreen(nil)
                 }
                 .labelStyle(.iconOnly)
                 .help(viewerIsFullScreen ? "Return this viewer to its window" : "Fill this display")
@@ -239,7 +242,10 @@ struct ScreenViewerView: View {
         }
         .overlay(alignment: .bottom) {
             if let progress = model.transferProgress {
-                ProgressView(value: progress).padding().background(.ultraThinMaterial, in: Capsule())
+                ProgressView(value: progress)
+                    .frame(maxWidth: 280)
+                    .padding()
+                    .background(.ultraThinMaterial, in: Capsule())
             }
         }
         // Said once, not twice.
@@ -270,15 +276,8 @@ struct ScreenViewerView: View {
             }
         }
         #if os(macOS)
-        // Only full screen is read here; the width and the titlebar inset
-        // have no viewer of their own, so they are given constants rather
-        // than bindings that would invalidate this view on every resize.
         .background {
-            WindowScreenObserver(
-                contentWidth: .constant(0),
-                isFullScreen: $viewerIsFullScreen,
-                titlebarInset: .constant(0)
-            )
+            ViewerWindowBridge(window: $viewerWindow, isFullScreen: $viewerIsFullScreen)
         }
         #endif
         #if !os(macOS)
@@ -422,7 +421,9 @@ struct ScreenViewerView: View {
     private var overlayStatus: some View {
         VStack(spacing: Theme.Space.m) {
             if model.state == .connecting {
-                ProgressView()
+                // Fixed circular spinner. Bare `ProgressView()` on macOS 14
+                // becomes a linear bar and walks the width of this overlay.
+                BusySpinner()
                 Text(model.message)
                     .font(Theme.callout)
                     .foregroundStyle(.white)
@@ -837,8 +838,16 @@ private final class ScreenViewerModel {
             task = Task { [weak self] in await self?.readLoop(session.id) }
         } catch {
             let reason = error.localizedDescription
-            if actionable(reason) { state = .failed; message = reason }
-            else { reconnect(after: reason) }
+            if actionable(reason) {
+                state = .failed
+                message = reason
+                // The phone asks as soon as Connect fails. The Mac viewer
+                // waited for a second press, so the host Mac never saw a
+                // request unless somebody found the overlay button.
+                if needsPermission { await requestAccess() }
+            } else {
+                reconnect(after: reason)
+            }
         }
     }
 

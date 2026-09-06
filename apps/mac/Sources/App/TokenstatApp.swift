@@ -109,7 +109,7 @@ struct TokenstatApp: App {
         Task { await ChatAttachmentCache.shared.maintain() }
         #if os(macOS)
         // A device can ask to see this screen, or to open the work on it, at
-        // any moment. The poll is what turns that into a toast or a banner.
+        // any moment. The poll is what turns that into a sheet or a banner.
         DeviceAccessRequests.shared.start()
         #endif
         #if os(iOS)
@@ -258,6 +258,18 @@ struct TokenstatApp: App {
         // Nothing outside the app opens this, and without the empty match a
         // URL or a document open can be routed to it instead of the main
         // window.
+        .handlesExternalEvents(matching: [])
+
+        // A real window, not a sheet. Sheets cannot enter AppKit full screen,
+        // and `NSApp.keyWindow` on a sheet is the parent, so the expand
+        // control on the viewer did nothing between two Macs.
+        WindowGroup(for: RemoteScreenTarget.self) { $target in
+            if let target {
+                ScreenViewerView(peer: target.peer, name: target.name, tier: target.tier)
+                    .frame(minWidth: 900, minHeight: 600)
+            }
+        }
+        .defaultSize(width: 1100, height: 720)
         .handlesExternalEvents(matching: [])
         #endif
     }

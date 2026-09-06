@@ -555,6 +555,13 @@ final class MachinesModel {
             if text.contains("has not approved") || text.contains("not approved") {
                 showNotice("\(peer.label) has been asked to let this device in. Approve it on the other device and its workspaces will appear here.")
                 errorMessage = nil
+            } else if text.localizedCaseInsensitiveContains("has not let this device")
+                || text.localizedCaseInsensitiveContains("workspace_not_allowed")
+                || text.localizedCaseInsensitiveContains("open its work")
+            {
+                _ = try? await Bridge.askWorkspaceAccess(peer: peer.key)
+                showNotice("\(peer.label) has been asked to let this device open its work. Approve it on that computer and its folders will appear here.")
+                errorMessage = nil
             } else if text.contains("closed before the answer arrived") {
                 // A drop mid-answer is the peer's daemon swapping its tunnel
                 // listener or a connection that died between two machines that

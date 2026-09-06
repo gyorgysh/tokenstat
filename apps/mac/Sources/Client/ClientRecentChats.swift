@@ -94,25 +94,24 @@ struct ClientRecentChatsSection: View {
 
     private var receipts: ClientChatReadState { .shared }
 
-    /// A week is recent enough to be useful without turning this into another
-    /// permanent chat list. Unread replies survive the window, capped by the
-    /// same five rows, so a reply cannot disappear merely because life was busy.
+    /// Three newest by time, then five more by what needs a look. Unread used
+    /// to take every slot, so a chat you just left vanished under older dots.
     private var visible: [ChatRecentConversation] {
-        let cutoff = Int64(Date().addingTimeInterval(-7 * 24 * 60 * 60).timeIntervalSince1970 * 1000)
-        let candidates = chats.filter { chat in
-            chat.needsAttention
-                || chat.running
-                || receipts.isUnread(peer: peer, chat: chat)
-                || (chat.lastMessageAtMs ?? 0) >= cutoff
-        }
-        return Array(candidates.sorted { left, right in
-            let leftPriority = priority(of: left)
-            let rightPriority = priority(of: right)
-            if leftPriority != rightPriority {
-                return leftPriority > rightPriority
-            }
-            return (left.lastMessageAtMs ?? 0) > (right.lastMessageAtMs ?? 0)
-        }.prefix(5))
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let ranked = ClientRecentChatsRanking.visible(
+            from: chats.map { chat in
+                ClientRecentChatsRanking.Item(
+                    id: chat.id,
+                    lastMessageAtMs: chat.lastMessageAtMs ?? 0,
+                    running: chat.running,
+                    needsAttention: chat.needsAttention,
+                    unread: receipts.isUnread(peer: peer, chat: chat)
+                )
+            },
+            nowMs: nowMs
+        )
+        let byID = Dictionary(uniqueKeysWithValues: chats.map { ($0.id, $0) })
+        return ranked.compactMap { byID[$0.id] }
     }
 
     var body: some View {
@@ -148,16 +147,6 @@ struct ClientRecentChatsSection: View {
         folders.first {
             (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == workspaceID
         }?.name ?? "Workspace"
-    }
-
-    /// Host-owned approvals first, then this device's unread replies, active
-    /// work, and finally ordinary recency. Keeping unread local is deliberate:
-    /// opening a chat on one device must not clear it on another.
-    private func priority(of chat: ChatRecentConversation) -> Int {
-        if chat.needsAttention { return 3 }
-        if receipts.isUnread(peer: peer, chat: chat) { return 2 }
-        if chat.running { return 1 }
-        return 0
     }
 }
 

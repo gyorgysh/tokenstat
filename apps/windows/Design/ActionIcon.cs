@@ -26,7 +26,7 @@ internal enum ActionIcon
     Delete,
     External, Next, Back, More, Search, Reveal, Docs, Source, Profile, Home, Help,
     Send, Attach, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
-    Dismiss, Done, Scheduled, CurrentPlan,
+    Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
 }
 
 internal static class ActionIconGlyph
@@ -51,6 +51,7 @@ internal static class ActionIconGlyph
         ActionIcon.Refresh or ActionIcon.AutoRenew => Microsoft.UI.Xaml.Controls.Symbol.Refresh,
         ActionIcon.CancelPlan or ActionIcon.Dismiss or ActionIcon.Disconnect
             => Microsoft.UI.Xaml.Controls.Symbol.Cancel,
+        ActionIcon.HideKeyboard => Microsoft.UI.Xaml.Controls.Symbol.Down,
         ActionIcon.Preview or ActionIcon.Visibility => Microsoft.UI.Xaml.Controls.Symbol.View,
         ActionIcon.Theme => Microsoft.UI.Xaml.Controls.Symbol.Highlight,
         ActionIcon.Layout => Microsoft.UI.Xaml.Controls.Symbol.ViewAll,

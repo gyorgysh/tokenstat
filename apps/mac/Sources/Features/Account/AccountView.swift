@@ -101,7 +101,9 @@ struct AccountView: View {
                     } else {
                         // Neither state is known yet. Showing "sign in" here would
                         // flash the wrong answer on every launch.
-                        ProgressView().frame(maxWidth: .infinity)
+                        BusySpinner()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, Theme.Space.l)
                     }
                     ChatCacheSettings()
                     notificationsCard
@@ -204,7 +206,9 @@ struct AccountView: View {
             } else if model.account != nil {
                 signedOut
             } else {
-                ProgressView().frame(maxWidth: .infinity)
+                BusySpinner()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Space.l)
             }
         }
         forgeCard
@@ -229,7 +233,9 @@ struct AccountView: View {
                 .buttonStyle(.borderedProminent)
             }
         } else {
-            ProgressView().frame(maxWidth: .infinity)
+            BusySpinner()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Space.l)
         }
     }
 

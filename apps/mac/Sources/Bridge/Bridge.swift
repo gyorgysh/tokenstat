@@ -918,12 +918,13 @@ extension Bridge {
         peer: String?,
         _ method: String,
         _ params: [String: Any] = [:],
+        patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T {
         if let peer {
-            return try await onPeer(peer, method, params, as: type)
+            return try await onPeer(peer, method, params, patience: patience, as: type)
         }
-        return try await background(method, params, as: type)
+        return try await background(method, params, patience: patience, as: type)
     }
 
     /// A Mac remote folder is stored as `remote:<peer>:<id>`. The phone already
@@ -1131,6 +1132,7 @@ extension Bridge {
             peer: peer,
             "chat.attachment",
             ["id": id, "attachmentId": attachmentID],
+            patience: Patience.long,
             as: ChatAttachmentData.self
         )
     }
@@ -1260,7 +1262,13 @@ extension Bridge {
         if let mediaType, !mediaType.isEmpty {
             params["mediaType"] = mediaType
         }
-        return try await chatInvoke(peer: peer, "chat.attach", params, as: ChatAttachment.self)
+        return try await chatInvoke(
+            peer: peer,
+            "chat.attach",
+            params,
+            patience: Patience.long,
+            as: ChatAttachment.self
+        )
     }
 }
 
@@ -3053,11 +3061,13 @@ extension Bridge {
         _ peer: String,
         _ method: String,
         _ params: [String: Any] = [:],
+        patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T {
         try await background(
             "remote.call",
             ["peer": peer, "method": method, "params": params],
+            patience: patience,
             as: type
         )
     }

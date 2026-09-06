@@ -98,6 +98,7 @@ enum ActionIcon {
     // capsule among glyphed ones.
     case dismiss
     case done
+    case hideKeyboard
     case scheduled
     case currentPlan
 
@@ -123,6 +124,7 @@ enum ActionIcon {
         case .autoRenew: return "arrow.triangle.2.circlepath"
         case .downgrade: return "arrow.down"
         case .cancelPlan, .dismiss: return "xmark"
+        case .hideKeyboard: return "keyboard.chevron.compact.down"
         case .token, .pair: return "key"
         case .preview, .visibility: return "eye"
         case .theme: return "paintpalette"

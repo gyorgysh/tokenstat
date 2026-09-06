@@ -470,4 +470,99 @@ final class WindowReportingView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
+
+/// The viewer's own window, for full screen.
+///
+/// `NSApp.keyWindow` is the parent when this view sits in a sheet, and a
+/// toolbar click does not always key the viewer first even in its own
+/// window. Full screen has to target the window that is showing the picture.
+/// Unlike `WindowScreenObserver`, this does not rewrite the style mask: that
+/// dance is for the main window's hidden title bar, and applying it here
+/// would add `fullSizeContentView` to a titled viewer on the way out.
+struct ViewerWindowBridge: NSViewRepresentable {
+    @Binding var window: NSWindow?
+    @Binding var isFullScreen: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> WindowReportingView {
+        let view = WindowReportingView()
+        view.onWindowChange = { [weak coordinator = context.coordinator] newWindow in
+            Task { @MainActor in
+                coordinator?.attach(newWindow)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: WindowReportingView, context: Context) {
+        MainActor.assumeIsolated {
+            context.coordinator.window = $window
+            context.coordinator.isFullScreen = $isFullScreen
+            if let current = nsView.window {
+                context.coordinator.attach(current)
+            }
+        }
+    }
+
+    @MainActor
+    final class Coordinator {
+        private weak var attached: NSWindow?
+        private var observers: [NSObjectProtocol] = []
+        var window: Binding<NSWindow?>?
+        var isFullScreen: Binding<Bool>?
+
+        func attach(_ window: NSWindow?) {
+            if attached !== window {
+                detach()
+                attached = window
+                if let window {
+                    window.collectionBehavior.insert(.fullScreenPrimary)
+                    observe(window)
+                }
+            }
+            if self.window?.wrappedValue !== window {
+                self.window?.wrappedValue = window
+            }
+            publish()
+        }
+
+        private func observe(_ window: NSWindow) {
+            let center = NotificationCenter.default
+            for name in [
+                NSWindow.didEnterFullScreenNotification,
+                NSWindow.didExitFullScreenNotification,
+            ] {
+                observers.append(center.addObserver(
+                    forName: name,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
+                    if Thread.isMainThread {
+                        MainActor.assumeIsolated { self?.publish() }
+                    } else {
+                        Task { @MainActor in self?.publish() }
+                    }
+                })
+            }
+        }
+
+        private func publish() {
+            let full = attached?.styleMask.contains(.fullScreen) == true
+            if isFullScreen?.wrappedValue != full {
+                isFullScreen?.wrappedValue = full
+            }
+        }
+
+        private func detach() {
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers.removeAll()
+            attached = nil
+        }
+
+        deinit {
+            observers.forEach(NotificationCenter.default.removeObserver)
+        }
+    }
+}
 #endif

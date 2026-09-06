@@ -28,8 +28,7 @@ struct WorkspacesView: View {
     /// The signed-in tier, for the screen viewer a remote workspace offers.
     /// Nil is a tier the viewer refuses, and says so.
     var tier: String?
-    /// The peer whose screen the header is offering, while the viewer is up.
-    @State private var viewingScreen: RemoteScreenTarget?
+    @Environment(\.openWindow) private var openWindow
     #endif
 
     var body: some View {
@@ -72,12 +71,6 @@ struct WorkspacesView: View {
             }
         }
         .background(Theme.background)
-        #if os(macOS)
-        .sheet(item: $viewingScreen) { target in
-            ScreenViewerView(peer: target.peer, name: target.name, tier: tier)
-                .frame(minWidth: 900, minHeight: 600)
-        }
-        #endif
     }
 
     private func header(_ folder: WorkspaceFolder) -> some View {
@@ -135,10 +128,11 @@ struct WorkspacesView: View {
                     .font(Theme.fit(12, weight: .medium))
                 Spacer(minLength: 0)
                 Button("View screen", .preview) {
-                    viewingScreen = RemoteScreenTarget(
+                    openWindow(value: RemoteScreenTarget(
                         peer: peer,
-                        name: folder.machineLabel ?? "Remote machine"
-                    )
+                        name: folder.machineLabel ?? "Remote machine",
+                        tier: tier
+                    ))
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .fixedSize()
@@ -784,10 +778,12 @@ private struct ChangeRow: View {
 /// The machine whose screen the viewer is showing.
 ///
 /// A value rather than a pair of `@State` strings, so "which machine" and
-/// "is the viewer up" cannot disagree.
-struct RemoteScreenTarget: Identifiable, Hashable {
-    let peer: String
-    let name: String
+/// "is the viewer up" cannot disagree. `Codable` because this is also the
+/// identity of the viewer's own window: a sheet cannot go full screen.
+struct RemoteScreenTarget: Identifiable, Hashable, Codable {
+    var peer: String
+    var name: String
+    var tier: String?
     var id: String { peer }
 }
 #endif

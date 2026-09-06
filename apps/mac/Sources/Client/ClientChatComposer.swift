@@ -4,6 +4,7 @@
 import Observation
 import PhotosUI
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// The bar under a phone transcript. Glass chrome, opaque field.
@@ -48,6 +49,13 @@ struct ClientChatComposer: View {
                     locked: running,
                     compact: true
                 )
+                Button("Hide keyboard", .hideKeyboard) { hideKeyboard() }
+                    .buttonStyle(.plain)
+                    .environment(\.compactActions, true)
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+                    .layoutPriority(1)
                 expandToggle
             }
             if !attachments.isEmpty {
@@ -178,22 +186,29 @@ struct ClientChatComposer: View {
     ///
     /// Six lines is the right height for a message and the wrong one for a
     /// brief. The toggle sits at the top right of the bar, away from send, so
-    /// the thumb that reaches for one never finds the other.
+    /// the thumb that reaches for one never finds the other. The symbols are
+    /// the same full-screen pair the rest of the app uses: the names this
+    /// used to type by hand are not in SF Symbols, so the control worked
+    /// and drew nothing.
     private var expandToggle: some View {
-        Button {
-            expanded.toggle()
-            if expanded { focused = true }
-        } label: {
-            Image(systemName: expanded
-                ? "chevron.down.forward.and.arrow.up.backward"
-                : "chevron.up.left.and.chevron.down.right")
-                .font(ClientType.label.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 34, height: 34)
-                .contentShape(.rect)
+        Group {
+            if expanded {
+                Button("Shrink the message box", .exitFullScreen) {
+                    expanded = false
+                }
+            } else {
+                Button("Expand the message box", .enterFullScreen) {
+                    expanded = true
+                    focused = true
+                }
+            }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(expanded ? "Shrink the message box" : "Expand the message box")
+        .environment(\.compactActions, true)
+        .foregroundStyle(Theme.accent)
+        .frame(width: 44, height: 44)
+        .contentShape(.rect)
+        .layoutPriority(1)
     }
 
     private var field: some View {
@@ -206,6 +221,23 @@ struct ClientChatComposer: View {
             .padding(.vertical, 8)
             .submitLabel(.send)
             .onSubmit { if canSend { onSend() } }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Hide keyboard") { hideKeyboard() }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                expanded = false
+            }
+    }
+
+    private func hideKeyboard() {
+        focused = false
+        expanded = false
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+        )
     }
 
     private var canSend: Bool { !cannotSend }

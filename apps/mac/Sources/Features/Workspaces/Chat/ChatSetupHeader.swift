@@ -276,15 +276,12 @@ struct ChatComposerControls: View {
                 }
             }
         } else {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: Theme.Space.s) { content }
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    agentField
-                    HStack(alignment: .center, spacing: Theme.Space.s) {
-                        pills
-                    }
-                }
-            }
+            // Hug the controls. ViewThatFits cannot choose when the agent
+            // field is willing to fill any width: it takes the first
+            // candidate always, and on macOS 14 that stretched the field
+            // across the well and parked the pills against Send.
+            HStack(alignment: .center, spacing: Theme.Space.s) { content }
+                .fixedSize(horizontal: true, vertical: true)
         }
     }
 

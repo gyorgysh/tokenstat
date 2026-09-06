@@ -56,6 +56,28 @@ direct or relayed.
 - Downloading one attachment no longer rebuilds every card in the transcript.
 - A downloaded chat file on the phone opens, instead of reporting that the
   file name is invalid.
+- A few-megabyte chat file failed to download over the relay, while the same
+  file arrived over a direct connection. The tunnel now waits for the socket
+  instead of dropping the burst.
+- Recent chats on the phone kept a thread you just used off the list when
+  many conversations were unread. The three newest sit at the top, then five
+  more by what needs a look.
+- The expand control at the top right of the phone composer had no glyph.
+- There was no way to put the keyboard away in a phone chat once it was open,
+  so the transcript could not grow. Drag the conversation, tap it, or tap
+  Hide keyboard.
+- Full screen on a Mac watching another Mac did nothing. The viewer is its
+  own window now, so the expand control fills the display.
+- A Mac asking another Mac for the screen or for folders never brought up a
+  permission prompt on the host. The request opens as a sheet, the Mac
+  sidebar asks when a host refuses the work, and the screen viewer asks on
+  the first refusal rather than waiting for a second press. Approving a
+  screen grant also asks macOS for Screen Recording, and for Accessibility
+  when control is included.
+- On older macOS the connecting spinner was a bar that travelled across the
+  screen, and the chat composer packed agent, pills and send against the
+  trailing edge with a gap after attach. The spinner stays circular, and the
+  composer keeps those controls next to attach.
 
 ## [0.8.3] - 2026-09-05
 

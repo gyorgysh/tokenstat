@@ -933,6 +933,34 @@ struct TierBadge: View {
     }
 }
 
+/// A spinner that stays a spinner.
+///
+/// Bare `ProgressView()` on macOS 14 becomes a linear indeterminate bar and
+/// walks the width of whatever parent it sits in. Newer macOS draws a circular
+/// control. This is the circular one, with a fixed size, on every version.
+struct BusySpinner: View {
+    var size: ControlSize = .regular
+
+    var body: some View {
+        ProgressView()
+            .progressViewStyle(.circular)
+            .controlSize(size)
+            .frame(width: Self.side(size), height: Self.side(size))
+            .accessibilityLabel("Loading")
+    }
+
+    private static func side(_ size: ControlSize) -> CGFloat {
+        switch size {
+        case .mini: 12
+        case .small: 16
+        case .regular: 20
+        case .large: 24
+        case .extraLarge: 28
+        @unknown default: 20
+        }
+    }
+}
+
 /// A line of status across the top of a pane.
 ///
 /// One banner for the whole app. There used to be three: a red-tinted bar in

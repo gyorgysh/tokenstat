@@ -778,6 +778,9 @@ final class WorkspacesModel {
     /// would re-dial an approved, reachable machine on its next pass and the
     /// Disconnect would last one refresh.
     private var suppressedPeers: Set<String> = []
+    /// Hosts we have already asked to open their work this session, so a
+    /// refusal is not re-asked on every peer sweep.
+    private var askedWorkspace: Set<String> = []
 
     /// Everything: this machine's folders and every reachable peer's.
     ///
@@ -860,6 +863,20 @@ final class WorkspacesModel {
                     remotePeerEverAnswered.insert(peer.key)
                     NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
                 } catch {
+                    let text = error.localizedDescription
+                    if Self.isWorkspaceRefusal(text) {
+                        // Reached a host that has not let this device in. The
+                        // phone asks on Connect. The Mac sidebar used to
+                        // swallow this as a dial failure, so the other Mac
+                        // never saw a request.
+                        if askedWorkspace.insert(peer.key).inserted {
+                            _ = try? await Bridge.askWorkspaceAccess(peer: peer.key)
+                        }
+                        remotePeerNextDial[peer.key] = Date().addingTimeInterval(
+                            Self.peerRetrySeconds
+                        )
+                        continue
+                    }
                     let failures = (remotePeerFailures[peer.key] ?? 0) + 1
                     remotePeerFailures[peer.key] = failures
                     // A machine that answered before is worth asking again
@@ -893,6 +910,16 @@ final class WorkspacesModel {
             // Not surfaced. The peer list failing is not a reason to put an
             // error over a screen full of working local folders.
         }
+    }
+
+    /// A host answered, and the answer was no. Connection failures and a
+    /// phone that cannot host a folder are different, and must not raise a
+    /// permission request.
+    private static func isWorkspaceRefusal(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("has not let this device")
+            || lower.contains("workspace_not_allowed")
+            || lower.contains("open its work")
     }
 
     /// Keep peer folders current while the app is open.
