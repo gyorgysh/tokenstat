@@ -546,7 +546,7 @@ struct HomeView: View {
                 EmptyHint(text: "The activity could not be read. See the message above.")
             } else if model.isLoading {
                 activityPlaceholder
-            } else {
+            } else if model.hasConfirmedEmptyActivity {
                 // A brand new install, not a failure, and not an empty state
                 // either: what somebody needs here is the next step, not a
                 // sentence confirming there is nothing.
@@ -560,6 +560,8 @@ struct HomeView: View {
                     },
                     onScan: { Task { await scanner.scan() } }
                 )
+            } else {
+                activityPlaceholder
             }
         }
         .animation(.easeOut(duration: 0.18), value: model.calendar != nil)

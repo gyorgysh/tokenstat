@@ -97,6 +97,9 @@ final class HomeModel {
     /// Not the same as `!isLoading`: a failed load must not start the warm pass.
     private(set) var isArchiveReady = false
 
+    /// Setup needs proof of an empty answer, never an absent or failed response.
+    private(set) var hasConfirmedEmptyActivity = false
+
     private var hostRetryTask: Task<Void, Never>?
     private var hostRetryCount = 0
     /// When the archive was last successfully read. Used to skip redundant
@@ -170,6 +173,7 @@ final class HomeModel {
             isLoading = false
             isRefreshing = false
         }
+        hasConfirmedEmptyActivity = false
         do {
             async let calendar = Bridge.activityCalendar(
                 scope: scope.wire,
@@ -188,6 +192,9 @@ final class HomeModel {
             // waiting for the other two only kept it behind a blur for longer.
             let grid = try await calendar
             self.calendar = grid
+            // Only null means the account/archive has no records. A grid
+            // with zero active days can be a quiet or locked history window.
+            hasConfirmedEmptyActivity = grid == nil
             // Heatmap is the largest Home surface and the first query back.
             // Mark archive ready here (not after the other two) so secondary
             // screens can warm while day/plan reports still finish.
@@ -227,6 +234,7 @@ final class HomeModel {
             hostRetryCount = 0
             hostRetryTask?.cancel()
         } catch {
+            hasConfirmedEmptyActivity = false
             // Host recovery is expected to resolve through the retry loop. The
             // footer reports it quietly, so Home does not replace useful data
             // with a large error card for a transient socket pause.

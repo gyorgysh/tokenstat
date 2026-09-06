@@ -29,18 +29,12 @@ struct ClientHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 greeting
-                // A calendar with no active day in it is a new account, not a
-                // year of doing nothing, and drawing the empty grid says the
-                // wrong one. The rail takes over until the first day lands.
-                //
-                // Only the figures and the grid, though. Plan windows and a
-                // scope notice are answers to different questions and neither
-                // needs a recorded day, so they keep their place below
-                // whichever of the two is drawn.
-                if let calendar = model.calendar, calendar.activeDays > 0 {
+                // A quiet, locked or cached grid still belongs to an existing
+                // account. Setup requires a successful empty response.
+                if let calendar = model.calendar {
                     totals(calendar)
                     heatmapCard(calendar)
-                } else if model.calendar != nil {
+                } else if model.hasConfirmedEmptyActivity {
                     ClientGettingStarted()
                 } else if model.isLoading {
                     // Shaped like what is coming, so nothing moves when it
@@ -67,10 +61,16 @@ struct ClientHomeView: View {
                         action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
                     )
                 } else {
-                    // Not an empty state. An account with nothing on it is a
-                    // new account, and the useful thing to draw is what to do
-                    // next rather than a card confirming there is nothing.
-                    ClientGettingStarted()
+                    // No authoritative empty answer yet. Recovery and stale
+                    // or fallback calendars must not send an account to setup.
+                    ClientEmptyState(
+                        kind: .unreachable,
+                        title: "Activity is unavailable",
+                        message: model.scopeNotice ?? "Waiting for your activity to load.",
+                        actionTitle: "Try again",
+                        actionIcon: .refresh,
+                        action: { Task { await model.refresh() } }
+                    )
                 }
 
                 // Below either branch. `model.calendar` being nil means the

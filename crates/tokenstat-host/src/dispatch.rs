@@ -41,6 +41,24 @@ use crate::dto::{WorkspaceDto, WorkspaceSummaryDto};
 use crate::error::DispatchError;
 use crate::session::{OpenParams, Session};
 
+/// A missing local archive cannot turn a failed account read into an empty account.
+fn account_calendar_fallback(
+    calendar: Option<tokenstat_core::activity::HeatCalendar>,
+    notice: String,
+    code: &str,
+    failure: String,
+) -> Result<Value, DispatchError> {
+    match calendar {
+        Some(calendar) => serde_json::to_value(CalendarDto::from(calendar).scoped(
+            "local",
+            Some(notice),
+            Some(code),
+        ))
+        .envelope(),
+        None => Err(DispatchError::new(code, failure)),
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReportParams {
@@ -1171,9 +1189,16 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                             }
                             return serde_json::to_value(dto).envelope();
                         }
-                        // The account exists and has nothing in it. Not an
-                        // error, and not a reason to show this machine's grid
-                        // labelled as everybody's.
+                        // A cached empty account is not proof it is still
+                        // empty after a failed refresh. Keep that failure out
+                        // of the successful-null onboarding path too.
+                        Ok(account) if account.stale => {
+                            return Err(DispatchError::new(
+                                "stale",
+                                "Could not refresh your activity. Try again when the connection is back.",
+                            ));
+                        }
+                        // Only a current empty answer can mean first use.
                         Ok(_) => return Ok(Value::Null),
                         Err(failure) => {
                             let code = match failure.reason {
@@ -1219,17 +1244,12 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                                 }
                                 _ => format!("Showing this machine only: {}", failure.message),
                             };
-                            return match tokenstat_core::activity::calendar(&days, p.weeks, today) {
-                                Some(calendar) => {
-                                    serde_json::to_value(CalendarDto::from(calendar).scoped(
-                                        "local",
-                                        Some(notice),
-                                        Some(code),
-                                    ))
-                                    .envelope()
-                                }
-                                None => Ok(Value::Null),
-                            };
+                            return account_calendar_fallback(
+                                tokenstat_core::activity::calendar(&days, p.weeks, today),
+                                notice,
+                                code,
+                                failure.message,
+                            );
                         }
                     }
                 }
@@ -4394,6 +4414,39 @@ mod tests {
         for value in [json!({}), json!({"avatar": ""}), json!({"avatar": "   "})] {
             assert_eq!(avatar_url("https://tokenstat.ai", &value), None, "{value}");
         }
+    }
+
+    #[test]
+    fn failed_account_calendar_without_local_data_remains_an_error() {
+        for code in ["auth", "upgrade", "other"] {
+            let result = account_calendar_fallback(
+                None,
+                "Showing this machine only".into(),
+                code,
+                "Account activity unavailable".into(),
+            );
+            let error = result.expect_err("a failed fetch must not become successful null");
+            assert_eq!(error.code, code);
+            assert_eq!(error.message, "Account activity unavailable");
+        }
+    }
+
+    #[test]
+    fn failed_account_calendar_keeps_available_local_data_and_notice() {
+        let today = "2026-09-06".parse().expect("date");
+        let calendar =
+            tokenstat_core::activity::calendar(&[("2026-09-06".into(), 1_000_000)], 53, today);
+        let result = account_calendar_fallback(
+            calendar,
+            "Account refresh failed".into(),
+            "other",
+            "offline".into(),
+        )
+        .expect("local fallback");
+        assert_eq!(result["scope"], "local");
+        assert_eq!(result["noticeCode"], "other");
+        assert_eq!(result["notice"], "Account refresh failed");
+        assert_eq!(result["activeDays"], 1);
     }
 
     /// An empty archive is a valid answer, not a failure.
