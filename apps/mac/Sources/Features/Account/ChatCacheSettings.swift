@@ -4,9 +4,9 @@ import SwiftUI
 
 /// Device-local downloads, shared by both Apple settings surfaces.
 ///
-/// Same card chrome as Terminal and Notifications: a 22pt feature mark, title
-/// and subtitle in the header, then labelled rows. The large purge illustration
-/// sat outside that vocabulary and made this block look like a different product.
+/// Named for the product, not for the one kind of file that uses it today.
+/// Chat files are the current contents. Other downloads join the same budget
+/// as they land, so this card does not get renamed each time.
 struct ChatCacheSettings: View {
     @AppStorage(ChatCachePreferences.sizeKey) private var maxGB = 5
     @AppStorage(ChatCachePreferences.daysKey) private var days = 7
@@ -32,7 +32,7 @@ struct ChatCacheSettings: View {
     private var card: some View {
         #if os(macOS)
         Card(
-            title: "Chat file cache",
+            title: "tokenstat cache",
             subtitle: usageLabel,
             mark: "mark_cache",
             accessory: statusAccessory
@@ -42,7 +42,7 @@ struct ChatCacheSettings: View {
         #else
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .center, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Chat file cache", mark: "mark_cache")
+                ClientSectionTitle(title: "tokenstat cache", mark: "mark_cache")
                 Spacer(minLength: 0)
                 if let statusAccessory { statusAccessory }
             }
@@ -59,6 +59,8 @@ struct ChatCacheSettings: View {
 
     private var rows: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
+            containsRow
+            ThemeRule()
             pickerRow(
                 "Maximum size",
                 selection: $maxGB,
@@ -70,7 +72,7 @@ struct ChatCacheSettings: View {
                 selection: $days,
                 values: ChatCachePreferences.days
             ) { $0 == 1 ? "1 day" : "\($0) days" }
-            Text("Oldest downloads are removed when the cache is full. This includes local preview copies. Originals stay on the computer that owns the chat.")
+            Text("Oldest downloads are removed when the cache is full. This includes local preview copies. Originals stay on the computer that owns the file.")
                 #if os(macOS)
                 .font(Theme.caption)
                 #else
@@ -90,6 +92,30 @@ struct ChatCacheSettings: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var containsRow: some View {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            Text("Currently contains")
+                #if os(macOS)
+                .font(Theme.callout)
+                #else
+                .font(ClientType.label)
+                #endif
+            Spacer(minLength: Theme.Space.m)
+            Text("Chat files")
+                #if os(macOS)
+                .font(Theme.callout)
+                #else
+                .font(ClientType.label)
+                #endif
+                .foregroundStyle(.secondary)
+        }
+        #if !os(macOS)
+        .frame(minHeight: 44)
+        .contentShape(.rect)
+        #endif
+        .accessibilityElement(children: .combine)
     }
 
     private func pickerRow<Value: Hashable>(
@@ -144,7 +170,7 @@ struct ChatCacheSettings: View {
         }
         .buttonStyle(.plain)
         .disabled(clearing)
-        .accessibilityHint("Removes downloaded chat files from this device. Originals stay on the computer that owns the chat.")
+        .accessibilityHint("Removes downloaded Chat files from this device. Originals stay on the computer that owns the file.")
         #endif
     }
 

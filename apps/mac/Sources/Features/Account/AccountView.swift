@@ -7,12 +7,41 @@
 
 import SwiftUI
 
+/// Account is three jobs, not one scrolling pile: who you are, vendor quota
+/// windows, and what this Mac itself does.
+#if os(macOS)
+private enum AccountSettingsPane: String, CaseIterable, Hashable {
+    case account
+    case planLimits
+    case thisMac
+
+    var label: String {
+        switch self {
+        case .account: return "Account"
+        case .planLimits: return "Plan limits"
+        case .thisMac: return "This Mac"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .account: return "person.crop.circle"
+        case .planLimits: return "list.clipboard"
+        case .thisMac: return "laptopcomputer"
+        }
+    }
+}
+#endif
+
 struct AccountView: View {
     @Bindable var model: AccountModel
     @Environment(\.openURL) private var openURL
     /// Whether the third-party notices sheet is open.
     @State private var confirmSignOut = false
     @State private var showLicenses = false
+    #if os(macOS)
+    @AppStorage("account.settingsPane") private var pane = AccountSettingsPane.account
+    #endif
     /// iOS only: the in-app browser that completes deletion on the website.
     @State private var showDeletionWeb = false
     @State private var deletionURL: URL?
@@ -47,12 +76,22 @@ struct AccountView: View {
                     }
                 }
             }
+            TabStrip(
+                tabs: AccountSettingsPane.allCases.map { ($0, $0.label, $0.symbol) },
+                selection: $pane
+            )
             #endif
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let message = model.errorMessage {
                         ErrorBanner(message: message)
                     }
+                    #if os(macOS)
+                    if let device = model.pendingLogin {
+                        SignInCode(device: device) { model.cancelSignIn() }
+                    }
+                    paneBody
+                    #else
                     if let device = model.pendingLogin {
                         SignInCode(device: device) { model.cancelSignIn() }
                     } else if model.signedIn, let account = model.account {
@@ -64,21 +103,18 @@ struct AccountView: View {
                         // flash the wrong answer on every launch.
                         ProgressView().frame(maxWidth: .infinity)
                     }
-
-                    #if os(macOS)
-                    forgeCard
-                    hostCard
-                    terminalCard
-                    localModelsCard
-                    #endif
                     ChatCacheSettings()
                     notificationsCard
                     licensesCard
                     deleteAccountCard
                     privacyNote
+                    #endif
                 }
                 .padding(Theme.Space.m)
             }
+            #if os(macOS)
+            .id(pane)
+            #endif
         }
         .background(Theme.background)
         .navigationTitle("Account")
@@ -141,12 +177,71 @@ struct AccountView: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             identity(account)
             syncCard(account)
-            #if os(macOS)
-            planLimitsCard
-            #endif
             machinesCard(account)
         }
     }
+
+    #if os(macOS)
+    @ViewBuilder
+    private var paneBody: some View {
+        switch pane {
+        case .account:
+            accountPane
+        case .planLimits:
+            planLimitsPane
+        case .thisMac:
+            thisMacPane
+        }
+    }
+
+    /// Who you are, who can reach you, and the legal end of the account.
+    @ViewBuilder
+    private var accountPane: some View {
+        if model.pendingLogin == nil {
+            if model.signedIn, let account = model.account {
+                signedIn(account)
+            } else if model.account != nil {
+                signedOut
+            } else {
+                ProgressView().frame(maxWidth: .infinity)
+            }
+        }
+        forgeCard
+        privacyNote
+        licensesCard
+        deleteAccountCard
+    }
+
+    @ViewBuilder
+    private var planLimitsPane: some View {
+        if model.signedIn {
+            planLimitsCard
+        } else if model.account != nil {
+            Card(
+                title: "Plan limits",
+                subtitle: "Sign in to track vendor quota windows on this Mac and share them with your other devices.",
+                mark: "mark_plan"
+            ) {
+                Button("Sign in to tokenstat.ai", .signIn) {
+                    model.signIn()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        } else {
+            ProgressView().frame(maxWidth: .infinity)
+        }
+    }
+
+    /// Settings that live on this computer, signed in or not.
+    @ViewBuilder
+    private var thisMacPane: some View {
+        hostCard
+        notificationsCard
+        ChatCacheSettings()
+        terminalCard
+        localModelsCard
+    }
+    #endif
 
     /// Who you are, at the size a profile deserves.
     ///

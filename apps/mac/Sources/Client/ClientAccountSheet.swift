@@ -50,6 +50,22 @@ struct ClientAccountSheet: View {
     }
 }
 
+/// Phone-sized account settings, split the same way the Mac pane is: who
+/// you are, what this device keeps, and the legal end.
+private enum ClientAccountPane: String, CaseIterable, Hashable {
+    case account
+    case thisDevice
+    case legal
+
+    var label: String {
+        switch self {
+        case .account: return "Account"
+        case .thisDevice: return "This device"
+        case .legal: return "Legal"
+        }
+    }
+}
+
 /// Phone-sized account settings: identity, plan, devices, sign out, legal.
 private struct ClientAccountContent: View {
     @Environment(AccountModel.self) private var model
@@ -62,44 +78,42 @@ private struct ClientAccountContent: View {
     @State private var confirmSignOut = false
     /// Read by `ClientRootView`, written here. See `ClientLayoutPreference`.
     @AppStorage("client.layoutMode") private var layoutPreference = ClientLayoutPreference.automatic.rawValue
+    @AppStorage("client.accountPane") private var pane = ClientAccountPane.account
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if let message = model.errorMessage {
-                    Text(message)
-                        .font(ClientType.body)
-                        .foregroundStyle(Theme.danger)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(Theme.Space.m)
-                        .cardSurface()
-                }
-
-                if model.signedIn, let account = model.account {
-                    identity(account)
-                    planCard(account)
-                    lastSync(account)
-                    devices(account)
-                    signOutButton
-                } else if model.account != nil {
-                    signedOut
-                } else {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding(Theme.Space.xl)
-                }
-
-                ChatCacheSettings()
-                notificationsCard
-                layoutCard
-                legalCard
-                licensesCard
-                deleteAccountCard
-                privacyNote
-            }
+        VStack(spacing: 0) {
+            SegmentedTabs(
+                options: ClientAccountPane.allCases,
+                selection: $pane
+            ) { $0.label }
             .padding(.horizontal, Theme.Space.m)
-            .padding(.top, Theme.Space.s)
-            .padding(.bottom, Theme.Space.xl)
+            .padding(.vertical, Theme.Space.s)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let message = model.errorMessage {
+                        Text(message)
+                            .font(ClientType.body)
+                            .foregroundStyle(Theme.danger)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Theme.Space.m)
+                            .cardSurface()
+                    }
+
+                    switch pane {
+                    case .account:
+                        accountPane
+                    case .thisDevice:
+                        thisDevicePane
+                    case .legal:
+                        legalPane
+                    }
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.top, Theme.Space.s)
+                .padding(.bottom, Theme.Space.xl)
+            }
+            .id(pane)
         }
         .background(Theme.background)
         .sheet(isPresented: $showLicenses) {
@@ -135,6 +149,38 @@ private struct ClientAccountContent: View {
         .task {
             if model.account == nil { await model.load() }
         }
+    }
+
+    @ViewBuilder
+    private var accountPane: some View {
+        if model.signedIn, let account = model.account {
+            identity(account)
+            planCard(account)
+            lastSync(account)
+            devices(account)
+            signOutButton
+        } else if model.account != nil {
+            signedOut
+        } else {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(Theme.Space.xl)
+        }
+    }
+
+    @ViewBuilder
+    private var thisDevicePane: some View {
+        ChatCacheSettings()
+        notificationsCard
+        layoutCard
+    }
+
+    @ViewBuilder
+    private var legalPane: some View {
+        legalCard
+        licensesCard
+        deleteAccountCard
+        privacyNote
     }
 
     private func identity(_ account: Account) -> some View {
