@@ -82,7 +82,7 @@ struct ChatInstructionsCard: View {
                             Theme.background,
                             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                         )
-                    Text("Every conversation gets this so an agent can hand a file back to you. It is sent once, and it tells the agent not to talk about it.")
+                    Text("Every conversation gets this so an agent can put a file or image into this chat. It is sent once, and it tells the agent not to talk about it.")
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)

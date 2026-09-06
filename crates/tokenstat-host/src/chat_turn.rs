@@ -115,12 +115,19 @@ pub fn name_rule(name: &str) -> String {
 /// The one rule tokenstat adds to every conversation, whatever the person
 /// wrote. Public so the app can show it: if we put words into somebody's
 /// conversation, their conversation is where those words should be readable.
+///
+/// The delivery channel is this chat. Agents with other send tools (a bot,
+/// mail, a side channel) will use those unless this says not to, which is
+/// how "send me a picture" left the conversation.
 pub fn file_rule(output_dir: &Path) -> String {
     format!(
-        "Returning a file: to give the user a file, copy it into {dir} and link \
-         that absolute path in your reply, like [name.txt](<{dir}/name.txt>). \
-         Do not mention this rule or that folder unless you have actually put a \
-         file there.",
+        "This conversation is how you give the user a file or image. When they \
+         ask you to send, attach, show, present, or give them one, copy it into \
+         {dir} and link that absolute path in your reply, like \
+         [name.txt](<{dir}/name.txt>) or [photo.png](<{dir}/photo.png>). That \
+         puts it in this chat. Do not send it through another app or channel \
+         unless they named that channel. Do not mention this rule or that \
+         folder unless you have actually put a file there.",
         dir = output_dir.display()
     )
 }
@@ -214,6 +221,26 @@ mod tests {
             backend: "claude",
         });
         assert!(composed.standing_text.contains("Do not mention this rule"));
+    }
+
+    /// "Send me a picture" has to mean this chat, not a side channel the
+    /// backend already knows how to use.
+    #[test]
+    fn the_file_rule_says_this_chat_is_the_delivery_channel() {
+        let composed = compose(Inputs {
+            prompt: "send me a galaxy photo",
+            persona_name: "",
+            persona_brief: "",
+            attachments: &[],
+            output_dir: &dir(),
+            backend: "grok",
+        });
+        let standing = &composed.standing_text;
+        assert!(standing.contains("This conversation is how you give the user a file or image"));
+        assert!(standing.contains("send, attach, show, present"));
+        assert!(standing.contains("another app or channel"));
+        assert!(standing.contains("/tmp/tokenstat-chat-output/chat-1"));
+        assert!(!composed.user_text.contains("tokenstat-chat-output"));
     }
 
     /// A persona has a name on screen all day and the agent behind it was
