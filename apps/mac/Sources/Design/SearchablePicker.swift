@@ -120,7 +120,11 @@ struct PickerSearchField: View {
             }
         }
         .padding(.horizontal, Theme.Space.s)
+        #if os(macOS)
         .frame(minHeight: 34)
+        #else
+        .frame(minHeight: 44)
+        #endif
         .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.Space.s))
         .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
     }
@@ -142,12 +146,17 @@ struct PickerOptionRow<Trailing: View>: View {
                 .foregroundStyle(isSelected ? Theme.accent : Color.secondary.opacity(0.35))
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
+                    #if os(macOS)
                     .font(
                         monospaced
                             ? Theme.mono(12, weight: isSelected ? .semibold : .regular)
                             : Theme.font(12, weight: isSelected ? .semibold : .regular)
                     )
-                    .lineLimit(1)
+                    #else
+                    .font(monospaced ? Theme.monoText(16, relativeTo: .body) : Theme.body)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    #endif
+                    .lineLimit(2)
                     .truncationMode(.middle)
                 if let detail, !detail.isEmpty {
                     Text(detail)
@@ -161,6 +170,9 @@ struct PickerOptionRow<Trailing: View>: View {
         }
         .padding(.horizontal, Theme.Space.s)
         .padding(.vertical, 6)
+        #if !os(macOS)
+        .frame(minHeight: 48)
+        #endif
         .contentShape(.rect)
     }
 }
@@ -251,6 +263,7 @@ struct PickerOptionList<Value: Hashable>: View {
     /// The agent/model/effort picker uses these to make its three editable
     /// dimensions obvious before somebody starts scrolling its long list.
     var sectionTabs: [String] = []
+    var selectionSummary: String?
     var pick: (Value) -> Void
     /// Trailing accessory per row, for the model picker's favourite star.
     var accessory: ((Value) -> AnyView)?
@@ -271,6 +284,13 @@ struct PickerOptionList<Value: Hashable>: View {
                         .foregroundStyle(.secondary)
                 }
                 #endif
+                if let selectionSummary {
+                    Text(selectionSummary)
+                        .font(Theme.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Current selection: \(selectionSummary)")
+                }
                 HStack(spacing: Theme.Space.s) {
                     PickerSearchField(prompt: prompt, query: $query, onSubmit: submit)
                     if refresh != nil {
@@ -327,23 +347,27 @@ struct PickerOptionList<Value: Hashable>: View {
                     }
                     .padding(Theme.Space.s)
                 }
+                .id(selectedSection)
+                .scrollDismissesKeyboard(.interactively)
             }
         }
     }
 
     private func row(_ choice: PickerChoice<Value>) -> some View {
         let selected = isSelected(choice.value)
-        return Button { pick(choice.value) } label: {
-            PickerOptionRow(
-                label: choice.label,
-                detail: choice.detail,
-                isSelected: selected,
-                monospaced: monospaced
-            ) {
-                if let accessory { accessory(choice.value) }
+        return HStack(spacing: 0) {
+            Button { pick(choice.value) } label: {
+                PickerOptionRow(
+                    label: choice.label,
+                    detail: choice.detail,
+                    isSelected: selected,
+                    monospaced: monospaced
+                )
             }
+            .buttonStyle(PickerRowButtonStyle(isSelected: selected))
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            if let accessory { accessory(choice.value) }
         }
-        .buttonStyle(PickerRowButtonStyle(isSelected: selected))
     }
 
     private var refreshButton: some View {
@@ -358,6 +382,10 @@ struct PickerOptionList<Value: Hashable>: View {
         .buttonStyle(.plain)
         .foregroundStyle(Theme.accent)
         .environment(\.compactActions, true)
+        #if !os(macOS)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(.rect)
+        #endif
         .disabled(refreshing)
         .opacity(refreshing ? 0.4 : 1)
         .help("Ask this computer to read the agent's model list again")
@@ -382,12 +410,16 @@ struct PickerOptionList<Value: Hashable>: View {
         let selected = selectedSection == section
         return Button {
             selectedSection = section
+            query = ""
         } label: {
             Text(title)
                 .font(Theme.caption.weight(selected ? .semibold : .regular))
                 .foregroundStyle(selected ? Theme.accent : .secondary)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
+                #if !os(macOS)
+                .frame(minWidth: 54, minHeight: 44)
+                #endif
                 .background(
                     selected ? Theme.accentSoft : Theme.background,
                     in: Capsule()

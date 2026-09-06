@@ -332,6 +332,7 @@ private struct ChatAgentMenu: View {
 
     @State private var isPresented = false
     @State private var canRefresh = false
+    @State private var updating = false
     @State private var favorites = ModelFavoritesStore.shared
 
     /// One row of the panel. Three kinds of choice share a list, so they share
@@ -346,32 +347,53 @@ private struct ChatAgentMenu: View {
 
     var body: some View {
         PickerPanel(title: "Agent, model and effort", isPresented: $isPresented) {
-            PickerOptionList(
-                choices: choices,
-                isSelected: isSelected,
-                prompt: "Filter agents, models and efforts",
-                emptyMessage: "No agents available",
-                caption: "Three settings for this conversation.",
-                refresh: canRefresh ? { await model.reloadBackends() } : nil,
-                sectionValue: currentValue,
-                sectionTabs: selectableSections,
-                pick: pick,
-                accessory: { value in AnyView(star(for: value)) }
-            )
-            .task(id: model.peer ?? "local") {
-                canRefresh = await RemoteHostFeature.modelRefresh.isSupported(peer: model.peer)
+            VStack(spacing: 0) {
+                #if os(macOS)
+                HStack {
+                    Text("Agent, model and effort").font(Theme.callout.weight(.semibold))
+                    Spacer()
+                    Button("Done", .done) { isPresented = false }
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(Theme.Space.s)
+                #endif
+                PickerOptionList(
+                    choices: choices,
+                    isSelected: isSelected,
+                    prompt: "Filter agents, models and efforts",
+                    emptyMessage: "No agents available",
+                    caption: "Three settings for this conversation.",
+                    refresh: canRefresh ? { await model.reloadBackends() } : nil,
+                    sectionValue: currentValue,
+                    sectionTabs: selectableSections,
+                    selectionSummary: summary,
+                    pick: pick,
+                    accessory: { value in AnyView(star(for: value)) }
+                )
+                .disabled(updating || locked)
+                .task(id: model.peer ?? "local") {
+                    canRefresh = await RemoteHostFeature.modelRefresh.isSupported(peer: model.peer)
+                }
             }
         } label: {
             HStack(spacing: 6) {
                 Text(summary)
+                    #if os(macOS)
                     .font(Theme.font(12, weight: .medium))
-                    .lineLimit(1)
+                    #else
+                    .font(Theme.callout.weight(.medium))
+                    #endif
+                    .lineLimit(2)
+                    .truncationMode(.middle)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(Theme.fixed(8, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
+            #if !os(macOS)
+            .frame(minHeight: 44)
+            #endif
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -380,7 +402,7 @@ private struct ChatAgentMenu: View {
             .contentShape(.rect)
         }
         .disabled(locked)
-        .fixedSize(horizontal: true, vertical: true)
+        .fixedSize(horizontal: false, vertical: true)
         .help("Agent, model and effort")
         .accessibilityLabel(summary)
     }
@@ -446,21 +468,22 @@ private struct ChatAgentMenu: View {
     }
 
     private func pick(_ choice: Choice) {
-        switch choice {
-        case let .agent(id):
-            Task {
+        guard !updating, !locked else { return }
+        updating = true
+        Task {
+            defer { updating = false }
+            switch choice {
+            case let .agent(id):
                 if model.backend(for: id)?.gateTier == "bypassOnly" {
                     await model.update(backend: id, autonomy: "bypass")
                 } else {
                     await model.update(backend: id)
                 }
+            case let .model(id):
+                await model.update(model: id)
+            case let .effort(id):
+                await model.update(effort: id)
             }
-        case let .model(id):
-            Task { await model.update(model: id) }
-            isPresented = false
-        case let .effort(id):
-            Task { await model.update(effort: id) }
-            isPresented = false
         }
     }
 
@@ -474,6 +497,10 @@ private struct ChatAgentMenu: View {
             } label: {
                 Image(systemName: favorites.contains(backend: backend.id, model: id)
                     ? "star.fill" : "star")
+                    #if !os(macOS)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+                    #endif
                     .font(Theme.font(10, weight: .semibold))
                     .foregroundStyle(
                         favorites.contains(backend: backend.id, model: id)
@@ -514,8 +541,8 @@ private struct ChatAgentMenu: View {
         } else {
             parts.append("Default")
         }
-        if let effort = chat.effort, !effort.isEmpty {
-            parts.append(effort)
+        if backend?.efforts.isEmpty == false {
+            parts.append("Effort: \(chat.effort.flatMap { $0.isEmpty ? nil : $0 } ?? "Default")")
         }
         return parts.joined(separator: " · ")
     }
@@ -537,6 +564,9 @@ struct ChatCompactPills: View {
                         .foregroundStyle(option.value == selection ? Theme.accent : Color.secondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
+                        #if !os(macOS)
+                        .frame(minHeight: 44)
+                        #endif
                         .background(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(option.value == selection ? Theme.accentSoft : .clear)

@@ -93,9 +93,10 @@ final class ChatModel {
     /// that started them may mutate the currently displayed workspace/chat.
     private var loadGeneration: UInt64 = 0
     private var selectionGeneration: UInt64 = 0
+    private var attachmentCacheGeneration: UInt64 = 0
     private var attemptedResponseAttachments: Set<String> = []
-    private var loadingResponseAttachments: Set<String> = []
-    private var responseAttachmentRetryAt: [String: Date] = [:]
+    private(set) var loadingResponseAttachments: Set<String> = []
+    private(set) var responseAttachmentErrors: [String: String] = [:]
 
     /// Whether this model has answered for the folder on screen.
     ///
@@ -172,7 +173,7 @@ final class ChatModel {
         responseAttachmentRevision &+= 1
         attemptedResponseAttachments = []
         loadingResponseAttachments = []
-        responseAttachmentRetryAt = [:]
+        responseAttachmentErrors = [:]
         approvals = []
         instructions = nil
         events = []
@@ -663,10 +664,7 @@ final class ChatModel {
     }
 
     var hasPendingResponseAttachments: Bool {
-        displayItems.contains { item in
-            guard case let .attachment(attachment) = item.kind else { return false }
-            return responseAttachmentData[attachment.id] == nil
-        }
+        !loadingResponseAttachments.isEmpty
     }
 
     /// The face of the conversation on screen.
@@ -1044,14 +1042,33 @@ final class ChatModel {
         }
     }
 
+    func clearCachedAttachmentMemory() {
+        attachmentCacheGeneration &+= 1
+        responseAttachmentData = [:]
+        attachmentPreviews = [:]
+        loadingResponseAttachments = []
+        responseAttachmentErrors = [:]
+        responseAttachmentRevision &+= 1
+        // Also stop the remainder of a background page's download queue.
+        attemptedResponseAttachments.formUnion(events.compactMap { timeline in
+            guard timeline.event?.kind == "attachment" else { return nil }
+            return timeline.event?.id
+        })
+    }
+
+    func downloadResponseAttachment(_ attachment: ChatAttachment) async {
+        guard let selected else { return }
+        await loadResponseAttachment(
+            attachment, id: selected.id, generation: selectionGeneration, userInitiated: true
+        )
+    }
+
     private func loadResponseAttachments(id: String, generation: UInt64) async {
         let descriptors = events.compactMap { timeline -> ChatAttachment? in
             guard let event = timeline.event,
                   event.kind == "attachment",
                   let attachmentID = event.id,
-                  !attemptedResponseAttachments.contains(attachmentID),
-                  !loadingResponseAttachments.contains(attachmentID),
-                  responseAttachmentRetryAt[attachmentID, default: .distantPast] <= Date()
+                  !attemptedResponseAttachments.contains(attachmentID)
             else { return nil }
             return ChatAttachment(
                 id: attachmentID,
@@ -1060,40 +1077,58 @@ final class ChatModel {
                 size: event.size
             )
         }
-        guard !descriptors.isEmpty else { return }
-        loadingResponseAttachments.formUnion(descriptors.map(\.id))
+        // Keep background downloads bounded instead of fetching a whole page
+        // of files concurrently. Navigation stops the remaining queue.
+        for descriptor in descriptors {
+            guard selectionMatches(id: id, generation: generation) else { return }
+            await loadResponseAttachment(descriptor, id: id, generation: generation, userInitiated: false)
+        }
+    }
+
+    private func loadResponseAttachment(
+        _ attachment: ChatAttachment, id: String, generation: UInt64, userInitiated: Bool
+    ) async {
+        guard selectionMatches(id: id, generation: generation),
+              responseAttachmentData[attachment.id] == nil,
+              !loadingResponseAttachments.contains(attachment.id),
+              userInitiated || !attemptedResponseAttachments.contains(attachment.id)
+        else { return }
         let targetPeer = peer
-        let loaded = await withTaskGroup(of: (String, Data)?.self, returning: [(String, Data)].self) { group in
-            for descriptor in descriptors {
-                group.addTask {
-                    guard let payload = try? await Bridge.chatAttachment(
-                        id: id,
-                        attachmentID: descriptor.id,
-                        peer: targetPeer
-                    ), let data = Data(base64Encoded: payload.data) else { return nil }
-                    return (descriptor.id, data)
-                }
+        let memoryGeneration = attachmentCacheGeneration
+        attemptedResponseAttachments.insert(attachment.id)
+        loadingResponseAttachments.insert(attachment.id)
+        responseAttachmentErrors[attachment.id] = nil
+        responseAttachmentRevision &+= 1
+        defer {
+            if selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration {
+                loadingResponseAttachments.remove(attachment.id)
+                responseAttachmentRevision &+= 1
             }
-            var values: [(String, Data)] = []
-            for await value in group {
-                if let value { values.append(value) }
+        }
+        let cacheEpoch = await ChatAttachmentCache.shared.epoch()
+        guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
+        if let cached = await ChatAttachmentCache.shared.read(peer: targetPeer, chat: id, attachment: attachment.id) {
+            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
+            responseAttachmentData[attachment.id] = cached
+            return
+        }
+        guard selectionMatches(id: id, generation: generation),
+              userInitiated || ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: attachment.size)
+        else { return }
+        do {
+            let payload = try await Bridge.chatAttachment(id: id, attachmentID: attachment.id, peer: targetPeer)
+            guard let data = Data(base64Encoded: payload.data), !data.isEmpty,
+                  data.count <= ChatInbox.maxBytes else {
+                throw CocoaError(.fileReadCorruptFile)
             }
-            return values
-        }
-        loadingResponseAttachments.subtract(descriptors.map(\.id))
-        guard selectionMatches(id: id, generation: generation) else { return }
-        let loadedIDs = Set(loaded.map(\.0))
-        var updatedData = responseAttachmentData
-        for (attachmentID, data) in loaded {
-            updatedData[attachmentID] = data
-            attemptedResponseAttachments.insert(attachmentID)
-        }
-        if updatedData.count != responseAttachmentData.count {
-            responseAttachmentData = updatedData
-            responseAttachmentRevision &+= 1
-        }
-        for descriptor in descriptors where !loadedIDs.contains(descriptor.id) {
-            responseAttachmentRetryAt[descriptor.id] = Date().addingTimeInterval(2)
+            guard await ChatAttachmentCache.shared.write(data, peer: targetPeer, chat: id, attachment: attachment.id, epoch: cacheEpoch) else { return }
+            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
+            responseAttachmentData[attachment.id] = data
+        } catch {
+            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
+            responseAttachmentErrors[attachment.id] = error.localizedDescription.contains("quota_exceeded")
+                ? "Relay allowance reached. A direct connection can still transfer this file."
+                : "Download failed. Tap to retry."
         }
     }
 

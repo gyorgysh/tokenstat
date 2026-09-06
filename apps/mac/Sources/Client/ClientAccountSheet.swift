@@ -89,6 +89,7 @@ private struct ClientAccountContent: View {
                         .padding(Theme.Space.xl)
                 }
 
+                ChatCacheSettings()
                 notificationsCard
                 layoutCard
                 legalCard

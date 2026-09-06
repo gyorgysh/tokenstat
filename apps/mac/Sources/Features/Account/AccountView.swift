@@ -71,6 +71,7 @@ struct AccountView: View {
                     terminalCard
                     localModelsCard
                     #endif
+                    ChatCacheSettings()
                     notificationsCard
                     licensesCard
                     deleteAccountCard

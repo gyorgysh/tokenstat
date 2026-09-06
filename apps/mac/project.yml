@@ -133,8 +133,11 @@ settings:
     # 71 went up.
     # 72 is 0.8.2.
     # 73 is 0.8.3.
-    # Next free Apple build number is 74.
-    CURRENT_PROJECT_VERSION: "73"
+    # 74 is the same 0.8.3 with the transcript hang fixes: follow that locks
+    # on send, a bounded row window, single-text diffs, quiet scrolling, and
+    # todo cards that read instead of pasting JSON.
+    # Next free Apple build number is 75.
+    CURRENT_PROJECT_VERSION: "74"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

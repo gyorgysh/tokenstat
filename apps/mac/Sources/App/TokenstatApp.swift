@@ -106,6 +106,7 @@ struct TokenstatApp: App {
         // callbacks for whatever arrived first, and on a Mac that is the
         // difference between a banner and silence while the app is in front.
         NotificationPresenter.install()
+        Task { await ChatAttachmentCache.shared.maintain() }
         #if os(macOS)
         // A device can ask to see this screen, or to open the work on it, at
         // any moment. The poll is what turns that into a toast or a banner.

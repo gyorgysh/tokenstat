@@ -167,6 +167,9 @@ struct ChatView: View {
         .onChange(of: "\(model.selected?.id ?? "")-\(isActive)", initial: true) { _, _ in
             UserPresence.shared.chatSurface(showing: isActive ? model.selected?.id : nil)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in
+            model.clearCachedAttachmentMemory()
+        }
         .onDisappear {
             UserPresence.shared.chatSurface(showing: nil)
         }
@@ -237,6 +240,11 @@ struct ChatView: View {
                             isPending: pendingApproval(item),
                             resolve: { approval, choice in
                                 Task { await model.resolve(approval, choice: choice) }
+                            },
+                            attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
+                            attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
+                            downloadAttachment: { attachment in
+                                Task { await model.downloadResponseAttachment(attachment) }
                             },
                             faceSeed: model.faceSeed,
                             isLive: model.busy && item.id == model.displayItems.last?.id
@@ -500,6 +508,11 @@ struct ChatView: View {
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
             return true
         }
+    }
+
+    private func attachmentID(for item: ChatDisplayItem) -> String {
+        guard case let .attachment(attachment) = item.kind else { return "" }
+        return attachment.id
     }
 
     private func attachmentData(for item: ChatDisplayItem) -> Data? {

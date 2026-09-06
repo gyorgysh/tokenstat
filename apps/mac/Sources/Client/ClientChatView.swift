@@ -346,6 +346,9 @@ struct ClientChatThread: View {
         .onChange(of: chatID, initial: true) { _, id in
             UserPresence.shared.chatSurface(showing: id.isEmpty ? nil : id)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in
+            model.clearCachedAttachmentMemory()
+        }
         .onDisappear {
             UserPresence.shared.chatSurface(showing: nil)
         }
@@ -393,6 +396,11 @@ struct ClientChatThread: View {
                             isPending: pendingApproval(item),
                             resolve: { approval, choice in
                                 Task { await model.resolve(approval, choice: choice) }
+                            },
+                            attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
+                            attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
+                            downloadAttachment: { attachment in
+                                Task { await model.downloadResponseAttachment(attachment) }
                             },
                             faceSeed: model.faceSeed,
                             isLive: model.busy && item.id == model.displayItems.last?.id
@@ -536,6 +544,11 @@ struct ClientChatThread: View {
                 settleMood = nil
             }
         }
+    }
+
+    private func attachmentID(for item: ChatDisplayItem) -> String {
+        guard case let .attachment(attachment) = item.kind else { return "" }
+        return attachment.id
     }
 
     private func attachmentData(for item: ChatDisplayItem) -> Data? {

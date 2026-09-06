@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
+import CryptoKit
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -371,5 +372,150 @@ enum ChatThumbnail {
         )
         guard CGImageDestinationFinalize(destination) else { return nil }
         return out as Data
+    }
+}
+
+enum ChatAttachmentDownloadPolicy {
+    static let automaticLimit: UInt64 = 1024 * 1024
+
+    static func permitsAutomaticDownload(size: UInt64?) -> Bool {
+        guard let size else { return false }
+        return size > 0 && size <= automaticLimit
+    }
+}
+
+enum ChatCachePreferences {
+    static let sizeKey = "chat.cache.maxGB"
+    static let daysKey = "chat.cache.retentionDays"
+    static let sizes = [1, 2, 5, 10, 20]
+    static let days = [1, 7, 14, 30]
+    static var maxGB: Int {
+        let value = UserDefaults.standard.integer(forKey: sizeKey)
+        return sizes.contains(value) ? value : 5
+    }
+    static var retentionDays: Int {
+        let value = UserDefaults.standard.integer(forKey: daysKey)
+        return days.contains(value) ? value : 7
+    }
+}
+
+extension Notification.Name {
+    static let chatAttachmentCachePurged = Notification.Name("chatAttachmentCachePurged")
+}
+
+/// Disposable downloads and preview copies. Disk work is serialized away
+/// from the UI actor. Purging invalidates writes from in-flight downloads.
+actor ChatAttachmentCache {
+    static let shared = ChatAttachmentCache(
+        previewDirectory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("tokenstat-chat-files", isDirectory: true)
+    )
+    private var budget: Int
+    private var lifetime: TimeInterval
+    private let directory: URL?
+    private let previewDirectory: URL?
+    private var generation: UInt64 = 0
+    private var lastPruned = Date.distantPast
+
+    init(
+        directory: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("chat-attachments", isDirectory: true),
+        budget: Int = ChatCachePreferences.maxGB * 1_000_000_000,
+        lifetime: TimeInterval = TimeInterval(ChatCachePreferences.retentionDays * 24 * 60 * 60),
+        previewDirectory: URL? = nil
+    ) {
+        self.directory = directory
+        self.budget = budget
+        self.lifetime = lifetime
+        self.previewDirectory = previewDirectory
+    }
+
+    func epoch() -> UInt64 { generation }
+
+    func configure(maxGB: Int, days: Int) throws -> Int {
+        budget = (ChatCachePreferences.sizes.contains(maxGB) ? maxGB : 5) * 1_000_000_000
+        lifetime = TimeInterval((ChatCachePreferences.days.contains(days) ? days : 7) * 24 * 60 * 60)
+        try prune()
+        return usedBytes()
+    }
+
+    private var roots: [URL] { [directory, previewDirectory].compactMap { $0 } }
+
+    private func file(peer: String?, chat: String, attachment: String) -> URL? {
+        let key = [peer ?? "local", chat, attachment].map { "\($0.utf8.count):\($0)" }.joined()
+        let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        return directory?.appendingPathComponent(digest)
+    }
+
+    func read(peer: String?, chat: String, attachment: String) -> Data? {
+        if Date().timeIntervalSince(lastPruned) > 60 { try? prune() }
+        guard let url = file(peer: peer, chat: chat, attachment: attachment),
+              let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+              let date = values.contentModificationDate,
+              Date().timeIntervalSince(date) < lifetime,
+              let size = values.fileSize, size > 0, size <= ChatInbox.maxBytes,
+              let data = try? Data(contentsOf: url)
+        else { return nil }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        return data
+    }
+
+    @discardableResult
+    func write(_ data: Data, peer: String?, chat: String, attachment: String, epoch: UInt64? = nil) -> Bool {
+        guard epoch == nil || epoch == generation else { return false }
+        guard data.count <= ChatInbox.maxBytes, let directory,
+              let url = file(peer: peer, chat: chat, attachment: attachment) else { return true }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            #if os(macOS)
+            try data.write(to: url, options: .atomic)
+            #else
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            #endif
+            try prune()
+        } catch {
+            // Cache failure must not prevent opening the downloaded file.
+        }
+        return true
+    }
+
+    func purge() throws {
+        generation &+= 1
+        var failure: Error?
+        for root in roots where FileManager.default.fileExists(atPath: root.path) {
+            do { try FileManager.default.removeItem(at: root) }
+            catch { failure = error }
+        }
+        if let failure { throw failure }
+    }
+
+    func usedBytes() -> Int { entries().reduce(0) { $0 + $1.2 } }
+
+    func maintain() { try? prune() }
+
+    private func entries() -> [(URL, Date, Int)] {
+        roots.flatMap { root -> [(URL, Date, Int)] in
+            guard let files = FileManager.default.enumerator(
+                at: root, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { return [] }
+            return files.compactMap { entry -> (URL, Date, Int)? in
+                guard let url = entry as? URL,
+                      let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]),
+                      values.isRegularFile == true,
+                      let date = values.contentModificationDate, let size = values.fileSize else { return nil }
+                return (url, date, size)
+            }
+        }
+    }
+
+    private func prune() throws {
+        let files = entries().sorted { $0.1 < $1.1 }
+        var total = files.reduce(0) { $0 + $1.2 }
+        for (url, date, size) in files where total > budget || Date().timeIntervalSince(date) >= lifetime {
+            try FileManager.default.removeItem(at: url)
+            total -= size
+        }
+        lastPruned = Date()
     }
 }

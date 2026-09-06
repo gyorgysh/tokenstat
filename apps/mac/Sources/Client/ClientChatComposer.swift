@@ -51,12 +51,16 @@ struct ClientChatComposer: View {
                 attachControl
                 field
                 if running {
-                    Button("Stop", .stop) { onStop() }
+                    Button { onStop() } label: {
+                        ActionIcon.stop.label("Stop").frame(width: 44, height: 44)
+                    }
                         .clientGlassStyle()
                         .environment(\.compactActions, true)
                 } else {
-                    Button("Send", .send) { onSend() }
-                        .buttonStyle(AccentButtonStyle(small: true))
+                    Button { onSend() } label: {
+                        ActionIcon.send.label("Send").frame(width: 44, height: 44)
+                    }
+                        .modifier(ChatSendStyle())
                         .environment(\.compactActions, true)
                         .disabled(cannotSend)
                 }
@@ -149,7 +153,7 @@ struct ClientChatComposer: View {
             ActionIcon.attach.label("Attach")
                 .environment(\.compactActions, true)
                 .foregroundStyle(Theme.accent)
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
                 .contentShape(.rect)
         }
         .disabled(running)
@@ -205,6 +209,17 @@ struct ClientChatComposer: View {
             for item in items {
                 await onAttach(item)
             }
+        }
+    }
+}
+
+private struct ChatSendStyle: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(AccentButtonStyle(small: true))
         }
     }
 }

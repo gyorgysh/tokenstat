@@ -227,7 +227,7 @@ struct ClientPaywallView: View {
             }
             .padding(.top, 4)
             if item.tier == "legend" {
-                Text("Screen connections try a direct path first. If a relay is needed, it remains end-to-end encrypted. The current generous relay allowance is 20 GiB per rolling 30 days, one relayed screen at a time, with up to 10 minutes per relayed session before reconnecting.")
+                Text("Screen connections try a direct path first. If a relay is needed, it remains end-to-end encrypted. The relay allowance is 20 GiB per rolling 30 days, shared by screen sessions and chat files. One relayed screen can run at a time, with up to 10 minutes per relayed session before reconnecting.")
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

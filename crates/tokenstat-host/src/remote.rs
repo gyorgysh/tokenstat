@@ -2069,6 +2069,14 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     // out of the pool is as live as a freshly dialled one while it is in use.
     let _slot = LiveSlot::take(peer_hex)?;
 
+    // Attachment payloads must not borrow an unlabelled pooled RPC channel:
+    // the relay meters file bytes against the account's shared allowance.
+    // This still uses the same authenticated direct-first dial ladder.
+    if is_attachment_transfer(method) {
+        let mut connection = dial_peer_as(peer_hex, ChannelPurpose::Files)?;
+        return round_trip(&mut connection, request.as_bytes()).map_err(|error| error.to_string());
+    }
+
     // One retry on a pooled connection, for a peer daemon that restarted. A
     // fresh connection failing is a real failure and is reported.
     if let Some(mut pooled) = checkout(peer_hex)
@@ -2096,6 +2104,10 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     let answer = answer.map_err(|e| e.to_string())?;
     checkin(peer_hex, fresh);
     Ok(answer)
+}
+
+fn is_attachment_transfer(method: &str) -> bool {
+    matches!(method, "chat.attach" | "chat.attachment")
 }
 
 /// Open a fresh, authenticated connection to a peer: direct when the record
@@ -2748,6 +2760,15 @@ fn forward(params: &str) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attachment_payloads_use_metered_file_channels() {
+        assert!(is_attachment_transfer("chat.attach"));
+        assert!(is_attachment_transfer("chat.attachment"));
+        assert!(!is_attachment_transfer("chat.send"));
+        assert!(!is_attachment_transfer("chat.eventPage"));
+        assert!(!is_attachment_transfer("chat.events"));
+    }
 
     #[test]
     fn remote_reach_is_off_unless_a_file_says_otherwise() {

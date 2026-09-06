@@ -4,6 +4,7 @@
 import SwiftUI
 import UIKit
 import ImageIO
+import QuickLook
 
 /// Phone-sized transcript blocks. Assistant prose and tools are the same
 /// views as the Mac. Edits use `DiffLineRow` so a hunk does not spend a
@@ -16,6 +17,9 @@ struct ClientChatEventRow: View {
     let agentLabel: (String) -> String
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
+    var attachmentIsLoading = false
+    var attachmentError: String?
+    var downloadAttachment: (ChatAttachment) -> Void = { _ in }
     var faceSeed: UInt64 = 0
     /// The row still being written. Selectable chains are held back until
     /// the turn ends; copy buttons stay live throughout.
@@ -98,7 +102,11 @@ struct ClientChatEventRow: View {
         case let .attachment(attachment):
             // Same as the Mac: stable identity across polls. The revision
             // still redraws through Equatable; recreating collapsed the row.
-            ClientChatResponseAttachment(attachment: attachment, data: attachmentData)
+            ClientChatResponseAttachment(
+                attachment: attachment, data: attachmentData,
+                isLoading: attachmentIsLoading, downloadError: attachmentError,
+                onDownload: { downloadAttachment(attachment) }
+            )
                 .id(attachment.id)
         case let .handoff(to, brief):
             ClientChatHandoffRow(agent: agentLabel(to), brief: brief)
@@ -133,19 +141,37 @@ struct ClientChatEventRow: View {
 private struct ClientChatResponseAttachment: View {
     let attachment: ChatAttachment
     let data: Data?
+    var isLoading: Bool
+    var downloadError: String?
+    var onDownload: () -> Void
     @State private var exportURL: URL?
+    @State private var previewURL: URL?
 
     var body: some View {
         Group {
             if let exportURL {
-                ShareLink(item: exportURL) { content }
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Button { previewURL = exportURL } label: { content }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Preview \(attachment.name)")
+                    ShareLink(item: exportURL) {
+                        Label("Share or save", systemImage: "square.and.arrow.up")
+                            .frame(minHeight: 44)
+                    }
                     .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                }
             } else {
-                content
+                Button(action: onDownload) { content }
+                    .buttonStyle(.plain)
+                    .disabled(isLoading || data != nil)
+                    .accessibilityLabel("Download \(attachment.name)")
             }
         }
+        .quickLookPreview($previewURL)
         .task(id: data) {
             exportURL = stage()
+            if exportURL != nil { await ChatAttachmentCache.shared.maintain() }
             guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
             // SwiftUI restarts a row's task when it re-enters the viewport.
             // Keep its decoded image and geometry on those appearances.
@@ -185,10 +211,15 @@ private struct ClientChatResponseAttachment: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if data == nil {
+                if isLoading {
                     ProgressView().controlSize(.small)
+                } else if data == nil {
+                    ActionIcon.download.label(downloadError == nil ? "Download" : "Retry")
+                        .font(ClientType.label)
+                        .foregroundStyle(Theme.accent)
+                        .frame(minHeight: 44)
                 } else {
-                    Image(systemName: "square.and.arrow.up")
+                    Image(systemName: "doc.viewfinder")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -213,6 +244,7 @@ private struct ClientChatResponseAttachment: View {
     private var image: UIImage? { decodedData == data ? decodedImage : nil }
 
     private var detail: String {
+        if let downloadError { return downloadError }
         let type = attachment.mediaType ?? "File"
         guard let size = attachment.size else { return type }
         return "\(type) · \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))"
