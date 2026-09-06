@@ -509,13 +509,25 @@ actor ChatAttachmentCache {
         }
     }
 
+    /// Oldest first, until the budget is met and nothing is past its lifetime.
+    ///
+    /// One file that will not go, because something has it open or its folder
+    /// turned read-only, must not stop the pass: the rest of the eviction is
+    /// what keeps the cache inside its budget. The failure is reported after
+    /// everything that could be removed has been.
     private func prune() throws {
         let files = entries().sorted { $0.1 < $1.1 }
         var total = files.reduce(0) { $0 + $1.2 }
+        var failure: Error?
         for (url, date, size) in files where total > budget || Date().timeIntervalSince(date) >= lifetime {
-            try FileManager.default.removeItem(at: url)
-            total -= size
+            do {
+                try FileManager.default.removeItem(at: url)
+                total -= size
+            } catch {
+                failure = error
+            }
         }
         lastPruned = Date()
+        if let failure { throw failure }
     }
 }

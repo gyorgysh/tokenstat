@@ -872,8 +872,18 @@ final class WorkspacesModel {
                         if askedWorkspace.insert(peer.key).inserted {
                             _ = try? await Bridge.askWorkspaceAccess(peer: peer.key)
                         }
+                        // Counted like any other refusal, so a machine whose
+                        // owner said no is asked every ten minutes rather than
+                        // twice a minute for the rest of the session. Its
+                        // folders stay: the host is reachable, it has simply
+                        // not said yes.
+                        let refusals = (remotePeerFailures[peer.key] ?? 0) + 1
+                        remotePeerFailures[peer.key] = refusals
+                        let neverOpened = !remotePeerEverAnswered.contains(peer.key)
                         remotePeerNextDial[peer.key] = Date().addingTimeInterval(
-                            Self.peerRetrySeconds
+                            neverOpened && refusals >= Self.failuresBeforeBackingOff
+                                ? Self.peerColdRetrySeconds
+                                : Self.peerRetrySeconds
                         )
                         continue
                     }
@@ -915,7 +925,12 @@ final class WorkspacesModel {
     /// A host answered, and the answer was no. Connection failures and a
     /// phone that cannot host a folder are different, and must not raise a
     /// permission request.
-    private static func isWorkspaceRefusal(_ message: String) -> Bool {
+    ///
+    /// Not private: the sidebar sweep and the Devices Connect button both
+    /// have to recognise this answer, and the wording lives with the host.
+    /// Two copies of these three strings is one call site that quietly stops
+    /// asking the next time the host rephrases itself.
+    static func isWorkspaceRefusal(_ message: String) -> Bool {
         let lower = message.lowercased()
         return lower.contains("has not let this device")
             || lower.contains("workspace_not_allowed")

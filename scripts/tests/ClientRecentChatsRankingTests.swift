@@ -70,5 +70,7 @@ struct ClientRecentChatsRankingTests {
             cutoff.map(\.id) == ["old-unread"],
             "A week-old read chat drops. Unread survives the window."
         )
+
+        print("ClientRecentChatsRankingTests passed")
     }
 }

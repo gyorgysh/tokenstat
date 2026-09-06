@@ -69,7 +69,12 @@ struct ClientFilePreview: UIViewControllerRepresentable {
             file.url as NSURL
         }
 
-        /// Let the share sheet offer everything, including Save to Files.
+        /// No Markup, no rotation, no crop.
+        ///
+        /// The staged copy is a scratch file the cache prunes on a budget, so
+        /// an edit made here would be thrown away without warning. Sharing is
+        /// unaffected: the action button is the system share sheet, which is
+        /// where Save to Files and AirDrop live.
         func previewController(
             _ controller: QLPreviewController, editingModeFor previewItem: QLPreviewItem
         ) -> QLPreviewItemEditingMode {

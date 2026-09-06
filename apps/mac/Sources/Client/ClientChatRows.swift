@@ -12,7 +12,6 @@ import QuickLook
 struct ClientChatEventRow: View {
     let item: ChatDisplayItem
     let attachmentData: Data?
-    let attachmentRevision: UInt64
     let defaultAgentName: String
     let agentLabel: (String) -> String
     let isPending: Bool

@@ -66,8 +66,39 @@ enum HostStatsFormat {
     /// for a path nobody has observed yet.
     @MainActor
     static func loadRoute(for peer: String) async -> String? {
-        guard let traffic = try? await Bridge.remoteStatus().traffic else { return nil }
-        return traffic.peers.first { $0.peer.caseInsensitiveCompare(peer) == .orderedSame }?.route
+        let traffic = await ConnectionRoutes.shared.traffic()
+        return traffic?.peers.first { $0.peer.caseInsensitiveCompare(peer) == .orderedSame }?.route
+    }
+}
+
+/// One `remote.status` for a screenful of machine rows.
+///
+/// Every row asks for its own path at the same moment, and the answer is the
+/// same list for all of them. The host builds that list under the lock every
+/// peer call takes a slot in, so a list of machines used to mean one of those
+/// per row. Rows within a couple of seconds of each other share one answer,
+/// and a request in flight is joined rather than duplicated.
+@MainActor
+final class ConnectionRoutes {
+    static let shared = ConnectionRoutes()
+
+    private static let freshFor: TimeInterval = 2
+    private var cached: RemoteTraffic?
+    private var readAt = Date.distantPast
+    private var inFlight: Task<RemoteTraffic?, Never>?
+
+    func traffic() async -> RemoteTraffic? {
+        if let cached, Date().timeIntervalSince(readAt) < Self.freshFor { return cached }
+        if let inFlight { return await inFlight.value }
+        let task = Task { @MainActor in try? await Bridge.remoteStatus().traffic }
+        inFlight = task
+        let answer = await task.value
+        inFlight = nil
+        if let answer {
+            cached = answer
+            readAt = Date()
+        }
+        return answer
     }
 }
 

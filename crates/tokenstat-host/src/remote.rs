@@ -1462,40 +1462,52 @@ fn remember_route(peer: &str, route: Route) {
 /// in the account relay allowance. These numbers live in this process only.
 fn traffic_json() -> Value {
     let (direct_bytes, relay_bytes) = tokenstat_remote::payload_bytes();
-    let live_map = live().lock().ok();
-    let pool_map = pool().lock().ok();
-    let routes = last_routes().lock().ok();
-    let mut keys: BTreeSet<String> = BTreeSet::new();
-    if let Some(ref live_map) = live_map {
-        keys.extend(live_map.keys().cloned());
-    }
-    if let Some(ref pool_map) = pool_map {
-        keys.extend(pool_map.keys().cloned());
-    }
-    let peers: Vec<Value> = keys
+    // Read the three maps, then let them go. `live()` is what every peer call
+    // takes and drops a slot in, so naming peers, which reads the peer store
+    // from disk, must not happen while it is held.
+    let counted: Vec<(String, usize, usize, Option<Route>)> = {
+        let live_map = live().lock().ok();
+        let pool_map = pool().lock().ok();
+        let routes = last_routes().lock().ok();
+        let mut keys: BTreeSet<String> = BTreeSet::new();
+        if let Some(ref live_map) = live_map {
+            keys.extend(live_map.keys().cloned());
+        }
+        if let Some(ref pool_map) = pool_map {
+            keys.extend(pool_map.keys().cloned());
+        }
+        keys.into_iter()
+            .map(|peer| {
+                let live = live_map
+                    .as_ref()
+                    .and_then(|held| held.get(&peer).copied())
+                    .unwrap_or(0);
+                let idle = pool_map
+                    .as_ref()
+                    .and_then(|held| held.get(&peer).map(Vec::len))
+                    .unwrap_or(0);
+                let route = routes
+                    .as_ref()
+                    .and_then(|held| held.get(&peer).copied())
+                    .or_else(|| {
+                        pool_map.as_ref().and_then(|held| {
+                            held.get(&peer)?
+                                .last()
+                                .map(|idle| Route::from_connection(&idle.connection))
+                        })
+                    });
+                (peer, live, idle, route)
+            })
+            .collect()
+    };
+    // One store read for the whole list rather than one per peer.
+    let store = PeerStore::cached().ok();
+    let peers: Vec<Value> = counted
         .into_iter()
-        .map(|peer| {
-            let live = live_map
-                .as_ref()
-                .and_then(|held| held.get(&peer).copied())
-                .unwrap_or(0);
-            let idle = pool_map
-                .as_ref()
-                .and_then(|held| held.get(&peer).map(Vec::len))
-                .unwrap_or(0);
-            let route = routes
-                .as_ref()
-                .and_then(|held| held.get(&peer).copied())
-                .or_else(|| {
-                    pool_map.as_ref().and_then(|held| {
-                        held.get(&peer)?
-                            .last()
-                            .map(|idle| Route::from_connection(&idle.connection))
-                    })
-                });
+        .map(|(peer, live, idle, route)| {
             json!({
                 "peer": peer,
-                "label": traffic_peer_label(&peer),
+                "label": traffic_peer_label(&peer, store.as_deref()),
                 "route": route.map(Route::as_str),
                 "live": live,
                 "idle": idle,
@@ -1509,12 +1521,11 @@ fn traffic_json() -> Value {
     })
 }
 
-fn traffic_peer_label(peer: &str) -> String {
+fn traffic_peer_label(peer: &str, store: Option<&PeerStore>) -> String {
     let Ok(key) = public_key_from_hex(peer) else {
         return peer.chars().take(8).collect();
     };
-    PeerStore::cached()
-        .ok()
+    store
         .and_then(|store| store.get(&key).map(|record| record.label.clone()))
         .filter(|label| !label.is_empty())
         .unwrap_or_else(|| tokenstat_identity::fingerprint(&key))
@@ -2048,6 +2059,35 @@ fn is_refreshing_direct() -> bool {
     REFRESHING_DIRECT.with(|flag| flag.get())
 }
 
+/// The least time between two candidate probes for the same peer.
+///
+/// A probe is a full relay round trip. During a direct cooldown the answer
+/// cannot be used until the cooldown expires, so asking once per minute keeps
+/// the list fresh for the moment it does, while asking on every dial spent a
+/// relay round trip per attachment download for nothing.
+const CANDIDATE_REFRESH_INTERVAL_MS: i64 = DIRECT_MISS_FLOOR_MS;
+
+/// When the peer was last asked for its listen addresses.
+fn last_candidate_refresh() -> &'static Mutex<HashMap<String, i64>> {
+    static STATE: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Claim the next probe for this peer, or say another one is recent enough.
+fn claim_candidate_refresh(peer_hex: &str) -> bool {
+    let now = jiff::Timestamp::now().as_millisecond();
+    let Ok(mut asked) = last_candidate_refresh().lock() else {
+        return true;
+    };
+    if let Some(previous) = asked.get(peer_hex)
+        && now.saturating_sub(*previous) < CANDIDATE_REFRESH_INTERVAL_MS
+    {
+        return false;
+    }
+    asked.insert(peer_hex.to_string(), now);
+    true
+}
+
 /// Whether this dial should first ask the peer for current listen addresses.
 ///
 /// Skip when a nested candidate probe is already in flight, and skip when we
@@ -2103,6 +2143,11 @@ fn parse_legacy_direct_candidate(value: &Value) -> Option<DirectCandidate> {
 /// ladder, including the relay, then stores the answer for the payload dial.
 fn refresh_peer_direct_candidates(peer_hex: &str, remembered: Option<&str>) {
     if !should_refresh_peer_direct_candidates(peer_hex, remembered) {
+        return;
+    }
+    // The probe itself is relayed traffic, and during a cooldown its answer
+    // cannot be used yet. One per minute per peer, not one per dial.
+    if !claim_candidate_refresh(peer_hex) {
         return;
     }
     let fetched = with_refreshing_direct(|| fetch_peer_direct_candidates(peer_hex));
@@ -3700,6 +3745,25 @@ mod tests {
         );
         offer_direct_candidates(peer, Vec::new());
         clear_direct_miss(peer);
+    }
+
+    #[test]
+    fn a_candidate_probe_is_claimed_once_per_interval() {
+        let peer = "candidate-refresh-rate-test";
+        last_candidate_refresh().lock().expect("lock").remove(peer);
+        assert!(claim_candidate_refresh(peer), "the first probe runs");
+        assert!(
+            !claim_candidate_refresh(peer),
+            "a second dial in the same minute must not spend another relay round trip"
+        );
+        if let Some(previous) = last_candidate_refresh().lock().expect("lock").get_mut(peer) {
+            *previous -= CANDIDATE_REFRESH_INTERVAL_MS + 1;
+        }
+        assert!(
+            claim_candidate_refresh(peer),
+            "the list is asked for again once the interval has passed"
+        );
+        last_candidate_refresh().lock().expect("lock").remove(peer);
     }
 
     #[test]

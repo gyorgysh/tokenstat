@@ -13,7 +13,6 @@ struct ChatEventRow: View {
     let defaultAgentName: String
     let agentLabel: (String) -> String
     let attachmentData: Data?
-    let attachmentRevision: UInt64
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
     /// The conversation's face, used when a turn fails so the same character

@@ -32,11 +32,24 @@ struct RelayUsage: Codable, Sendable, Hashable {
         daily.filter { $0.bytes > 0 }
     }
 
+    /// Binary units, spelled the way the plan copy spells them.
+    ///
+    /// `ByteCountFormatter` with `.binary` divides by 1024 and then labels the
+    /// answer GB, so a card sitting under a paywall promising "20 GiB" read
+    /// "20 GB", and the Windows and Android cards for the same number said
+    /// GiB. It is localized too, so the unit moved again on a French device.
     static func bytes(_ value: UInt64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .binary
-        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
-        return formatter.string(fromByteCount: Int64(clamping: value))
+        let kibi = 1024.0
+        let amount = Double(value)
+        func scaled(_ divisor: Double, _ unit: String) -> String {
+            let shown = amount / divisor
+            let digits = shown >= 10 ? 0 : 1
+            return "\(shown.formatted(.number.precision(.fractionLength(0...digits)))) \(unit)"
+        }
+        if amount >= kibi * kibi * kibi { return scaled(kibi * kibi * kibi, "GiB") }
+        if amount >= kibi * kibi { return scaled(kibi * kibi, "MiB") }
+        if amount >= kibi { return scaled(kibi, "KiB") }
+        return "\(value) B"
     }
 }
 

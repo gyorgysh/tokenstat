@@ -65,10 +65,6 @@ final class ChatModel {
     /// The transcript only persists descriptors, so remote files work exactly
     /// like local ones without exposing a host filesystem path to SwiftUI.
     var responseAttachmentData: [String: Data] = [:]
-    /// Bumped when response bytes arrive. Views use this as an explicit
-    /// invalidation point because a dictionary subscript mutation can be too
-    /// subtle for a lazily rendered transcript row to observe.
-    private(set) var responseAttachmentRevision: UInt64 = 0
     var backends: [ChatBackend] = []
     var personas: [ChatPersona] = []
     /// New conversations inherit this persona unless the person picks none.
@@ -170,7 +166,6 @@ final class ChatModel {
         attachments = []
         attachmentPreviews = [:]
         responseAttachmentData = [:]
-        responseAttachmentRevision &+= 1
         attemptedResponseAttachments = []
         loadingResponseAttachments = []
         responseAttachmentErrors = [:]
@@ -1048,7 +1043,6 @@ final class ChatModel {
         attachmentPreviews = [:]
         loadingResponseAttachments = []
         responseAttachmentErrors = [:]
-        responseAttachmentRevision &+= 1
         // Also stop the remainder of a background page's download queue.
         attemptedResponseAttachments.formUnion(events.compactMap { timeline in
             guard timeline.event?.kind == "attachment" else { return nil }
@@ -1098,11 +1092,9 @@ final class ChatModel {
         attemptedResponseAttachments.insert(attachment.id)
         loadingResponseAttachments.insert(attachment.id)
         responseAttachmentErrors[attachment.id] = nil
-        responseAttachmentRevision &+= 1
         defer {
             if selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration {
                 loadingResponseAttachments.remove(attachment.id)
-                responseAttachmentRevision &+= 1
             }
         }
         let cacheEpoch = await ChatAttachmentCache.shared.epoch()
@@ -1126,10 +1118,28 @@ final class ChatModel {
             responseAttachmentData[attachment.id] = data
         } catch {
             guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
-            responseAttachmentErrors[attachment.id] = error.localizedDescription.contains("quota_exceeded")
-                ? "Relay allowance reached. A direct connection can still transfer this file."
-                : "Download failed. Tap to retry."
+            responseAttachmentErrors[attachment.id] = Self.downloadFailure(error)
         }
+    }
+
+    /// What the card says when a file does not arrive.
+    ///
+    /// A retry is only worth offering when trying again could work. The host
+    /// refuses a file over its transfer cap and one it can no longer find,
+    /// and both of those answers are the same every time they are asked, so
+    /// they are reported as they are rather than as "Tap to retry".
+    private static func downloadFailure(_ error: Error) -> String {
+        let reason = error.localizedDescription
+        if reason.contains("quota_exceeded") {
+            return "Relay allowance reached. A direct connection can still transfer this file."
+        }
+        if reason.localizedCaseInsensitiveContains("too large") {
+            return "This file is too large to transfer. Open it on the computer that made it."
+        }
+        if reason.localizedCaseInsensitiveContains("no longer available") {
+            return "This file is no longer on the computer that made it."
+        }
+        return "Download failed. Tap to retry."
     }
 
     /// The brief and the one rule tokenstat adds. Reloaded whenever either

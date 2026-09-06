@@ -407,7 +407,6 @@ struct ClientChatThread: View {
                         ClientChatEventRow(
                             item: item,
                             attachmentData: attachmentData(for: item),
-                            attachmentRevision: model.responseAttachmentRevision,
                             defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
                             agentLabel: { backend in
                                 model.backend(for: backend)?.label ?? backend.capitalized

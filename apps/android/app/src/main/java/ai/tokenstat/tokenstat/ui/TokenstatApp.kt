@@ -1804,8 +1804,16 @@ private fun binaryBytes(n: Long): String {
     val value = n.coerceAtLeast(0).toDouble()
     val kibi = 1024.0
     fun fmt(x: Double, unit: String): String {
-        val shown = if (x >= 10) "%.0f".format(x) else "%.1f".format(x)
-        return shown.trimEnd('0').trimEnd('.') + " " + unit
+        // Trim the tenth only when there is one. Trimming zeros off a whole
+        // number turned a 20 GiB allowance into "2 GiB". The separator is
+        // whatever the locale uses, so drop a trailing dot or comma rather
+        // than assuming a dot.
+        val shown = if (x >= 10) {
+            "%.0f".format(x)
+        } else {
+            "%.1f".format(x).trimEnd('0').trimEnd('.', ',')
+        }
+        return shown + " " + unit
     }
     return when {
         value >= kibi * kibi * kibi -> fmt(value / (kibi * kibi * kibi), "GiB")
