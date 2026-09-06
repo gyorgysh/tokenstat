@@ -85,9 +85,9 @@ struct FriendlyError {
         }
         if lower.contains("quota_exceeded") {
             return FriendlyError(
-                title: "This month's screen sharing is used up",
-                message: "The allowance resets on a rolling window, so some of it comes back "
-                    + "each day. Everything else, including terminals, is unaffected.",
+                title: "Relay allowance used up",
+                message: "Check relay usage in Account to see when older traffic leaves the window. "
+                    + "Direct connections do not use this allowance.",
                 symbol: "gauge.with.dots.needle.100percent",
                 raw: raw
             )

@@ -367,6 +367,38 @@ pub struct AccountDto {
     /// Absent when signed out. Present when signed in even on Free, so the
     /// iOS paywall can stamp `appAccountToken` before a first purchase.
     pub billing: Option<AccountBillingDto>,
+    /// Optional server-owned relay ledger. Older servers omit it.
+    pub relay_usage: Option<RelayUsageDto>,
+}
+
+/// Account-wide relay counters, independent of device-local traffic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayUsageDto {
+    pub policy: String,
+    pub window_days: u32,
+    pub timezone: String,
+    pub as_of: String,
+    pub reporting_delay_seconds: u32,
+    pub window_start: String,
+    pub window_end: String,
+    pub limit_bytes: u64,
+    pub used_bytes: u64,
+    pub remaining_bytes: u64,
+    pub today_bytes: u64,
+    pub month_bytes: u64,
+    #[serde(default)]
+    pub next_unlock_at: Option<String>,
+    #[serde(default)]
+    pub next_unlock_bytes: u64,
+    #[serde(default)]
+    pub daily: Vec<RelayUsageDayDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelayUsageDayDto {
+    pub day: String,
+    pub bytes: u64,
 }
 
 /// Cross-store billing snapshot from `GET /api/v1/me`.

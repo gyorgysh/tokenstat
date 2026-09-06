@@ -176,6 +176,7 @@ struct AccountView: View {
     private func signedIn(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             identity(account)
+            RelayUsageCard(usage: account.relayUsage) { await model.load() }
             syncCard(account)
             machinesCard(account)
         }

@@ -1316,6 +1316,7 @@ struct Account: Codable, Sendable, Hashable {
     var syncInterval: Int?
     /// Who billed the current plan. Present when signed in, even on Free.
     var billing: AccountBilling?
+    var relayUsage: RelayUsage?
 
     /// `thisMachineId` on the wire. Spelling the acronym without saying so
     /// left it nil on every decode, so no row in the machine list was ever
@@ -1325,7 +1326,7 @@ struct Account: Codable, Sendable, Hashable {
         case thisMachineID = "thisMachineId"
         case machines, schemaCurrent
         case machineLimit, hostsLinked, canRemote, syncInterval
-        case billing
+        case billing, relayUsage
     }
 
     var hostMachines: [Machine] { machines.filter(\.isHost) }

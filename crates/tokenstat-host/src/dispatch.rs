@@ -694,6 +694,10 @@ fn account_dto_from_status(s: tokenstat_sync::StatusResult) -> AccountDto {
             .and_then(|v| v.as_u64())
             .map(|n| n as u32),
         billing: billing_from_raw(&s.raw),
+        relay_usage: s
+            .raw
+            .get("relayUsage")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
     }
 }
 
@@ -1449,6 +1453,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     can_remote: None,
                     sync_interval: None,
                     billing: None,
+                    relay_usage: None,
                 })
                 .envelope(),
                 Err(e) => Err(e.to_string().into()),

@@ -393,7 +393,7 @@ struct ClientPaywallView: View {
         CompareFeature(label: "History", values: ["30 days", "1 yr", "All", "All"]),
         CompareFeature(label: "Terminal + SSH", values: ["No", "No", "Yes", "Yes"]),
         CompareFeature(label: "View screen", values: ["No", "No", "No", "Yes"]),
-        CompareFeature(label: "Relayed files", values: ["100 MiB", "1 GiB", "5 GiB", "20 GiB"]),
+        CompareFeature(label: "Relay traffic", values: ["100 MiB", "1 GiB", "5 GiB", "20 GiB"]),
         CompareFeature(label: "Sync", values: ["Hourly", "30 min", "10 min", "5 min"]),
         CompareFeature(label: "Mark", values: ["None", "Star", "Badge", "Crown"]),
         CompareFeature(label: "Read API", values: ["No", "No", "No", "Yes"]),
@@ -502,11 +502,11 @@ struct ClientPaywallView: View {
     private func relayCaption(for item: ClientStoreProduct) -> String? {
         switch item.tier {
         case "supporter":
-            return "Chat files try a direct path first. If a relay is needed, it remains end-to-end encrypted. The relay allowance is 1 GiB per rolling 30 days."
+            return "Connections try a direct path first. Relayed traffic shares 1 GiB per rolling 30 UTC days. Direct connections do not count."
         case "patron":
-            return "Chat files try a direct path first. If a relay is needed, it remains end-to-end encrypted. The relay allowance is 5 GiB per rolling 30 days."
+            return "Connections try a direct path first. Relayed traffic shares 5 GiB per rolling 30 UTC days. Direct connections do not count."
         case "legend":
-            return "Screen and chat files try a direct path first. If a relay is needed, it remains end-to-end encrypted. The relay allowance is 20 GiB per rolling 30 days, shared by screen sessions and chat files. One relayed screen can run at a time, with up to 10 minutes per relayed session before reconnecting."
+            return "Connections try a direct path first. Relayed traffic shares 20 GiB per rolling 30 UTC days, including terminals, files and screen. Direct connections do not count. One relayed screen can run at a time, with up to 10 minutes per relayed session before reconnecting."
         default:
             return nil
         }
