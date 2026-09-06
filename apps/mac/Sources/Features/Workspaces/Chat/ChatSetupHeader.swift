@@ -262,11 +262,19 @@ struct ChatComposerControls: View {
     @ViewBuilder
     private var layout: some View {
         if compact {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .center, spacing: Theme.Space.s) { content }
-                    .padding(.trailing, Theme.Space.xs)
+            // Two rows, both of which fit. One row does not: the two pill
+            // groups alone are most of a phone's width, so the agent field
+            // was pushing them past the edge of the bar. The field takes the
+            // width that is left on its own row and truncates in the middle,
+            // where the interesting part of a model id is not.
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                agentField
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .center, spacing: Theme.Space.s) {
+                    pills
+                    Spacer(minLength: 0)
+                }
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         } else {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: Theme.Space.s) { content }

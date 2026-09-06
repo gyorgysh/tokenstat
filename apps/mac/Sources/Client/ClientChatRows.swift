@@ -20,6 +20,7 @@ struct ClientChatEventRow: View {
     var attachmentIsLoading = false
     var attachmentError: String?
     var downloadAttachment: (ChatAttachment) -> Void = { _ in }
+    var openAttachment: (ChatAttachment, Data) -> Void = { _, _ in }
     var faceSeed: UInt64 = 0
     /// The row still being written. Selectable chains are held back until
     /// the turn ends; copy buttons stay live throughout.
@@ -105,7 +106,8 @@ struct ClientChatEventRow: View {
             ClientChatResponseAttachment(
                 attachment: attachment, data: attachmentData,
                 isLoading: attachmentIsLoading, downloadError: attachmentError,
-                onDownload: { downloadAttachment(attachment) }
+                onDownload: { downloadAttachment(attachment) },
+                onOpen: { data in openAttachment(attachment, data) }
             )
                 .id(attachment.id)
         case let .handoff(to, brief):
@@ -144,47 +146,34 @@ private struct ClientChatResponseAttachment: View {
     var isLoading: Bool
     var downloadError: String?
     var onDownload: () -> Void
-    @State private var exportURL: URL?
-    @State private var previewURL: URL?
+    var onOpen: (Data) -> Void
 
     var body: some View {
-        // One tappable card in every state. It used to become a disabled
-        // button the moment the bytes arrived, so a file that downloaded but
-        // failed to stage a preview copy sat there greyed out with no way to
-        // open it, share it, or ask again. The card now stages on demand and
-        // restages if the copy was pruned, and nothing about it goes inert
-        // except while a download is actually running.
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Button(action: activate) { content }
-                .buttonStyle(.plain)
-                .disabled(isLoading)
-                .accessibilityLabel(
-                    data == nil ? "Download \(attachment.name)" : "Open \(attachment.name)"
-                )
-            if let exportURL {
-                ShareLink(item: exportURL) {
-                    Label("Share or save", systemImage: "square.and.arrow.up")
-                        .frame(minHeight: 44)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.accent)
+        // One tappable card in every state, and it presents nothing itself.
+        // It used to own both a Quick Look presentation and the staged copy
+        // that presentation needed, from inside a lazy stack that is free to
+        // tear a row down mid-tap, and it disabled itself the moment the bytes
+        // arrived. A downloaded file was a grey rectangle, then a card that
+        // did nothing at all. Opening is the chat view's job now; this is a
+        // button.
+        Button { if let data { onOpen(data) } else { onDownload() } } label: { content }
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+            .accessibilityLabel(
+                data == nil ? "Download \(attachment.name)" : "Open \(attachment.name)"
+            )
+            .task(id: data) {
+                guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
+                // SwiftUI restarts a row's task when it re-enters the viewport.
+                // Keep its decoded image and geometry on those appearances.
+                guard decodedData != data else { return }
+                let result = await Task.detached(priority: .userInitiated) {
+                    UIImage(data: data)
+                }.value
+                guard !Task.isCancelled else { return }
+                decodedData = data
+                decodedImage = result
             }
-        }
-        .quickLookPreview($previewURL)
-        .task(id: data) {
-            // Prune first. Pruning after staging can delete the copy this
-            // row is about to hand to Quick Look.
-            await ChatAttachmentCache.shared.maintain()
-            exportURL = stage()
-            guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
-            // SwiftUI restarts a row's task when it re-enters the viewport.
-            // Keep its decoded image and geometry on those appearances.
-            guard decodedData != data else { return }
-            let result = await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
-            guard !Task.isCancelled else { return }
-            decodedData = data
-            decodedImage = result
-        }
     }
 
     private var content: some View {
@@ -266,51 +255,6 @@ private struct ClientChatResponseAttachment: View {
         return "doc"
     }
 
-    /// Download, or open what is already here. Staging is done here rather
-    /// than only in the task so a card whose preview copy was pruned between
-    /// appearances still opens on the first tap.
-    private func activate() {
-        guard data != nil else {
-            onDownload()
-            return
-        }
-        if exportURL == nil || !FileManager.default.fileExists(atPath: exportURL?.path ?? "") {
-            exportURL = stage()
-        }
-        previewURL = exportURL
-    }
-
-    private func stage() -> URL? {
-        guard let data else { return nil }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tokenstat-chat-files", isDirectory: true)
-            .appendingPathComponent(attachment.id, isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let safeName = Self.sanitizedFileName(attachment.name)
-            let url = directory.appendingPathComponent(safeName)
-            guard url.standardizedFileURL.path.hasPrefix(directory.standardizedFileURL.path) else {
-                return nil
-            }
-            try data.write(to: url, options: .atomic)
-            return url
-        } catch {
-            return nil
-        }
-    }
-
-    static func sanitizedFileName(_ raw: String) -> String {
-        let leaf = (raw as NSString).lastPathComponent
-        let cleaned = leaf.filter { !$0.isNewline && !$0.unicodeScalars.contains(where: \.properties.isDefaultIgnorableCodePoint) }
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let withoutNulls = cleaned.replacingOccurrences(of: "\0", with: "")
-        if withoutNulls.isEmpty || withoutNulls == "." || withoutNulls == ".." {
-            return "attachment"
-        }
-        let noSeparators = withoutNulls.replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "\\", with: "_")
-        return noSeparators.isEmpty ? "attachment" : noSeparators
-    }
 }
 
 /// Image dimensions from the file header, without decoding pixels. Used to

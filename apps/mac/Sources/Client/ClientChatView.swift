@@ -205,6 +205,7 @@ struct ClientChatThread: View {
     @State private var composerDropTargeted = false
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
+    @State private var previewFile: ChatPreviewedFile?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -215,52 +216,19 @@ struct ClientChatThread: View {
     var body: some View {
         VStack(spacing: 0) {
             if let chat {
+                // The bar is an inset, not the next row of a stack. Stacked,
+                // it had the window background under it rather than the
+                // conversation, so its glass had nothing to be glass about and
+                // read as a white slab whatever material it asked for. As an
+                // inset the transcript runs underneath and still stops above
+                // it, which is the whole point of the material.
                 transcript(chat)
                     .overlay {
                         if dropExperienceVisible {
                             ChatDropExperience(seed: model.faceSeed)
                         }
                     }
-                // Same rule as the Mac: a blocked turn takes the composer's
-                // place. On a phone this matters more, not less, because the
-                // card scrolls out of a short viewport in one streamed
-                // paragraph.
-                if model.approvals.isEmpty {
-                    ClientChatComposer(
-                        model: model,
-                        chat: chat,
-                        draft: $draft,
-                        attachments: model.attachments,
-                        previews: model.attachmentPreviews,
-                        running: model.busy,
-                        placeholder: "Ask about \(folderName.isEmpty ? "this folder" : folderName)",
-                        onSend: { submit(from: chat) },
-                        onStop: { Task { await model.stop() } },
-                        onAttach: { item in await model.attach(item) },
-                        onRemove: { model.removeAttachment($0) },
-                        onOpenSetup: { showingSetup = true },
-                        onDropURLs: { urls in
-                            Task { await receive(ChatInbox.drops(from: urls)) }
-                        },
-                        onDropText: { items in
-                            Task { await receive(items.map(ChatInboxDrop.text)) }
-                        },
-                        onDropData: { items in
-                            Task { await receive(items.compactMap(ChatInbox.imageDrop(from:))) }
-                        },
-                        onDropTargeted: { composerDropTargeted = $0 }
-                    )
-                } else {
-                    ChatApprovalBar(
-                        approvals: model.approvals,
-                        resolve: { approval, choice in
-                            Task { await model.resolve(approval, choice: choice) }
-                        },
-                        showInTranscript: { approval in
-                            scrollTarget = "approval-\(approval.id)"
-                        }
-                    )
-                }
+                    .safeAreaInset(edge: .bottom, spacing: 0) { bar(chat) }
             } else {
                 ClientEmptyState(
                     kind: .nothingYet,
@@ -349,6 +317,13 @@ struct ClientChatThread: View {
         .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in
             model.clearCachedAttachmentMemory()
         }
+        // Presented here rather than on the row. A row lives in a lazy stack
+        // that is free to tear it down while it is being tapped, and a
+        // presentation that goes with it is a tap that does nothing.
+        .fullScreenCover(item: $previewFile) { file in
+            ClientFilePreview(file: file) { previewFile = nil }
+                .ignoresSafeArea()
+        }
         .onDisappear {
             UserPresence.shared.chatSurface(showing: nil)
         }
@@ -362,6 +337,49 @@ struct ClientChatThread: View {
             Button("OK", role: .cancel) { model.error = nil }
         } message: {
             Text(model.error.map { ClientTunnelCopy.display($0, host: hostName) } ?? "")
+        }
+    }
+
+    /// Same rule as the Mac: a blocked turn takes the composer's place. On a
+    /// phone this matters more, not less, because the card scrolls out of a
+    /// short viewport in one streamed paragraph.
+    @ViewBuilder
+    private func bar(_ chat: ChatConversation) -> some View {
+        if model.approvals.isEmpty {
+            ClientChatComposer(
+                model: model,
+                chat: chat,
+                draft: $draft,
+                attachments: model.attachments,
+                previews: model.attachmentPreviews,
+                running: model.busy,
+                placeholder: "Ask about \(folderName.isEmpty ? "this folder" : folderName)",
+                onSend: { submit(from: chat) },
+                onStop: { Task { await model.stop() } },
+                onAttach: { item in await model.attach(item) },
+                onRemove: { model.removeAttachment($0) },
+                onOpenSetup: { showingSetup = true },
+                onDropURLs: { urls in
+                    Task { await receive(ChatInbox.drops(from: urls)) }
+                },
+                onDropText: { items in
+                    Task { await receive(items.map(ChatInboxDrop.text)) }
+                },
+                onDropData: { items in
+                    Task { await receive(items.compactMap(ChatInbox.imageDrop(from:))) }
+                },
+                onDropTargeted: { composerDropTargeted = $0 }
+            )
+        } else {
+            ChatApprovalBar(
+                approvals: model.approvals,
+                resolve: { approval, choice in
+                    Task { await model.resolve(approval, choice: choice) }
+                },
+                showInTranscript: { approval in
+                    scrollTarget = "approval-\(approval.id)"
+                }
+            )
         }
     }
 
@@ -402,6 +420,7 @@ struct ClientChatThread: View {
                             downloadAttachment: { attachment in
                                 Task { await model.downloadResponseAttachment(attachment) }
                             },
+                            openAttachment: open(_:data:),
                             faceSeed: model.faceSeed,
                             isLive: model.busy && item.id == model.displayItems.last?.id
                         )
@@ -543,6 +562,24 @@ struct ClientChatThread: View {
                 try? await Task.sleep(for: .milliseconds(480))
                 settleMood = nil
             }
+        }
+    }
+
+    /// Stage the bytes under the file's real name and hand them to Quick
+    /// Look, which plays video, renders text and PDF, shows images, and
+    /// carries the share sheet that Save to Files lives in.
+    ///
+    /// Staging every time rather than once: the copy sits in a cache that is
+    /// pruned on a budget, so the one made when the row first appeared may
+    /// well be gone by the time somebody taps it.
+    private func open(_ attachment: ChatAttachment, data: Data) {
+        do {
+            let url = try ChatFileStaging.stage(data, id: attachment.id, name: attachment.name)
+            previewFile = ChatPreviewedFile(id: attachment.id, url: url, name: attachment.name)
+        } catch {
+            // Never silent. A card that does nothing when tapped is the bug
+            // this whole path is being rebuilt for.
+            showDropNotice("\(attachment.name) could not be opened. \(error.localizedDescription)")
         }
     }
 

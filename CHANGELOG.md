@@ -20,8 +20,9 @@ with Touch ID or Face ID.
 
 - Attach a file to a conversation. When you ask an agent to send, show, or
   present something, it puts the file in this thread as an attachment, rather
-  than through another app. On the phone, tap one to preview it. Share or save
-  stays its own action.
+  than through another app. On the phone, tap one to open it: video and audio
+  play, text, source and PDF render, images show, and the viewer's own share
+  sheet carries Save to Files, AirDrop and the rest.
 - Files over 1 MiB wait for Download. Smaller ones arrive on their own. A
   device-local cache holds what you have already fetched, with a size cap and
   idle retention you can change, and a purge that cannot be undone by a
@@ -31,10 +32,9 @@ with Touch ID or Face ID.
   This Mac. On the phone: Account, This device, and Legal. Deleting the account
   sits at the end of Account, behind its own rule, rather than among the legal
   documents.
-- The phone composer is smaller and reads as glass. Send appears when there is
-  something to send instead of sitting greyed out, the agent and mode controls
-  share one scrolling row, and a toggle at the top right grows the box for a
-  longer message.
+- The phone composer reads as glass, with the conversation moving under it.
+  Send appears when there is something to send instead of sitting greyed out,
+  and a toggle at the top right grows the box for a longer message.
 - The combined agent, model, and effort picker stays open while you change
   those settings. It shows what is selected, and the phone's targets are
   larger.

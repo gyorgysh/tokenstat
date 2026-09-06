@@ -41,7 +41,7 @@ struct ClientChatComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(alignment: .center, spacing: Theme.Space.s) {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
                 ChatComposerControls(
                     model: model,
                     chat: chat,
