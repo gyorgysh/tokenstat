@@ -8,6 +8,14 @@ import SwiftUI
 /// Chat adds running and failure; automations leave those at their defaults
 /// and keep the inspector looking as it did.
 struct ToolRow: View {
+    /// The same figure the phone's edit row draws. This row and that one sit
+    /// in one transcript, and they were two sizes apart.
+    #if os(macOS)
+    private static let diffFigure = Theme.mono(11, weight: .medium)
+    #else
+    private static let diffFigure = ClientType.diffFigure
+    #endif
+
     var verb: String
     var arg: String
     var snippet: [String] = []
@@ -109,10 +117,10 @@ struct ToolRow: View {
                 Spacer(minLength: 0)
                 if hasDiff, !running {
                     Text("+\(diffAdded)")
-                        .font(Theme.mono(11, weight: .medium))
+                        .font(Self.diffFigure)
                         .foregroundStyle(Theme.diffAdded)
                     Text("−\(diffRemoved)")
-                        .font(Theme.mono(11, weight: .medium))
+                        .font(Self.diffFigure)
                         .foregroundStyle(Theme.diffRemoved)
                 }
                 if running {

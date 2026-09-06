@@ -54,6 +54,16 @@ enum ClientType {
     /// numbers above and below it.
     static let rowFigure = Theme.callout.monospacedDigit()
 
+    /// The +N and -N beside an edit.
+    ///
+    /// Its own role because two different rows show it: the tool row an agent
+    /// writes when it edits a file, and the edit row the transcript makes from
+    /// the patch. One was mono 11 and the other was callout, which put two
+    /// sizes of the same figure a few points apart in one conversation. Mono
+    /// so the digits line up down the thread, and the same metrics as `code`
+    /// so a count sits with the path beside it.
+    static let diffFigure = Theme.monoText(13, relativeTo: .footnote).weight(.medium)
+
     /// Source code, and the gutter beside it.
     ///
     /// One role for both, because a diff's line numbers and its lines have to

@@ -258,27 +258,46 @@ struct ClientDevicesView: View {
         if !hosts.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ClientSectionTitle(title: "Always-on host", mark: "mark_host")
+                // A name on a card reads as something to press, and this one
+                // was not. It goes where the row in the list below it goes.
                 ForEach(hosts) { machine in
-                    HStack(spacing: Theme.Space.s) {
-                        AwakeDot(online: machine.online)
-                        Image(systemName: ClientDeviceIcon.symbol(
-                            name: machine.label,
-                            isHost: machine.isHost
-                        ))
-                        .font(Theme.font(13))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(DeviceCopy.name(machine))
-                                .font(ClientType.label.weight(.medium))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Text(alwaysOnLine(machine))
+                    NavigationLink {
+                        ClientDeviceDetailView(
+                            machine: machine,
+                            usage: model.usage(for: machine),
+                            accountTotal: model.total,
+                            isThisDevice: isThisDevice(machine),
+                            onRenamed: { await account.load() }
+                        )
+                    } label: {
+                        HStack(spacing: Theme.Space.s) {
+                            AwakeDot(online: machine.online)
+                            Image(systemName: ClientDeviceIcon.symbol(
+                                name: machine.label,
+                                isHost: machine.isHost
+                            ))
+                            .font(Theme.font(13))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(DeviceCopy.name(machine))
+                                    .font(ClientType.label.weight(.medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text(alwaysOnLine(machine))
+                                    .font(ClientType.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: Theme.Space.s)
+                            Image(systemName: "chevron.right")
                                 .font(ClientType.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
                         }
-                        Spacer(minLength: Theme.Space.s)
+                        .frame(minHeight: 44)
+                        .contentShape(.rect)
                     }
+                    .buttonStyle(.plain)
                 }
                 Text("A computer with Always-on host on stays reachable even after you quit the app there. Turn it on in Account on that computer.")
                     .font(ClientType.caption)

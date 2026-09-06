@@ -315,10 +315,10 @@ private struct ClientChatEditRow: View {
                     .lineLimit(2)
                     .truncationMode(.middle)
                 Text("+\(added)")
-                    .font(ClientType.rowFigure)
+                    .font(ClientType.diffFigure)
                     .foregroundStyle(Theme.diffAdded)
                 Text("−\(removed)")
-                    .font(ClientType.rowFigure)
+                    .font(ClientType.diffFigure)
                     .foregroundStyle(Theme.diffRemoved)
                 Spacer(minLength: 0)
                 if !patch.isEmpty {
