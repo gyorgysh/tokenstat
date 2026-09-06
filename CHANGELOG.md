@@ -31,6 +31,10 @@ relayed.
   for good, because it is too large to transfer or is no longer there, says so
   instead of offering a retry that cannot work. The setting is named tokenstat
   cache. Chat files are what it holds so far.
+- On iPad, files open in tabs across the top of the workspace. A file keeps
+  its text, its cursor and its unsaved changes while you move around the app,
+  and closing one with unsaved work asks first. Command-S saves, Command-W
+  closes. Signing out clears them.
 - Account settings split into panes. On the Mac: Account, Plan limits, and
   This Mac. On the phone: Account, This device, and Legal. Deleting the
   account sits at the end of Account, behind its own rule. It used to sit
@@ -50,6 +54,9 @@ relayed.
   vault. The sheet opens straight into it when this device has a saved
   password, without showing the password form first. The password remains the
   fallback, and a changed biometric set forgets the saved one.
+- Terminals and files try a direct connection before the relay. The screen
+  viewer already did, and a direct connection does not count against your
+  relay allowance.
 - Relayed traffic shares one allowance: 100 MiB on Free, 1 GiB on Supporter,
   5 GiB on Patron, and 20 GiB on Legend, covering today and the previous 29
   UTC days. Direct connections do not count. Each day the oldest day leaves
@@ -66,11 +73,17 @@ relayed.
 - Recent chats on the phone dropped a thread you had just used when many
   conversations were unread. The three newest sit at the top, then five more
   by what needs a look.
+- Home showed Getting Started, the screen for a new account, when it could not
+  read your activity. An account with no records still gets Getting Started. A
+  read that failed or came back stale says so and offers Try again.
 - The expand control at the top right of the phone composer had no glyph.
 - A phone chat had no way to put the keyboard away once it was open, so the
   transcript could not grow. Drag the conversation, tap it, or tap the
   keyboard button above the field. That button is there only while the
   keyboard is up.
+- Terminal sessions on another computer appeared only while the relay was
+  connected. A computer reachable over the local network lists them without
+  it.
 - Full screen on a Mac watching another Mac did nothing. The viewer is its own
   window now, so the expand control fills the display.
 - A Mac asking another Mac for the screen or for folders never brought up a

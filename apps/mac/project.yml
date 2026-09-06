@@ -149,7 +149,10 @@ settings:
     # 79 is the same 0.9.0 with the review fixes: relay figures in one unit
     # everywhere, a refused host that backs off, fewer relay round trips, and
     # a file the host refuses for good saying so.
-    CURRENT_PROJECT_VERSION: "79"
+    # 79 went up.
+    # 80 is the same 0.9.0 with the vault sheet opening straight into Face ID
+    # or Touch ID, and one hide-keyboard control in the phone composer.
+    CURRENT_PROJECT_VERSION: "80"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
