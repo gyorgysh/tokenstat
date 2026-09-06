@@ -39,6 +39,7 @@ private val pitches = listOf(
             "4 devices, added up into one profile",
             "A year of history on your profile, not 30 days",
             "End-to-end encrypted SSH vault sync across your devices",
+            "1 GiB relay traffic per rolling 30 UTC days. Direct connections do not count",
             "The supporter star next to your name",
         ),
     ),
@@ -49,6 +50,7 @@ private val pitches = listOf(
         listOf(
             "Everything in Supporter",
             "Remote management: your other devices, from the app",
+            "5 GiB relay traffic per rolling 30 UTC days. Direct connections do not count",
             "6 devices, added up into one profile",
             "Every day you have ever synced, with no window",
             "Profile updates every 10 minutes",
@@ -61,6 +63,7 @@ private val pitches = listOf(
         "The top plan. More devices, a faster page, the read API, and first in line when something new lands.",
         listOf(
             "Everything in Patron",
+            "20 GiB relay traffic per rolling 30 UTC days, including terminals, files and screen",
             "10 devices, added up into one profile",
             "Profile updates every 5 minutes",
             "The legend crown next to your name",

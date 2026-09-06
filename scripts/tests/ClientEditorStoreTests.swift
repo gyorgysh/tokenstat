@@ -60,6 +60,15 @@ struct ClientEditorStoreTests {
         precondition(store.tabs.count == 1, "Other host is retained")
         store.reset()
         precondition(store.tabs.isEmpty, "Sign-out clears session contents")
+
+        let clean = ClientEditorKey(peer: "host-a", workspace: "workspace", path: "README.md")
+        store.open(clean, content: "first")
+        store.adoptSaved(clean, content: "from host")
+        precondition(store.tab(for: clean)?.document.text == "from host", "Clean tabs re-read")
+        store.tab(for: clean)?.document.setText("typed")
+        store.adoptSaved(clean, content: "stale host")
+        precondition(store.tab(for: clean)?.document.text == "typed", "Dirty tabs keep the buffer")
+        store.reset()
         print("ClientEditorStoreTests passed")
     }
 }

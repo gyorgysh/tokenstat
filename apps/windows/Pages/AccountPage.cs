@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 using System.Diagnostics;
+using System.Linq;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -114,11 +115,191 @@ internal sealed class AccountPage : Page
                 await LoadAsync();
             }));
             _root.Children.Add(Chrome.Card("Account", body));
+            _root.Children.Add(RelayUsageCard(account));
         }
 
+        _root.Children.Add(await LocalTrafficCardAsync());
         _root.Children.Add(await PullConnectionCardAsync());
         _root.Children.Add(UpdateCard());
         _root.Children.Add(AboutBlurb());
+    }
+
+    private UIElement RelayUsageCard(JsonNode account)
+    {
+        var usage = account["relayUsage"];
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        var supported = Format.Text(usage, "policy") == "rolling_30_utc_days"
+            && Format.Long(usage, "windowDays") == 30
+            && Format.Text(usage, "timezone") == "UTC";
+        if (usage is null || !supported)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "Relay usage details are not available from this server yet.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return Chrome.Card("Relay usage", body, "One allowance across your devices");
+        }
+        var used = Format.Long(usage, "usedBytes");
+        var limit = Format.Long(usage, "limitBytes");
+        var remaining = Format.Long(usage, "remainingBytes");
+        body.Children.Add(new TextBlock
+        {
+            Text = Format.DataSize(used) + " of " + Format.DataSize(limit) + " used",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        body.Children.Add(new ProgressBar
+        {
+            Minimum = 0,
+            Maximum = 1,
+            Value = limit > 0 ? Math.Min(1, used / (double)limit) : 0,
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = Format.DataSize(remaining) + " remaining",
+            Opacity = 0.7,
+        });
+        body.Children.Add(UsageRow("Today (UTC)", Format.Long(usage, "todayBytes")));
+        body.Children.Add(UsageRow("This calendar month (UTC)", Format.Long(usage, "monthBytes")));
+        body.Children.Add(UsageRow("Rolling 30 days, used for your limit", used));
+        body.Children.Add(new TextBlock
+        {
+            Text = "All relayed traffic shares this allowance. Direct connections do not count. The limit includes today and the previous 29 UTC days. Each day, older usage leaves the window. This is not a daily refill or a calendar-month reset.",
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+        });
+        var unlock = Format.Text(usage, "nextUnlockAt");
+        if (!string.IsNullOrEmpty(unlock))
+        {
+            var day = unlock.Length >= 10 ? unlock[..10] : unlock;
+            body.Children.Add(new TextBlock
+            {
+                Text = "Next usage to expire: " + Format.DataSize(Format.Long(usage, "nextUnlockBytes"))
+                    + " on " + day + " at 00:00 UTC.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+            });
+        }
+        if (usage["daily"] is JsonArray days)
+        {
+            var usedDays = days.OfType<JsonNode>().Where(day => Format.Long(day, "bytes") > 0).ToList();
+            body.Children.Add(new TextBlock
+            {
+                Text = "Daily usage (UTC)",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            if (usedDays.Count == 0)
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = "No relayed traffic in this window.",
+                    Opacity = 0.7,
+                    FontSize = 12,
+                });
+            }
+            else
+            {
+                foreach (var day in usedDays.AsEnumerable().Reverse())
+                {
+                    body.Children.Add(UsageRow(Format.Text(day, "day"), Format.Long(day, "bytes")));
+                }
+            }
+        }
+        var asOf = Format.Text(usage, "asOf");
+        var delay = Format.Long(usage, "reportingDelaySeconds");
+        var stamp = asOf.Length >= 10 ? asOf[..10] : asOf;
+        body.Children.Add(new TextBlock
+        {
+            Text = "As of " + stamp + ". Relay reporting can lag by about " + delay + " seconds.",
+            Opacity = 0.7,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        body.Children.Add(ActionIconGlyph.Button("Refresh usage", ActionIcon.Refresh, async (_, _) => await LoadAsync()));
+        return Chrome.Card("Relay usage", body, "One allowance across your devices");
+    }
+
+    private static UIElement UsageRow(string label, long bytes)
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var name = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap };
+        var value = new TextBlock { Text = Format.DataSize(bytes), FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas") };
+        Grid.SetColumn(value, 1);
+        row.Children.Add(name);
+        row.Children.Add(value);
+        return row;
+    }
+
+    private async Task<UIElement> LocalTrafficCardAsync()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        try
+        {
+            var status = await AppServices.Host.CallAsync("remote.status");
+            var traffic = status["traffic"];
+            if (traffic is null)
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = "This host does not report local traffic yet.",
+                    Opacity = 0.7,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
+            else
+            {
+                body.Children.Add(UsageRow("Direct", Format.Long(traffic, "directBytes")));
+                body.Children.Add(UsageRow("Relayed", Format.Long(traffic, "relayBytes")));
+                body.Children.Add(new TextBlock
+                {
+                    Text = "Counted on this device since tokenstat started. Direct traffic does not use the account relay allowance. The relayed figure is this machine only, not the account total.",
+                    Opacity = 0.7,
+                    FontSize = 12,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+                if (traffic["peers"] is JsonArray peers && peers.Count > 0)
+                {
+                    foreach (var peer in peers.OfType<JsonNode>())
+                    {
+                        var name = Format.Text(peer, "label");
+                        if (string.IsNullOrEmpty(name)) name = Format.Text(peer, "peer");
+                        var row = new Grid();
+                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                        var left = new TextBlock { Text = name, TextWrapping = TextWrapping.Wrap };
+                        var right = new TextBlock
+                        {
+                            Text = Format.Transport(Format.Text(peer, "route")),
+                            Opacity = 0.7,
+                        };
+                        Grid.SetColumn(right, 1);
+                        row.Children.Add(left);
+                        row.Children.Add(right);
+                        body.Children.Add(row);
+                    }
+                }
+                else
+                {
+                    body.Children.Add(new TextBlock
+                    {
+                        Text = "No live connections right now.",
+                        Opacity = 0.7,
+                        FontSize = 12,
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            body.Children.Add(Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
+        }
+        body.Children.Add(ActionIconGlyph.Button("Refresh traffic", ActionIcon.Refresh, async (_, _) => await LoadAsync()));
+        return Chrome.Card("This device", body, "How connections leave this machine");
     }
 
     private async Task<UIElement> PullConnectionCardAsync()

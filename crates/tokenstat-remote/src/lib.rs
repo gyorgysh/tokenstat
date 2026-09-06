@@ -37,6 +37,7 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -128,6 +129,15 @@ pub trait Transport: Read + Write + Send {
     /// timeout is what lets the reader give the lock back; a timed-out read
     /// means "no data yet", never a failure.
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()>;
+
+    /// True when this is a multiplexed relay channel rather than a TCP socket.
+    ///
+    /// Direct is the default. The tunnel overrides it. Handshake copies the
+    /// answer onto the Connection so payload accounting can tell the two
+    /// apart after the transport is boxed.
+    fn is_relay(&self) -> bool {
+        false
+    }
 }
 
 impl<T: Transport + ?Sized> Transport for Box<T> {
@@ -141,6 +151,10 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
 
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
         (**self).set_read_timeout(timeout)
+    }
+
+    fn is_relay(&self) -> bool {
+        (**self).is_relay()
     }
 }
 
@@ -179,6 +193,8 @@ pub struct Connection {
     /// Friendly name the peer sent in the handshake (device name). Empty when
     /// the far side is older and sent nothing.
     intro_label: String,
+    /// Copied from the transport at handshake. True is the hosted relay.
+    relay: bool,
 }
 
 /// Names the peer and nothing else. The keying material inside the transport
@@ -208,9 +224,21 @@ impl Connection {
         &self.intro_label
     }
 
+    /// Whether this connection is the hosted relay rather than a TCP socket.
+    pub fn is_relay(&self) -> bool {
+        self.relay
+    }
+
+    /// `"direct"` or `"relay"`. The same words the screen viewer already uses.
+    pub fn link(&self) -> &'static str {
+        if self.relay { "relay" } else { "direct" }
+    }
+
     /// Send one message.
     pub fn send(&mut self, payload: &[u8]) -> Result<(), RemoteError> {
-        write_one(&mut self.noise, &mut *self.stream, payload)
+        write_one(&mut self.noise, &mut *self.stream, payload)?;
+        note_payload(self.relay, payload.len() as u64);
+        Ok(())
     }
 
     /// Receive one message.
@@ -219,7 +247,9 @@ impl Connection {
     /// a large frame. An approved peer is trusted, not unlimited: a bug on the
     /// other side should not be able to exhaust this machine's memory.
     pub fn receive(&mut self, max: usize) -> Result<Vec<u8>, RemoteError> {
-        read_one(&mut self.noise, &mut *self.stream, max, None)
+        let payload = read_one(&mut self.noise, &mut *self.stream, max, None)?;
+        note_payload(self.relay, payload.len() as u64);
+        Ok(payload)
     }
 
     /// Receive one message, giving up when nothing arrives for `idle`.
@@ -240,6 +270,9 @@ impl Connection {
         // frame. This connection goes back into a pool where the next caller
         // decides its own budget, so hand it back the way it was found.
         let _ = self.stream.set_read_timeout(None);
+        if let Ok(ref payload) = result {
+            note_payload(self.relay, payload.len() as u64);
+        }
         result
     }
 
@@ -269,12 +302,14 @@ impl Connection {
             noise,
             peer: _,
             intro_label: _,
+            relay,
         } = self;
         let mut core = Core {
             noise,
             stream,
             closed: std::sync::atomic::AtomicBool::new(false),
             authorize: Arc::new(authorize),
+            relay,
         };
         let _ = core.stream.set_read_timeout(Some(STREAM_READ_TIMEOUT));
         let core = Arc::new(Mutex::new(core));
@@ -310,6 +345,7 @@ struct Core {
     stream: Box<dyn Transport>,
     closed: std::sync::atomic::AtomicBool,
     authorize: Arc<dyn Fn() -> bool + Send + Sync>,
+    relay: bool,
 }
 
 impl Core {
@@ -339,6 +375,7 @@ impl StreamReader {
             if !guard.permitted() {
                 return Err(RemoteError::Closed);
             }
+            let relay = guard.relay;
             let Core {
                 noise,
                 stream,
@@ -364,6 +401,9 @@ impl StreamReader {
                     }
                     if !guard.permitted() {
                         return Err(RemoteError::Closed);
+                    }
+                    if let Ok(ref payload) = other {
+                        note_payload(relay, payload.len() as u64);
                     }
                     return other;
                 }
@@ -402,6 +442,7 @@ impl StreamWriter {
         if !guard.permitted() {
             return Err(RemoteError::Closed);
         }
+        let relay = guard.relay;
         let Core {
             noise,
             stream,
@@ -411,7 +452,9 @@ impl StreamWriter {
         if closed.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(RemoteError::Closed);
         }
-        write_one(noise, &mut **stream, payload)
+        write_one(noise, &mut **stream, payload)?;
+        note_payload(relay, payload.len() as u64);
+        Ok(())
     }
 
     /// Close the underlying stream. Idempotent.
@@ -791,12 +834,14 @@ fn handshake_initiator_with_timeout(
     // The handshake timeout was for the handshake. A session read blocks until
     // there is an answer, which for a scan is a long time.
     stream.set_deadline(None)?;
+    let relay = stream.is_relay();
 
     Ok(Connection {
         stream,
         noise: handshake.into_transport_mode()?,
         peer,
         intro_label: String::new(),
+        relay,
     })
 }
 
@@ -911,6 +956,7 @@ pub fn authorize_with(
         noise,
         peer,
         intro_label,
+        relay,
     } = connection;
     let label = intro_label.trim().to_string();
     let trust_result = {
@@ -968,6 +1014,7 @@ pub fn authorize_with(
             noise,
             peer,
             intro_label,
+            relay,
         }),
         (known, _, display) => {
             let mut refusal = Connection {
@@ -975,6 +1022,7 @@ pub fn authorize_with(
                 noise,
                 peer,
                 intro_label,
+                relay,
             };
             let _ = refusal.send(NOT_APPROVED.as_bytes());
             refusal.close();
@@ -1024,11 +1072,13 @@ pub fn handshake_responder(
         .collect::<String>();
     let peer = remote_static(&handshake)?;
     stream.set_deadline(None)?;
+    let relay = stream.is_relay();
     Ok(Connection {
         stream,
         noise: handshake.into_transport_mode()?,
         peer,
         intro_label,
+        relay,
     })
 }
 
@@ -1084,6 +1134,36 @@ fn format_epoch(secs: u64) -> String {
         (rem % 3600) / 60,
         rem % 60
     )
+}
+
+// MARK: - Local payload counters
+
+/// Payload bytes moved on authenticated connections since this process started.
+///
+/// Direct is a TCP socket between two of the user's machines. Relay is the
+/// hosted tunnel. The numbers are this device only: they are not synced, and
+/// they are not the account's relay allowance. Empty end-of-stream markers
+/// are not counted.
+static DIRECT_PAYLOAD: AtomicU64 = AtomicU64::new(0);
+static RELAY_PAYLOAD: AtomicU64 = AtomicU64::new(0);
+
+/// `(direct, relay)` payload bytes observed on this process.
+pub fn payload_bytes() -> (u64, u64) {
+    (
+        DIRECT_PAYLOAD.load(Ordering::Relaxed),
+        RELAY_PAYLOAD.load(Ordering::Relaxed),
+    )
+}
+
+fn note_payload(relay: bool, n: u64) {
+    if n == 0 {
+        return;
+    }
+    if relay {
+        RELAY_PAYLOAD.fetch_add(n, Ordering::Relaxed);
+    } else {
+        DIRECT_PAYLOAD.fetch_add(n, Ordering::Relaxed);
+    }
 }
 
 // MARK: - Length framing under Noise
@@ -1166,6 +1246,90 @@ mod tests {
         assert_eq!(reader.read(1 << 20).expect("read two"), b"second");
         writer.write(&[]).expect("end of stream");
         echo.join().expect("echo thread");
+    }
+
+    /// `Box<dyn Transport>` must forward `is_relay`. The trait default is
+    /// false, and handshake copies that flag onto the Connection.
+    struct RelayStub;
+
+    impl Read for RelayStub {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Ok(0)
+        }
+    }
+
+    impl Write for RelayStub {
+        fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
+            Ok(input.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Transport for RelayStub {
+        fn close(&mut self) {}
+        fn set_deadline(&mut self, _: Option<Duration>) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn set_read_timeout(&mut self, _: Option<Duration>) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn is_relay(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn a_boxed_relay_transport_keeps_the_flag() {
+        let boxed: Box<dyn Transport> = Box::new(RelayStub);
+        assert!(
+            boxed.is_relay(),
+            "Box must forward is_relay or handshake would tag every tunnel as direct"
+        );
+    }
+
+    #[test]
+    fn payload_bytes_count_direct_messages() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a listener");
+        let address = listener.local_addr().expect("its address");
+        let responder_ident = MachineIdentity::from_secret([5u8; 32]);
+        let initiator_ident = MachineIdentity::from_secret([6u8; 32]);
+        let responder_key = responder_ident.public_key();
+
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("a connection");
+            let mut connection =
+                handshake_responder(Box::new(stream), &responder_ident).expect("handshake");
+            assert!(!connection.is_relay(), "TCP is direct");
+            let got = connection.receive(1024).expect("request");
+            connection.send(&got).expect("echo");
+        });
+
+        let stream = TcpStream::connect(address).expect("connect");
+        let mut connection = handshake_initiator(
+            Box::new(stream),
+            &initiator_ident,
+            Some(responder_key),
+            "test",
+        )
+        .expect("handshake");
+        assert!(!connection.is_relay());
+        assert_eq!(connection.link(), "direct");
+        let before = payload_bytes();
+        connection.send(b"ping").expect("send");
+        let answer = connection.receive(1024).expect("answer");
+        assert_eq!(answer, b"ping");
+        let after = payload_bytes();
+        assert!(
+            after.0 >= before.0.saturating_add(8),
+            "direct payload should grow by the request and the answer: {before:?} -> {after:?}"
+        );
+        assert_eq!(
+            after.1, before.1,
+            "a TCP pair must not count as relay: {before:?} -> {after:?}"
+        );
+        server.join().expect("server");
     }
 
     /// A non-blocking listener must still be able to complete a handshake.

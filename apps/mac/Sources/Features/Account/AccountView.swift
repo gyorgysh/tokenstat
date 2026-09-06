@@ -237,6 +237,9 @@ struct AccountView: View {
     @ViewBuilder
     private var thisMacPane: some View {
         hostCard
+        LocalTrafficCard(traffic: model.remoteStatus?.traffic) {
+            await model.loadTraffic()
+        }
         notificationsCard
         ChatCacheSettings()
         terminalCard

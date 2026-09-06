@@ -69,6 +69,38 @@ internal static class Format
     public static bool Flag(JsonNode? node, string name) =>
         node?[name] is JsonValue v && v.GetValueKind() == JsonValueKind.True;
 
+    /// <summary>Binary units, matching the Mac Account card.</summary>
+    public static string DataSize(long bytes)
+    {
+        if (bytes < 0) bytes = 0;
+        const double kibi = 1024d;
+        if (bytes >= kibi * kibi * kibi)
+        {
+            return (bytes / (kibi * kibi * kibi)).ToString("0.#", CultureInfo.InvariantCulture) + " GiB";
+        }
+        if (bytes >= kibi * kibi)
+        {
+            return (bytes / (kibi * kibi)).ToString("0.#", CultureInfo.InvariantCulture) + " MiB";
+        }
+        if (bytes >= kibi)
+        {
+            return (bytes / kibi).ToString("0.#", CultureInfo.InvariantCulture) + " KiB";
+        }
+        return bytes.ToString(CultureInfo.InvariantCulture) + " B";
+    }
+
+    /// <summary>
+    /// Human label for a connection path. Empty or unknown stays unknown:
+    /// Account must not invent a relay just because the host omitted the route.
+    /// Screen passes "relay" as the JSON fallback when the field is missing.
+    /// </summary>
+    public static string Transport(string raw) => raw switch
+    {
+        "direct" => "Direct connection",
+        "relay" => "Encrypted relay",
+        _ => string.IsNullOrEmpty(raw) ? "Unknown" : raw,
+    };
+
     public static string Text(JsonNode? node, string name, string fallback = "")
     {
         if (node is not JsonObject)

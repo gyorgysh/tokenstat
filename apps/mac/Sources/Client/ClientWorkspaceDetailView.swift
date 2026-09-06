@@ -762,11 +762,14 @@ struct ClientFilesView: View {
             return
         }
         let key = ClientEditorKey(peer: peer, workspace: workspace, path: entry.path)
-        if usesEditorTabs, editors.selectExisting(key) { return }
+        if usesEditorTabs, let tab = editors.tab(for: key), tab.document.isDirty || tab.isSaving {
+            editors.select(tab)
+            return
+        }
         do {
             let file = try await ClientRemote.readFile(peer: peer, workspace: workspace, path: entry.path)
             if usesEditorTabs {
-                editors.open(key, content: file.content)
+                editors.adoptSaved(key, content: file.content)
             } else {
                 openFile = OpenFile(path: entry.path, content: file.content)
             }

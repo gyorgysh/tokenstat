@@ -55,6 +55,9 @@ fn account_calendar_fallback(
             Some(code),
         ))
         .envelope(),
+        // Not signed in, and this machine has no days either: first use, not
+        // a failed read. Home's Getting Started is the right screen.
+        None if code == "auth" => Ok(Value::Null),
         None => Err(DispatchError::new(code, failure)),
     }
 }
@@ -4423,7 +4426,7 @@ mod tests {
 
     #[test]
     fn failed_account_calendar_without_local_data_remains_an_error() {
-        for code in ["auth", "upgrade", "other"] {
+        for code in ["upgrade", "other"] {
             let result = account_calendar_fallback(
                 None,
                 "Showing this machine only".into(),
@@ -4434,6 +4437,14 @@ mod tests {
             assert_eq!(error.code, code);
             assert_eq!(error.message, "Account activity unavailable");
         }
+        let first_run = account_calendar_fallback(
+            None,
+            "Showing this machine only".into(),
+            "auth",
+            "Sign in to tokenstat.ai to see your usage.".into(),
+        )
+        .expect("unsigned-in empty is first use");
+        assert!(first_run.is_null(), "{first_run}");
     }
 
     #[test]

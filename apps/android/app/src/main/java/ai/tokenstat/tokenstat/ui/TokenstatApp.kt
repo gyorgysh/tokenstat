@@ -1646,6 +1646,8 @@ private fun AccountDialog(
                 )
             }
             notifyError?.let { Text(it, color = colors.warning) }
+            RelayUsageCard(state.account, onRefresh = { model.refresh() })
+            LocalTrafficCard(model)
             TsSecondaryButton(label = "Terms", onClick = { open("https://tokenstat.ai/terms?mobile=1") }, modifier = Modifier.fillMaxWidth())
             TsSecondaryButton(label = "Privacy", onClick = { open("https://tokenstat.ai/privacy?mobile=1") }, modifier = Modifier.fillMaxWidth())
             TsSecondaryButton(
@@ -1658,6 +1660,165 @@ private fun AccountDialog(
         }
     }
     if (paywall) PaywallSheet(billing, onDismiss = { paywall = false })
+}
+
+@Composable
+private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
+    val usage = account?.get("relayUsage") as? JsonObject
+    val supported = usage?.string("policy") == "rolling_30_utc_days"
+        && usage?.int("windowDays") == 30
+        && usage?.string("timezone") == "UTC"
+    TsCard(title = "Relay usage", subtitle = "One allowance across your devices") {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            if (usage == null || !supported) {
+                Text(
+                    "Relay usage details are not available from this server yet.",
+                    color = LocalTsColors.current.textSecondary,
+                )
+            } else {
+                val used = usage.long("usedBytes") ?: 0L
+                val limit = usage.long("limitBytes") ?: 0L
+                val remaining = usage.long("remainingBytes") ?: 0L
+                Text(
+                    "${binaryBytes(used)} of ${binaryBytes(limit)} used",
+                    fontWeight = FontWeight.SemiBold,
+                    color = LocalTsColors.current.textPrimary,
+                )
+                LinearProgressIndicator(
+                    progress = { if (limit > 0) (used.toDouble() / limit).coerceIn(0.0, 1.0).toFloat() else 0f },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("${binaryBytes(remaining)} remaining", color = LocalTsColors.current.textSecondary)
+                UsageRow("Today (UTC)", usage.long("todayBytes") ?: 0L)
+                UsageRow("This calendar month (UTC)", usage.long("monthBytes") ?: 0L)
+                UsageRow("Rolling 30 days, used for your limit", used)
+                Text(
+                    "All relayed traffic shares this allowance. Direct connections do not count. The limit includes today and the previous 29 UTC days. Each day, older usage leaves the window. This is not a daily refill or a calendar-month reset.",
+                    style = TextStyle(fontSize = 12.sp),
+                    color = LocalTsColors.current.textSecondary,
+                )
+                val unlock = usage.string("nextUnlockAt")
+                if (!unlock.isNullOrBlank()) {
+                    val day = unlock.take(10)
+                    Text(
+                        "Next usage to expire: ${binaryBytes(usage.long("nextUnlockBytes") ?: 0L)} on $day at 00:00 UTC.",
+                        style = TextStyle(fontSize = 12.sp),
+                        color = LocalTsColors.current.textSecondary,
+                    )
+                }
+                val days = (usage["daily"] as? JsonArray).orEmpty()
+                    .mapNotNull { it as? JsonObject }
+                    .filter { (it.long("bytes") ?: 0L) > 0L }
+                    .reversed()
+                Text("Daily usage (UTC)", fontWeight = FontWeight.SemiBold, color = LocalTsColors.current.textPrimary)
+                if (days.isEmpty()) {
+                    Text("No relayed traffic in this window.", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+                } else {
+                    days.forEach { day ->
+                        UsageRow(day.string("day") ?: "", day.long("bytes") ?: 0L)
+                    }
+                }
+                val asOf = usage.string("asOf")?.take(10).orEmpty()
+                val delay = usage.int("reportingDelaySeconds") ?: 0
+                Text(
+                    "As of $asOf. Relay reporting can lag by about $delay seconds.",
+                    style = TextStyle(fontSize = 12.sp),
+                    color = LocalTsColors.current.textSecondary,
+                )
+            }
+            TsSecondaryButton(label = "Refresh usage", onClick = onRefresh, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun LocalTrafficCard(model: AppViewModel) {
+    var traffic by remember { mutableStateOf<JsonObject?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    fun load() {
+        scope.launch {
+            loading = true
+            runCatching { model.core("remote.status") as JsonObject }
+                .onSuccess {
+                    traffic = it["traffic"] as? JsonObject
+                    error = null
+                }
+                .onFailure { error = it.message }
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { load() }
+    TsCard(title = "This device", subtitle = "How connections leave this machine") {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            error?.let { Text(it, color = LocalTsColors.current.warning) }
+            val snapshot = traffic
+            if (snapshot == null && !loading && error == null) {
+                Text(
+                    "This host does not report local traffic yet.",
+                    color = LocalTsColors.current.textSecondary,
+                )
+            } else if (snapshot != null) {
+                UsageRow("Direct", snapshot.long("directBytes") ?: 0L)
+                UsageRow("Relayed", snapshot.long("relayBytes") ?: 0L)
+                Text(
+                    "Counted on this device since tokenstat started. Direct traffic does not use the account relay allowance. The relayed figure is this machine only, not the account total.",
+                    style = TextStyle(fontSize = 12.sp),
+                    color = LocalTsColors.current.textSecondary,
+                )
+                val peers = (snapshot["peers"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+                if (peers.isEmpty()) {
+                    Text("No live connections right now.", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+                } else {
+                    peers.forEach { peer ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(peer.string("label")?.ifBlank { null } ?: peer.string("peer").orEmpty())
+                            Text(
+                                transportLabel(peer.string("route")),
+                                color = LocalTsColors.current.textSecondary,
+                            )
+                        }
+                    }
+                }
+            }
+            TsSecondaryButton(
+                label = if (loading) "Refreshing…" else "Refresh traffic",
+                onClick = { load() },
+                enabled = !loading,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun UsageRow(label: String, bytes: Long) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, modifier = Modifier.weight(1f), color = LocalTsColors.current.textPrimary)
+        Text(binaryBytes(bytes), fontFamily = FontFamily.Monospace, color = LocalTsColors.current.textPrimary)
+    }
+}
+
+private fun binaryBytes(n: Long): String {
+    val value = n.coerceAtLeast(0).toDouble()
+    val kibi = 1024.0
+    fun fmt(x: Double, unit: String): String {
+        val shown = if (x >= 10) "%.0f".format(x) else "%.1f".format(x)
+        return shown.trimEnd('0').trimEnd('.') + " " + unit
+    }
+    return when {
+        value >= kibi * kibi * kibi -> fmt(value / (kibi * kibi * kibi), "GiB")
+        value >= kibi * kibi -> fmt(value / (kibi * kibi), "MiB")
+        value >= kibi -> fmt(value / kibi, "KiB")
+        else -> "${n.coerceAtLeast(0)} B"
+    }
+}
+
+private fun transportLabel(raw: String?): String = when (raw) {
+    "direct" -> "Direct connection"
+    "relay" -> "Encrypted relay"
+    else -> raw ?: "Unknown"
 }
 
 @Composable private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) =

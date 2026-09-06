@@ -4042,6 +4042,35 @@ struct RemoteStatus: Codable, Sendable {
     let label: String
     /// Addresses held by the live direct listener. Optional across rollout.
     let directCandidates: [RemoteDirectCandidate]?
+    /// This-device payload counters. Older hosts omit the object.
+    let traffic: RemoteTraffic?
+}
+
+/// Payload this process has moved, split by how it travelled.
+///
+/// Direct is a TCP socket between two of the user's machines. Relay is the
+/// hosted tunnel. These numbers are not the account relay allowance.
+struct RemoteTraffic: Codable, Sendable, Hashable {
+    var directBytes: UInt64
+    var relayBytes: UInt64
+    var peers: [RemoteTrafficPeer]
+}
+
+struct RemoteTrafficPeer: Codable, Sendable, Hashable, Identifiable {
+    var peer: String
+    var label: String
+    var route: String?
+    var live: Int
+    var idle: Int
+    var id: String { peer }
+
+    var routeLabel: String {
+        switch route {
+        case "direct": return "Direct connection"
+        case "relay": return "Encrypted relay"
+        default: return "Unknown"
+        }
+    }
 }
 
 struct RemoteDirectCandidate: Codable, Sendable {

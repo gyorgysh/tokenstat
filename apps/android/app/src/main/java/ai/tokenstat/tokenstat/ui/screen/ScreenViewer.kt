@@ -99,7 +99,7 @@ fun ScreenViewerScreen(
                 ?: throw IllegalStateException("The viewer opened without an id.")
             sessionId = id
             transport = opened["transport"]?.jsonPrimitive?.contentOrNull
-            status = (transport ?: "relay")
+            status = transportLabel(transport)
             while (true) {
                 val chunk = model.core(
                     "screen.viewer.read",
@@ -116,7 +116,7 @@ fun ScreenViewerScreen(
                 val frame = chunk["frame"]?.jsonPrimitive?.contentOrNull
                 if (!frame.isNullOrBlank()) {
                     decodeFrame(texture, frame)
-                    status = transport ?: "live"
+                    status = transportLabel(transport)
                 }
                 if (chunk["active"]?.jsonPrimitive?.content == "false") {
                     status = "The host stopped sharing."
@@ -138,11 +138,17 @@ fun ScreenViewerScreen(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx -> TextureView(ctx).also { texture = it } },
             )
-            if (status != "live" && status != "direct" && status != "relay") {
+            if (status != "live" && status != "Direct connection" && status != "Encrypted relay") {
                 Text(status, color = colors.textSecondary, modifier = Modifier.padding(Space.l))
             }
         }
     }
+}
+
+private fun transportLabel(raw: String?): String = when (raw) {
+    "direct" -> "Direct connection"
+    "relay" -> "Encrypted relay"
+    else -> raw ?: "Encrypted relay"
 }
 
 private fun decodeFrame(view: TextureView?, b64: String) {

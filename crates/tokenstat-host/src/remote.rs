@@ -1199,6 +1199,14 @@ impl Route {
             Route::Relay => "relay",
         }
     }
+
+    fn from_connection(connection: &tokenstat_remote::Connection) -> Self {
+        if connection.is_relay() {
+            Route::Relay
+        } else {
+            Route::Direct
+        }
+    }
 }
 
 /// Answer one peer for as long as it stays connected.
@@ -1211,11 +1219,12 @@ impl Route {
 fn serve_peer(
     mut connection: tokenstat_remote::Connection,
     session: &Mutex<Session>,
-    // Read only by the stream claim below, which needs `local-host` to exist:
-    // without it there are no reservations to claim and nothing to encode.
-    #[cfg_attr(not(feature = "local-host"), allow(unused_variables))] route: Route,
+    // Stream claims still need `local-host`. The route is recorded on every
+    // build so Account can say how a peer reached this machine.
+    route: Route,
 ) {
     let peer = connection.peer_key();
+    remember_route(&tokenstat_identity::hex(&peer), route);
     // A machine cannot serve itself. A self-dial through the tunnel, or a
     // mistaken local pair that pinned this machine's own key, would otherwise
     // pass the approval check with its own store and answer itself.
@@ -1433,6 +1442,82 @@ pub fn connection_counts() -> (usize, usize) {
         .map(|held| held.values().map(Vec::len).sum())
         .unwrap_or(0);
     (LIVE_TOTAL.load(Ordering::Relaxed), idle)
+}
+
+/// Last known route per peer, for Account and `remote.status`.
+fn last_routes() -> &'static Mutex<HashMap<String, Route>> {
+    static ROUTES: OnceLock<Mutex<HashMap<String, Route>>> = OnceLock::new();
+    ROUTES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn remember_route(peer: &str, route: Route) {
+    if let Ok(mut map) = last_routes().lock() {
+        map.insert(peer.to_string(), route);
+    }
+}
+
+/// This-device payload counters and the peers currently using a connection.
+///
+/// Direct and relay are counted separately on purpose. Direct never belongs
+/// in the account relay allowance. These numbers live in this process only.
+fn traffic_json() -> Value {
+    let (direct_bytes, relay_bytes) = tokenstat_remote::payload_bytes();
+    let live_map = live().lock().ok();
+    let pool_map = pool().lock().ok();
+    let routes = last_routes().lock().ok();
+    let mut keys: BTreeSet<String> = BTreeSet::new();
+    if let Some(ref live_map) = live_map {
+        keys.extend(live_map.keys().cloned());
+    }
+    if let Some(ref pool_map) = pool_map {
+        keys.extend(pool_map.keys().cloned());
+    }
+    let peers: Vec<Value> = keys
+        .into_iter()
+        .map(|peer| {
+            let live = live_map
+                .as_ref()
+                .and_then(|held| held.get(&peer).copied())
+                .unwrap_or(0);
+            let idle = pool_map
+                .as_ref()
+                .and_then(|held| held.get(&peer).map(Vec::len))
+                .unwrap_or(0);
+            let route = routes
+                .as_ref()
+                .and_then(|held| held.get(&peer).copied())
+                .or_else(|| {
+                    pool_map.as_ref().and_then(|held| {
+                        held.get(&peer)?
+                            .last()
+                            .map(|idle| Route::from_connection(&idle.connection))
+                    })
+                });
+            json!({
+                "peer": peer,
+                "label": traffic_peer_label(&peer),
+                "route": route.map(Route::as_str),
+                "live": live,
+                "idle": idle,
+            })
+        })
+        .collect();
+    json!({
+        "directBytes": direct_bytes,
+        "relayBytes": relay_bytes,
+        "peers": peers,
+    })
+}
+
+fn traffic_peer_label(peer: &str) -> String {
+    let Ok(key) = public_key_from_hex(peer) else {
+        return peer.chars().take(8).collect();
+    };
+    PeerStore::cached()
+        .ok()
+        .and_then(|store| store.get(&key).map(|record| record.label.clone()))
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| tokenstat_identity::fingerprint(&key))
 }
 
 /// How long the first `no_such_peer` is remembered, and the ceiling the
@@ -1903,8 +1988,9 @@ pub(crate) fn offer_direct_candidates(peer_hex: &str, candidates: Vec<DirectCand
             offered.remove(peer_hex);
         } else {
             offered.insert(peer_hex.to_string(), candidates);
-            // These describe the current network, learned after the old miss.
-            clear_direct_miss(peer_hex);
+            // A list is not a working TCP path. Successful Noise already
+            // clears the miss in dial_peer_for. Clearing it here made every
+            // off-LAN RPC re-race LAN during cooldown.
         }
     }
 }
@@ -2031,10 +2117,11 @@ fn fetch_peer_direct_candidates(peer_hex: &str) -> Result<Vec<DirectCandidate>, 
         Err(error) if is_unknown_method(&error) => {
             match call_peer_result(peer_hex, "screen.direct.candidates", "{}") {
                 Ok(answer) => Ok(parse_peer_candidate_list(&answer)),
-                Err(_) => {
+                Err(error) if is_unknown_method(&error) => {
                     let answer = call_peer_result(peer_hex, "screen.direct.candidate", "{}")?;
                     Ok(parse_legacy_direct_candidate(&answer).into_iter().collect())
                 }
+                Err(error) => Err(error),
             }
         }
         Err(error) => Err(error),
@@ -2046,6 +2133,10 @@ fn fetch_peer_direct_candidates(peer_hex: &str) -> Result<Vec<DirectCandidate>, 
 /// An authenticated peer may ask. Empty is a real answer: this device is not
 /// listening, so the caller should use the relay. Screen view permission is
 /// not required, because listing listen addresses is not viewing a desktop.
+/// The list can include a mapped public address. That is intentional: files
+/// and terminals need a current WAN candidate without a screen grant. The
+/// Noise pin is still the gate. An approved account device is already trusted
+/// to reach this machine.
 fn advertised_direct_candidates() -> Result<Value, String> {
     crate::request_context::remote_peer()
         .ok_or("direct candidates must be requested by an authenticated peer")?;
@@ -2303,13 +2394,18 @@ pub(crate) fn dial_peer_for(
     match direct {
         Ok((connection, address)) => {
             clear_direct_miss(&peer_hex);
+            remember_route(&peer_hex, Route::Direct);
             // Persistence follows proof: TCP connected and the pinned key
             // completed Noise. Merely advertising a candidate never writes it.
             let _ = remember_direct_address(&peer_hex, &address);
             Ok((connection, "direct"))
         }
-        Err(error) => tunnel_dial(&settings(), key, &identity, &label, purpose, error)
-            .map(|connection| (connection, "relay")),
+        Err(error) => {
+            tunnel_dial(&settings(), key, &identity, &label, purpose, error).map(|connection| {
+                remember_route(&peer_hex, Route::Relay);
+                (connection, "relay")
+            })
+        }
     }
 }
 
@@ -2603,6 +2699,10 @@ fn checkout(peer: &str) -> Option<tokenstat_remote::Connection> {
         .and_then(Vec::pop)
         .map(|idle| idle.connection);
     map.retain(|_, idle| !idle.is_empty());
+    drop(map);
+    if let Some(ref connection) = taken {
+        remember_route(peer, Route::from_connection(connection));
+    }
     taken
 }
 
@@ -2846,6 +2946,8 @@ fn status() -> Result<Value, String> {
         // Useful for an invite as well as diagnostics. These are addresses,
         // never credentials; the receiver still authenticates the key above.
         "directCandidates": direct_candidates,
+        // This device only. Direct bytes are not the account relay allowance.
+        "traffic": traffic_json(),
     }))
 }
 
@@ -3601,6 +3703,40 @@ mod tests {
     }
 
     #[test]
+    fn offering_candidates_does_not_clear_a_direct_miss() {
+        let peer = "offer-does-not-clear-miss";
+        clear_direct_miss(peer);
+        let failed = try_direct_with_backoff::<()>(peer, true, || Err("offline".into()));
+        assert!(failed.is_err());
+        let first = *direct_misses()
+            .lock()
+            .expect("lock")
+            .get(peer)
+            .expect("miss");
+        offer_direct_candidates(
+            peer,
+            vec![DirectCandidate {
+                kind: "lan".into(),
+                address: "192.168.1.9:7878".into(),
+                priority: 100,
+            }],
+        );
+        let after = *direct_misses()
+            .lock()
+            .expect("lock")
+            .get(peer)
+            .expect("miss");
+        assert_eq!(after.since_ms, first.since_ms);
+        assert_eq!(after.strikes, first.strikes);
+        let skipped = try_direct_with_backoff::<()>(peer, true, || {
+            panic!("cooldown must skip the direct dial after a refreshed list")
+        });
+        assert!(skipped.is_err());
+        clear_direct_miss(peer);
+        offer_direct_candidates(peer, Vec::new());
+    }
+
+    #[test]
     fn advertised_direct_candidates_are_for_authenticated_peers() {
         let refused = advertised_direct_candidates().expect_err("local caller");
         assert!(refused.contains("authenticated peer"), "{refused}");
@@ -3612,6 +3748,43 @@ mod tests {
         assert!(
             handled.is_some(),
             "the method is on the shared dispatch table"
+        );
+    }
+
+    #[test]
+    fn traffic_snapshot_keeps_direct_and_relay_apart() {
+        let value = traffic_json();
+        assert!(value["directBytes"].as_u64().is_some(), "{value}");
+        assert!(value["relayBytes"].as_u64().is_some(), "{value}");
+        assert!(value["peers"].as_array().is_some(), "{value}");
+        remember_route("aa", Route::Direct);
+        {
+            let mut held = live().lock().expect("live map");
+            held.insert("aa".into(), 1);
+        }
+        let listed = traffic_json();
+        let peers = listed["peers"].as_array().cloned().unwrap_or_default();
+        let row = peers.iter().find(|peer| peer["peer"] == "aa");
+        assert_eq!(
+            row.and_then(|peer| peer["route"].as_str()),
+            Some("direct"),
+            "{listed}"
+        );
+        assert_eq!(
+            row.and_then(|peer| peer["live"].as_u64()),
+            Some(1),
+            "{listed}"
+        );
+        live().lock().expect("live map").remove("aa");
+        remember_route("aa", Route::Relay);
+        // A remembered route without a live or idle connection stays off the
+        // list, so Account cannot invent a connected peer after hang-up.
+        let idle_only = traffic_json();
+        assert!(
+            idle_only["peers"]
+                .as_array()
+                .is_some_and(|peers| peers.iter().all(|peer| peer["peer"] != "aa")),
+            "{idle_only}"
         );
     }
 }

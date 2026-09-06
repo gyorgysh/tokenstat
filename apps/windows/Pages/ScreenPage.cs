@@ -191,7 +191,7 @@ internal sealed class ScreenPage : Page
             _caption.Text = "The viewer opened without an id.";
             return;
         }
-        var transport = Format.Text(opened, "transport", "relay");
+        var transport = Format.Transport(Format.Text(opened, "transport", "relay"));
         _caption.Text = "Waiting for the first picture · " + transport;
         _poll = new CancellationTokenSource();
         _ = PollAsync(_poll.Token);

@@ -19,6 +19,8 @@ internal static class FriendlyError
             return "The background helper is older than the app. Restart the app to replace it, then try again.";
         if (lower.Contains("unauthorized") || lower.Contains("forbidden"))
             return "This account or device does not have access to that.";
+        if (lower.Contains("quota_exceeded"))
+            return "Relay allowance used up. Check relay usage in Account to see when older traffic leaves the window. Direct connections do not use this allowance.";
         if (lower.Contains("quota") || lower.Contains("429") || lower.Contains("rate"))
             return "The service asked us to slow down. Wait a moment and try again.";
         if (lower.Contains("vault") || lower.Contains("not enrolled"))

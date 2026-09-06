@@ -44,11 +44,30 @@ final class ClientEditorStore {
         return tabs.first { $0.id == key }
     }
 
+    func tab(for key: ClientEditorKey) -> ClientEditorTab? {
+        tabs.first(where: { $0.id == key })
+    }
+
     @discardableResult
     func selectExisting(_ key: ClientEditorKey) -> Bool {
-        guard let tab = tabs.first(where: { $0.id == key }) else { return false }
+        guard let tab = tab(for: key) else { return false }
         select(tab)
         return true
+    }
+
+    /// Replace a clean buffer with a fresh host read. Dirty and in-flight
+    /// saves keep what the person is looking at.
+    func adoptSaved(_ key: ClientEditorKey, content: String) {
+        guard let tab = tab(for: key) else {
+            open(key, content: content)
+            return
+        }
+        if tab.isSaving || tab.document.isDirty {
+            select(tab)
+            return
+        }
+        tab.document.adopt(saved: content)
+        select(tab)
     }
 
     func select(_ tab: ClientEditorTab) {

@@ -22,6 +22,8 @@ final class AccountModel {
     /// "signed out". Showing a sign-in button before we have checked would
     /// flash the wrong state on every launch.
     var account: Account?
+    /// Local host traffic. Independent of the signed-in account snapshot.
+    var remoteStatus: RemoteStatus?
     var pendingLogin: DeviceLogin?
     var isLoading = false
     var isSyncing = false
@@ -138,6 +140,7 @@ final class AccountModel {
             errorMessage = nil
             authCheckError = nil
             authChecked = true
+            remoteStatus = try? await Bridge.remoteStatus()
             #if os(macOS)
             applyLimitsSync((try? await Bridge.limitsSync()) ?? LimitsSyncState())
             hostPolicy = try? await Bridge.hostPolicy()
@@ -153,6 +156,10 @@ final class AccountModel {
                 errorMessage = nil
             }
         }
+    }
+
+    func loadTraffic() async {
+        remoteStatus = try? await Bridge.remoteStatus()
     }
 
     #if os(macOS)

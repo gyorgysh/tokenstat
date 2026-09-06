@@ -80,7 +80,6 @@ final class EditorDocument: Identifiable {
 
     @ObservationIgnored var selection = NSRange(location: 0, length: 0)
 
-
     /// Colour the buffer, once it stops changing.
     ///
     /// Debounced rather than run per keystroke: highlighting is a parse of the

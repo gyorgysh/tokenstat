@@ -110,7 +110,13 @@ fun friendlyError(raw: String?): FriendlyError {
             FriendlyError("Session ended", "The session reached its time limit or went idle.", true)
         lower.contains("screen_already_open") || lower.contains("already open") ->
             FriendlyError("Already open", "That screen session is already open on the host.", false)
-        lower.contains("quota_exceeded") || lower.contains("429") || lower.contains("rate") ->
+        lower.contains("quota_exceeded") ->
+            FriendlyError(
+                "Relay allowance used up",
+                "Check relay usage in Account to see when older traffic leaves the window. Direct connections do not use this allowance.",
+                false,
+            )
+        lower.contains("quota") || lower.contains("429") || lower.contains("rate") ->
             FriendlyError("Rate limited", "The service asked us to slow down. Wait a moment and try again.", true)
         lower.contains("vault") || lower.contains("not enrolled") || lower.contains("machine_required") ->
             FriendlyError("Vault needed", "Unlock the vault on the host to continue.", false)

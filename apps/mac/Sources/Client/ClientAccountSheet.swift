@@ -197,6 +197,9 @@ private struct ClientAccountContent: View {
 
     @ViewBuilder
     private var thisDevicePane: some View {
+        LocalTrafficCard(traffic: model.remoteStatus?.traffic) {
+            await model.loadTraffic()
+        }
         ChatCacheSettings()
         notificationsCard
         layoutCard

@@ -626,6 +626,10 @@ impl Transport for ChannelTransport {
         self.state.cond.notify_all();
         Ok(())
     }
+
+    fn is_relay(&self) -> bool {
+        true
+    }
 }
 
 // MARK: - The supervisor
