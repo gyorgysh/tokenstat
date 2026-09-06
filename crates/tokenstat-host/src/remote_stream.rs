@@ -727,8 +727,15 @@ pub(crate) fn remote_pty_lists() -> Vec<Value> {
         let guard = pty_lists().lock().unwrap_or_else(|e| e.into_inner());
         remote_pty_snapshot(&crate::remote::reachable_peers(), &guard, pty_list_now_ms())
     };
-    if crate::remote::tunnel_is_connected() && !snapshot.stale.is_empty() {
-        schedule_remote_pty_refresh(snapshot.stale);
+    if !snapshot.stale.is_empty() {
+        let available = crate::remote::refreshable_peers();
+        schedule_remote_pty_refresh(
+            snapshot
+                .stale
+                .into_iter()
+                .filter(|peer| available.contains(peer))
+                .collect(),
+        );
     }
     let mut out = Vec::new();
     for (peer, items) in snapshot.served {

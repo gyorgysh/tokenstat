@@ -2282,12 +2282,8 @@ fn settings() -> RemoteSettings {
 }
 
 /// Whether the multiplexed tunnel socket is up right now.
-///
-/// `pty.list` uses this to skip dialling peers while the network is gone or
-/// the supervisor is still reconnecting. Waiting on those dials is what made
-/// the host silent for ten seconds after a path change.
 #[cfg(feature = "local-host")]
-pub(crate) fn tunnel_is_connected() -> bool {
+fn tunnel_is_connected() -> bool {
     tunnel_session()
         .lock()
         .ok()
@@ -2311,6 +2307,42 @@ pub(crate) fn reachable_peers() -> Vec<String> {
         .filter(|peer| peer.trust == Trust::Approved && load_settings().tunnel)
         .map(|peer| peer.key)
         .collect()
+}
+
+/// Background discovery can use a known direct route while the relay is down.
+/// Keep unreachable peers in the served cache, but do not schedule dials for
+/// them until either the relay is ready or a direct candidate may be retried.
+#[cfg(feature = "local-host")]
+pub(crate) fn refreshable_peers() -> Vec<String> {
+    if !load_settings().tunnel {
+        return Vec::new();
+    }
+    let Ok(store) = PeerStore::load() else {
+        return Vec::new();
+    };
+    let relay_connected = tunnel_is_connected();
+    store
+        .list()
+        .into_iter()
+        .filter(|peer| peer.trust == Trust::Approved)
+        .filter(|peer| {
+            route_available_for_refresh(&peer.key, peer.address.as_deref(), relay_connected)
+        })
+        .map(|peer| peer.key)
+        .collect()
+}
+
+#[cfg(feature = "local-host")]
+fn route_available_for_refresh(
+    peer: &str,
+    remembered: Option<&str>,
+    relay_connected: bool,
+) -> bool {
+    relay_connected
+        || (direct_is_worth_trying(peer)
+            && candidates_for_peer(peer, remembered)
+                .iter()
+                .any(|candidate| direct_candidate_address_is_usable(&candidate.address)))
 }
 
 fn tunnel_dial(
@@ -3221,6 +3253,32 @@ mod tests {
             direct_is_worth_trying(peer),
             "no candidates must not start backoff"
         );
+    }
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn background_discovery_uses_direct_without_a_relay_and_respects_backoff() {
+        let peer = "background-direct-route-test";
+        clear_direct_miss(peer);
+        assert!(!route_available_for_refresh(peer, None, false));
+        assert!(route_available_for_refresh(
+            peer,
+            Some("192.168.1.5:7878"),
+            false
+        ));
+        assert!(!route_available_for_refresh(
+            peer,
+            Some("127.0.0.1:7878"),
+            false
+        ));
+        note_direct_miss(peer);
+        assert!(!route_available_for_refresh(
+            peer,
+            Some("192.168.1.5:7878"),
+            false
+        ));
+        assert!(route_available_for_refresh(peer, None, true));
+        clear_direct_miss(peer);
     }
 
     #[test]
