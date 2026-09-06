@@ -31,7 +31,12 @@ struct IOSCodeTextView: UIViewRepresentable {
         view.smartQuotesType = .no
         view.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         view.alwaysBounceVertical = true
+        let savedSelection = document.selection
         context.coordinator.sync(document, into: view)
+        let length = (document.text as NSString).length
+        let location = min(savedSelection.location, length)
+        view.selectedRange = NSRange(location: location, length: min(savedSelection.length, length - location))
+        view.scrollRangeToVisible(view.selectedRange)
         return view
     }
 
@@ -110,6 +115,11 @@ struct IOSCodeTextView: UIViewRepresentable {
             guard !applying else { return }
             syncedText = textView.text
             document.setText(textView.text)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            guard !applying else { return }
+            document.selection = textView.selectedRange
         }
 
         private func attributedText(_ document: EditorDocument) -> NSAttributedString {

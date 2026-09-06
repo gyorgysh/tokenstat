@@ -658,6 +658,9 @@ struct ClientFilesView: View {
     let workspace: String
     let folderName: String
 
+    @Environment(ClientEditorStore.self) private var editors
+    private var usesEditorTabs: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+
     @State private var pathStack: [String] = [""]
     @State private var children: [TreeEntry] = []
     @State private var errorMessage: String?
@@ -670,6 +673,18 @@ struct ClientFilesView: View {
     private var currentPath: String { pathStack.last ?? "" }
 
     var body: some View {
+        Group {
+            if usesEditorTabs {
+                ClientFileTabs(peer: peer, workspace: workspace, folderName: folderName) {
+                    fileList
+                }
+            } else {
+                fileList
+            }
+        }
+    }
+
+    private var fileList: some View {
         List {
             if let errorMessage {
                 // The shared card rather than a red line: it knows what to say
@@ -746,9 +761,15 @@ struct ClientFilesView: View {
             pathStack.append(entry.path)
             return
         }
+        let key = ClientEditorKey(peer: peer, workspace: workspace, path: entry.path)
+        if usesEditorTabs, editors.selectExisting(key) { return }
         do {
             let file = try await ClientRemote.readFile(peer: peer, workspace: workspace, path: entry.path)
-            openFile = OpenFile(path: entry.path, content: file.content)
+            if usesEditorTabs {
+                editors.open(key, content: file.content)
+            } else {
+                openFile = OpenFile(path: entry.path, content: file.content)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -803,6 +824,7 @@ struct ClientFileEditor: View {
                                 dismiss()
                             }
                         }
+                        .disabled(isSaving)
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button(isSaving ? "Saving…" : "Save") {
@@ -816,6 +838,7 @@ struct ClientFileEditor: View {
         // The first parse, before anybody types. Colour is not worth blocking
         // the sheet on, so the text is up either way.
         .task { await document.highlightNow() }
+        .interactiveDismissDisabled(document.isDirty || isSaving)
         .confirmationDialog(
             "Discard changes?",
             isPresented: $confirmClose,
@@ -848,16 +871,18 @@ struct ClientFileEditor: View {
     }
 
     private func save() async {
+        guard !isSaving else { return }
         isSaving = true
+        let sent = document.text
         defer { isSaving = false }
         do {
             try await ClientRemote.writeFile(
                 peer: peer,
                 workspace: workspace,
                 path: path,
-                content: document.text
+                content: sent
             )
-            document.markSaved()
+            document.markSaved(content: sent)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

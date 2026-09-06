@@ -72,9 +72,14 @@ final class EditorDocument: Identifiable {
         scheduleHighlight()
     }
 
-    func markSaved() {
-        savedText = text
+    func markSaved(content: String? = nil) {
+        // A network save acknowledges the submitted version. Edits made
+        // while that request was in flight must remain dirty.
+        savedText = content ?? text
     }
+
+    @ObservationIgnored var selection = NSRange(location: 0, length: 0)
+
 
     /// Colour the buffer, once it stops changing.
     ///

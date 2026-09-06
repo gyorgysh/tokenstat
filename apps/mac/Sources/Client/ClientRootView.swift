@@ -52,6 +52,7 @@ struct ClientRootView: View {
     /// Where the person is, held above both layouts so a keyboard being
     /// attached or detached does not land them somewhere else.
     @State private var navigation = ClientNavigationModel()
+    @State private var editors = ClientEditorStore(write: ClientRemote.writeFile)
     /// The account sheet, opened from the avatar rather than from a tab. See
     /// `AvatarButton`.
     @State private var showAccount = false
@@ -160,6 +161,7 @@ struct ClientRootView: View {
         .environment(store)
         .environment(input)
         .environment(navigation)
+        .environment(editors)
         .clientPointerProbe(input)
         .background {
             GeometryReader { geo in
@@ -215,6 +217,7 @@ struct ClientRootView: View {
             }
         }
         .onChange(of: account.signedIn) { _, signedIn in
+            if !signedIn { editors.reset() }
             guard signedIn, let signed = account.account else { return }
             Task { await store.finishPendingIntent(with: signed) }
         }
