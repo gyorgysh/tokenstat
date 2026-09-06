@@ -8,35 +8,38 @@ desktop and Android builds are still previews. Newest first.
 The Unreleased section is always the complete, person-facing delta from the
 latest `v<version>` tag to `main`. Work that has not appeared in a shipped app
 still belongs there. When a release is tagged, close that delta under its
-version and begin the next one, rather than reconstructing release notes from
-commits at the end.
+version and begin the next one. Do not reconstruct release notes from commits
+at the end.
 
-## [Unreleased]
+## [0.9.0] - 2026-09-06
 
-Chat can carry files, Account is split into panes, the vault can unlock with
-Touch ID or Face ID, and a connected computer shows whether the path is
-direct or relayed.
+Chat can carry files, Account splits into panes, the vault unlocks with Touch
+ID or Face ID, and a connected computer shows which path it took, direct or
+relayed.
 
 ### Added
 
-- Attach a file to a conversation. When you ask an agent to send, show, or
-  present something, it puts the file in this thread as an attachment, rather
-  than through another app. On the phone, tap one to open it: video and audio
-  play, text, source and PDF render, images show, and the viewer's own share
-  sheet carries Save to Files, AirDrop and the rest.
+- Attach a file to a conversation. Ask an agent to send, show, or present
+  something and it puts the file in this thread. An agent with a mail or bot
+  tool used to reach for that instead. On the phone, tap a file to open it:
+  video and audio play, text, source and PDF render, images show, and the
+  viewer's own share sheet carries Save to Files, AirDrop and the rest.
 - Files over 1 MiB wait for Download. Smaller ones arrive on their own. A
   device-local cache holds what you have already fetched, with a size cap and
-  idle retention you can change, and a purge that cannot be undone by a
-  download already in flight. The setting is named tokenstat cache, and today
-  it holds Chat files.
-- Account settings are split into panes. On the Mac: Account, Plan limits, and
-  This Mac. On the phone: Account, This device, and Legal. Deleting the account
-  sits at the end of Account, behind its own rule, rather than among the legal
-  documents.
+  an idle retention you can change. Purging it clears the lot, and a download
+  already in flight cannot put those bytes back. A file the computer refuses
+  for good, because it is too large to transfer or is no longer there, says so
+  instead of offering a retry that cannot work. The setting is named tokenstat
+  cache. Chat files are what it holds so far.
+- Account settings split into panes. On the Mac: Account, Plan limits, and
+  This Mac. On the phone: Account, This device, and Legal. Deleting the
+  account sits at the end of Account, behind its own rule. It used to sit
+  among the legal documents.
 - Account shows this device's own direct and relayed traffic, counted since
   tokenstat started, separate from the account relay allowance.
-- Workspaces and the device page show whether this phone reached the computer
-  directly or through the encrypted relay. The screen viewer already did.
+- Workspaces and the device page show which path this phone took to the
+  computer, direct or through the encrypted relay. The screen viewer already
+  did.
 - The phone composer reads as glass, with the conversation moving under it.
   Send appears when there is something to send instead of sitting greyed out,
   and a toggle at the top right grows the box for a longer message.
@@ -44,12 +47,13 @@ direct or relayed.
   those settings. It shows what is selected, and the phone's targets are
   larger.
 - Touch ID on the Mac and Face ID or Touch ID on the phone can unlock the
-  vault. The password remains the fallback, and a changed biometric set
-  forgets the saved one.
-- Relayed traffic shares one allowance: 100 MB on Free, 1 GB on Supporter,
-  5 GB on Patron, and 20 GB on Legend, covering today and the previous 29
-  UTC days. Direct connections do not count. This is not a daily refill or a
-  calendar-month reset.
+  vault. The sheet opens straight into it when this device has a saved
+  password, without showing the password form first. The password remains the
+  fallback, and a changed biometric set forgets the saved one.
+- Relayed traffic shares one allowance: 100 MiB on Free, 1 GiB on Supporter,
+  5 GiB on Patron, and 20 GiB on Legend, covering today and the previous 29
+  UTC days. Direct connections do not count. Each day the oldest day leaves
+  the window, so there is no monthly reset.
 
 ### Fixed
 
@@ -57,27 +61,28 @@ direct or relayed.
 - A downloaded chat file on the phone opens, instead of reporting that the
   file name is invalid.
 - A few-megabyte chat file failed to download over the relay, while the same
-  file arrived over a direct connection. The tunnel now waits for the socket
+  file arrived over a direct connection. The tunnel waits for the socket now
   instead of dropping the burst.
-- Recent chats on the phone kept a thread you just used off the list when
-  many conversations were unread. The three newest sit at the top, then five
-  more by what needs a look.
+- Recent chats on the phone dropped a thread you had just used when many
+  conversations were unread. The three newest sit at the top, then five more
+  by what needs a look.
 - The expand control at the top right of the phone composer had no glyph.
-- There was no way to put the keyboard away in a phone chat once it was open,
-  so the transcript could not grow. Drag the conversation, tap it, or tap
-  Hide keyboard.
-- Full screen on a Mac watching another Mac did nothing. The viewer is its
-  own window now, so the expand control fills the display.
+- A phone chat had no way to put the keyboard away once it was open, so the
+  transcript could not grow. Drag the conversation, tap it, or tap the
+  keyboard button above the field. That button is there only while the
+  keyboard is up.
+- Full screen on a Mac watching another Mac did nothing. The viewer is its own
+  window now, so the expand control fills the display.
 - A Mac asking another Mac for the screen or for folders never brought up a
-  permission prompt on the host. The request opens as a sheet, the Mac
-  sidebar asks when a host refuses the work, and the screen viewer asks on
-  the first refusal rather than waiting for a second press. Approving a
+  permission prompt on the host. The request opens as a sheet, the Mac sidebar
+  asks when a host refuses the work, and the screen viewer asks the moment a
+  connection is refused. It used to wait for a second press. Approving a
   screen grant also asks macOS for Screen Recording, and for Accessibility
   when control is included.
 - On older macOS the connecting spinner was a bar that travelled across the
-  screen, and the chat composer packed agent, pills and send against the
-  trailing edge with a gap after attach. The spinner stays circular, and the
-  composer keeps those controls next to attach.
+  screen. It stays circular. The chat composer on those versions packed agent,
+  pills and send against the trailing edge with a gap after attach, and keeps
+  those controls next to attach.
 
 ## [0.8.3] - 2026-09-05
 

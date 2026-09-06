@@ -294,8 +294,12 @@ struct SSHVaultSetupSheet: View {
     @State private var enteredRecovery = ""
     @State private var forgot = false
     @State private var biometricAccount: String?
-    @State private var biometricName: String?
-    @State private var biometricSaved = false
+    // Both answered by the device, not the host, so the first frame is already
+    // the right shape. Asking the host which account is signed in takes a round
+    // trip, and the sheet used to spend it showing the password form and then
+    // swapping to Face ID under somebody who had started typing.
+    @State private var biometricName: String? = SSHVaultBiometrics.name
+    @State private var biometricSaved = SSHVaultBiometrics.hasSavedPassword
     @State private var usePassword = false
     @State private var enableBiometrics = false
     @State private var passwordAccepted = false
@@ -408,10 +412,10 @@ struct SSHVaultSetupSheet: View {
         .task {
             biometricName = SSHVaultBiometrics.name
             biometricAccount = try? await SSHVaultBiometrics.accountKey()
-            if let biometricAccount {
-                biometricSaved = SSHVaultBiometrics.contains(account: biometricAccount)
-                enableBiometrics = biometricSaved
-            }
+            // Now the exact one. The opening guess was "this device has a saved
+            // password"; this is "for the account signed in right now".
+            biometricSaved = biometricAccount.map(SSHVaultBiometrics.contains) ?? false
+            enableBiometrics = biometricSaved
         }
         .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
             Button("Delete vault", role: .destructive) { Task { await resetVault() } }
@@ -573,7 +577,10 @@ struct SSHVaultSetupSheet: View {
                 Task { await unlockWithBiometrics() }
             }
             .buttonStyle(AccentButtonStyle())
-            .disabled(working)
+            // The panel can be up before the account key lands. Without this a
+            // fast tap hits the guard in `unlockWithBiometrics` and nothing
+            // happens, which reads as a broken button.
+            .disabled(working || biometricAccount == nil)
             .keyboardShortcut(.defaultAction)
         } else if exists && !stale {
             Button(working ? "Unlocking…" : "Unlock with password", .signIn) { attempt() }

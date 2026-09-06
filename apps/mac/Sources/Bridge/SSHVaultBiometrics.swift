@@ -36,7 +36,24 @@ enum SSHVaultBiometrics {
         return query
     }
 
-    static func contains(account: String) -> Bool {
+    /// Whether this device has a saved vault password at all, without asking
+    /// the host which account is signed in.
+    ///
+    /// `contains(account:)` needs an account key, and that key costs a round
+    /// trip to the host. The unlock sheet was drawing its password form, then
+    /// swapping to Face ID when the round trip landed, which put an
+    /// authentication prompt in front of somebody already typing. This answers
+    /// from the Keychain alone, so the sheet opens in the right shape on its
+    /// first frame. The service holds one item in practice: `save` removes
+    /// before it adds, and signing out removes every account's. A yes for the
+    /// wrong account is corrected by the exact check a moment later.
+    static var hasSavedPassword: Bool { exists(account: nil) }
+
+    static func contains(account: String) -> Bool { exists(account: account) }
+
+    /// Look, do not prompt. `interactionNotAllowed` is what keeps this from
+    /// raising Face ID, so an item that is there but locked answers yes.
+    private static func exists(account: String?) -> Bool {
         var query = query(account)
         query[kSecReturnAttributes as String] = true
         let context = LAContext()
