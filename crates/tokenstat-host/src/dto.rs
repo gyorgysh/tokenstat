@@ -372,20 +372,37 @@ pub struct AccountDto {
 }
 
 /// Account-wide relay counters, independent of device-local traffic.
+///
+/// Every field has a default so one missing or renamed server key degrades to
+/// a zero rather than dropping the whole ledger: the account call decodes this
+/// with `from_value(...).ok()`, and a strict struct would turn a single new
+/// server field into a silently absent card.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelayUsageDto {
+    #[serde(default)]
     pub policy: String,
+    #[serde(default)]
     pub window_days: u32,
+    #[serde(default)]
     pub timezone: String,
+    #[serde(default)]
     pub as_of: String,
+    #[serde(default)]
     pub reporting_delay_seconds: u32,
+    #[serde(default)]
     pub window_start: String,
+    #[serde(default)]
     pub window_end: String,
+    #[serde(default)]
     pub limit_bytes: u64,
+    #[serde(default)]
     pub used_bytes: u64,
+    #[serde(default)]
     pub remaining_bytes: u64,
+    #[serde(default)]
     pub today_bytes: u64,
+    #[serde(default)]
     pub month_bytes: u64,
     #[serde(default)]
     pub next_unlock_at: Option<String>,
@@ -395,9 +412,11 @@ pub struct RelayUsageDto {
     pub daily: Vec<RelayUsageDayDto>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RelayUsageDayDto {
+    #[serde(default)]
     pub day: String,
+    #[serde(default)]
     pub bytes: u64,
 }
 
@@ -818,5 +837,26 @@ impl CalendarDto {
         // The app is the owner looking at their own grid.
         self.history_upgrade = true;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The account call decodes `relayUsage` with `from_value(...).ok()`, so a
+    /// strict struct turns one missing server key into a silently absent card.
+    /// A partial ledger must still decode, with zeros where keys are missing.
+    #[test]
+    fn a_partial_relay_ledger_still_decodes() {
+        let value = serde_json::json!({
+            "policy": "rolling_30_utc_days",
+            "usedBytes": 1234,
+        });
+        let usage: RelayUsageDto = serde_json::from_value(value).expect("partial ledger decodes");
+        assert_eq!(usage.policy, "rolling_30_utc_days");
+        assert_eq!(usage.used_bytes, 1234);
+        assert_eq!(usage.limit_bytes, 0);
+        assert!(usage.daily.is_empty());
     }
 }

@@ -730,6 +730,9 @@ private final class ScreenViewerModel {
     /// How long a session has to hold up before the budget is given back.
     private static let stableAfter: TimeInterval = 12
     private var stopped = false
+    /// When the viewer last asked for access on its own after a failed
+    /// connect. Bounds the auto-ask so repeated failures do not spam the host.
+    private var lastAutoRequest = Date.distantPast
     /// What came back from asking, kept apart from `message` on purpose.
     ///
     /// `message` is why the session is not running, and the checklist reads it
@@ -843,8 +846,13 @@ private final class ScreenViewerModel {
                 message = reason
                 // The phone asks as soon as Connect fails. The Mac viewer
                 // waited for a second press, so the host Mac never saw a
-                // request unless somebody found the overlay button.
-                if needsPermission { await requestAccess() }
+                // request unless somebody found the overlay button. Rate
+                // limited: without it every failed retry re-asks and spams
+                // the host.
+                if needsPermission, Date().timeIntervalSince(lastAutoRequest) > 60 {
+                    lastAutoRequest = Date()
+                    await requestAccess()
+                }
             } else {
                 reconnect(after: reason)
             }

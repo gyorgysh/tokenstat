@@ -51,6 +51,23 @@ def profile_entitlements(profile, certificate):
     return plistlib.loads(template.encode())
 
 
+def match_identity(candidates, identity):
+    """Filter `security find-identity` candidates by name or SHA-1 digest.
+
+    Pasted secret values carry trailing newlines and spaces, so the input is
+    stripped before the exact comparison: without it a release aborts with a
+    generic "no matching certificate" for an identity that is there.
+    """
+    identity = (identity or "").strip()
+    if not identity:
+        return candidates
+    return [
+        (digest, name)
+        for digest, name in candidates
+        if identity.upper() == digest.upper() or identity == name
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
@@ -64,7 +81,7 @@ def main():
     identities = subprocess.check_output(["security", "find-identity", "-v", "-p", "codesigning"], text=True)
     candidates = re.findall(r'\b([0-9A-Fa-f]{40})\s+"(Developer ID Application: [^"]+)"', identities)
     if args.identity:
-        candidates = [(digest, name) for digest, name in candidates if args.identity.upper() == digest.upper() or args.identity == name]
+        candidates = match_identity(candidates, args.identity)
     with tempfile.TemporaryDirectory(prefix="tokenstat-sign-") as temporary:
         temporary = Path(temporary)
         explicit = os.environ.get("TOKENSTAT_MAC_PROFILE")
@@ -97,7 +114,7 @@ def main():
                     raise refusal
                 if selected:
                     break
-            except (ValueError, subprocess.CalledProcessError):
+            except (ValueError, subprocess.CalledProcessError, OSError):
                 if explicit or encoded:
                     raise
         if not selected:
@@ -106,6 +123,21 @@ def main():
                        "CI requires the DEVELOPER_ID_PROFILE_BASE64 release secret.")
             if args.optional and not (explicit or encoded or args.identity):
                 print(message + " Debug build remains unsigned; biometric vault unlock is unavailable.")
+                return
+            if args.optional and candidates:
+                # A local machine with the identity but without its profile:
+                # sign without entitlements so the signature stays stable
+                # across rebuilds (which is what keeps the Screen Recording
+                # and Accessibility grants). Biometric vault unlock needs the
+                # profile's Keychain group and is unavailable in this build.
+                digest = candidates[0][0]
+                fallback = ["codesign", "--force", "--options", "runtime", "--timestamp", "--sign", digest]
+                helper = args.app / "Contents/Resources/tokenstat-hostd"
+                if helper.is_file():
+                    subprocess.run(fallback + [str(helper)], check=True)
+                subprocess.run(fallback + ["--deep", str(args.app)], check=True)
+                subprocess.run(["codesign", "--verify", "--deep", "--strict", str(args.app)], check=True)
+                print("Signed without a provisioning profile; biometric vault unlock is unavailable.")
                 return
             raise ValueError(message)
         profile_path, digest, entitlements = selected
@@ -124,6 +156,13 @@ def main():
         # Keychain entitlements. --deep must never propagate them to frameworks.
         subprocess.run(sign + ["--deep", str(args.app)], check=True)
         subprocess.run(sign + ["--entitlements", str(entitlement_path), str(args.app)], check=True)
+        # Verify the helper on its own: it lives in Resources, where --deep
+        # hashes it as data, so a bundle-wide verify walks past a broken or
+        # unsigned helper and only notarization would catch it.
+        subprocess.run(
+            ["codesign", "--verify", "--strict", "--verbose=2", str(helper)],
+            check=True,
+        )
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(args.app)], check=True)
         actual = plistlib.loads(subprocess.check_output(["codesign", "-d", "--entitlements", "-", "--xml", str(args.app)], stderr=subprocess.DEVNULL))
         if any(actual.get(key) != value for key, value in entitlements.items()):

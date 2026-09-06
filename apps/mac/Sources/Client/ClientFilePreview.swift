@@ -47,9 +47,13 @@ struct ClientFilePreview: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UINavigationController, context: Context) {
-        context.coordinator.file = file
         context.coordinator.onDone = onDone
-        (controller.viewControllers.first as? QLPreviewController)?.reloadData()
+        // Reloading on every SwiftUI update flashes the preview. Only the
+        // file changing needs one.
+        if context.coordinator.file.id != file.id {
+            context.coordinator.file = file
+            (controller.viewControllers.first as? QLPreviewController)?.reloadData()
+        }
     }
 
     final class Coordinator: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate {

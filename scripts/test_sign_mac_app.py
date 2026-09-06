@@ -72,5 +72,30 @@ class ProfileTests(unittest.TestCase):
         signing.profile_entitlements(self.profile, self.digest)
 
 
+class MatchIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.candidates = [
+            ("AABBCC" * 6 + "AABB", "Developer ID Application: Example One (TEAMONE)"),
+            ("DDEEFF" * 6 + "DDEE", "Developer ID Application: Example Two (TEAMTWO)"),
+        ]
+
+    def test_trims_a_pasted_identity(self):
+        [match] = signing.match_identity(
+            self.candidates, "Developer ID Application: Example One (TEAMONE)\n"
+        )
+        self.assertEqual(match[1], "Developer ID Application: Example One (TEAMONE)")
+
+    def test_matches_digest_case_insensitively(self):
+        [match] = signing.match_identity(self.candidates, ("aabbcc" * 6 + "aabb"))
+        self.assertEqual(match[0], "AABBCC" * 6 + "AABB")
+
+    def test_empty_identity_keeps_everything(self):
+        self.assertEqual(signing.match_identity(self.candidates, ""), self.candidates)
+        self.assertEqual(signing.match_identity(self.candidates, None), self.candidates)
+
+    def test_unknown_identity_matches_nothing(self):
+        self.assertEqual(signing.match_identity(self.candidates, "Nobody"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

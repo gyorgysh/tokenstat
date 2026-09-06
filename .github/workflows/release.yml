@@ -64,7 +64,7 @@ jobs:
         env:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          manifest=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          manifest=$(grep -m1 '^version =' Cargo.toml | cut -d'"' -f2)
           if [ "$manifest" != "$VERSION" ]; then
             echo "Cargo.toml version '$manifest' does not match tag version '$VERSION'." >&2
             exit 1
@@ -325,6 +325,9 @@ jobs:
           rm -f "${CERT_PATH}" "${CERT_IMPORT}" "${CERT_PEM}" "${KEY_PEM}" "${PASS_FILE}"
 
           IDENTITY="${DEVELOPER_ID_APP:-}"
+          # Pasted secrets carry trailing newlines; the script matches the
+          # name exactly, so trim here like the passwords above.
+          IDENTITY="$(printf '%s' "${IDENTITY}" | tr -d '\r\n' | sed 's/^ *//;s/ *$//')"
           if [ -z "${IDENTITY}" ]; then
             IDENTITY=$(security find-identity -v -p codesigning "${KEYCHAIN}" \
               | awk -F'"' '/Developer ID Application/ {print $2; exit}')

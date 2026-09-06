@@ -83,6 +83,11 @@ const MAX_CHANNEL_BUFFER: usize = 32 * 1024 * 1024;
 /// Bound queued outbound data when the relay or peer is slow.
 const MAX_OUTBOUND_QUEUE: usize = 8 * 1024 * 1024;
 const OUTBOUND_FRAME_QUEUE: usize = 64;
+/// How long a channel write waits for room in the outbound queue before
+/// failing. Long enough that a slow relay drains 8 MiB first, short enough
+/// that a writer holding the split connection's lock cannot starve its reader
+/// indefinitely.
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 /// Where this machine's dial ids start. Channel ids are local to each socket,
 /// and the two sides choose them independently: the relay numbers the
 /// channels it opens to a socket from its own per-socket counter (which grows
@@ -454,9 +459,16 @@ impl TunnelSession {
     /// Direct TCP `write` waits when the kernel buffer is full. This used to
     /// `try_send` and fail the moment 64 frames were in flight, about 2 MiB of
     /// Noise: a 5 MB chat file over the relay died with "tunnel outbound queue
-    /// is full" while the same file over a direct connection arrived. Blocking
+    /// is full" while the same file over a direct connection arrived. Waiting
     /// here is that same backpressure, so a large attachment waits for the
     /// socket instead of failing the download.
+    ///
+    /// The wait is bounded (`SEND_TIMEOUT`) rather than forever. The caller in
+    /// `tokenstat-remote` holds the split connection's lock across this call,
+    /// so parking without a deadline would starve the read half for as long as
+    /// the relay stayed slow. And the 8 MiB byte reservation below still caps
+    /// memory: a burst larger than that fails loudly rather than growing
+    /// without bound.
     fn send_channel_frame(&self, op: u8, ch: u32, payload: &[u8]) -> Result<(), RemoteError> {
         if payload.len() > MAX_OUTBOUND_QUEUE {
             return Err(RemoteError::Tunnel("channel frame is too large".into()));
@@ -490,11 +502,26 @@ impl TunnelSession {
                 Err(observed) => current = observed,
             }
         }
-        match writer.sender.send(frame) {
-            Ok(()) => Ok(()),
-            Err(_) => {
-                writer.bytes.fetch_sub(size, Ordering::AcqRel);
-                Err(RemoteError::Tunnel("tunnel is not connected".into()))
+        // Bounded backpressure on stable: `SyncSender::send_timeout` is still
+        // unstable, so retry `try_send` until the deadline. A full queue means
+        // the relay is slow, not gone; a disconnected one means the IO loop
+        // died and the next call will reconnect.
+        let deadline = Instant::now() + SEND_TIMEOUT;
+        loop {
+            match writer.sender.try_send(frame) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::TrySendError::Full(returned)) => {
+                    if Instant::now() >= deadline {
+                        writer.bytes.fetch_sub(size, Ordering::AcqRel);
+                        return Err(RemoteError::Tunnel("tunnel outbound queue is full".into()));
+                    }
+                    frame = returned;
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    writer.bytes.fetch_sub(size, Ordering::AcqRel);
+                    return Err(RemoteError::Tunnel("tunnel is not connected".into()));
+                }
             }
         }
     }

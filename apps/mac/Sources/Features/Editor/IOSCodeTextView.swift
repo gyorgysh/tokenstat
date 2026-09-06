@@ -36,7 +36,9 @@ struct IOSCodeTextView: UIViewRepresentable {
         let length = (document.text as NSString).length
         let location = min(savedSelection.location, length)
         view.selectedRange = NSRange(location: location, length: min(savedSelection.length, length - location))
-        view.scrollRangeToVisible(view.selectedRange)
+        // No scrollRangeToVisible: this runs on every recreation (rotation,
+        // cell reuse), and yanking the scroll to the cursor each time is not
+        // restoring anything. Selection alone is the restore.
         return view
     }
 

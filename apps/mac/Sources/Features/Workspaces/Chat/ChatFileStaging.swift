@@ -43,10 +43,10 @@ enum ChatFileStaging {
             throw CocoaError(.fileWriteInvalidFileName)
         }
         let url = URL(fileURLWithPath: filePath, isDirectory: false)
-        if let existing = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           existing == data.count {
-            return url
-        }
+        // No size shortcut here: two different files can share a length, and
+        // reusing the wrong bytes is a silent wrong-file. Staging is cheap
+        // and repeatable (the cache prunes these copies anyway), so always
+        // write.
         #if os(macOS)
         try data.write(to: url, options: .atomic)
         #else

@@ -124,9 +124,9 @@ internal sealed class AccountPage : Page
         _root.Children.Add(AboutBlurb());
     }
 
-    private UIElement RelayUsageCard(JsonNode account)
+    private UIElement RelayUsageCard(JsonNode? account)
     {
-        var usage = account["relayUsage"];
+        var usage = account?["relayUsage"];
         var body = new StackPanel { Spacing = Theme.SpaceS };
         var supported = Format.Text(usage, "policy") == "rolling_30_utc_days"
             && Format.Long(usage, "windowDays") == 30

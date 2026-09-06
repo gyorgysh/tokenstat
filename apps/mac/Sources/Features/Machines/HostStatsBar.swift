@@ -271,6 +271,10 @@ struct HostStatsBar: View {
     }
 
     private func refresh() async {
+        // The task restarts (and cancels this one) when the peer changes, but
+        // a cancelled await still resumes: only publish when this refresh is
+        // still the current one, or one peer's answer lands on another's row.
+        let peerAtStart = peer
         do {
             if local {
                 stats = try await Bridge.hostStats()
@@ -282,6 +286,7 @@ struct HostStatsBar: View {
         } catch {
             failed = true
         }
+        guard !Task.isCancelled, peer == peerAtStart else { return }
         if !local, let peer {
             route = await HostStatsFormat.loadRoute(for: peer)
         }

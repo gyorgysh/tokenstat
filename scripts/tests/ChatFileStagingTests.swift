@@ -27,7 +27,14 @@ struct ChatFileStagingTests {
         let again = try ChatFileStaging.stage(
             bytes, id: "output-1", name: "galaxy.jpg", into: root
         )
-        require(again.path == url.path, "Same size reuses the copy")
+        require(again.path == url.path, "Same bytes land on the same path")
+
+        let collision = Data("galaxy".utf8.reversed())
+        require(collision.count == bytes.count, "Collision fixture really collides")
+        let fixed = try ChatFileStaging.stage(
+            collision, id: "output-1", name: "galaxy.jpg", into: root
+        )
+        require(try Data(contentsOf: fixed) == collision, "Same size never reuses wrong bytes")
 
         let changed = Data("galaxy!!".utf8)
         let rewritten = try ChatFileStaging.stage(

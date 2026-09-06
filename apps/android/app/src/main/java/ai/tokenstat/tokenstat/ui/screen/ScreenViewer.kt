@@ -138,7 +138,7 @@ fun ScreenViewerScreen(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx -> TextureView(ctx).also { texture = it } },
             )
-            if (status != "live" && status != "Direct connection" && status != "Encrypted relay") {
+            if (status != "live" && status != "Direct connection" && status != "Encrypted relay" && status != "Waiting…") {
                 Text(status, color = colors.textSecondary, modifier = Modifier.padding(Space.l))
             }
         }
@@ -148,7 +148,9 @@ fun ScreenViewerScreen(
 private fun transportLabel(raw: String?): String = when (raw) {
     "direct" -> "Direct connection"
     "relay" -> "Encrypted relay"
-    else -> raw ?: "Encrypted relay"
+    // Missing stays missing: inventing "Encrypted relay" for a path nobody
+    // observed yet is the same lie the account card refuses to tell.
+    else -> raw ?: "Waiting…"
 }
 
 private fun decodeFrame(view: TextureView?, b64: String) {

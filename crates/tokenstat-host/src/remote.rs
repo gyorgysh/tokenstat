@@ -1450,8 +1450,19 @@ fn last_routes() -> &'static Mutex<HashMap<String, Route>> {
     ROUTES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// How many peer routes are remembered. Peers come and go; without a ceiling
+/// a long-lived daemon keeps an entry for every machine it ever dialled.
+const MAX_REMEMBERED_ROUTES: usize = 256;
+
 fn remember_route(peer: &str, route: Route) {
     if let Ok(mut map) = last_routes().lock() {
+        // Bounded: entries for peers that were removed from the store
+        // otherwise accumulate for the life of the daemon.
+        if !map.contains_key(peer) && map.len() >= MAX_REMEMBERED_ROUTES {
+            if let Some(first) = map.keys().next().cloned() {
+                map.remove(&first);
+            }
+        }
         map.insert(peer.to_string(), route);
     }
 }
@@ -1490,10 +1501,20 @@ fn traffic_json() -> Value {
                     .as_ref()
                     .and_then(|held| held.get(&peer).copied())
                     .or_else(|| {
+                        // The pool can hold both kinds at once (a live direct
+                        // call beside an idle relay channel), so the last entry
+                        // may describe the wrong channel. Prefer a direct one:
+                        // it is the route traffic actually takes.
                         pool_map.as_ref().and_then(|held| {
-                            held.get(&peer)?
-                                .last()
-                                .map(|idle| Route::from_connection(&idle.connection))
+                            held.get(&peer).and_then(|idle| {
+                                idle.iter()
+                                    .map(|held| Route::from_connection(&held.connection))
+                                    .find(|route| matches!(route, Route::Direct))
+                                    .or_else(|| {
+                                        idle.last()
+                                            .map(|held| Route::from_connection(&held.connection))
+                                    })
+                            })
                         })
                     });
                 (peer, live, idle, route)
@@ -2044,14 +2065,18 @@ thread_local! {
 }
 
 fn with_refreshing_direct<T>(work: impl FnOnce() -> T) -> T {
-    struct Restore;
+    struct Restore(bool);
     impl Drop for Restore {
         fn drop(&mut self) {
-            REFRESHING_DIRECT.with(|flag| flag.set(false));
+            REFRESHING_DIRECT.with(|flag| flag.set(self.0));
         }
     }
-    REFRESHING_DIRECT.with(|flag| flag.set(true));
-    let _restore = Restore;
+    let prior = REFRESHING_DIRECT.with(|flag| {
+        let prior = flag.get();
+        flag.set(true);
+        prior
+    });
+    let _restore = Restore(prior);
     work()
 }
 
@@ -2066,6 +2091,10 @@ fn is_refreshing_direct() -> bool {
 /// the list fresh for the moment it does, while asking on every dial spent a
 /// relay round trip per attachment download for nothing.
 const CANDIDATE_REFRESH_INTERVAL_MS: i64 = DIRECT_MISS_FLOOR_MS;
+/// How soon a failed candidate probe may be retried. Shorter than the
+/// success interval: a failure says nothing about the peer's addresses, only
+/// that this attempt could not reach it.
+const CANDIDATE_RETRY_MS: i64 = 10_000;
 
 /// When the peer was last asked for its listen addresses.
 fn last_candidate_refresh() -> &'static Mutex<HashMap<String, i64>> {
@@ -2079,13 +2108,31 @@ fn claim_candidate_refresh(peer_hex: &str) -> bool {
     let Ok(mut asked) = last_candidate_refresh().lock() else {
         return true;
     };
-    if let Some(previous) = asked.get(peer_hex)
-        && now.saturating_sub(*previous) < CANDIDATE_REFRESH_INTERVAL_MS
-    {
+    asked.retain(|_, previous| now.saturating_sub(*previous) < CANDIDATE_REFRESH_INTERVAL_MS);
+    if asked.contains_key(peer_hex) {
         return false;
     }
     asked.insert(peer_hex.to_string(), now);
     true
+}
+
+/// Record the outcome of a candidate probe. A failed probe (the relay was
+/// down, the peer was unreachable) must not suppress the next retry for the
+/// full minute: back it off briefly instead, so recovery after a transient
+/// failure waits seconds rather than a probe interval.
+fn note_candidate_refresh(peer_hex: &str, succeeded: bool) {
+    let Ok(mut asked) = last_candidate_refresh().lock() else {
+        return;
+    };
+    let now = jiff::Timestamp::now().as_millisecond();
+    if succeeded {
+        asked.insert(peer_hex.to_string(), now);
+    } else {
+        asked.insert(
+            peer_hex.to_string(),
+            now.saturating_sub(CANDIDATE_REFRESH_INTERVAL_MS - CANDIDATE_RETRY_MS),
+        );
+    }
 }
 
 /// Whether this dial should first ask the peer for current listen addresses.
@@ -2116,14 +2163,22 @@ fn peer_has_offered_candidates(peer_hex: &str) -> bool {
 }
 
 fn is_unknown_method(error: &str) -> bool {
-    error.to_ascii_lowercase().contains("unknown method")
+    let folded = error.to_ascii_lowercase();
+    folded.contains("unknown method") || folded.contains("unknown_method")
 }
 
 fn parse_peer_candidate_list(value: &Value) -> Vec<DirectCandidate> {
+    // Per item, not all or nothing: one malformed entry must not discard the
+    // whole list and force a call onto the relay.
     value
         .get("candidates")
-        .cloned()
-        .and_then(|candidates| serde_json::from_value(candidates).ok())
+        .and_then(Value::as_array)
+        .map(|candidates| {
+            candidates
+                .iter()
+                .filter_map(|candidate| serde_json::from_value(candidate.clone()).ok())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -2151,8 +2206,12 @@ fn refresh_peer_direct_candidates(peer_hex: &str, remembered: Option<&str>) {
         return;
     }
     let fetched = with_refreshing_direct(|| fetch_peer_direct_candidates(peer_hex));
-    if let Ok(candidates) = fetched {
-        offer_direct_candidates(peer_hex, candidates);
+    match fetched {
+        Ok(candidates) => {
+            note_candidate_refresh(peer_hex, true);
+            offer_direct_candidates(peer_hex, candidates);
+        }
+        Err(_) => note_candidate_refresh(peer_hex, false),
     }
 }
 
@@ -2333,11 +2392,24 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     let _slot = LiveSlot::take(peer_hex)?;
 
     // Attachment payloads must not borrow an unlabelled pooled RPC channel:
-    // the relay meters file bytes against the account's shared allowance.
-    // This still uses the same authenticated direct-first dial ladder.
+    // the relay meters file bytes against the account's shared allowance, so a
+    // Files channel must never be checked back into the pool for ordinary
+    // calls to reuse. This still uses the same authenticated direct-first
+    // dial ladder.
     if is_attachment_transfer(method) {
         let mut connection = dial_peer_as(peer_hex, ChannelPurpose::Files)?;
-        return round_trip(&mut connection, request.as_bytes()).map_err(|error| error.to_string());
+        match round_trip(&mut connection, request.as_bytes()) {
+            Ok(answer) => return Ok(answer),
+            // The same one-redial rule as below: a freshly dialled connection
+            // closing before the first answer is usually the far daemon
+            // replacing its listener, not a real failure.
+            Err(tokenstat_remote::RemoteError::Closed) => {
+                let mut redialled = dial_peer_as(peer_hex, ChannelPurpose::Files)?;
+                return round_trip(&mut redialled, request.as_bytes())
+                    .map_err(|error| error.to_string());
+            }
+            Err(error) => return Err(error.to_string()),
+        }
     }
 
     // One retry on a pooled connection, for a peer daemon that restarted. A
@@ -2432,7 +2504,11 @@ pub(crate) fn dial_peer_for(
     // direct: ask the peer for current listen addresses, try those, then the
     // relay. Screen used to be the only caller that did this.
     refresh_peer_direct_candidates(&peer_hex, address.as_deref());
-    let candidates = candidates_for_peer(&peer_hex, address.as_deref());
+    let mut candidates = candidates_for_peer(&peer_hex, address.as_deref());
+    // Filter before measuring: backoff counts failed attempts, and an offer of
+    // loopback-only addresses that nothing dials is not an attempt. The race
+    // below re-checks, since an offer can land between here and the dial.
+    candidates.retain(|candidate| direct_candidate_address_is_usable(&candidate.address));
     let direct = try_direct_with_backoff(&peer_hex, !candidates.is_empty(), || {
         dial_direct_candidates(&peer_hex, candidates, &identity, key, &label)
     });
@@ -3075,6 +3151,37 @@ mod tests {
         assert!(!is_attachment_transfer("chat.send"));
         assert!(!is_attachment_transfer("chat.eventPage"));
         assert!(!is_attachment_transfer("chat.events"));
+    }
+
+    #[test]
+    fn one_bad_candidate_does_not_discard_the_list() {
+        let value = json!({"candidates": [
+            {"kind": "lan", "address": "192.168.1.2:7878", "priority": 100},
+            {"kind": "lan", "address": 42, "priority": "high"},
+            {"kind": "mdns", "address": "mac.local:7878", "priority": 50},
+        ]});
+        let parsed = parse_peer_candidate_list(&value);
+        assert_eq!(parsed.len(), 2, "{parsed:?}");
+        assert!(parsed.iter().any(|c| c.address == "192.168.1.2:7878"));
+        assert!(parsed.iter().any(|c| c.address == "mac.local:7878"));
+    }
+
+    #[test]
+    fn unknown_method_matches_both_spellings() {
+        assert!(is_unknown_method("unknown method `direct.candidates`"));
+        assert!(is_unknown_method("unknown_method"));
+        assert!(!is_unknown_method("the relay refused the connection"));
+    }
+
+    #[test]
+    fn the_direct_refresh_guard_restores_its_prior_value() {
+        REFRESHING_DIRECT.with(|flag| flag.set(true));
+        with_refreshing_direct(|| assert!(is_refreshing_direct()));
+        assert!(
+            is_refreshing_direct(),
+            "an outer refresh in flight must survive a nested one"
+        );
+        REFRESHING_DIRECT.with(|flag| flag.set(false));
     }
 
     #[test]

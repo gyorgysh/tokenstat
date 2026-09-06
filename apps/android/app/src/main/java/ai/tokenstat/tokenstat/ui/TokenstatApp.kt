@@ -1740,12 +1740,12 @@ private fun LocalTrafficCard(model: AppViewModel) {
     fun load() {
         scope.launch {
             loading = true
-            runCatching { model.core("remote.status") as JsonObject }
+            runCatching { model.core("remote.status") as? JsonObject ?: error("The host answered remote.status with an unexpected shape.") }
                 .onSuccess {
                     traffic = it["traffic"] as? JsonObject
                     error = null
                 }
-                .onFailure { error = it.message }
+                .onFailure { error = it.message ?: "Could not load local traffic." }
             loading = false
         }
     }

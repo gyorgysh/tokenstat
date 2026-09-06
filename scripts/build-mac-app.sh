@@ -42,7 +42,7 @@ VERSION="${1:-}"
 OUT="${2:-$ROOT/dist}"
 
 if [ -z "$VERSION" ]; then
-    VERSION="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+    VERSION="$(grep -m1 '^version =' Cargo.toml | cut -d'"' -f2)"
 fi
 
 # A sandbox may point this elsewhere and leave the app linking a stale library.
@@ -158,7 +158,7 @@ ditto "$APP" "$OUT/Tokenstat.app"
 IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
     | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -n 1)"
 if [ -n "$IDENTITY" ]; then
-    python3 "$ROOT/scripts/sign-mac-app.py" "$OUT/Tokenstat.app" --identity "$IDENTITY"
+    python3 "$ROOT/scripts/sign-mac-app.py" --optional "$OUT/Tokenstat.app" --identity "$IDENTITY"
 else
     echo "No Developer ID identity on this machine: leaving the app unsigned."
     echo "Screen Recording and Accessibility grants will be lost on each rebuild."

@@ -106,12 +106,16 @@ final class DeviceAccessRequests {
             // the sheet under somebody's cursor every five seconds.
             if live != asking { self.asking = live }
         }
-        // Bring the question forward. A notification only posts while the app
-        // is in the background, and Mac-to-Mac usually has this app in front
-        // on the host, so without this the only signal was a sidebar card.
+        // Bring the question forward, but only when the app is in the
+        // background. Activating on every poll steals focus and interrupts
+        // typing when the host Mac has this app in front, which is the
+        // common Mac-to-Mac case; the sheet and sidebar card are signal
+        // enough there.
         if self.asking == nil, let first = arrived.min(by: { $0.askedAt < $1.askedAt }) {
             self.asking = first
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            if !NSApplication.shared.isActive {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
         }
         for request in arrived {
             announced.insert(stamp(request))

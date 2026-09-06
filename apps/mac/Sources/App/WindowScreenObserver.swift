@@ -496,11 +496,27 @@ struct ViewerWindowBridge: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: WindowReportingView, context: Context) {
-        MainActor.assumeIsolated {
-            context.coordinator.window = $window
-            context.coordinator.isFullScreen = $isFullScreen
-            if let current = nsView.window {
-                context.coordinator.attach(current)
+        // updateNSView is documented to run on the main thread, but crashing
+        // the process if that ever changes is the wrong enforcement: hop
+        // there instead.
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                context.coordinator.window = $window
+                context.coordinator.isFullScreen = $isFullScreen
+                if let current = nsView.window {
+                    context.coordinator.attach(current)
+                }
+            }
+        } else {
+            let window = $window
+            let isFullScreen = $isFullScreen
+            let view = nsView
+            Task { @MainActor in
+                context.coordinator.window = window
+                context.coordinator.isFullScreen = isFullScreen
+                if let current = view.window {
+                    context.coordinator.attach(current)
+                }
             }
         }
     }
@@ -509,6 +525,10 @@ struct ViewerWindowBridge: NSViewRepresentable {
     final class Coordinator {
         private weak var attached: NSWindow?
         private var observers: [NSObjectProtocol] = []
+        /// The behaviour the window had before `attach` added fullscreen
+        /// support, so `detach` can put it back instead of leaving every
+        /// window it ever touched opting into fullscreen.
+        private var previousBehavior: NSWindow.CollectionBehavior?
         var window: Binding<NSWindow?>?
         var isFullScreen: Binding<Bool>?
 
@@ -517,6 +537,9 @@ struct ViewerWindowBridge: NSViewRepresentable {
                 detach()
                 attached = window
                 if let window {
+                    if previousBehavior == nil {
+                        previousBehavior = window.collectionBehavior
+                    }
                     window.collectionBehavior.insert(.fullScreenPrimary)
                     observe(window)
                 }
@@ -557,6 +580,10 @@ struct ViewerWindowBridge: NSViewRepresentable {
         private func detach() {
             observers.forEach(NotificationCenter.default.removeObserver)
             observers.removeAll()
+            if let window = attached, let previous = previousBehavior {
+                window.collectionBehavior = previous
+            }
+            previousBehavior = nil
             attached = nil
         }
 

@@ -450,11 +450,10 @@ struct ClientChatThread: View {
                 .chatScrollContent()
             }
             .scrollDismissesKeyboard(.immediately)
-            .simultaneousGesture(TapGesture().onEnded {
-                UIApplication.shared.sendAction(
-                    #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
-                )
-            })
+            // No tap-to-dismiss gesture here: `.scrollDismissesKeyboard`
+            // already hides the keyboard on scroll, and a transcript-wide
+            // tap gate fires on attachment taps, link taps and text
+            // selection too.
             // Only the bottom. The composer sits right under it and draws
             // its own edge, while the top is where the system's own fade
             // keeps the first "Web search:" chip off the navigation bar.

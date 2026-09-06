@@ -263,7 +263,7 @@ targets:
         # What it costs us is nothing we do, and what it buys is a build Apple
         # will notarize.
         ENABLE_HARDENED_RUNTIME: YES
-        INFOPLIST_KEY_NSFaceIDUsageDescription: "Use Face ID to unlock your SSH vault on this device."
+        INFOPLIST_KEY_NSFaceIDUsageDescription: "Use Face ID or Touch ID to unlock your SSH vault on this device."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         # Required, not cosmetic: an upload with no orientations declared is
         # rejected outright (error 90474), because an iPad app that does not
