@@ -148,30 +148,34 @@ private struct ClientChatResponseAttachment: View {
     @State private var previewURL: URL?
 
     var body: some View {
-        Group {
+        // One tappable card in every state. It used to become a disabled
+        // button the moment the bytes arrived, so a file that downloaded but
+        // failed to stage a preview copy sat there greyed out with no way to
+        // open it, share it, or ask again. The card now stages on demand and
+        // restages if the copy was pruned, and nothing about it goes inert
+        // except while a download is actually running.
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            Button(action: activate) { content }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .accessibilityLabel(
+                    data == nil ? "Download \(attachment.name)" : "Open \(attachment.name)"
+                )
             if let exportURL {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Button { previewURL = exportURL } label: { content }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Preview \(attachment.name)")
-                    ShareLink(item: exportURL) {
-                        Label("Share or save", systemImage: "square.and.arrow.up")
-                            .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.accent)
+                ShareLink(item: exportURL) {
+                    Label("Share or save", systemImage: "square.and.arrow.up")
+                        .frame(minHeight: 44)
                 }
-            } else {
-                Button(action: onDownload) { content }
-                    .buttonStyle(.plain)
-                    .disabled(isLoading || data != nil)
-                    .accessibilityLabel("Download \(attachment.name)")
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
             }
         }
         .quickLookPreview($previewURL)
         .task(id: data) {
+            // Prune first. Pruning after staging can delete the copy this
+            // row is about to hand to Quick Look.
+            await ChatAttachmentCache.shared.maintain()
             exportURL = stage()
-            if exportURL != nil { await ChatAttachmentCache.shared.maintain() }
             guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
             // SwiftUI restarts a row's task when it re-enters the viewport.
             // Keep its decoded image and geometry on those appearances.
@@ -219,8 +223,10 @@ private struct ClientChatResponseAttachment: View {
                         .foregroundStyle(Theme.accent)
                         .frame(minHeight: 44)
                 } else {
-                    Image(systemName: "doc.viewfinder")
-                        .foregroundStyle(.secondary)
+                    ActionIcon.preview.label("Open")
+                        .font(ClientType.label)
+                        .foregroundStyle(Theme.accent)
+                        .frame(minHeight: 44)
                 }
             }
             .padding(Theme.Space.m)
@@ -258,6 +264,20 @@ private struct ClientChatResponseAttachment: View {
         if type == "application/pdf" { return "doc.richtext" }
         if type.hasPrefix("text/") || type.contains("json") { return "doc.text" }
         return "doc"
+    }
+
+    /// Download, or open what is already here. Staging is done here rather
+    /// than only in the task so a card whose preview copy was pruned between
+    /// appearances still opens on the first tap.
+    private func activate() {
+        guard data != nil else {
+            onDownload()
+            return
+        }
+        if exportURL == nil || !FileManager.default.fileExists(atPath: exportURL?.path ?? "") {
+            exportURL = stage()
+        }
+        previewURL = exportURL
     }
 
     private func stage() -> URL? {

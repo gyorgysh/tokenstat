@@ -166,6 +166,32 @@ private struct ClientAccountContent: View {
                 .frame(maxWidth: .infinity)
                 .padding(Theme.Space.xl)
         }
+        dangerZone
+    }
+
+    /// Ending the account, kept apart from everything above it.
+    ///
+    /// Deletion used to sit under Legal, between the terms links and the third
+    /// party notices, because having it in the app at all is a store
+    /// requirement. That put the most destructive thing here can start in the
+    /// one tab nobody opens to change a setting. It is not a document. It ends
+    /// the account, so it lives at the end of the account, behind a rule that
+    /// says the rest of the pane has finished.
+    ///
+    /// It stays visible when signed out: the website's flow signs the person in
+    /// first, and a delete that is only reachable from one state is a delete
+    /// somebody cannot find.
+    @ViewBuilder
+    private var dangerZone: some View {
+        ThemeRule()
+            .padding(.top, Theme.Space.m)
+        Text("Danger zone")
+            .font(ClientType.caption.weight(.semibold))
+            .foregroundStyle(Theme.danger)
+            .tracking(0.7)
+            .padding(.leading, Theme.Space.xs)
+            .accessibilityAddTraits(.isHeader)
+        deleteAccountCard
     }
 
     @ViewBuilder
@@ -179,7 +205,6 @@ private struct ClientAccountContent: View {
     private var legalPane: some View {
         legalCard
         licensesCard
-        deleteAccountCard
         privacyNote
     }
 

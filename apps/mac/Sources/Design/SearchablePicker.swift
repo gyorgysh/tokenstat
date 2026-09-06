@@ -67,29 +67,50 @@ struct PickerPanel<Label: View, Content: View>: View {
     var body: some View {
         Button { isPresented = true } label: { label() }
             .buttonStyle(.plain)
-            #if os(macOS)
-            .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-                content()
-                    .frame(width: 320, height: 420)
-                    .background(Theme.panel)
-            }
-            #else
-            .sheet(isPresented: $isPresented) {
-                NavigationStack {
-                    content()
-                        .navigationTitle(title)
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { isPresented = false }
-                            }
-                        }
-                }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+            .pickerPanelSurface(title: title, isPresented: $isPresented, content: content)
+    }
+}
+
+extension View {
+    /// The panel surface on its own, for a picker whose button cannot own the
+    /// presentation.
+    ///
+    /// A control that sits inside a `ViewThatFits` is one of those. The
+    /// container swaps candidates whenever its content changes width, and a
+    /// swap is a change of identity, which throws away the `@State` holding
+    /// the panel open. Picking an agent renames the field, the field no longer
+    /// fits on one line, and the sheet the person was still reading closes
+    /// under them. Anchoring the presentation on a stable ancestor is what
+    /// keeps it open.
+    @ViewBuilder
+    func pickerPanelSurface<Content: View>(
+        title: String,
+        isPresented: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        #if os(macOS)
+        popover(isPresented: isPresented, arrowEdge: .bottom) {
+            content()
+                .frame(width: 320, height: 420)
                 .background(Theme.panel)
+        }
+        #else
+        sheet(isPresented: isPresented) {
+            NavigationStack {
+                content()
+                    .navigationTitle(title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { isPresented.wrappedValue = false }
+                        }
+                    }
             }
-            #endif
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .background(Theme.panel)
+        }
+        #endif
     }
 }
 

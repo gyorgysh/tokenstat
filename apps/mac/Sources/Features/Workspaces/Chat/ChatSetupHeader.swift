@@ -238,25 +238,56 @@ struct ChatComposerControls: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     var locked: Bool
+    /// One scrolling row instead of a fitting layout. The phone composer is
+    /// never wide enough for the fitting pass to have a choice to make, and
+    /// giving it one costs a second line the transcript could have had.
+    var compact = false
+
+    @State private var pickingAgent = false
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: Theme.Space.s) { content }
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ChatAgentMenu(model: model, chat: chat, locked: locked)
-                HStack(alignment: .center, spacing: Theme.Space.s) {
-                    pills
+        layout
+            .pickerPanelSurface(
+                title: "Agent, model and effort",
+                isPresented: $pickingAgent
+            ) {
+                ChatAgentPanel(model: model, chat: chat, locked: locked) {
+                    pickingAgent = false
+                }
+            }
+            .onAppear { enforceBypassOnly() }
+            .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }
+    }
+
+    @ViewBuilder
+    private var layout: some View {
+        if compact {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .center, spacing: Theme.Space.s) { content }
+                    .padding(.trailing, Theme.Space.xs)
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: Theme.Space.s) { content }
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    agentField
+                    HStack(alignment: .center, spacing: Theme.Space.s) {
+                        pills
+                    }
                 }
             }
         }
-        .onAppear { enforceBypassOnly() }
-        .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }
     }
 
     @ViewBuilder
     private var content: some View {
-        ChatAgentMenu(model: model, chat: chat, locked: locked)
+        agentField
         pills
+    }
+
+    private var agentField: some View {
+        ChatAgentField(model: model, chat: chat, locked: locked) { pickingAgent = true }
     }
 
     @ViewBuilder
@@ -311,8 +342,12 @@ struct ChatComposerControls: View {
     }
 }
 
-/// Nested Agent / Model / Effort from one compact field.
-/// Agent, model and effort in one panel you can type into.
+/// What the agent picker offers and what picking a row does.
+///
+/// Not a view. The field that opens the panel and the panel itself are two
+/// views now, in two places in the hierarchy, and they need the same summary,
+/// the same rows and the same rules about which of the three settings a row
+/// belongs to.
 ///
 /// This was three nested menus, declared twice: once for macOS and once for
 /// iOS, because iOS renders a nested `Menu` bottom-up inside the glass sheet
@@ -320,97 +355,25 @@ struct ChatComposerControls: View {
 /// sections out backwards. That is gone. One panel, three sections, one
 /// declaration, and the filter runs across all of them, so typing "meta" in a
 /// forty-model list gets there in four keystrokes instead of a scroll.
-///
-/// The Refresh lives here, not in the app's settings, because this is where
-/// somebody notices the list is short: they added an API key to a CLI a minute
-/// ago and the provider it unlocked is not in the list yet. See
-/// `ChatModel.reloadBackends`.
-private struct ChatAgentMenu: View {
-    @Bindable var model: ChatModel
+@MainActor
+struct ChatAgentChoices {
+    let model: ChatModel
     let chat: ChatConversation
-    var locked: Bool
-
-    @State private var isPresented = false
-    @State private var canRefresh = false
-    @State private var updating = false
-    @State private var favorites = ModelFavoritesStore.shared
 
     /// One row of the panel. Three kinds of choice share a list, so they share
     /// a value: the section a row came from is what says which of the three
     /// the person just changed.
-    private enum Choice: Hashable {
+    enum Choice: Hashable {
         case agent(String)
         /// Empty is the agent's own default.
         case model(String)
         case effort(String)
     }
 
-    var body: some View {
-        PickerPanel(title: "Agent, model and effort", isPresented: $isPresented) {
-            VStack(spacing: 0) {
-                #if os(macOS)
-                HStack {
-                    Text("Agent, model and effort").font(Theme.callout.weight(.semibold))
-                    Spacer()
-                    Button("Done", .done) { isPresented = false }
-                        .keyboardShortcut(.defaultAction)
-                }
-                .padding(Theme.Space.s)
-                #endif
-                PickerOptionList(
-                    choices: choices,
-                    isSelected: isSelected,
-                    prompt: "Filter agents, models and efforts",
-                    emptyMessage: "No agents available",
-                    caption: "Three settings for this conversation.",
-                    refresh: canRefresh ? { await model.reloadBackends() } : nil,
-                    sectionValue: currentValue,
-                    sectionTabs: selectableSections,
-                    selectionSummary: summary,
-                    pick: pick,
-                    accessory: { value in AnyView(star(for: value)) }
-                )
-                .disabled(updating || locked)
-                .task(id: model.peer ?? "local") {
-                    canRefresh = await RemoteHostFeature.modelRefresh.isSupported(peer: model.peer)
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Text(summary)
-                    #if os(macOS)
-                    .font(Theme.font(12, weight: .medium))
-                    #else
-                    .font(Theme.callout.weight(.medium))
-                    #endif
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(Theme.fixed(8, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            #if !os(macOS)
-            .frame(minHeight: 44)
-            #endif
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            }
-            .contentShape(.rect)
-        }
-        .disabled(locked)
-        .fixedSize(horizontal: false, vertical: true)
-        .help("Agent, model and effort")
-        .accessibilityLabel(summary)
-    }
-
-    private var backend: ChatBackend? { model.backend(for: chat.backend) }
+    var backend: ChatBackend? { model.backend(for: chat.backend) }
 
     /// Every row, in the order the sections have always been read in.
-    private var choices: [PickerChoice<Choice>] {
+    var choices: [PickerChoice<Choice>] {
         var rows = agentOptions.map {
             PickerChoice(value: Choice.agent($0.value), label: $0.label, section: "Agent")
         }
@@ -438,7 +401,7 @@ private struct ChatAgentMenu: View {
 
     /// Only show filters that have choices for the selected agent. For
     /// example, an agent with no effort control should not advertise one.
-    private var selectableSections: [String] {
+    var selectableSections: [String] {
         var seen = Set<String>()
         return choices.compactMap { choice in
             seen.insert(choice.section).inserted ? choice.section : nil
@@ -448,7 +411,7 @@ private struct ChatAgentMenu: View {
     /// What each section is set to, for its heading. The panel is three
     /// settings, and a heading that only names the group leaves somebody
     /// scrolling to find which row carries the mark.
-    private func currentValue(_ section: String) -> String? {
+    func currentValue(_ section: String) -> String? {
         switch section {
         case "Agent": backend?.label ?? chat.backend
         case "Model": (chat.model?.isEmpty == false ? chat.model : "Default")
@@ -459,7 +422,7 @@ private struct ChatAgentMenu: View {
 
     /// Three marks in one list, one per section, each reading the
     /// conversation's own setting.
-    private func isSelected(_ choice: Choice) -> Bool {
+    func isSelected(_ choice: Choice) -> Bool {
         switch choice {
         case let .agent(id): id == chat.backend
         case let .model(id): id == (chat.model ?? "")
@@ -467,31 +430,162 @@ private struct ChatAgentMenu: View {
         }
     }
 
-    private func pick(_ choice: Choice) {
+    func apply(_ choice: Choice) async {
+        switch choice {
+        case let .agent(id):
+            if model.backend(for: id)?.gateTier == "bypassOnly" {
+                await model.update(backend: id, autonomy: "bypass")
+            } else {
+                await model.update(backend: id)
+            }
+        case let .model(id):
+            await model.update(model: id)
+        case let .effort(id):
+            await model.update(effort: id)
+        }
+    }
+
+    var agentOptions: [(value: String, label: String)] {
+        model.backends
+            .filter { $0.id != "sh" || $0.id == chat.backend }
+            .map { (value: $0.id, label: $0.label) }
+    }
+
+    var modelIDs: [String] {
+        guard let backend else { return [] }
+        var ids = backend.models
+        let extra = chat.model ?? ""
+        if !extra.isEmpty, !ids.contains(extra) {
+            ids.insert(extra, at: 0)
+        }
+        let favs = ModelFavoritesStore.shared.ids(for: backend.id).filter { ids.contains($0) }
+        let rest = ids.filter { !favs.contains($0) }
+        return favs + rest
+    }
+
+    var summary: String {
+        let agent = backend?.label ?? chat.backend
+        var parts = [agent]
+        if let name = chat.model, !name.isEmpty {
+            parts.append(name)
+        } else {
+            parts.append("Default")
+        }
+        if backend?.efforts.isEmpty == false {
+            parts.append("Effort: \(chat.effort.flatMap { $0.isEmpty ? nil : $0 } ?? "Default")")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// The field that says what this conversation is set to and opens the panel.
+///
+/// It holds no presentation of its own. Whoever places it owns that, because
+/// this field lives inside layout containers that swap their contents as the
+/// summary changes width, and a swap would close the panel. See
+/// `pickerPanelSurface`.
+struct ChatAgentField: View {
+    @Bindable var model: ChatModel
+    let chat: ChatConversation
+    var locked: Bool
+    var onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 6) {
+                Text(choices.summary)
+                    #if os(macOS)
+                    .font(Theme.font(12, weight: .medium))
+                    #else
+                    .font(Theme.callout.weight(.medium))
+                    #endif
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(Theme.fixed(8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            #if !os(macOS)
+            .frame(minHeight: 44)
+            #endif
+            .chatControlChrome()
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(locked)
+        .fixedSize(horizontal: false, vertical: true)
+        .help("Agent, model and effort")
+        .accessibilityLabel(choices.summary)
+    }
+
+    private var choices: ChatAgentChoices { ChatAgentChoices(model: model, chat: chat) }
+}
+
+/// Agent, model and effort in one panel you can type into.
+///
+/// The Refresh lives here, not in the app's settings, because this is where
+/// somebody notices the list is short: they added an API key to a CLI a minute
+/// ago and the provider it unlocked is not in the list yet. See
+/// `ChatModel.reloadBackends`.
+struct ChatAgentPanel: View {
+    @Bindable var model: ChatModel
+    let chat: ChatConversation
+    var locked: Bool
+    var onDone: () -> Void = {}
+
+    @State private var canRefresh = false
+    @State private var updating = false
+    @State private var favorites = ModelFavoritesStore.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            #if os(macOS)
+            HStack {
+                Text("Agent, model and effort").font(Theme.callout.weight(.semibold))
+                Spacer()
+                Button("Done", .done) { onDone() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(Theme.Space.s)
+            #endif
+            PickerOptionList(
+                choices: choices.choices,
+                isSelected: choices.isSelected,
+                prompt: "Filter agents, models and efforts",
+                emptyMessage: "No agents available",
+                caption: "Three settings for this conversation.",
+                refresh: canRefresh ? { await model.reloadBackends() } : nil,
+                sectionValue: choices.currentValue,
+                sectionTabs: choices.selectableSections,
+                selectionSummary: choices.summary,
+                pick: pick,
+                accessory: { value in AnyView(star(for: value)) }
+            )
+            .disabled(updating || locked)
+            .task(id: model.peer ?? "local") {
+                canRefresh = await RemoteHostFeature.modelRefresh.isSupported(peer: model.peer)
+            }
+        }
+    }
+
+    private var choices: ChatAgentChoices { ChatAgentChoices(model: model, chat: chat) }
+
+    private func pick(_ choice: ChatAgentChoices.Choice) {
         guard !updating, !locked else { return }
         updating = true
         Task {
             defer { updating = false }
-            switch choice {
-            case let .agent(id):
-                if model.backend(for: id)?.gateTier == "bypassOnly" {
-                    await model.update(backend: id, autonomy: "bypass")
-                } else {
-                    await model.update(backend: id)
-                }
-            case let .model(id):
-                await model.update(model: id)
-            case let .effort(id):
-                await model.update(effort: id)
-            }
+            await choices.apply(choice)
         }
     }
 
     /// The favourite star, on model rows only. Same store as before, so what
     /// somebody starred in the old menu is still pinned in this one.
     @ViewBuilder
-    private func star(for choice: Choice) -> some View {
-        if case let .model(id) = choice, !id.isEmpty, let backend {
+    private func star(for choice: ChatAgentChoices.Choice) -> some View {
+        if case let .model(id) = choice, !id.isEmpty, let backend = choices.backend {
             Button {
                 favorites.toggle(backend: backend.id, model: id)
             } label: {
@@ -514,37 +608,40 @@ private struct ChatAgentMenu: View {
             )
         }
     }
+}
 
-    private var agentOptions: [(value: String, label: String)] {
-        model.backends
-            .filter { $0.id != "sh" || $0.id == chat.backend }
-            .map { (value: $0.id, label: $0.label) }
-    }
-
-    private var modelIDs: [String] {
-        guard let backend else { return [] }
-        var ids = backend.models
-        let extra = chat.model ?? ""
-        if !extra.isEmpty, !ids.contains(extra) {
-            ids.insert(extra, at: 0)
-        }
-        let favs = ModelFavoritesStore.shared.ids(for: backend.id).filter { ids.contains($0) }
-        let rest = ids.filter { !favs.contains($0) }
-        return favs + rest
-    }
-
-    private var summary: String {
-        let agent = backend?.label ?? chat.backend
-        var parts = [agent]
-        if let name = chat.model, !name.isEmpty {
-            parts.append(name)
+/// Chrome for a control that sits in the composer.
+///
+/// The phone composer is glass, and glass only reads as glass if there is
+/// something to see through it. A control with an opaque panel fill on top of
+/// it is a solid rectangle across the one surface meant to show the transcript
+/// moving underneath, which is why that bar has been reading as a white slab.
+/// Another glass layer is not the answer either, since two of them overlapping
+/// is its own bug. So on Liquid Glass the control keeps its hairline and drops
+/// its fill. Everywhere else the fill stays: there is nothing behind it to see.
+extension View {
+    @ViewBuilder
+    func chatControlChrome(cornerRadius: CGFloat = 8) -> some View {
+        #if os(macOS)
+        chatControlPanel(cornerRadius: cornerRadius)
+        #else
+        if #available(iOS 26, *) {
+            overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Theme.border.opacity(0.7), lineWidth: 1)
+            }
         } else {
-            parts.append("Default")
+            chatControlPanel(cornerRadius: cornerRadius)
         }
-        if backend?.efforts.isEmpty == false {
-            parts.append("Effort: \(chat.effort.flatMap { $0.isEmpty ? nil : $0 } ?? "Default")")
-        }
-        return parts.joined(separator: " · ")
+        #endif
+    }
+
+    private func chatControlPanel(cornerRadius: CGFloat) -> some View {
+        background(Theme.panel, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            }
     }
 }
 
@@ -577,11 +674,7 @@ struct ChatCompactPills: View {
             }
         }
         .padding(3)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
-        }
+        .chatControlChrome(cornerRadius: 10)
         .fixedSize(horizontal: true, vertical: true)
     }
 }

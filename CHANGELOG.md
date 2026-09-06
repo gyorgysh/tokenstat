@@ -28,7 +28,13 @@ with Touch ID or Face ID.
   download already in flight. The setting is named tokenstat cache, and today
   it holds Chat files.
 - Account settings are split into panes. On the Mac: Account, Plan limits, and
-  This Mac. On the phone: Account, This device, and Legal.
+  This Mac. On the phone: Account, This device, and Legal. Deleting the account
+  sits at the end of Account, behind its own rule, rather than among the legal
+  documents.
+- The phone composer is smaller and reads as glass. Send appears when there is
+  something to send instead of sitting greyed out, the agent and mode controls
+  share one scrolling row, and a toggle at the top right grows the box for a
+  longer message.
 - The combined agent, model, and effort picker stays open while you change
   those settings. It shows what is selected, and the phone's targets are
   larger.

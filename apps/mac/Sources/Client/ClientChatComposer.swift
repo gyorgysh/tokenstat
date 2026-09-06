@@ -35,37 +35,51 @@ struct ClientChatComposer: View {
     @State private var textDropTargeted = false
     @State private var dataDropTargeted = false
     @State private var photos: [PhotosPickerItem] = []
+    @State private var expanded = false
     @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ChatComposerControls(
-                model: model,
-                chat: chat,
-                locked: running
-            )
+            HStack(alignment: .center, spacing: Theme.Space.s) {
+                ChatComposerControls(
+                    model: model,
+                    chat: chat,
+                    locked: running,
+                    compact: true
+                )
+                expandToggle
+            }
             if !attachments.isEmpty {
                 strip
             }
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 attachControl
                 field
+                // The send button earns its 44 points only when there is
+                // something to send. A permanently greyed one is a control
+                // that has never done anything, taking the width a message
+                // could have had.
                 if running {
                     Button { onStop() } label: {
                         ActionIcon.stop.label("Stop").frame(width: 44, height: 44)
                     }
                         .clientGlassStyle()
                         .environment(\.compactActions, true)
-                } else {
+                        .transition(sendTransition)
+                } else if canSend {
                     Button { onSend() } label: {
                         ActionIcon.send.label("Send").frame(width: 44, height: 44)
                     }
                         .modifier(ChatSendStyle())
                         .environment(\.compactActions, true)
-                        .disabled(cannotSend)
+                        .transition(sendTransition)
                 }
             }
         }
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: canSend)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: running)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: expanded)
         .padding(12)
         .clientFloatingBar()
         .padding(.horizontal, Theme.Space.s)
@@ -160,15 +174,44 @@ struct ClientChatComposer: View {
         .accessibilityLabel("Attach")
     }
 
+    /// Grow the writing area without leaving the conversation.
+    ///
+    /// Six lines is the right height for a message and the wrong one for a
+    /// brief. The toggle sits at the top right of the bar, away from send, so
+    /// the thumb that reaches for one never finds the other.
+    private var expandToggle: some View {
+        Button {
+            expanded.toggle()
+            if expanded { focused = true }
+        } label: {
+            Image(systemName: expanded
+                ? "chevron.down.forward.and.arrow.up.backward"
+                : "chevron.up.left.and.chevron.down.right")
+                .font(ClientType.label.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 34, height: 34)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(expanded ? "Shrink the message box" : "Expand the message box")
+    }
+
     private var field: some View {
         TextField(placeholder, text: $draft, axis: .vertical)
             .textFieldStyle(.plain)
             .font(ClientType.body)
-            .lineLimit(1...6)
+            .lineLimit(expanded ? 8...18 : 1...6)
+            .frame(minHeight: expanded ? 180 : 0, alignment: .topLeading)
             .focused($focused)
             .padding(.vertical, 8)
             .submitLabel(.send)
-            .onSubmit { if !cannotSend { onSend() } }
+            .onSubmit { if canSend { onSend() } }
+    }
+
+    private var canSend: Bool { !cannotSend }
+
+    private var sendTransition: AnyTransition {
+        .scale(scale: 0.6).combined(with: .opacity)
     }
 
     private var cannotSend: Bool {
