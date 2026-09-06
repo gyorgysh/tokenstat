@@ -11,6 +11,38 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one, rather than reconstructing release notes from
 commits at the end.
 
+## [Unreleased]
+
+Chat can carry files, Account is split into panes, and the vault can unlock
+with Touch ID or Face ID.
+
+### Added
+
+- Attach a file to a conversation. When you ask an agent to send, show, or
+  present something, it puts the file in this thread as an attachment, rather
+  than through another app. On the phone, tap one to preview it. Share or save
+  stays its own action.
+- Files over 1 MiB wait for Download. Smaller ones arrive on their own. A
+  device-local cache holds what you have already fetched, with a size cap and
+  idle retention you can change, and a purge that cannot be undone by a
+  download already in flight. The setting is named tokenstat cache, and today
+  it holds Chat files.
+- Account settings are split into panes. On the Mac: Account, Plan limits, and
+  This Mac. On the phone: Account, This device, and Legal.
+- The combined agent, model, and effort picker stays open while you change
+  those settings. It shows what is selected, and the phone's targets are
+  larger.
+- Touch ID on the Mac and Face ID or Touch ID on the phone can unlock the
+  vault. The password remains the fallback, and a changed biometric set
+  forgets the saved one.
+- Relayed file transfers share a monthly allowance with screen: 100 MB on
+  Free, 1 GB on Supporter, 5 GB on Patron, and 20 GB on Legend. A direct
+  connection does not count.
+
+### Fixed
+
+- Downloading one attachment no longer rebuilds every card in the transcript.
+
 ## [0.8.3] - 2026-09-05
 
 The model picker has a search, chat follows a turn started on another device,
