@@ -23,6 +23,7 @@
 //! daemon listens only after the user says to, and serves only peers a person
 //! approved. See `docs/remote-transport.md`.
 
+use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
 #[cfg(feature = "local-host")]
 use std::net::UdpSocket;
@@ -1941,6 +1942,116 @@ fn direct_candidate_address_is_usable(address: &str) -> bool {
         && port.parse::<u16>().is_ok()
 }
 
+thread_local! {
+    static REFRESHING_DIRECT: Cell<bool> = const { Cell::new(false) };
+}
+
+fn with_refreshing_direct<T>(work: impl FnOnce() -> T) -> T {
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            REFRESHING_DIRECT.with(|flag| flag.set(false));
+        }
+    }
+    REFRESHING_DIRECT.with(|flag| flag.set(true));
+    let _restore = Restore;
+    work()
+}
+
+fn is_refreshing_direct() -> bool {
+    REFRESHING_DIRECT.with(|flag| flag.get())
+}
+
+/// Whether this dial should first ask the peer for current listen addresses.
+///
+/// Skip when a nested candidate probe is already in flight, and skip when we
+/// already have a live-looking route: the upcoming dial will try it. Refresh
+/// when there is nothing to try, or when the last direct attempt is cooling
+/// down, so a relay round trip can replace a stale LAN address.
+fn should_refresh_peer_direct_candidates(peer_hex: &str, remembered: Option<&str>) -> bool {
+    if is_refreshing_direct() {
+        return false;
+    }
+    if !direct_is_worth_trying(peer_hex) {
+        return true;
+    }
+    if peer_has_offered_candidates(peer_hex) {
+        return false;
+    }
+    remembered.is_none()
+}
+
+fn peer_has_offered_candidates(peer_hex: &str) -> bool {
+    offered_direct_candidates()
+        .lock()
+        .ok()
+        .and_then(|offered| offered.get(peer_hex).cloned())
+        .is_some_and(|candidates| !candidates.is_empty())
+}
+
+fn is_unknown_method(error: &str) -> bool {
+    error.to_ascii_lowercase().contains("unknown method")
+}
+
+fn parse_peer_candidate_list(value: &Value) -> Vec<DirectCandidate> {
+    value
+        .get("candidates")
+        .cloned()
+        .and_then(|candidates| serde_json::from_value(candidates).ok())
+        .unwrap_or_default()
+}
+
+fn parse_legacy_direct_candidate(value: &Value) -> Option<DirectCandidate> {
+    value
+        .get("address")
+        .and_then(Value::as_str)
+        .filter(|address| !address.is_empty())
+        .map(|address| DirectCandidate {
+            kind: "legacy".into(),
+            address: address.to_string(),
+            priority: 40,
+        })
+}
+
+/// Ask the peer what it is listening on right now. Uses the existing dial
+/// ladder, including the relay, then stores the answer for the payload dial.
+fn refresh_peer_direct_candidates(peer_hex: &str, remembered: Option<&str>) {
+    if !should_refresh_peer_direct_candidates(peer_hex, remembered) {
+        return;
+    }
+    let fetched = with_refreshing_direct(|| fetch_peer_direct_candidates(peer_hex));
+    if let Ok(candidates) = fetched {
+        offer_direct_candidates(peer_hex, candidates);
+    }
+}
+
+fn fetch_peer_direct_candidates(peer_hex: &str) -> Result<Vec<DirectCandidate>, String> {
+    match call_peer_result(peer_hex, "direct.candidates", "{}") {
+        Ok(answer) => Ok(parse_peer_candidate_list(&answer)),
+        Err(error) if is_unknown_method(&error) => {
+            match call_peer_result(peer_hex, "screen.direct.candidates", "{}") {
+                Ok(answer) => Ok(parse_peer_candidate_list(&answer)),
+                Err(_) => {
+                    let answer = call_peer_result(peer_hex, "screen.direct.candidate", "{}")?;
+                    Ok(parse_legacy_direct_candidate(&answer).into_iter().collect())
+                }
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Addresses this machine currently accepts for a direct Noise connection.
+///
+/// An authenticated peer may ask. Empty is a real answer: this device is not
+/// listening, so the caller should use the relay. Screen view permission is
+/// not required, because listing listen addresses is not viewing a desktop.
+fn advertised_direct_candidates() -> Result<Value, String> {
+    crate::request_context::remote_peer()
+        .ok_or("direct candidates must be requested by an authenticated peer")?;
+    Ok(json!({ "candidates": direct_candidates() }))
+}
+
 fn candidates_for_peer(peer_hex: &str, remembered: Option<&str>) -> Vec<DirectCandidate> {
     let mut candidates = offered_direct_candidates()
         .lock()
@@ -2181,6 +2292,10 @@ pub(crate) fn dial_peer_for(
 
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     let peer_hex = tokenstat_identity::hex(&key);
+    // Discovery can use the hosted service even when the payload later goes
+    // direct: ask the peer for current listen addresses, try those, then the
+    // relay. Screen used to be the only caller that did this.
+    refresh_peer_direct_candidates(&peer_hex, address.as_deref());
     let candidates = candidates_for_peer(&peer_hex, address.as_deref());
     let direct = try_direct_with_backoff(&peer_hex, !candidates.is_empty(), || {
         dial_direct_candidates(&peer_hex, candidates, &identity, key, &label)
@@ -2544,6 +2659,10 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
         "remote.call" => forward(params),
         "remote.nudge" => nudge(params),
         "remote.reconsiderPlan" => reconsider_plan(),
+        // Authenticated peers ask this of the machine they are reaching, so
+        // terminals, files and screen can all try a current LAN address before
+        // the relay. It is not a `remote.*` owner method: those stay local.
+        "direct.candidates" => advertised_direct_candidates(),
         _ => return None,
     })
 }
@@ -3423,5 +3542,76 @@ mod tests {
             vec!["192.168.0.102:7878", "desk-mac.local:7878"]
         );
         offer_direct_candidates(peer, Vec::new());
+    }
+
+    #[test]
+    fn candidate_lists_and_legacy_addresses_parse_from_peer_answers() {
+        let listed = parse_peer_candidate_list(&json!({
+            "candidates": [
+                {"kind": "lan", "address": "192.168.1.9:7878", "priority": 100},
+                {"kind": "mdns", "address": "desk.local:7878", "priority": 50}
+            ]
+        }));
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].address, "192.168.1.9:7878");
+        assert!(parse_peer_candidate_list(&json!({})).is_empty());
+        assert_eq!(
+            parse_legacy_direct_candidate(&json!({"address": "desk.local:7878"}))
+                .map(|candidate| candidate.address),
+            Some("desk.local:7878".into())
+        );
+        assert!(parse_legacy_direct_candidate(&json!({})).is_none());
+        assert!(is_unknown_method("unknown method: direct.candidates"));
+        assert!(!is_unknown_method("that machine is not approved"));
+    }
+
+    #[test]
+    fn direct_candidate_refresh_runs_when_the_relay_is_the_only_route() {
+        let peer = "refresh-when-empty-test";
+        offer_direct_candidates(peer, Vec::new());
+        clear_direct_miss(peer);
+        assert!(
+            should_refresh_peer_direct_candidates(peer, None),
+            "no remembered address and no offered list: ask the peer through the relay"
+        );
+        assert!(
+            !should_refresh_peer_direct_candidates(peer, Some("192.168.1.9:7878")),
+            "a live-looking remembered address is tried first, without an extra round trip"
+        );
+        offer_direct_candidates(
+            peer,
+            vec![DirectCandidate {
+                kind: "lan".into(),
+                address: "192.168.1.9:7878".into(),
+                priority: 100,
+            }],
+        );
+        assert!(!should_refresh_peer_direct_candidates(peer, None));
+        note_direct_miss(peer);
+        assert!(
+            should_refresh_peer_direct_candidates(peer, Some("192.168.1.9:7878")),
+            "a cooled-down direct miss should fetch a fresh list through the relay"
+        );
+        assert!(
+            !with_refreshing_direct(|| should_refresh_peer_direct_candidates(peer, None)),
+            "the nested probe must not ask again"
+        );
+        offer_direct_candidates(peer, Vec::new());
+        clear_direct_miss(peer);
+    }
+
+    #[test]
+    fn advertised_direct_candidates_are_for_authenticated_peers() {
+        let refused = advertised_direct_candidates().expect_err("local caller");
+        assert!(refused.contains("authenticated peer"), "{refused}");
+        let answer = crate::request_context::with_remote_peer("phone", || {
+            advertised_direct_candidates().expect("peer may ask")
+        });
+        assert!(answer.get("candidates").and_then(Value::as_array).is_some());
+        let handled = call("direct.candidates", "{}");
+        assert!(
+            handled.is_some(),
+            "the method is on the shared dispatch table"
+        );
     }
 }

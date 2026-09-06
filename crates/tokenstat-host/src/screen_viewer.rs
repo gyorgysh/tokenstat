@@ -89,36 +89,10 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
 
 fn open(params: &str) -> Result<Value, String> {
     let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-    // Candidate exchange itself rides the authenticated connection. Hints are
-    // kept only in memory; the dialler persists the one that actually accepts
-    // TCP and proves the pinned Noise key.
-    match crate::remote::call_peer_result(&p.peer, "screen.direct.candidates", "{}") {
-        Ok(answer) => {
-            let candidates = answer
-                .get("candidates")
-                .cloned()
-                .and_then(|value| serde_json::from_value(value).ok())
-                .unwrap_or_default();
-            crate::remote::offer_direct_candidates(&p.peer, candidates);
-        }
-        Err(_) => {
-            // A host from before candidate lists can still offer its one
-            // `.local` address. It is treated as unverified like every hint.
-            if let Ok(candidate) =
-                crate::remote::call_peer_result(&p.peer, "screen.direct.candidate", "{}")
-                && let Some(address) = candidate.get("address").and_then(Value::as_str)
-            {
-                crate::remote::offer_direct_candidates(
-                    &p.peer,
-                    vec![crate::remote::DirectCandidate {
-                        kind: "legacy".into(),
-                        address: address.to_string(),
-                        priority: 40,
-                    }],
-                );
-            }
-        }
-    }
+    // Fresh listen addresses are fetched on the shared dial path, so this
+    // stream uses the same direct-then-relay ladder as terminals and files.
+    // Hints stay in memory; the dialler persists the one that accepts TCP and
+    // proves the pinned Noise key.
     let answer = crate::remote::call_peer_result(
         &p.peer,
         "stream.open",
