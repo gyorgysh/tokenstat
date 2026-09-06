@@ -49,13 +49,20 @@ struct ClientChatComposer: View {
                     locked: running,
                     compact: true
                 )
-                Button("Hide keyboard", .hideKeyboard) { hideKeyboard() }
-                    .buttonStyle(.plain)
-                    .environment(\.compactActions, true)
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 44, height: 44)
-                    .contentShape(.rect)
-                    .layoutPriority(1)
+                // Only while there is a keyboard to put away. A control that
+                // cannot do anything is one the eye still has to read past
+                // every time, and this row is already three controls wide on
+                // a phone.
+                if focused {
+                    Button("Hide keyboard", .hideKeyboard) { hideKeyboard() }
+                        .buttonStyle(.plain)
+                        .environment(\.compactActions, true)
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                        .layoutPriority(1)
+                        .transition(controlTransition)
+                }
                 expandToggle
             }
             if !attachments.isEmpty {
@@ -74,20 +81,21 @@ struct ClientChatComposer: View {
                     }
                         .clientGlassStyle()
                         .environment(\.compactActions, true)
-                        .transition(sendTransition)
+                        .transition(controlTransition)
                 } else if canSend {
                     Button { onSend() } label: {
                         ActionIcon.send.label("Send").frame(width: 44, height: 44)
                     }
                         .modifier(ChatSendStyle())
                         .environment(\.compactActions, true)
-                        .transition(sendTransition)
+                        .transition(controlTransition)
                 }
             }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: canSend)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: running)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: expanded)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: focused)
         .padding(12)
         .clientFloatingBar()
         .padding(.horizontal, Theme.Space.s)
@@ -221,12 +229,6 @@ struct ClientChatComposer: View {
             .padding(.vertical, 8)
             .submitLabel(.send)
             .onSubmit { if canSend { onSend() } }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Hide keyboard") { hideKeyboard() }
-                }
-            }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 expanded = false
             }
@@ -242,7 +244,8 @@ struct ClientChatComposer: View {
 
     private var canSend: Bool { !cannotSend }
 
-    private var sendTransition: AnyTransition {
+    /// Controls that come and go with what the bar can do right now.
+    private var controlTransition: AnyTransition {
         .scale(scale: 0.6).combined(with: .opacity)
     }
 
