@@ -145,7 +145,11 @@ settings:
     # 78 is 0.9.0: chat files open on the phone, and Workspaces plus the
     # device page show whether this phone reached the computer directly or
     # through the encrypted relay.
-    CURRENT_PROJECT_VERSION: "78"
+    # 78 went up.
+    # 79 is the same 0.9.0 with the review fixes: relay figures in one unit
+    # everywhere, a refused host that backs off, fewer relay round trips, and
+    # a file the host refuses for good saying so.
+    CURRENT_PROJECT_VERSION: "79"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
