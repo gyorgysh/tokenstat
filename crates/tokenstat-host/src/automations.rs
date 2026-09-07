@@ -588,7 +588,12 @@ pub fn chat_agent_command(
         // splicing at `len - 1` used to leave `--output-format` without a
         // value, which is the error a Standard grok turn printed instead of
         // answering.
-        argv.retain(|arg| arg != "--permission-mode" && arg != "bypassPermissions");
+        argv.retain(|arg| {
+            !matches!(
+                arg.as_str(),
+                "--permission-mode" | "bypassPermissions" | "--always-approve" | "--yolo"
+            )
+        });
         // A guarded turn runs grok's own permission layer wide open, because
         // the hook is the gate and grok's layer cannot be one here.
         //
@@ -614,6 +619,16 @@ pub fn chat_agent_command(
         // there is no path where this ships without the gate behind it. With
         // no helper the answer stays `dontAsk`, which refuses rather than
         // asking nobody.
+        //
+        // Plan mode is the same cancellation on a different tool. Grok's
+        // `--permission-mode plan` is the edit gate (writes fail, even under
+        // always-approve). `spawn_subagent` is not a read-only auto-approval,
+        // so a headless plan turn cancelled it as "User cancelled the
+        // execution for tool `spawn_subagent`". Grok's own docs keep
+        // always-approve armed underneath plan mode: non-edit tools run, file
+        // edits stay blocked. The hook is still the gate when one is
+        // installed. Bypass with no hook gets the same pair, or plan would
+        // keep overriding Bypass and cancel the spawn anyway.
         let permission = if plan {
             "plan"
         } else if launch.bypass || launch.hook_helper.is_some() {
@@ -622,6 +637,9 @@ pub fn chat_agent_command(
             "dontAsk"
         };
         extra.extend(["--permission-mode".into(), permission.into()]);
+        if plan && (launch.bypass || launch.hook_helper.is_some()) {
+            extra.push("--always-approve".into());
+        }
         // Saved always-allow answers still ride as rules. A rule that matches
         // is approved without a hook round trip, so "always allow" stays
         // instant rather than becoming a card the person answers twice.
@@ -2543,10 +2561,27 @@ mod tests {
         // No hook, no gate, so nothing may run: refuse rather than ask nobody.
         assert_eq!(mode_of(&launch(None, "execute", false)), "dontAsk");
         assert_eq!(mode_of(&launch(None, "plan", false)), "plan");
+        assert!(
+            !launch(None, "plan", false)
+                .iter()
+                .any(|arg| arg == "--always-approve"),
+            "a plan turn with no gate must not auto-approve"
+        );
+        let planning = launch(Some("/tmp/tokenstat-hostd"), "plan", false);
         assert_eq!(
-            mode_of(&launch(Some("/tmp/tokenstat-hostd"), "plan", false)),
+            mode_of(&planning),
             "plan",
-            "plan mode keeps grok's own restraint"
+            "plan mode keeps grok's edit gate"
+        );
+        assert!(
+            planning.iter().any(|arg| arg == "--always-approve"),
+            "a guarded plan turn must not cancel spawn_subagent: {planning:?}"
+        );
+        let bypassed_plan = launch(None, "plan", true);
+        assert_eq!(mode_of(&bypassed_plan), "plan");
+        assert!(
+            bypassed_plan.iter().any(|arg| arg == "--always-approve"),
+            "Bypass under plan still has to let non-edit tools run: {bypassed_plan:?}"
         );
     }
 
@@ -2816,6 +2851,8 @@ mod tests {
                 "--trust",
                 "--auto",
                 "bypassPermissions",
+                "--always-approve",
+                "--yolo",
             ] {
                 assert!(
                     !argv.iter().any(|argument| argument == unsafe_flag),

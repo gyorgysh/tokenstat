@@ -11,6 +11,14 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
+## [Unreleased]
+
+### Fixed
+
+- A grok chat in Plan could not spawn a subagent. The call came back as
+  cancelled even after you had allowed it, so the agent stopped exploring
+  instead of reading the project. Plan still blocks edits.
+
 ## [0.9.0] - 2026-09-07
 
 Chat can carry files, Account splits into panes, the vault unlocks with Touch
