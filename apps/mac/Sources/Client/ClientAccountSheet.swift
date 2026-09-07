@@ -195,13 +195,15 @@ private struct ClientAccountContent: View {
         deleteAccountCard
     }
 
+    /// Notifications first. That switch is why most people open this pane,
+    /// and it used to sit under the cache, below the fold on a phone.
     @ViewBuilder
     private var thisDevicePane: some View {
+        notificationsCard
         LocalTrafficCard(traffic: model.remoteStatus?.traffic) {
             await model.loadTraffic()
         }
         ChatCacheSettings()
-        notificationsCard
         layoutCard
     }
 

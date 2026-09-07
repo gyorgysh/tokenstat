@@ -13,6 +13,11 @@ at the end.
 
 ## [Unreleased]
 
+### Changed
+
+- Account, This device, opens with Notifications. The switch used to sit
+  under the cache, below the fold on a phone.
+
 ## [1.0.0] - 2026-09-07
 
 Chat on iPhone and iPad keeps the composer on the transcript, a folder has
