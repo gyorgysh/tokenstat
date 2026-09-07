@@ -48,18 +48,22 @@ struct ChatEventRow: View {
         switch item.kind {
         case let .user(text):
             #if os(macOS)
-            HStack(spacing: Theme.Space.s) {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
                 Spacer(minLength: 48)
                 RowCopyButton(text: text, help: "Copy prompt", visible: hovering)
                 userBubble(text, selectable: allowsSelection)
+                    .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
             .contentShape(.rect)
             .onHover { hovering = $0 }
             #else
-            HStack(spacing: Theme.Space.s) {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
                 Spacer(minLength: 48)
                 userBubble(text, selectable: allowsSelection)
+                    .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
             #endif
         case let .assistant(text, backend):
             VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -202,9 +206,16 @@ struct ChatEventRow: View {
 }
 
 /// The user turn bubble, shared by the hover and plain layouts above.
+///
+/// Height is the wrapped text, not the lazy stack's estimate. A wrapping
+/// `Text` in a `LazyVStack` can measure as empty on the first pass, which
+/// is a sent prompt that is missing until the next layout (a click off
+/// the row and back). Markdown already asks for this; the bubble did not.
 private func userBubble(_ text: String, selectable: Bool) -> some View {
     Text(text)
         .font(Theme.chatBody)
+        .multilineTextAlignment(.leading)
+        .fixedSize(horizontal: false, vertical: true)
         .modifier(SelectableWhen(selectable))
         .padding(Theme.Space.m)
         .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

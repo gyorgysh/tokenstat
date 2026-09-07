@@ -22,6 +22,12 @@ final class ChatModel {
     var chats: [ChatConversation] = []
     var selected: ChatConversation?
     var events: [ChatTimelineEvent] = []
+    /// A prompt that has been sent and is not in `events` yet.
+    ///
+    /// The composer clears on Send. Without this the bubble is missing
+    /// until the host answers, and a lazy stack can also skip that first
+    /// landing until the next layout.
+    private(set) var outgoing: [ChatDisplayItem] = []
     var approvals: [ChatApproval] = []
     /// What this conversation says to its agent ahead of the person's
     /// words. Read so the inspector can show it rather than describe it.
@@ -121,6 +127,8 @@ final class ChatModel {
             chats = []
             selected = nil
             events = []
+            outgoing = []
+            outgoingWatermark = [:]
             approvals = []
             forgetWindow()
             selectionGeneration &+= 1
@@ -206,6 +214,8 @@ final class ChatModel {
         approvals = []
         instructions = nil
         events = []
+        outgoing = []
+        outgoingWatermark = [:]
         forgetWindow()
         loadQueue(for: chat?.id)
         #if os(macOS)
@@ -276,6 +286,8 @@ final class ChatModel {
         selectionGeneration &+= 1
         let generation = selectionGeneration
         events = []
+        outgoing = []
+        outgoingWatermark = [:]
         forgetWindow()
         openingConversation = true
         defer {
@@ -601,6 +613,7 @@ final class ChatModel {
     func send(_ text: String, attachmentIDs: [String]? = nil) async -> Bool {
         guard let selected, !sending else { return false }
         sending = true
+        let staged = stageOutgoing(text)
         defer { sending = false }
         let generation = selectionGeneration
         let ids = attachmentIDs ?? attachments.map(\.id)
@@ -611,7 +624,10 @@ final class ChatModel {
                 attachmentIDs: ids,
                 peer: peer
             )
-            guard selectionMatches(id: updated.id, generation: generation) else { return false }
+            guard selectionMatches(id: updated.id, generation: generation) else {
+                dropOutgoing(staged)
+                return false
+            }
             replace(updated)
             let sent = Set(ids)
             attachments.removeAll { sent.contains($0.id) }
@@ -619,6 +635,7 @@ final class ChatModel {
             await loadEvents(id: updated.id, reset: false, generation: generation)
             return true
         } catch {
+            dropOutgoing(staged)
             if selectionMatches(id: selected.id, generation: generation) {
                 self.error = error.localizedDescription
             }
@@ -965,10 +982,17 @@ final class ChatModel {
             lastSeq: events.last?.seq,
             backend: selected?.backend
         )
-        if key == displayKey { return displayCache }
-        displayCache = ChatDisplayItem.coalesce(events, defaultBackend: key.backend)
-        displayKey = key
-        return displayCache
+        let pending = outgoing
+        let coalesced: [ChatDisplayItem]
+        if key == displayKey {
+            coalesced = displayCache
+        } else {
+            displayCache = ChatDisplayItem.coalesce(events, defaultBackend: key.backend)
+            displayKey = key
+            coalesced = displayCache
+        }
+        if pending.isEmpty { return coalesced }
+        return coalesced + pending
     }
 
     /// Parse the prose in the rows now, off the main thread.
@@ -1004,6 +1028,66 @@ final class ChatModel {
 
     @ObservationIgnored private var displayCache: [ChatDisplayItem] = []
     @ObservationIgnored private var displayKey: DisplayKey?
+
+    /// Show the prompt in the transcript the moment Send is pressed.
+    @discardableResult
+    private func stageOutgoing(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let id = "outgoing-\(UUID().uuidString)"
+        outgoing.append(ChatDisplayItem(id: id, kind: .user(trimmed)))
+        outgoingWatermark[id] = events.compactMap(\.seq).max()
+        return id
+    }
+
+    private func dropOutgoing(_ id: String?) {
+        guard let id else { return }
+        outgoing.removeAll { $0.id == id }
+        outgoingWatermark.removeValue(forKey: id)
+    }
+
+    /// Newest archive seq seen when each prompt was staged, by staged id.
+    /// A text match only counts when it is newer than the send: without this
+    /// a repeated prompt ("hi" twice) is dropped by the older copy, and a
+    /// host that echoes the text in another form would leave a ghost bubble
+    /// that never matches. Hosts without seq fall back to text matching.
+    @ObservationIgnored private var outgoingWatermark: [String: UInt64?] = [:]
+
+    /// Drop staged prompts the archive has now given back.
+    ///
+    /// The stored text can grow a suffix (attachment names), so a prefix
+    /// match still counts as the same send. A newer user record also drops
+    /// the bubble even when the text matches nothing: the host moved past
+    /// this send, so whatever it stored is this prompt under some form.
+    private func reconcileOutgoing() {
+        guard !outgoing.isEmpty else { return }
+        let userSeqs: [UInt64?] = events.lazy
+            .filter { $0.kind == "user" }
+            .map { $0.seq }
+        outgoing.removeAll { item in
+            guard case let .user(text) = item.kind else {
+                outgoingWatermark.removeValue(forKey: item.id)
+                return true
+            }
+            let watermark = outgoingWatermark[item.id] ?? nil
+            let matched = events.contains { event in
+                guard event.kind == "user", let held = event.text else { return false }
+                guard held == text || held.hasPrefix(text) else { return false }
+                // Same text sent before is not this send arriving.
+                if let seq = event.seq, let watermark { return seq > watermark }
+                return true
+            }
+            // The host stored something newer from this person. Sends are
+            // serialized, so that record is this send under another form.
+            let movedPast = userSeqs.contains { seq in
+                guard let seq, let watermark else { return false }
+                return seq > watermark
+            }
+            if matched || movedPast { outgoingWatermark.removeValue(forKey: item.id) }
+            return matched || movedPast
+        }
+    }
+
     /// Bumped whenever the window is replaced rather than grown. A host older
     /// than `seq` gives its records no identity of their own, and two
     /// different windows of the same size would otherwise look like one.
@@ -1045,6 +1129,7 @@ final class ChatModel {
             guard selectionMatches(id: id, generation: generation) else { return }
             eventsEpoch &+= 1
             events = page.events
+            reconcileOutgoing()
             offset = page.nextOffset
             earlierCursor = page.cursor
             hasEarlier = page.hasEarlier
@@ -1105,6 +1190,7 @@ final class ChatModel {
                 // putting it in front of records it now sits after.
                 eventsEpoch &+= 1
                 events = page.events
+                reconcileOutgoing()
                 offset = page.nextOffset
                 conversationUsage = page.usage
                 usageThrough = page.nextOffset
@@ -1196,6 +1282,7 @@ final class ChatModel {
             } else {
                 events.append(contentsOf: chunk.events)
             }
+            reconcileOutgoing()
             offset = chunk.nextOffset
             settleNotifications()
             await loadResponseAttachments(id: id, generation: generation)

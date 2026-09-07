@@ -54,6 +54,9 @@ at the end.
   host or an empty recents list lands on Workspaces.
 - Back from a conversation left the floating tab bar hidden, so Workspaces
   had no tabs to switch with.
+- A sent chat prompt could be missing until you clicked off the composer
+  and back. It is on the transcript as soon as it is sent, including when
+  the conversation is just opening.
 
 ## [1.0.0] - 2026-09-07
 

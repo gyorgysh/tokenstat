@@ -28,17 +28,21 @@ struct ClientChatEventRow: View {
     var body: some View {
         switch item.kind {
         case let .user(text):
-            HStack {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
                 Spacer(minLength: 36)
                 Text(text)
                     .font(Theme.chatBody)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .padding(Theme.Space.m)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .contextMenu {
                         Button("Copy") { ChatClipboard.copy(text) }
                     }
+                    .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         case let .assistant(text, backend):
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack(spacing: Theme.Space.s) {

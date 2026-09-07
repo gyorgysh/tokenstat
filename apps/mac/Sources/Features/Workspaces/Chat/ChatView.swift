@@ -308,15 +308,16 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
                 .chatScrollContent()
             }
-            // Nobody watches a conversation assemble itself from the top and
-            // then jump. It builds behind the wireframe and appears where the
-            // reading is.
-            .opacity(transcriptReady ? 1 : 0)
+            // Cover the build-up, do not hide the stack. Opacity 0 is how a
+            // lazy stack skipped measuring the last prompt: those rows were
+            // not visible, so they stayed at estimated height until a click
+            // forced a real layout.
             .overlay {
                 if !transcriptReady {
                     TranscriptSkeleton()
                         .frame(maxWidth: ReadingRoom.laneWidth)
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Theme.background)
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
@@ -377,6 +378,14 @@ struct ChatView: View {
             }
             .onChange(of: isActive, initial: true) { _, active in
                 follow.active = active
+                // This pane stays mounted behind other destinations. Coming
+                // forward has to put the end back under the viewport: a
+                // hidden layout pass leaves the last prompt off-screen, and
+                // the settle task is keyed on the conversation, so it will
+                // not run again.
+                if active, follow.pinned, follow.arrived, !follow.settling {
+                    Task { await chaseLatest(proxy) }
+                }
             }
             // A request that arrives while a reply is still streaming would
             // otherwise be pushed off the top of the page before anyone saw

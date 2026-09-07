@@ -33,7 +33,7 @@ struct ChatDraftView: NSViewRepresentable {
 
         let textView = ChatDraftTextView()
         textView.delegate = context.coordinator
-        textView.draftSend = onSend
+        textView.draftSend = { context.coordinator.requestSend() }
         textView.draftStop = onStop
         textView.pasteAttachments = onPasteAttachments
         textView.placeholder = placeholder
@@ -76,7 +76,7 @@ struct ChatDraftView: NSViewRepresentable {
         context.coordinator.onSend = onSend
         context.coordinator.onStop = onStop
         context.coordinator.selection = $selection
-        textView.draftSend = onSend
+        textView.draftSend = { context.coordinator.requestSend() }
         textView.draftStop = onStop
         textView.pasteAttachments = onPasteAttachments
         textView.placeholder = placeholder
@@ -102,6 +102,7 @@ struct ChatDraftView: NSViewRepresentable {
         var onSend: () -> Void
         var onStop: () -> Void
         weak var textView: ChatDraftTextView?
+        private var sendQueued = false
 
         init(
             text: Binding<String>,
@@ -113,6 +114,19 @@ struct ChatDraftView: NSViewRepresentable {
             self.selection = selection
             self.onSend = onSend
             self.onStop = onStop
+        }
+
+        /// Leave the text view's command handling before SwiftUI updates.
+        /// Send from inside Return used to land in the same turn as the
+        /// field editor, and the new prompt stayed unmeasured until the
+        /// next click on the composer.
+        func requestSend() {
+            guard !sendQueued else { return }
+            sendQueued = true
+            DispatchQueue.main.async { [weak self] in
+                self?.sendQueued = false
+                self?.onSend()
+            }
         }
 
         func textDidChange(_ notification: Notification) {
@@ -134,7 +148,7 @@ struct ChatDraftView: NSViewRepresentable {
                     textView.insertNewlineIgnoringFieldEditor(nil)
                     return true
                 }
-                onSend()
+                requestSend()
                 return true
             }
             if selector == #selector(NSResponder.cancelOperation(_:)) {

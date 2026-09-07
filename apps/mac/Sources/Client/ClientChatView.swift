@@ -534,10 +534,14 @@ struct ClientChatThread: View {
             // Leave the bottom scroll-edge effect in place. The composer
             // sits on a `safeAreaBar`, and that glass is what the fade is
             // for. Hiding it left a grey slab in the home indicator.
-            .opacity(transcriptReady ? 1 : 0)
+            // Cover the build-up, do not hide the stack. Opacity 0 is how a
+            // lazy stack skipped measuring the last prompt until a later
+            // layout (leave and come back) forced the real height.
             .overlay {
                 if !transcriptReady {
                     TranscriptSkeleton()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Theme.background)
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
