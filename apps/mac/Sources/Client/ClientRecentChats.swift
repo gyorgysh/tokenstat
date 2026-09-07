@@ -5,6 +5,7 @@ import Observation
 import SwiftUI
 
 #if !os(macOS)
+import UIKit
 
 /// What this particular phone or iPad has opened.
 ///
@@ -224,6 +225,8 @@ struct ClientRecentChatView: View {
 
     @State private var model = ChatModel()
     @State private var loaded = false
+    @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -251,6 +254,21 @@ struct ClientRecentChatView: View {
         // Same hide as a folder conversation. Back pops this whole screen
         // to Workspaces, so restore has to run on the way out.
         .clientTabBarHidden(true)
+        .onAppear {
+            // The notification cover is `presentedChat`. Writing here would
+            // hide the folder thread sitting under it.
+            if navigation.presentedChat == nil {
+                navigation.visibleChatID = chatID
+            }
+        }
+        .onDisappear {
+            guard scenePhase == .active,
+                  UIApplication.shared.applicationState == .active
+            else { return }
+            if navigation.presentedChat == nil, navigation.visibleChatID == chatID {
+                navigation.visibleChatID = nil
+            }
+        }
         .task {
             guard !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else {
                 loaded = true

@@ -22,10 +22,11 @@ import UIKit
 /// the other machine's Machines screen. Two devices showing the same pair of
 /// words are talking to each other and to nobody in between.
 ///
-/// The wording follows the project's privacy rule: **the guarantee is the
-/// boundary, not the read.** Nothing here says tokenstat "cannot see"
-/// something it never receives in the first place, because a claim that
-/// overstates is a claim somebody can catch out.
+/// On the work list it sits as a glass divider, not a fourth device card. The
+/// keys stay a tap away. The wording follows the project's privacy rule:
+/// **the guarantee is the boundary, not the read.** Nothing here says
+/// tokenstat "cannot see" something it never receives in the first place,
+/// because a claim that overstates is a claim somebody can catch out.
 struct ClientSecurityCard: View {
     /// The far end, when there is one. Nil shows this device alone.
     var peerKey: String?
@@ -44,27 +45,35 @@ struct ClientSecurityCard: View {
                 }
             } label: {
                 HStack(spacing: Theme.Space.s) {
-                    Image(systemName: "lock.shield.fill")
-                        .foregroundStyle(Theme.accent)
-                    VStack(alignment: .leading, spacing: 2) {
+                    ThemeRule()
+                    HStack(spacing: 6) {
+                        Image(systemName: ActionIcon.security.symbol)
+                            .font(ClientType.caption.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
                         Text("End to end encrypted")
-                            .font(ClientType.sectionTitle)
-                        Text(isExpanded
-                            ? "Keys and fingerprints are visible"
-                            : "Keys are hidden until you choose to view them")
-                            .font(ClientType.caption)
+                            .font(ClientType.caption.weight(.medium))
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(Theme.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
                     }
-                    Spacer(minLength: Theme.Space.s)
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(Theme.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.vertical, Theme.Space.s)
+                    .fixedSize()
+                    .clientGlassChip()
+                    ThemeRule()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: Theme.Control.heightComfortable)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint(isExpanded ? "Hides the encryption keys" : "Shows the encryption keys")
+            .accessibilityLabel("End to end encrypted")
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(isExpanded
+                ? "Hides the encryption keys"
+                : "Shows the encryption keys. Keys are hidden until you choose to view them.")
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -101,12 +110,11 @@ struct ClientSecurityCard: View {
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.horizontal, Theme.Space.s)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Theme.Space.m)
-        .cardSurface()
         .task(id: peerKey) { await load() }
     }
 

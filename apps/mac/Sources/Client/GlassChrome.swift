@@ -14,9 +14,11 @@ import SwiftUI
 ///
 /// **Glass is chrome, content is opaque.** The tab bar, the top bar and sheets
 /// float on glass, which the system draws. A card holding numbers sits on a
-/// solid panel colour with a hairline. `Theme` already argues this for the Mac,
-/// and it is more true at 402 points wide: vibrancy pulls whatever scrolls
-/// behind a card into the digits on it.
+/// solid panel colour with a hairline. A divider chip between two lists is
+/// chrome too, which is why the encryption note is glass and a host row is
+/// not. `Theme` already argues this for the Mac, and it is more true at 402
+/// points wide: vibrancy pulls whatever scrolls behind a card into the digits
+/// on it.
 ///
 /// So there is deliberately almost no custom glass here. Two glass surfaces
 /// overlapping is a bug, and the fastest way to get one is to add glass the
@@ -33,6 +35,22 @@ extension View {
                 RoundedRectangle(cornerRadius: Theme.cardRadius)
                     .strokeBorder(Theme.border, lineWidth: 1)
             }
+    }
+
+    /// A chip of chrome, not a content card.
+    ///
+    /// Liquid Glass on iOS 26, thin material below. Use this for a divider
+    /// that sits between lists. A host row still wants `cardSurface`.
+    @ViewBuilder
+    func clientGlassChip() -> some View {
+        if #available(iOS 26, *) {
+            glassEffect(.regular, in: Capsule())
+        } else {
+            background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule().strokeBorder(Theme.border, lineWidth: 1)
+                }
+        }
     }
 
     /// Primary action. Liquid glass on iOS 26, brand capsule below.

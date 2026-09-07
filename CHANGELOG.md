@@ -18,11 +18,15 @@ at the end.
 - Tapping a notification opens the work that needs you. A terminal waiting
   on a permission prompt or a gate opens that session. Otherwise the chat
   that finished, or is waiting, opens. On a Mac it brings the window
-  forward. On iPhone and iPad it opens over the app. The push still names
-  only the machine.
-- Send while a turn is still running queues the next message. The queue
-  sits above the composer, can be edited or removed, and Send now stops
-  the current turn so that message goes out next.
+  forward. On iPhone and iPad it opens over the app, unless that
+  conversation is already on screen, in which case the same window stays.
+  The push still names only the machine.
+- Send while a turn is still running queues the next message. A compact
+  strip above the composer says it is waiting to send after this turn.
+  The next message can be edited or removed there, and Send now stops
+  the current turn so that message goes out next. Two or more waiting
+  messages open from View pending, so the list does not cover the
+  transcript.
 - Sessions on iPhone has the branch picker and the bypass switch the Mac
   already shows. A launch from the phone can skip permission prompts the
   same way.
@@ -38,8 +42,10 @@ at the end.
   latest turn, so the reply is not sitting above a closed keyboard.
 - The composer floats on the same glass as the tab bar, including the
   home-indicator edge, so the lower end is not a grey strip.
-- Jump to latest is a larger control, easier to press over a moving
-  transcript.
+- Jump to latest, Following and Follow share one themed capsule, easier
+  to press over a moving transcript. Following is no longer a grey pill.
+- The end-to-end note on Workspaces is a glass divider between the hosts
+  and the chats, not a second device card. The keys are still a tap away.
 
 ### Fixed
 

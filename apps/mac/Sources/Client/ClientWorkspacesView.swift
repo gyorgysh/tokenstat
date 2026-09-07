@@ -286,6 +286,14 @@ struct ClientWorkspacesView: View {
             model.openSession(session)
         case let .chat(peer, hostName, folder, chat):
             guard !peer.isEmpty, !chat.id.isEmpty else { return }
+            // Same thread, phone was just locked: bring that window
+            // forward. Presenting again remounts the transcript on top.
+            if navigation.isShowing(chatID: chat.id) {
+                if navigation.destination != .workspaces {
+                    navigation.destination = .workspaces
+                }
+                return
+            }
             navigation.presentedChat = PresentedChat(
                 peer: peer,
                 workspaceID: chat.workspaceID,

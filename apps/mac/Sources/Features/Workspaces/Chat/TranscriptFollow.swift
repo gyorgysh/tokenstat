@@ -694,12 +694,13 @@ struct TranscriptSkeleton: View {
 
 /// The follow control at the bottom of a transcript: three states, one seat.
 ///
-/// - Scrolled away: a solid **Jump to latest** that chases the end.
-/// - Following a live turn: a quiet **Following** pill. It is the lock the
-///   transcript was missing: pressing it pauses, pressing Follow resumes.
-/// - Paused while live: an outlined **Follow** so there is always a way back
-///   without scrolling.
+/// - Scrolled away: **Jump to latest**.
+/// - Following a live turn: **Following**. Press to pause.
+/// - Paused while live: **Follow**. Press to resume.
 /// - Idle and pinned: nothing. A control nobody needs is clutter, not state.
+///
+/// All three share `AccentButtonStyle(comfortable:)`, the same themed
+/// capsule, so the control does not change language when the state does.
 struct TranscriptFollowPill: View {
     var showJump: Bool
     var busy: Bool
@@ -713,29 +714,13 @@ struct TranscriptFollowPill: View {
                 Button("Jump to latest", .next, action: resume)
                     .buttonStyle(AccentButtonStyle(comfortable: true))
             } else if busy, paused {
-                Button(action: resume) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.down")
-                        Text("Follow")
-                    }
-                    .font(Theme.caption.weight(.medium))
-                }
-                .buttonStyle(SecondaryButtonStyle(small: true))
-                .help("Follow new responses as they arrive")
+                Button("Follow", .next, action: resume)
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
+                    .help("Follow new responses as they arrive")
             } else if busy {
-                Button(action: pause) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.down.circle.fill")
-                        Text("Following")
-                    }
-                    .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(.ultraThinMaterial, in: Capsule())
-                .help("Pause auto-follow")
+                Button("Following", .next, action: pause)
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
+                    .help("Pause auto-follow")
             }
         }
         .padding(.bottom, Theme.Space.m)

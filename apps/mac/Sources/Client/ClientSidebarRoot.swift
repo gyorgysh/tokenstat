@@ -560,6 +560,12 @@ struct ClientSidebarRoot: View {
             workspaces.openSession(session)
         case let .chat(peer, hostName, folder, chat):
             guard !peer.isEmpty, !chat.id.isEmpty else { return }
+            if navigation.isShowing(chatID: chat.id) {
+                if navigation.destination != .workspaces {
+                    navigation.destination = .workspaces
+                }
+                return
+            }
             if let folder {
                 navigation.openChat(folderID: folder.id, chatID: chat.id)
             } else {

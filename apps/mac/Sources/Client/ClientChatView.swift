@@ -38,6 +38,7 @@ struct ClientChatView: View {
     /// reach the list rather than immediately pushing the same chat again.
     @State private var didOpenConversation = false
     @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(\.scenePhase) private var scenePhase
 
     private var place: String { folderName.isEmpty ? "this folder" : folderName }
 
@@ -60,6 +61,19 @@ struct ClientChatView: View {
         // is an update on the same prober, not a teardown after this view
         // has left the window.
         .clientTabBarHidden(opened != nil)
+        .onChange(of: opened?.id, initial: true) { _, id in
+            navigation.visibleChatID = id
+        }
+        .onDisappear {
+            // Locking the phone must not forget this thread. A tap on its
+            // notification would otherwise remount it over itself.
+            guard scenePhase == .active,
+                  UIApplication.shared.applicationState == .active
+            else { return }
+            if let id = opened?.id, navigation.visibleChatID == id {
+                navigation.visibleChatID = nil
+            }
+        }
     }
 
     private var list: some View {
@@ -179,12 +193,16 @@ struct ClientChatView: View {
 
     /// A notification named this conversation. Only consume it if it is in
     /// this folder, so a list that is still on screen for another workspace
-    /// cannot steal the tap.
+    /// cannot steal the tap. Already open is a no-op: re-selecting blanks
+    /// the transcript.
     @discardableResult
     private func openRequestedChat() async -> Bool {
-        guard let id = navigation.openChatID, !id.isEmpty,
-              let chat = model.chats.first(where: { $0.id == id })
-        else { return false }
+        guard let id = navigation.openChatID, !id.isEmpty else { return false }
+        if opened?.id == id {
+            navigation.openChatID = nil
+            return true
+        }
+        guard let chat = model.chats.first(where: { $0.id == id }) else { return false }
         await model.select(chat)
         opened = chat
         navigation.openChatID = nil

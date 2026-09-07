@@ -37,9 +37,22 @@ final class ClientNavigationModel {
     /// once that folder is on screen.
     var openChatID: String?
 
+    /// The conversation the person is already in, as the folder thread or a
+    /// Recents push. A notification tap for this id leaves that window as it
+    /// is: locking the phone does not unmount it, and remounting blanks the
+    /// transcript. The cover a tap presents is `presentedChat`, not this.
+    var visibleChatID: String?
+
     /// A chat opened from a notification on the tab layout, where there is
     /// no sidebar to land the folder in. Dismissing it returns where you were.
     var presentedChat: PresentedChat?
+
+    /// True when this conversation is already on screen, so a tap should not
+    /// open it again.
+    func isShowing(chatID: String) -> Bool {
+        guard !chatID.isEmpty else { return false }
+        return presentedChat?.chatID == chatID || visibleChatID == chatID
+    }
 
     /// The machine Devices should be showing, when something outside that tab
     /// asked for it.
@@ -70,12 +83,18 @@ final class ClientNavigationModel {
     }
 
     /// Open this conversation in its folder's chat section.
+    ///
+    /// If that thread is already the one on screen, only the destination
+    /// moves. Setting `openChatID` again would re-select it and blank the
+    /// transcript.
     func openChat(folderID: String, chatID: String) {
         guard !folderID.isEmpty, !chatID.isEmpty else { return }
+        let already = self.folderID == folderID && section == .chat && isShowing(chatID: chatID)
         self.folderID = folderID
         self.section = .chat
-        self.openChatID = chatID
         self.destination = .workspaces
+        if already { return }
+        self.openChatID = chatID
     }
 }
 
