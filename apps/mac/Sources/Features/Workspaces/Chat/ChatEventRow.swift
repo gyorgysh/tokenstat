@@ -25,6 +25,10 @@ struct ChatEventRow: View {
     /// so selectable chains (one SelectionOverlay each) are held back until
     /// the turn ends. Copy buttons stay live throughout.
     var isLive = false
+    /// Whether this row may run the transcript's spinner. One row does; the
+    /// rest of a set of running tools say "Running" in words. See
+    /// `TranscriptFollow.spinningRow`.
+    var animatesRunning = true
     #if os(macOS)
     /// Whole-card hover for the copy action. Scoping this to the header
     /// saved nothing measurable once segment init was cached and the pin
@@ -88,7 +92,8 @@ struct ChatEventRow: View {
                     text,
                     bodyFont: Theme.chatBody,
                     codeFont: Theme.chatCode,
-                    selectable: allowsSelection
+                    selectable: allowsSelection,
+                    live: isLive
                 )
             }
             .padding(Theme.Space.m)
@@ -133,7 +138,8 @@ struct ChatEventRow: View {
                     codeFont: Theme.monoText(11, relativeTo: .subheadline),
                     style: .aside,
                     selectable: allowsSelection,
-                    cacheScope: "thinking"
+                    cacheScope: "thinking",
+                    live: isLive
                 )
             }
             .foregroundStyle(.secondary)
@@ -156,10 +162,11 @@ struct ChatEventRow: View {
                 snippet: state.snippet,
                 time: state.duration,
                 running: state.running,
-                failed: state.failed
+                failed: state.failed,
+                animatesRunning: animatesRunning
             )
         case let .edit(state):
-            ChatFileEditRow(state: state)
+            ChatFileEditRow(state: state, animatesRunning: animatesRunning)
         case let .attachment(attachment):
             // Stable identity across attachment polls: the revision prop
             // still redraws the row through Equatable when bytes arrive, but
@@ -708,6 +715,7 @@ extension ChatEventRow: Equatable {
             && lhs.isPending == rhs.isPending
             && lhs.faceSeed == rhs.faceSeed
             && lhs.isLive == rhs.isLive
+            && lhs.animatesRunning == rhs.animatesRunning
         else { return false }
         if case .attachment = lhs.item.kind {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading

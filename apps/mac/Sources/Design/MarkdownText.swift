@@ -146,11 +146,16 @@ private final class ParsedTextCache<Value> {
         cache.countLimit = limit
     }
 
-    func value(for source: String, parse: () -> Value) -> Value {
+    /// `store: false` still reads the cache and still answers, it just does
+    /// not keep what it computed. That is what a row being written wants: its
+    /// text is a different string on every token, so every parse of it is a
+    /// miss, and keeping them fills the cache with hundreds of revisions of
+    /// one message and evicts every settled row in the conversation.
+    func value(for source: String, store: Bool = true, parse: () -> Value) -> Value {
         let key = source as NSString
         if let held = cache.object(forKey: key) { return held.value }
         let parsed = parse()
-        cache.setObject(Held(parsed), forKey: key)
+        if store { cache.setObject(Held(parsed), forKey: key) }
         return parsed
     }
 
@@ -378,8 +383,8 @@ private struct MarkdownListRow: View {
 /// Separated from the view so the same work can be done ahead of time, off the
 /// main thread, by `MarkdownText.warm`.
 private enum MarkdownInline {
-    static func attributed(_ source: String) -> AttributedString {
-        MarkdownCache.inline.value(for: source) {
+    static func attributed(_ source: String, store: Bool = true) -> AttributedString {
+        MarkdownCache.inline.value(for: source, store: store) {
             let safe = MarkdownSanitizer.inline(source)
             let options = AttributedString.MarkdownParsingOptions(
                 interpretedSyntax: .inlineOnlyPreservingWhitespace,
@@ -456,9 +461,14 @@ struct MessageMarkdown: View {
         codeFont: Font = Theme.monoText(12, relativeTo: .body),
         style: MarkdownStyle = .document,
         selectable: Bool = true,
-        cacheScope: String = "chat"
+        cacheScope: String = "chat",
+        live: Bool = false
     ) {
-        let parsed = MarkdownCache.blocks.value(for: markdown) {
+        // A row still being written is a new string on every token, so every
+        // parse of it misses and nothing it stores is ever read again. What
+        // storing it does is evict the settled rows, which then reparse on
+        // the next measuring pass the lazy stack makes.
+        let parsed = MarkdownCache.blocks.value(for: markdown, store: !live) {
             var parser = MarkdownParser(markdown)
             return parser.blocks()
         }
@@ -472,8 +482,8 @@ struct MessageMarkdown: View {
         // brought the hitches back. The scope names the caller's font set,
         // which is baked into the chains and cannot be keyed from `Font`.
         let key = "\(cacheScope):\(style == .aside ? "a" : "d"):\(markdown)"
-        cachedSegments = MarkdownCache.segments.value(for: key) {
-            Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
+        cachedSegments = MarkdownCache.segments.value(for: key, store: !live) {
+            Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style, live: live)
         }
     }
 
@@ -481,7 +491,15 @@ struct MessageMarkdown: View {
     /// one drag, short enough that no single `Text` ever costs a frame.
     private static let chainCharCap = 8000
 
-    private static func makeSegments(blocks: [MarkdownBlock], bodyFont: Font, style: MarkdownStyle) -> [MessageSegment] {
+    private static func makeSegments(
+        blocks: [MarkdownBlock],
+        bodyFont: Font,
+        style: MarkdownStyle,
+        live: Bool = false
+    ) -> [MessageSegment] {
+        func inline(_ source: String) -> AttributedString {
+            MarkdownInline.attributed(source, store: !live)
+        }
         var out: [MessageSegment] = []
         var chain: Text? = nil
         var chainLength = 0
@@ -549,14 +567,14 @@ struct MessageMarkdown: View {
             switch block.kind {
             case let .heading(level, text):
                 push(
-                    Text(MarkdownInline.attributed(text))
+                    Text(inline(text))
                         .font(Self.headingFont(style: style, bodyFont: bodyFont, level: level)),
                     length: text.count
                 )
             case let .paragraph(text):
                 for chunk in chunks(text) {
                     push(
-                        Text(MarkdownInline.attributed(chunk))
+                        Text(inline(chunk))
                             .font(bodyFont),
                         length: chunk.count
                     )
@@ -566,7 +584,7 @@ struct MessageMarkdown: View {
                 if total <= Self.chainCharCap {
                     var list: Text? = nil
                     for item in items {
-                        let row = listRow(item, text: MarkdownInline.attributed(item.text))
+                        let row = listRow(item, text: inline(item.text))
                         if let acc = list {
                             list = acc + Text("\n").font(bodyFont) + row
                         } else {
@@ -581,8 +599,8 @@ struct MessageMarkdown: View {
                         let parts = chunks(item.text)
                         for (part, chunk) in parts.enumerated() {
                             let piece = (part == 0)
-                                ? listRow(item, text: MarkdownInline.attributed(chunk))
-                                : Text(MarkdownInline.attributed(chunk)).font(bodyFont)
+                                ? listRow(item, text: inline(chunk))
+                                : Text(inline(chunk)).font(bodyFont)
                             push(
                                 piece,
                                 length: chunk.count,

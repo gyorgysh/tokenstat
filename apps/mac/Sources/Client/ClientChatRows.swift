@@ -24,6 +24,9 @@ struct ClientChatEventRow: View {
     /// The row still being written. Selectable chains are held back until
     /// the turn ends; copy buttons stay live throughout.
     var isLive = false
+    /// Whether this row may run the transcript's spinner. See
+    /// `TranscriptFollow.spinningRow`.
+    var animatesRunning = true
 
     var body: some View {
         switch item.kind {
@@ -52,7 +55,13 @@ struct ClientChatEventRow: View {
                     Spacer(minLength: 0)
                     RowCopyButton(text: text, help: "Copy response")
                 }
-                MessageMarkdown(text, bodyFont: Theme.chatBody, codeFont: Theme.chatCode, selectable: !isLive)
+                MessageMarkdown(
+                    text,
+                    bodyFont: Theme.chatBody,
+                    codeFont: Theme.chatCode,
+                    selectable: !isLive,
+                    live: isLive
+                )
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -85,7 +94,8 @@ struct ClientChatEventRow: View {
                 codeFont: Theme.monoText(10, relativeTo: .caption),
                 style: .aside,
                 selectable: !isLive,
-                cacheScope: "client-thinking"
+                cacheScope: "client-thinking",
+                live: isLive
             )
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -99,10 +109,11 @@ struct ClientChatEventRow: View {
                 snippet: state.snippet,
                 time: state.duration,
                 running: state.running,
-                failed: state.failed
+                failed: state.failed,
+                animatesRunning: animatesRunning
             )
         case let .edit(state):
-            ChatFileEditRow(state: state)
+            ChatFileEditRow(state: state, animatesRunning: animatesRunning)
         case let .attachment(attachment):
             // Same as the Mac: stable identity across polls. The revision
             // still redraws through Equatable; recreating collapsed the row.
@@ -432,6 +443,7 @@ extension ClientChatEventRow: Equatable {
             && lhs.isPending == rhs.isPending
             && lhs.faceSeed == rhs.faceSeed
             && lhs.isLive == rhs.isLive
+            && lhs.animatesRunning == rhs.animatesRunning
         else { return false }
         if case .attachment = lhs.item.kind {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading

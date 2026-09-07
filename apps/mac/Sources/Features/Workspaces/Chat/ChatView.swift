@@ -272,7 +272,8 @@ struct ChatView: View {
                                 Task { await model.downloadResponseAttachment(attachment) }
                             },
                             faceSeed: model.faceSeed,
-                            isLive: model.busy && item.id == model.displayItems.last?.id
+                            isLive: model.busy && item.id == model.displayItems.last?.id,
+                            animatesRunning: item.id == spinningRowID
                         )
                         .equatable()
                         .frame(
@@ -485,6 +486,11 @@ struct ChatView: View {
     /// pages arrive through the paging path, older built rows by sliding.
     private var visibleItems: [ChatDisplayItem] {
         TranscriptSlice.items(model.displayItems, olderOffset: sliceOffset)
+    }
+
+    /// The single row allowed to animate while it runs.
+    private var spinningRowID: String? {
+        TranscriptFollow.spinningRow(visibleItems)
     }
 
     /// Rows above the built slice. Zero while the whole conversation fits.

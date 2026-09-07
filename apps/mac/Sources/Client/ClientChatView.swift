@@ -497,7 +497,8 @@ struct ClientChatThread: View {
                             },
                             openAttachment: open(_:data:),
                             faceSeed: model.faceSeed,
-                            isLive: model.busy && item.id == model.displayItems.last?.id
+                            isLive: model.busy && item.id == model.displayItems.last?.id,
+                            animatesRunning: item.id == spinningRowID
                         )
                         .equatable()
                         // No geometry readers mid-fling: each one reports per
@@ -814,6 +815,11 @@ struct ClientChatThread: View {
     /// Rows the transcript builds this pass. Same slice as the Mac.
     private var visibleItems: [ChatDisplayItem] {
         TranscriptSlice.items(model.displayItems, olderOffset: sliceOffset)
+    }
+
+    /// The single row allowed to animate while it runs.
+    private var spinningRowID: String? {
+        TranscriptFollow.spinningRow(visibleItems)
     }
 
     /// Rows above the built slice. Zero while the whole conversation fits.

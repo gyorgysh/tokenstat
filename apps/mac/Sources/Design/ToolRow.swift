@@ -22,6 +22,11 @@ struct ToolRow: View {
     var time: String? = nil
     var running: Bool = false
     var failed: Bool = false
+    /// Whether this row is the one carrying the transcript's spinner. A
+    /// running row that is not turns its verb glyph in the accent instead:
+    /// see `TranscriptFollow.spinningRow`, which is where the count of
+    /// animating platform views in a transcript is held at one.
+    var animatesRunning: Bool = true
     @State private var showSnippet = false
     /// Set once the person toggles the snippet by hand. Auto-expand must
     /// not overrule it: lazy rows re-run `onAppear` scrolling back, and a
@@ -93,7 +98,7 @@ struct ToolRow: View {
             // hottest frame by a distance. Centring is read off the size.
             HStack(alignment: .center, spacing: Theme.Space.s) {
                 Group {
-                    if running {
+                    if running, animatesRunning {
                         ProgressView()
                             .controlSize(.mini)
                     } else {

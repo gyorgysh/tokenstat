@@ -57,6 +57,31 @@ enum TranscriptFollow {
         return .thinking
     }
 
+    /// The one row allowed an animated spinner, newest first.
+    ///
+    /// A running `ProgressView` on macOS is an `NSProgressIndicator` behind a
+    /// platform view host, and an animating one invalidates layout on every
+    /// frame. A transcript with one of those measures the slice once per
+    /// frame, which the lazy stack can afford. A transcript with forty never
+    /// finishes a transaction: a hang report caught the app spending ten
+    /// minutes inside a single `flushTransactions`, in lazy stack placement,
+    /// with the process at six gigabytes. That is what a chat looked like
+    /// when the host left every Bash call marked running.
+    ///
+    /// So the spinner is a property of the transcript rather than of the row:
+    /// whatever the timeline claims is running, one row turns. The rest keep
+    /// their accent border and their "Running" label, which is what says so
+    /// in words anyway.
+    static func spinningRow(_ items: [ChatDisplayItem]) -> String? {
+        items.last { item in
+            switch item.kind {
+            case let .tool(state): return state.running
+            case let .edit(state): return state.running
+            default: return false
+            }
+        }?.id
+    }
+
     /// Growing prose. Used to pin without animation.
     static func streamExtent(_ items: [ChatDisplayItem]) -> Int {
         guard let last = items.last else { return 0 }

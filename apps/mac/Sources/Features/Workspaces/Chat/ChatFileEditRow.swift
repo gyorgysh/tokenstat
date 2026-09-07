@@ -10,6 +10,10 @@ import SwiftUI
 /// stays a caption so two edits of WORKLOG.md cannot be mistaken for twins.
 struct ChatFileEditRow: View {
     let state: ChatEditState
+    /// Whether this row carries the transcript's spinner. See
+    /// `TranscriptFollow.spinningRow`: one animating platform view per
+    /// transcript, whatever the timeline says is still running.
+    var animatesRunning: Bool = true
     #if os(macOS)
     private static let nameFont = Theme.callout.weight(.semibold)
     private static let metaFont = Theme.mono(11)
@@ -82,7 +86,7 @@ struct ChatFileEditRow: View {
     private var header: some View {
         HStack(alignment: .center, spacing: Theme.Space.s) {
             Group {
-                if state.running {
+                if state.running, animatesRunning {
                     ProgressView()
                         .controlSize(.mini)
                 } else {
