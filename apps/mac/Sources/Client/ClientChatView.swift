@@ -54,10 +54,6 @@ struct ClientChatView: View {
                 list
             }
         }
-        // The floating tab bar sits under the composer and steals a row the
-        // transcript could have had. Chat is already a pushed folder screen,
-        // so Back is the way out. Other sections keep the bar.
-        .toolbar(.hidden, for: .tabBar)
     }
 
     private var list: some View {
@@ -251,6 +247,12 @@ struct ClientChatThread: View {
             }
         }
         .background(Theme.background)
+        // The floating tab bar sits under the composer and steals a row the
+        // transcript could have had. SwiftUI's `.toolbar(.hidden)` only
+        // minimises it on iOS 26, and the pill still expands into the full
+        // tab menu when tapped. `clientTabBarHidden` removes the bar. The
+        // chat list keeps it, like the other folder sections.
+        .clientTabBarHidden(true)
         // Do not fight the system's Liquid Glass. On iOS 26 the bar is glass
         // already and any background of ours replaces it with a flat blur, so
         // that system gets nothing from us. Below 26 there is no bar to fight.
