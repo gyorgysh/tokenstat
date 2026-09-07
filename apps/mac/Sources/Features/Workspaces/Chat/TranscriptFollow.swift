@@ -711,7 +711,7 @@ struct TranscriptFollowPill: View {
         Group {
             if showJump {
                 Button("Jump to latest", .next, action: resume)
-                    .buttonStyle(AccentButtonStyle(small: true))
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
             } else if busy, paused {
                 Button(action: resume) {
                     HStack(spacing: 4) {

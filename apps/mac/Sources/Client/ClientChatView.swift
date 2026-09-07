@@ -55,6 +55,11 @@ struct ClientChatView: View {
                 list
             }
         }
+        // The floating tab bar sits under the composer. SwiftUI's toolbar
+        // hide only minimises it on iOS 26. Bound here so Back to the list
+        // is an update on the same prober, not a teardown after this view
+        // has left the window.
+        .clientTabBarHidden(opened != nil)
     }
 
     private var list: some View {
@@ -242,19 +247,22 @@ struct ClientChatThread: View {
     var body: some View {
         VStack(spacing: 0) {
             if let chat {
-                // The bar is an inset, not the next row of a stack. Stacked,
+                // The bar is pinned, not the next row of a stack. Stacked,
                 // it had the window background under it rather than the
                 // conversation, so its glass had nothing to be glass about and
-                // read as a white slab whatever material it asked for. As an
-                // inset the transcript runs underneath and still stops above
-                // it, which is the whole point of the material.
+                // read as a white slab whatever material it asked for. As a
+                // bottom bar the transcript runs underneath, including the
+                // home indicator, which is the whole point of the material.
                 transcript(chat)
                     .overlay {
                         if dropExperienceVisible {
                             ChatDropExperience(seed: model.faceSeed)
                         }
                     }
-                    .safeAreaInset(edge: .bottom, spacing: 0) { bar(chat) }
+                    .clientBottomBar {
+                        bar(chat)
+                            .padding(.top, Theme.Space.s)
+                    }
             } else {
                 ClientEmptyState(
                     kind: .nothingYet,
@@ -266,12 +274,6 @@ struct ClientChatThread: View {
             }
         }
         .background(Theme.background)
-        // The floating tab bar sits under the composer and steals a row the
-        // transcript could have had. SwiftUI's `.toolbar(.hidden)` only
-        // minimises it on iOS 26, and the pill still expands into the full
-        // tab menu when tapped. `clientTabBarHidden` removes the bar. The
-        // chat list keeps it, like the other folder sections.
-        .clientTabBarHidden(true)
         // Do not fight the system's Liquid Glass. On iOS 26 the bar is glass
         // already and any background of ours replaces it with a flat blur, so
         // that system gets nothing from us. Below 26 there is no bar to fight.
@@ -375,30 +377,48 @@ struct ClientChatThread: View {
     @ViewBuilder
     private func bar(_ chat: ChatConversation) -> some View {
         if model.approvals.isEmpty {
-            ClientChatComposer(
-                model: model,
-                chat: chat,
-                draft: $draft,
-                attachments: model.attachments,
-                previews: model.attachmentPreviews,
-                running: model.busy,
-                placeholder: "Ask about \(folderName.isEmpty ? "this folder" : folderName)",
-                onSend: { submit(from: chat) },
-                onStop: { Task { await model.stop() } },
-                onAttach: { item in await model.attach(item) },
-                onRemove: { model.removeAttachment($0) },
-                onOpenSetup: { showingSetup = true },
-                onDropURLs: { urls in
-                    Task { await receive(ChatInbox.drops(from: urls)) }
-                },
-                onDropText: { items in
-                    Task { await receive(items.map(ChatInboxDrop.text)) }
-                },
-                onDropData: { items in
-                    Task { await receive(items.compactMap(ChatInbox.imageDrop(from:))) }
-                },
-                onDropTargeted: { composerDropTargeted = $0 }
-            )
+            VStack(spacing: Theme.Space.s) {
+                if !model.queued.isEmpty {
+                    ChatQueueStrip(
+                        items: model.queued,
+                        onChange: { item, text in model.updateQueued(item, text: text) },
+                        onRemove: { model.removeQueued($0) },
+                        onSendNow: { item in Task { await model.sendNow(item) } }
+                    )
+                    .padding(.horizontal, Theme.Space.s)
+                }
+                ClientChatComposer(
+                    model: model,
+                    chat: chat,
+                    draft: $draft,
+                    attachments: model.attachments,
+                    previews: model.attachmentPreviews,
+                    running: model.busy,
+                    placeholder: model.busy
+                        ? "Send after this turn"
+                        : "Ask about \(folderName.isEmpty ? "this folder" : folderName)",
+                    onSend: { submit(from: chat) },
+                    onSendNow: { submit(from: chat, sendNow: true) },
+                    onStop: { Task { await model.stop() } },
+                    onKeyboardDidHide: {
+                        guard follow.pinned else { return }
+                        followPulse += 1
+                    },
+                    onAttach: { item in await model.attach(item) },
+                    onRemove: { model.removeAttachment($0) },
+                    onOpenSetup: { showingSetup = true },
+                    onDropURLs: { urls in
+                        Task { await receive(ChatInbox.drops(from: urls)) }
+                    },
+                    onDropText: { items in
+                        Task { await receive(items.map(ChatInboxDrop.text)) }
+                    },
+                    onDropData: { items in
+                        Task { await receive(items.compactMap(ChatInbox.imageDrop(from:))) }
+                    },
+                    onDropTargeted: { composerDropTargeted = $0 }
+                )
+            }
         } else {
             ChatApprovalBar(
                 approvals: model.approvals,
@@ -484,10 +504,9 @@ struct ClientChatThread: View {
             // already hides the keyboard on scroll, and a transcript-wide
             // tap gate fires on attachment taps, link taps and text
             // selection too.
-            // Only the bottom. The composer sits right under it and draws
-            // its own edge, while the top is where the system's own fade
-            // keeps the first "Web search:" chip off the navigation bar.
-            .clientHideScrollEdgeEffect(for: .bottom)
+            // Leave the bottom scroll-edge effect in place. The composer
+            // sits on a `safeAreaBar`, and that glass is what the fade is
+            // for. Hiding it left a grey slab in the home indicator.
             .opacity(transcriptReady ? 1 : 0)
             .overlay {
                 if !transcriptReady {
@@ -530,13 +549,18 @@ struct ClientChatThread: View {
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
             .onChange(of: followPulse) { _, _ in
-                if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
+                showNewest()
+                follow.jump()
+                Task { await chaseLatest(proxy) }
             }
             .onChange(of: chat.running) { _, _ in
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
             .onChange(of: model.busy) { was, now in
                 settleAfterTurn(was: was, now: now)
+                if was, !now {
+                    Task { await model.drainQueue() }
+                }
             }
             .onChange(of: model.approvals.isEmpty) { _, empty in
                 follow.suppressed = !empty
@@ -865,18 +889,30 @@ struct ClientChatThread: View {
         }
     }
 
-    private func submit(from chat: ChatConversation) {
+    private func submit(from chat: ChatConversation, sendNow: Bool = false) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
-        guard !text.isEmpty || !model.attachments.isEmpty, !model.busy else { return }
+        guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
         draft = ""
         // Sending is engaging: follow is the default, so a new turn resumes
-        // it even if it was paused before. Pausing again is one tap. The
-        // pulse scrolls now; the token pins take over as content arrives.
+        // it even if it was paused before. Pausing again is one tap. Hide the
+        // keyboard and snap to the end so the next tokens are not off-screen
+        // above a closed keyboard.
         showNewest()
         follow.jump()
         followPulse += 1
+        if sendNow {
+            let item = model.enqueue(text, atFront: true)
+            if let item {
+                Task { await model.sendNow(item) }
+            }
+            return
+        }
+        if model.busy {
+            _ = model.enqueue(text)
+            return
+        }
         Task { await model.send(text) }
     }
 

@@ -274,21 +274,26 @@ struct ClientWorkspacesView: View {
             }
     }
 
-    /// A tap on a push. The tab layout has no sidebar to land a folder in,
-    /// so the thread opens over the app and Close puts you back.
+    /// A tap on a push. A terminal that needs the person opens here. Chat
+    /// is the fallback, over the app because this layout has no sidebar.
     private func fulfillNotification() async {
-        guard let request = NotificationOpen.shared.take(), request.kind == .chat else { return }
-        guard let opened = await model.chatFromNotification(request, account: account.account) else {
+        guard let request = NotificationOpen.shared.take() else { return }
+        guard let opened = await model.targetFromNotification(request, account: account.account) else {
             return
         }
-        guard !opened.peer.isEmpty, !opened.chat.id.isEmpty else { return }
-        navigation.presentedChat = PresentedChat(
-            peer: opened.peer,
-            workspaceID: opened.chat.workspaceID,
-            folderName: opened.folder?.name ?? "Workspace",
-            hostName: opened.hostName,
-            chatID: opened.chat.id
-        )
+        switch opened {
+        case let .session(session):
+            model.openSession(session)
+        case let .chat(peer, hostName, folder, chat):
+            guard !peer.isEmpty, !chat.id.isEmpty else { return }
+            navigation.presentedChat = PresentedChat(
+                peer: peer,
+                workspaceID: chat.workspaceID,
+                folderName: folder?.name ?? "Workspace",
+                hostName: hostName,
+                chatID: chat.id
+            )
+        }
     }
 
     /// This phone, on the screen that lists the devices it can reach.
@@ -738,15 +743,21 @@ final class ClientWorkspacesModel {
         recentChats = (try? await ClientRemote.recentChats(peer: peer.key)) ?? recentChats
     }
 
-    /// Dial the machine the push named, then pick the thread that matches.
+    /// What a notification tap should open on this host.
+    enum NotificationTarget {
+        case session(PtySessionInfo)
+        case chat(peer: String, hostName: String, folder: WorkspaceFolder?, chat: ChatRecentConversation)
+    }
+
+    /// Dial the machine the push named, then pick what needs the person.
     ///
-    /// The push itself has no conversation id. Recents on this host are the
-    /// lookup: a waiting banner wants a pending approval, a finished turn
-    /// wants the newest agent reply.
-    func chatFromNotification(
+    /// A live terminal with `attention` wins: that is the thing holding
+    /// the work up. Recents are the chat fallback. The push itself has no
+    /// conversation or session id.
+    func targetFromNotification(
         _ request: NotificationOpen.Request,
         account: Account?
-    ) async -> (peer: String, hostName: String, folder: WorkspaceFolder?, chat: ChatRecentConversation)? {
+    ) async -> NotificationTarget? {
         await refresh(account: account)
         for _ in 0..<20 {
             if isConnecting == nil { break }
@@ -765,6 +776,10 @@ final class ClientWorkspacesModel {
             await reloadRemote(peerKey: host.peerKey)
         }
         guard connectedKey == host.peerKey else { return nil }
+        if let session = Self.pickNotificationSession(from: sessions, named: request.sessionID) {
+            return .session(session)
+        }
+        guard request.kind == .chat else { return nil }
         guard let chat = Self.pickNotificationChat(from: recentChats, waiting: request.waiting),
               !chat.id.isEmpty
         else {
@@ -773,7 +788,21 @@ final class ClientWorkspacesModel {
         let folder = folders.first {
             (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == chat.workspaceID
         }
-        return (host.peerKey, host.name, folder, chat)
+        return .chat(peer: host.peerKey, hostName: host.name, folder: folder, chat: chat)
+    }
+
+    static func pickNotificationSession(
+        from sessions: [PtySessionInfo],
+        named sessionID: String? = nil
+    ) -> PtySessionInfo? {
+        if let sessionID, !sessionID.isEmpty,
+           let named = sessions.first(where: { $0.id == sessionID })
+        {
+            return named
+        }
+        return sessions
+            .filter { $0.alive && !($0.attention?.isEmpty ?? true) }
+            .max { ($0.lastActivityAtMs ?? 0) < ($1.lastActivityAtMs ?? 0) }
     }
 
     static func pickNotificationChat(

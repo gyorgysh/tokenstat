@@ -213,6 +213,14 @@ enum Theme {
         static let height: CGFloat = 30
         /// Row accessories and card headers.
         static let heightSmall: CGFloat = 24
+        /// A control that has to be easy to hit, such as Jump to latest
+        /// over a moving transcript. Taller on a phone, where a 24pt pill
+        /// is a miss more often than a press.
+        #if os(macOS)
+        static let heightComfortable: CGFloat = 32
+        #else
+        static let heightComfortable: CGFloat = 44
+        #endif
         /// Buttons that sit beside each other in a footer.
         static let pairedWidth: CGFloat = 88
         /// Row height for a list a person scans rather than reads.
@@ -1508,16 +1516,24 @@ struct ActionLabelStyle: LabelStyle {
 struct AccentButtonStyle: ButtonStyle {
     /// Dense variant for rows and card accessories.
     var small = false
+    /// Finger-friendly. Jump to latest over a transcript, not a row chip.
+    var comfortable = false
 
     func makeBody(configuration: Configuration) -> some View {
+        let height: CGFloat = comfortable
+            ? Theme.Control.heightComfortable
+            : (small ? Theme.Control.heightSmall : Theme.Control.height)
+        let fontSize: CGFloat = comfortable ? 15 : (small ? 12 : 13)
+        let pad: CGFloat = comfortable ? 16 : (small ? 10 : 14)
+        let radius: CGFloat = comfortable ? 12 : 8
         configuration.label
-            .labelStyle(ActionLabelStyle(small: small))
-            .font(.system(size: small ? 12 : 13, weight: .medium))
+            .labelStyle(ActionLabelStyle(small: small && !comfortable))
+            .font(.system(size: fontSize, weight: .medium))
             .foregroundStyle(Theme.accent)
-            .padding(.horizontal, small ? 10 : 14)
-            .frame(height: small ? Theme.Control.heightSmall : Theme.Control.height)
+            .padding(.horizontal, pad)
+            .frame(height: height)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: radius)
                     .fill(
                         configuration.isPressed
                             ? Theme.accent.opacity(0.18)
@@ -1525,7 +1541,7 @@ struct AccentButtonStyle: ButtonStyle {
                     )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: radius)
                     .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
             )
             .contentShape(.rect)

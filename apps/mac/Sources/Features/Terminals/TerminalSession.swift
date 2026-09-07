@@ -1297,7 +1297,11 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// the badge beside it has said the same thing already.
     private func announceAttention() {
         guard !isFocused || !NSApp.isActive else { return }
-        RunNotifications.shared.attention(sessionID: id, name: attentionName)
+        RunNotifications.shared.attention(
+            sessionID: id,
+            name: attentionName,
+            workspaceID: workspaceID
+        )
     }
 
     /// What to call this session in a notification: what the program asked to

@@ -89,6 +89,18 @@ struct ChatView: View {
                 // agent is parked, and removing the field is the plainest way
                 // to say what the conversation is actually waiting for.
                 if model.approvals.isEmpty {
+                    if !model.queued.isEmpty {
+                        ChatQueueStrip(
+                            items: model.queued,
+                            onChange: { item, text in model.updateQueued(item, text: text) },
+                            onRemove: { model.removeQueued($0) },
+                            onSendNow: { item in Task { await model.sendNow(item) } }
+                        )
+                        .frame(maxWidth: ReadingRoom.laneWidth)
+                        .padding(.horizontal, Theme.Space.l)
+                        .padding(.bottom, Theme.Space.s)
+                        .frame(maxWidth: .infinity)
+                    }
                     ChatComposer(
                         model: model,
                         chat: chat,
@@ -97,8 +109,11 @@ struct ChatView: View {
                         attachments: model.attachments,
                         previews: model.attachmentPreviews,
                         running: model.busy,
-                        placeholder: "Ask about \(workspaceName ?? "this folder")",
+                        placeholder: model.busy
+                            ? "Send after this turn"
+                            : "Ask about \(workspaceName ?? "this folder")",
                         onSend: { submit(from: chat) },
+                        onSendNow: { submit(from: chat, sendNow: true) },
                         onStop: { Task { await model.stop() } },
                         onAttach: { item in await model.attach(item) },
                         onRemove: { model.removeAttachment($0) },
@@ -338,13 +353,18 @@ struct ChatView: View {
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
             .onChange(of: followPulse) { _, _ in
-                if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
+                showNewest()
+                follow.jump()
+                Task { await returnToLatest(proxy) }
             }
             .onChange(of: chat.running) { _, _ in
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
             .onChange(of: model.busy) { was, now in
                 settleAfterTurn(was: was, now: now)
+                if was, !now {
+                    Task { await model.drainQueue() }
+                }
             }
             .onChange(of: model.approvals.isEmpty) { _, empty in
                 follow.suppressed = !empty
@@ -659,11 +679,11 @@ struct ChatView: View {
         return false
     }
 
-    private func submit(from chat: ChatConversation) {
+    private func submit(from chat: ChatConversation, sendNow: Bool = false) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
-        guard !text.isEmpty || !model.attachments.isEmpty, !model.busy else { return }
+        guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
         draft = ""
         // Sending is engaging: follow is the default, so a new turn resumes
         // it even if it was paused before. Pausing again is one tap. The
@@ -671,6 +691,17 @@ struct ChatView: View {
         showNewest()
         follow.jump()
         followPulse += 1
+        if sendNow {
+            let item = model.enqueue(text, atFront: true)
+            if let item {
+                Task { await model.sendNow(item) }
+            }
+            return
+        }
+        if model.busy {
+            _ = model.enqueue(text)
+            return
+        }
         Task { await model.send(text) }
     }
 

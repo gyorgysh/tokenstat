@@ -21,7 +21,9 @@ struct ClientChatComposer: View {
     var running: Bool
     var placeholder: String
     var onSend: () -> Void
+    var onSendNow: () -> Void = {}
     var onStop: () -> Void
+    var onKeyboardDidHide: () -> Void = {}
     var onAttach: (ChatInboxItem) async -> Void
     var onRemove: (ChatAttachment) -> Void
     var onOpenSetup: () -> Void
@@ -49,18 +51,23 @@ struct ClientChatComposer: View {
                     locked: running,
                     compact: true
                 )
+                .frame(maxWidth: .infinity, alignment: .leading)
                 // Only while there is a keyboard to put away. A control that
                 // cannot do anything is one the eye still has to read past
                 // every time, and this row is already three controls wide on
                 // a phone.
                 if focused {
-                    Button("Hide keyboard", .hideKeyboard) { hideKeyboard() }
-                        .buttonStyle(.plain)
-                        .environment(\.compactActions, true)
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 44, height: 44)
-                        .contentShape(.rect)
-                        .layoutPriority(1)
+                    Button("Hide keyboard", .hideKeyboard, action: hideKeyboard)
+                        .modifier(ComposerChromeButton())
+                        .transition(controlTransition)
+                }
+                // Stay in this row whenever a turn is running. Parking it on
+                // send, then jumping it up here the moment a queued draft
+                // appears, grew the bar and put a glass circle where a
+                // 44-point glyph belongs.
+                if running {
+                    Button("Stop", .stop, action: onStop)
+                        .modifier(ComposerChromeButton())
                         .transition(controlTransition)
                 }
                 expandToggle
@@ -75,23 +82,13 @@ struct ClientChatComposer: View {
                 // something to send. A permanently greyed one is a control
                 // that has never done anything, taking the width a message
                 // could have had.
-                if running {
-                    Button { onStop() } label: {
-                        ActionIcon.stop.label("Stop").frame(width: 44, height: 44)
-                    }
-                        .clientGlassStyle()
-                        .environment(\.compactActions, true)
-                        .transition(controlTransition)
-                } else if canSend {
-                    Button { onSend() } label: {
-                        ActionIcon.send.label("Send").frame(width: 44, height: 44)
-                    }
-                        .modifier(ChatSendStyle())
-                        .environment(\.compactActions, true)
+                if canSend {
+                    sendControl
                         .transition(controlTransition)
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: canSend)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: running)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: expanded)
@@ -186,7 +183,6 @@ struct ClientChatComposer: View {
                 .frame(width: 44, height: 44)
                 .contentShape(.rect)
         }
-        .disabled(running)
         .accessibilityLabel("Attach")
     }
 
@@ -211,12 +207,7 @@ struct ClientChatComposer: View {
                 }
             }
         }
-        .buttonStyle(.plain)
-        .environment(\.compactActions, true)
-        .foregroundStyle(Theme.accent)
-        .frame(width: 44, height: 44)
-        .contentShape(.rect)
-        .layoutPriority(1)
+        .modifier(ComposerChromeButton())
     }
 
     private var field: some View {
@@ -228,9 +219,12 @@ struct ClientChatComposer: View {
             .focused($focused)
             .padding(.vertical, 8)
             .submitLabel(.send)
-            .onSubmit { if canSend { onSend() } }
+            .onSubmit { if canSend { sendTapped() } }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 expanded = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+                onKeyboardDidHide()
             }
     }
 
@@ -242,6 +236,31 @@ struct ClientChatComposer: View {
         )
     }
 
+    private func sendTapped() {
+        hideKeyboard()
+        onSend()
+    }
+
+    private func sendNowTapped() {
+        hideKeyboard()
+        onSendNow()
+    }
+
+    @ViewBuilder
+    private var sendControl: some View {
+        Button { sendTapped() } label: {
+            ActionIcon.send.label(running ? "Send after this turn" : "Send").frame(width: 44, height: 44)
+        }
+        .modifier(ChatSendStyle())
+        .environment(\.compactActions, true)
+        .accessibilityLabel(running ? "Send after this turn" : "Send")
+        .contextMenu {
+            if running {
+                Button("Stop and send now", .send, action: sendNowTapped)
+            }
+        }
+    }
+
     private var canSend: Bool { !cannotSend }
 
     /// Controls that come and go with what the bar can do right now.
@@ -250,8 +269,7 @@ struct ClientChatComposer: View {
     }
 
     private var cannotSend: Bool {
-        running
-            || model.sending
+        model.sending
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
     }
 
@@ -299,6 +317,20 @@ private struct ChatSendStyle: ViewModifier {
         } else {
             content.buttonStyle(AccentButtonStyle(small: true))
         }
+    }
+}
+
+/// A 44-point glyph in the composer chrome. Not a glass circle: that
+/// style is for send, and using it for Stop grew the bar.
+private struct ComposerChromeButton: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .buttonStyle(.plain)
+            .environment(\.compactActions, true)
+            .foregroundStyle(Theme.accent)
+            .frame(width: 44, height: 44)
+            .contentShape(.rect)
+            .layoutPriority(1)
     }
 }
 

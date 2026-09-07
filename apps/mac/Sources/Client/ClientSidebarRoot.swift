@@ -548,24 +548,29 @@ struct ClientSidebarRoot: View {
         return URL(fileURLWithPath: session.command).lastPathComponent
     }
 
-    /// A tap on a push. The sidebar can land the folder and the thread in
-    /// place, which is the iPad equivalent of bringing that window forward.
+    /// A tap on a push. The sidebar can land the folder, a waiting
+    /// terminal, or the thread in place.
     private func fulfillNotification() async {
-        guard let request = NotificationOpen.shared.take(), request.kind == .chat else { return }
-        guard let opened = await workspaces.chatFromNotification(request, account: account.account) else {
+        guard let request = NotificationOpen.shared.take() else { return }
+        guard let opened = await workspaces.targetFromNotification(request, account: account.account) else {
             return
         }
-        guard !opened.peer.isEmpty, !opened.chat.id.isEmpty else { return }
-        if let folder = opened.folder {
-            navigation.openChat(folderID: folder.id, chatID: opened.chat.id)
-        } else {
-            navigation.presentedChat = PresentedChat(
-                peer: opened.peer,
-                workspaceID: opened.chat.workspaceID,
-                folderName: "Workspace",
-                hostName: opened.hostName,
-                chatID: opened.chat.id
-            )
+        switch opened {
+        case let .session(session):
+            workspaces.openSession(session)
+        case let .chat(peer, hostName, folder, chat):
+            guard !peer.isEmpty, !chat.id.isEmpty else { return }
+            if let folder {
+                navigation.openChat(folderID: folder.id, chatID: chat.id)
+            } else {
+                navigation.presentedChat = PresentedChat(
+                    peer: peer,
+                    workspaceID: chat.workspaceID,
+                    folderName: "Workspace",
+                    hostName: hostName,
+                    chatID: chat.id
+                )
+            }
         }
     }
 

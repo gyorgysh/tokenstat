@@ -118,6 +118,27 @@ extension View {
                 }
         }
     }
+
+    /// Pin chrome to the bottom of the screen, including the home indicator.
+    ///
+    /// iOS 26's `safeAreaBar` is the tab bar's treatment: Liquid Glass the
+    /// transcript can peek through, drawn into the safe area rather than
+    /// leaving a slab of material under the composer. Below 26 there is no
+    /// such bar, so the inset keeps a panel fill and a hairline.
+    @ViewBuilder
+    func clientBottomBar<Bar: View>(@ViewBuilder bar: () -> Bar) -> some View {
+        if #available(iOS 26, *) {
+            safeAreaBar(edge: .bottom, spacing: 0, content: bar)
+        } else {
+            safeAreaInset(edge: .bottom, spacing: 0) {
+                bar()
+                    .background(Theme.panel)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Theme.border).frame(height: 1)
+                    }
+            }
+        }
+    }
 }
 
 /// Section title with the same FeatureMark cards use on the Mac.

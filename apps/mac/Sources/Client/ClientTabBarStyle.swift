@@ -34,6 +34,10 @@ enum ClientTabBarHost {
     /// actually takes it off the screen.
     static func setHidden(_ hidden: Bool, from start: UIViewController, animated: Bool) {
         guard let tabs = controller(from: start) else { return }
+        setHidden(hidden, on: tabs, animated: animated)
+    }
+
+    static func setHidden(_ hidden: Bool, on tabs: UITabBarController, animated: Bool) {
         if #available(iOS 18, *) {
             if tabs.isTabBarHidden != hidden {
                 tabs.setTabBarHidden(hidden, animated: animated)
@@ -114,10 +118,18 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
         /// Restore only what this instance hid, so tearing down a visible
         /// screen cannot unhide a later one that still wants it gone.
         private var hidByUs = false
+        /// Held because teardown walks the parent chain after this view has
+        /// left the window, and `controller(from:)` then returns nil. Back
+        /// from a conversation would leave the floating bar gone.
+        private weak var tabs: UITabBarController?
 
         override func didMove(toParent parent: UIViewController?) {
             super.didMove(toParent: parent)
-            apply(animated: false)
+            if parent == nil {
+                restore()
+            } else {
+                apply(animated: false)
+            }
         }
 
         override func viewDidAppear(_ animated: Bool) {
@@ -125,16 +137,28 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
             apply(animated: false)
         }
 
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            if parent == nil || view.window == nil {
+                restore()
+            }
+        }
+
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
             // SwiftUI's toolbar hide can put the bar back as a pill after
             // we have already removed it. Re-assert while we still want it
-            // gone. Cheap when the state already matches.
+            // gone. Cheap when the state already matches. Skip once this
+            // view has left, or a disappearing layout pass hides it again
+            // after restore.
+            guard parent != nil, view.window != nil else { return }
             apply(animated: false)
         }
 
         func apply(animated: Bool) {
-            guard let tabs = ClientTabBarHost.controller(from: self) else { return }
+            guard parent != nil else { return }
+            guard let tabs = ClientTabBarHost.controller(from: self) ?? tabs else { return }
+            self.tabs = tabs
             let reportedHidden: Bool
             if #available(iOS 18, *) {
                 reportedHidden = tabs.isTabBarHidden
@@ -155,15 +179,16 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
                 if hidden { hidByUs = true }
                 return
             }
-            ClientTabBarHost.setHidden(hidden, from: self, animated: animated)
+            ClientTabBarHost.setHidden(hidden, on: tabs, animated: animated)
             hidByUs = hidden
         }
 
         func restore() {
             guard hidByUs else { return }
-            hidden = false
             hidByUs = false
-            ClientTabBarHost.setHidden(false, from: self, animated: false)
+            if let tabs = tabs ?? ClientTabBarHost.controller(from: self) {
+                ClientTabBarHost.setHidden(false, on: tabs, animated: false)
+            }
         }
     }
 }

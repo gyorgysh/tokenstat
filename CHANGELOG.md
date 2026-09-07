@@ -15,19 +15,38 @@ at the end.
 
 ### Added
 
-- Tapping a chat notification opens that conversation. On a Mac it brings
-  the window forward and selects the thread. On iPhone and iPad it opens
-  the thread. The push still names only the machine.
+- Tapping a notification opens the work that needs you. A terminal waiting
+  on a permission prompt or a gate opens that session. Otherwise the chat
+  that finished, or is waiting, opens. On a Mac it brings the window
+  forward. On iPhone and iPad it opens over the app. The push still names
+  only the machine.
+- Send while a turn is still running queues the next message. The queue
+  sits above the composer, can be edited or removed, and Send now stops
+  the current turn so that message goes out next.
+- Sessions on iPhone has the branch picker and the bypass switch the Mac
+  already shows. A launch from the phone can skip permission prompts the
+  same way.
 
 ### Changed
 
 - Account, This device, opens with Notifications. The switch used to sit
   under the cache, below the fold on a phone.
+- A file the agent edits is one card named after the file, not an Edit
+  tool row plus a second copy of the same patch. A later change of that
+  file in the same turn is marked 2nd change.
+- Sending a chat message on iPhone hides the keyboard and jumps to the
+  latest turn, so the reply is not sitting above a closed keyboard.
+- The composer floats on the same glass as the tab bar, including the
+  home-indicator edge, so the lower end is not a grey strip.
+- Jump to latest is a larger control, easier to press over a moving
+  transcript.
 
 ### Fixed
 
 - Tapping a chat notification on iPhone no longer closes the app. A missing
   host or an empty recents list lands on Workspaces.
+- Back from a conversation left the floating tab bar hidden, so Workspaces
+  had no tabs to switch with.
 
 ## [1.0.0] - 2026-09-07
 

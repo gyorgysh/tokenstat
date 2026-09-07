@@ -207,6 +207,7 @@ final class ChatModel {
         instructions = nil
         events = []
         forgetWindow()
+        loadQueue(for: chat?.id)
         #if os(macOS)
         if let chat { RunNotifications.shared.chatAttentionHandled(id: chat.id) }
         #endif
@@ -226,6 +227,9 @@ final class ChatModel {
             ClientChatReadState.shared.markRead(peer: peer, chat: selected ?? chat)
         }
         #endif
+        if selectionMatches(id: chat.id, generation: generation) {
+            await drainQueue()
+        }
     }
 
     /// Bring an already open conversation up to date without emptying it.
@@ -469,29 +473,106 @@ final class ChatModel {
     /// Send on this; without it a double-tap re-sent the same attachments,
     /// which image-only sends made reachable.
     private(set) var sending = false
+    /// Messages waiting for the open turn to finish. Kept per conversation so
+    /// leaving the thread and coming back still has them.
+    private(set) var queued: [ChatQueuedMessage] = []
+    private var queuedConversationID: String?
+    private static let queueCap = 20
+    private static let queueKeyPrefix = "chat.queuedMessages.v1."
 
-    func send(_ text: String) async {
-        guard let selected, !sending else { return }
+    /// Queue a message for when the current turn ends. The composer stays
+    /// usable mid-turn: the host will not take a second send until this one
+    /// finishes, so the words wait here.
+    @discardableResult
+    func enqueue(_ text: String, atFront: Bool = false) -> ChatQueuedMessage? {
+        guard selected != nil else { return nil }
+        if queued.count >= Self.queueCap {
+            error = "Already \(Self.queueCap) messages waiting."
+            return nil
+        }
+        let item = ChatQueuedMessage(
+            id: UUID().uuidString,
+            text: text,
+            attachments: attachments
+        )
+        if atFront {
+            queued.insert(item, at: 0)
+        } else {
+            queued.append(item)
+        }
+        attachments = []
+        attachmentPreviews = [:]
+        persistQueue()
+        return item
+    }
+
+    func updateQueued(_ item: ChatQueuedMessage, text: String) {
+        guard let index = queued.firstIndex(where: { $0.id == item.id }) else { return }
+        queued[index].text = text
+        persistQueue()
+    }
+
+    func removeQueued(_ item: ChatQueuedMessage) {
+        queued.removeAll { $0.id == item.id }
+        persistQueue()
+    }
+
+    /// Stop the current turn and send this queued message as soon as the
+    /// host will take it. Remaining queued items stay waiting.
+    func sendNow(_ item: ChatQueuedMessage) async {
+        if let index = queued.firstIndex(where: { $0.id == item.id }) {
+            queued.remove(at: index)
+        }
+        queued.insert(item, at: 0)
+        persistQueue()
+        if busy {
+            await stop()
+            for _ in 0..<80 {
+                if !busy, !sending { break }
+                await poll()
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        await drainQueue()
+    }
+
+    func drainQueue() async {
+        guard !busy, !sending, let item = queued.first else { return }
+        queued.removeFirst()
+        persistQueue()
+        let ok = await send(item.text, attachmentIDs: item.attachments.map(\.id))
+        if !ok {
+            queued.insert(item, at: 0)
+            persistQueue()
+        }
+    }
+
+    @discardableResult
+    func send(_ text: String, attachmentIDs: [String]? = nil) async -> Bool {
+        guard let selected, !sending else { return false }
         sending = true
         defer { sending = false }
         let generation = selectionGeneration
-        let attachmentIDs = attachments.map(\.id)
+        let ids = attachmentIDs ?? attachments.map(\.id)
         do {
             let updated = try await Bridge.sendChat(
                 id: selected.id,
                 text: text,
-                attachmentIDs: attachmentIDs,
+                attachmentIDs: ids,
                 peer: peer
             )
-            guard selectionMatches(id: updated.id, generation: generation) else { return }
+            guard selectionMatches(id: updated.id, generation: generation) else { return false }
             replace(updated)
-            attachments = []
-            attachmentPreviews = [:]
+            let sent = Set(ids)
+            attachments.removeAll { sent.contains($0.id) }
+            for id in sent { attachmentPreviews.removeValue(forKey: id) }
             await loadEvents(id: updated.id, reset: false, generation: generation)
+            return true
         } catch {
             if selectionMatches(id: selected.id, generation: generation) {
                 self.error = error.localizedDescription
             }
+            return false
         }
     }
 
@@ -684,8 +765,11 @@ final class ChatModel {
 
     private func computeHasRunningTool() -> Bool {
         let value = displayItems.contains { item in
-            if case let .tool(state) = item.kind { return state.running }
-            return false
+            switch item.kind {
+            case let .tool(state): return state.running
+            case let .edit(state): return state.running
+            default: return false
+            }
         }
         hasRunningToolCacheKey = displayKey
         hasRunningToolCacheValue = value
@@ -744,8 +828,11 @@ final class ChatModel {
     /// True while a tool is actually running, as opposed to the agent thinking.
     var isRunningTool: Bool {
         displayItems.contains { item in
-            if case let .tool(state) = item.kind { return state.running }
-            return false
+            switch item.kind {
+            case let .tool(state): return state.running
+            case let .edit(state): return state.running
+            default: return false
+            }
         }
     }
 
@@ -1265,6 +1352,33 @@ final class ChatModel {
         return try? JSONDecoder().decode(LaunchChoice.self, from: data)
     }
 
+    private func loadQueue(for id: String?) {
+        persistQueue()
+        queuedConversationID = id
+        guard let id else {
+            queued = []
+            return
+        }
+        if let data = UserDefaults.standard.data(forKey: Self.queueKeyPrefix + id),
+           let items = try? JSONDecoder().decode([ChatQueuedMessage].self, from: data) {
+            queued = items
+        } else {
+            queued = []
+        }
+    }
+
+    private func persistQueue() {
+        guard let id = queuedConversationID else { return }
+        let key = Self.queueKeyPrefix + id
+        if queued.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+            return
+        }
+        if let data = try? JSONEncoder().encode(queued) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
     private func saveLaunchChoice(from chat: ChatConversation) {
         let choice = LaunchChoice(
             backend: chat.backend,
@@ -1297,14 +1411,11 @@ struct ChatToolState: Equatable {
     var snippet: [String]
 
     var duration: String? {
-        guard let endedAtMs else { return nil }
-        let ms = max(0, endedAtMs - startedAtMs)
-        if ms < 1000 { return "\(ms)ms" }
-        let seconds = Double(ms) / 1000
-        if seconds < 10 {
-            return String(format: "%.1fs", seconds)
-        }
-        return "\(Int(seconds.rounded()))s"
+        ChatClock.duration(from: startedAtMs, to: endedAtMs)
+    }
+
+    static func isFileEditVerb(_ verb: String) -> Bool {
+        verb == "Edit" || verb == "NotebookEdit"
     }
 
     /// Display lines for one detail string, split once. See `snippet`.
@@ -1374,6 +1485,106 @@ struct ChatToolState: Equatable {
     private static let snippetColumnCap = 600
 }
 
+/// A file the agent changed. One card, not a tool row plus a second copy.
+struct ChatEditState: Equatable {
+    var path: String
+    var added: UInt32
+    var removed: UInt32
+    var patch: String
+    /// 1-based count of this path since the last user message. 2 means this
+    /// file was already edited earlier in the same turn.
+    var revision: Int
+    var running: Bool
+    var failed: Bool
+    var startedAtMs: Int64
+    var endedAtMs: Int64?
+
+    var duration: String? {
+        ChatClock.duration(from: startedAtMs, to: endedAtMs)
+    }
+
+    var fileName: String {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return name.isEmpty ? path : name
+    }
+
+    /// Last two folders of the parent path, enough to tell two same-named
+    /// files apart without drawing the whole absolute path as the title.
+    var location: String {
+        let folder = (path as NSString).deletingLastPathComponent
+        let last = (folder as NSString).lastPathComponent
+        let grand = ((folder as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        if last.isEmpty || last == "/" { return "" }
+        if grand.isEmpty || grand == "/" { return last }
+        return "\(grand)/\(last)"
+    }
+
+    /// Nil on the first change of a file in a turn. Later ones name themselves.
+    var changeLabel: String? {
+        guard revision >= 2 else { return nil }
+        return "\(ChatClock.ordinal(revision)) change"
+    }
+
+    mutating func applyPatch(added: UInt32, removed: UInt32, patch: String) {
+        if added > 0 { self.added = added }
+        if removed > 0 { self.removed = removed }
+        if !patch.isEmpty { self.patch = patch }
+        recountIfNeeded()
+    }
+
+    mutating func applyDetail(_ detail: String?) {
+        guard patch.isEmpty, let detail, !detail.isEmpty else { return }
+        patch = detail
+        recountIfNeeded()
+    }
+
+    mutating func recountIfNeeded() {
+        guard added == 0, removed == 0, !patch.isEmpty else { return }
+        var plus: UInt32 = 0
+        var minus: UInt32 = 0
+        for line in patch.split(separator: "\n", omittingEmptySubsequences: false) {
+            let shown = String(line)
+            guard ChatToolState.isDiffLine(shown), let first = shown.first else { continue }
+            if first == "+" { plus += 1 }
+            if first == "-" { minus += 1 }
+        }
+        added = plus
+        removed = minus
+    }
+}
+
+enum ChatClock {
+    static func duration(from startedAtMs: Int64, to endedAtMs: Int64?) -> String? {
+        guard let endedAtMs else { return nil }
+        let ms = max(0, endedAtMs - startedAtMs)
+        if ms < 1000 { return "\(ms)ms" }
+        let seconds = Double(ms) / 1000
+        if seconds < 10 {
+            return String(format: "%.1fs", seconds)
+        }
+        return "\(Int(seconds.rounded()))s"
+    }
+
+    static func ordinal(_ value: Int) -> String {
+        let mod100 = value % 100
+        let mod10 = value % 10
+        if (11...13).contains(mod100) { return "\(value)th" }
+        switch mod10 {
+        case 1: return "\(value)st"
+        case 2: return "\(value)nd"
+        case 3: return "\(value)rd"
+        default: return "\(value)th"
+        }
+    }
+}
+
+/// A message waiting for the current turn to finish.
+struct ChatQueuedMessage: Identifiable, Equatable, Codable {
+    var id: String
+    var text: String
+    var attachments: [ChatAttachment]
+}
+
 /// Equatable so a transcript can skip the rows that did not move. A chat
 /// redraws whenever anything about it changes, and without this every visible
 /// row rebuilds itself because one of them grew by a word.
@@ -1390,7 +1601,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
         case handoff(to: String, brief: String)
         case thinking(String)
         case tool(ChatToolState)
-        case edit(path: String, added: UInt32, removed: UInt32, patch: String)
+        case edit(ChatEditState)
         case attachment(ChatAttachment)
         case approval(ChatApproval)
         case usage(input: UInt64, output: UInt64, cost: Double?)
@@ -1423,6 +1634,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
         var thinking = ""
         var thinkingID = ""
         var lastBackend: String?
+        var editRevisions: [String: Int] = [:]
 
         func flushText() {
             let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1449,23 +1661,59 @@ struct ChatDisplayItem: Identifiable, Equatable {
         }
 
         func closeRunningTools(failed: Bool, at: Int64?, detail: String?) {
-            for (_, index) in toolIndex {
-                guard case .tool(var state) = items[index].kind, state.running else { continue }
-                state.running = false
-                state.failed = failed
-                if state.detail == nil {
-                    state.detail = detail
-                    state.snippet = ChatToolState.makeSnippet(verb: state.verb, detail: detail)
+            for index in items.indices {
+                switch items[index].kind {
+                case .tool(var state) where state.running:
+                    state.running = false
+                    state.failed = failed
+                    if state.detail == nil {
+                        state.detail = detail
+                        state.snippet = ChatToolState.makeSnippet(verb: state.verb, detail: detail)
+                    }
+                    state.endedAtMs = at
+                    items[index] = ChatDisplayItem(id: items[index].id, kind: .tool(state))
+                case .edit(var state) where state.running:
+                    state.running = false
+                    state.failed = failed
+                    state.endedAtMs = at
+                    state.applyDetail(detail)
+                    items[index] = ChatDisplayItem(id: items[index].id, kind: .edit(state))
+                default:
+                    continue
                 }
-                state.endedAtMs = at
-                items[index] = ChatDisplayItem(id: items[index].id, kind: .tool(state))
             }
+        }
+
+        func nextEditRevision(_ path: String) -> Int {
+            let key = path
+            let n = (editRevisions[key] ?? 0) + 1
+            editRevisions[key] = n
+            return n
+        }
+
+        func matchingEditIndex(callId: String, path: String) -> Int? {
+            if !callId.isEmpty, let index = toolIndex[callId] { return index }
+            for index in items.indices.reversed() {
+                switch items[index].kind {
+                case let .edit(state) where state.running && (path.isEmpty || state.path == path):
+                    return index
+                case let .tool(state)
+                    where state.running
+                        && ChatToolState.isFileEditVerb(state.verb)
+                        && (path.isEmpty || state.target == path):
+                    return index
+                default:
+                    continue
+                }
+            }
+            return nil
         }
 
         for event in events {
             if event.kind == "user" {
                 flushText()
                 flushThinking()
+                editRevisions = [:]
                 items.append(
                     ChatDisplayItem(
                         id: "user-\(stamp(event, items.count))",
@@ -1544,33 +1792,97 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 let occurrence = (toolStarts[callId] ?? 0) + 1
                 toolStarts[callId] = occurrence
                 let rowID = occurrence == 1 ? "tool-\(callId)" : "tool-\(callId)#\(occurrence)"
-                let state = ChatToolState(
-                    callId: callId,
-                    verb: agent.verb ?? "Tool",
-                    // Same reason as the snippet: a shell "target" is the
-                    // whole command, and a heredoc makes that a document.
-                    // `lineLimit` bounds what is drawn, not what is measured.
-                    target: ChatToolState.clip(agent.target ?? ""),
-                    running: true,
-                    failed: false,
-                    detail: nil,
-                    startedAtMs: event.atMs ?? 0,
-                    endedAtMs: nil,
-                    snippet: []
-                )
+                let verb = agent.verb ?? "Tool"
+                let target = ChatToolState.clip(agent.target ?? "")
                 toolIndex[callId] = items.count
-                items.append(ChatDisplayItem(id: rowID, kind: .tool(state)))
+                if ChatToolState.isFileEditVerb(verb) {
+                    items.append(
+                        ChatDisplayItem(
+                            id: rowID,
+                            kind: .edit(
+                                ChatEditState(
+                                    path: target.isEmpty ? "File" : target,
+                                    added: 0,
+                                    removed: 0,
+                                    patch: "",
+                                    revision: nextEditRevision(target.isEmpty ? "File" : target),
+                                    running: true,
+                                    failed: false,
+                                    startedAtMs: event.atMs ?? 0,
+                                    endedAtMs: nil
+                                )
+                            )
+                        )
+                    )
+                } else {
+                    items.append(
+                        ChatDisplayItem(
+                            id: rowID,
+                            kind: .tool(
+                                ChatToolState(
+                                    callId: callId,
+                                    verb: verb,
+                                    // Same reason as the snippet: a shell "target"
+                                    // is the whole command, and a heredoc makes
+                                    // that a document. `lineLimit` bounds what
+                                    // is drawn, not what is measured.
+                                    target: target,
+                                    running: true,
+                                    failed: false,
+                                    detail: nil,
+                                    startedAtMs: event.atMs ?? 0,
+                                    endedAtMs: nil,
+                                    snippet: []
+                                )
+                            )
+                        )
+                    )
+                }
             case "toolEnd":
                 flushText()
                 flushThinking()
                 let callId = agent.callId ?? ""
-                if let index = toolIndex[callId], case .tool(var state) = items[index].kind {
-                    state.running = false
-                    state.failed = !(agent.ok ?? true)
-                    state.detail = agent.detail
-                    state.snippet = ChatToolState.makeSnippet(verb: state.verb, detail: agent.detail)
-                    state.endedAtMs = event.atMs
-                    items[index] = ChatDisplayItem(id: items[index].id, kind: .tool(state))
+                if let index = toolIndex[callId] {
+                    switch items[index].kind {
+                    case .tool(var state):
+                        state.running = false
+                        state.failed = !(agent.ok ?? true)
+                        state.detail = agent.detail
+                        state.snippet = ChatToolState.makeSnippet(verb: state.verb, detail: agent.detail)
+                        state.endedAtMs = event.atMs
+                        items[index] = ChatDisplayItem(id: items[index].id, kind: .tool(state))
+                    case .edit(var state):
+                        state.running = false
+                        state.failed = !(agent.ok ?? true)
+                        state.endedAtMs = event.atMs
+                        state.applyDetail(agent.detail)
+                        items[index] = ChatDisplayItem(id: items[index].id, kind: .edit(state))
+                    default:
+                        break
+                    }
+                } else if ChatToolState.isFileEditVerb(agent.verb ?? "") {
+                    let path = {
+                        let clipped = ChatToolState.clip(agent.target ?? "")
+                        return clipped.isEmpty ? "File" : clipped
+                    }()
+                    var state = ChatEditState(
+                        path: path,
+                        added: 0,
+                        removed: 0,
+                        patch: "",
+                        revision: nextEditRevision(path),
+                        running: false,
+                        failed: !(agent.ok ?? true),
+                        startedAtMs: event.atMs ?? 0,
+                        endedAtMs: event.atMs
+                    )
+                    state.applyDetail(agent.detail)
+                    items.append(
+                        ChatDisplayItem(
+                            id: "edit-\(callId.isEmpty ? stamp(event, items.count) : callId)",
+                            kind: .edit(state)
+                        )
+                    )
                 } else {
                     let fallback = callId.isEmpty ? "end-\(stamp(event, items.count))" : callId
                     let fallbackVerb = agent.verb ?? "Tool"
@@ -1596,17 +1908,52 @@ struct ChatDisplayItem: Identifiable, Equatable {
             case "edit":
                 flushText()
                 flushThinking()
-                items.append(
-                    ChatDisplayItem(
-                        id: "edit-\(agent.callId ?? agent.path ?? stamp(event, items.count))",
-                        kind: .edit(
-                            path: agent.path ?? "File",
-                            added: agent.added ?? 0,
-                            removed: agent.removed ?? 0,
-                            patch: agent.patch ?? ""
+                let callId = agent.callId ?? ""
+                let path = agent.path ?? "File"
+                let added = agent.added ?? 0
+                let removed = agent.removed ?? 0
+                let patch = agent.patch ?? ""
+                if let index = matchingEditIndex(callId: callId, path: path) {
+                    switch items[index].kind {
+                    case .edit(var state):
+                        state.applyPatch(added: added, removed: removed, patch: patch)
+                        if state.path == "File", !path.isEmpty { state.path = path }
+                        items[index] = ChatDisplayItem(id: items[index].id, kind: .edit(state))
+                    case .tool:
+                        var state = ChatEditState(
+                            path: path,
+                            added: added,
+                            removed: removed,
+                            patch: patch,
+                            revision: nextEditRevision(path),
+                            running: false,
+                            failed: false,
+                            startedAtMs: event.atMs ?? 0,
+                            endedAtMs: nil
                         )
+                        state.recountIfNeeded()
+                        items[index] = ChatDisplayItem(id: items[index].id, kind: .edit(state))
+                    default:
+                        break
+                    }
+                    if !callId.isEmpty { toolIndex[callId] = index }
+                } else {
+                    var state = ChatEditState(
+                        path: path,
+                        added: added,
+                        removed: removed,
+                        patch: patch,
+                        revision: nextEditRevision(path),
+                        running: false,
+                        failed: false,
+                        startedAtMs: event.atMs ?? 0,
+                        endedAtMs: nil
                     )
-                )
+                    state.recountIfNeeded()
+                    let rowID = "edit-\(callId.isEmpty ? (agent.path ?? stamp(event, items.count)) : callId)"
+                    if !callId.isEmpty { toolIndex[callId] = items.count }
+                    items.append(ChatDisplayItem(id: rowID, kind: .edit(state)))
+                }
             case "attachment":
                 flushText()
                 flushThinking()

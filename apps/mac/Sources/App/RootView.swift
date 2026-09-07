@@ -2820,9 +2820,16 @@ struct RootView: View {
         }
     }
 
-    /// A tap on a chat notification. The conversation id is local: this Mac
-    /// wrote it, and nothing about the thread left the machine.
+    /// A tap on a notification. A terminal that is waiting on the person
+    /// wins: that is the thing holding the work up. Chat is the fallback
+    /// when no session needs them.
     private func openFromNotification(_ request: NotificationOpen.Request) {
+        if let session = sessionMatching(request) {
+            openSection(.sessions, in: session.workspaceID) {
+                terminals.select(session)
+            }
+            return
+        }
         guard request.kind == .chat, let conversationID = request.conversationID, !conversationID.isEmpty else { return }
         let folderID = request.workspaceID.flatMap { workspaceID in
             workspaces.folders.first { $0.id == workspaceID }?.id
@@ -2843,6 +2850,16 @@ struct RootView: View {
                 await chat.select(conversation)
             }
         }
+    }
+
+    /// The session a banner is about, or the one currently waiting.
+    private func sessionMatching(_ request: NotificationOpen.Request) -> TerminalSession? {
+        if let id = request.sessionID, !id.isEmpty,
+           let session = terminals.sessions.first(where: { $0.id == id })
+        {
+            return session
+        }
+        return terminals.sessions.first { $0.state == .needsAttention }
     }
 
     /// Answer a `NavigationRequest` from a screen that does not know the shell.

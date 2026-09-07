@@ -154,8 +154,8 @@ struct ChatEventRow: View {
                 running: state.running,
                 failed: state.failed
             )
-        case let .edit(path, added, removed, patch):
-            ChatEditRow(path: path, added: added, removed: removed, patch: patch)
+        case let .edit(state):
+            ChatFileEditRow(state: state)
         case let .attachment(attachment):
             // Stable identity across attachment polls: the revision prop
             // still redraws the row through Equatable when bytes arrive, but
@@ -451,106 +451,6 @@ struct ChatWorkingIndicator: View {
     /// The mood names itself. One list, so a state added to the character
     /// cannot arrive in the transcript still calling itself "Thinking".
     private var label: String { mood.label }
-}
-
-/// Path and +n −m, expanding into the shared DiffBody rather than a second
-/// renderer. The patch is a chat preview, not a git hunk.
-private struct ChatEditRow: View {
-    let path: String
-    let added: UInt32
-    let removed: UInt32
-    let patch: String
-    @State private var expanded = false
-    /// The parsed patch, and how many lines it left out.
-    ///
-    /// Held rather than computed. `FileDiff.fromEditPatch` walks the whole
-    /// patch, and this was calling it from `body`: an open edit re-parsed
-    /// itself on every measuring pass the transcript's lazy stack made over
-    /// the row, which during a scroll is once a frame. Parsed on the press
-    /// instead, and again only if the patch itself changes.
-    @State private var shown: (diff: FileDiff, cut: Int)?
-    /// The expanded patch as one colored text. Built with `shown`, for the
-    /// same reason: hundreds of per-line rows re-stamp through the graph on
-    /// every measuring pass, one text measures once.
-    @State private var shownText: AttributedString?
-
-    /// How much of a diff a card in a transcript draws.
-    ///
-    /// `DiffBody` is a `LazyVStack`, but a lazy stack inside a horizontally
-    /// scrolling container has no vertical viewport to be lazy against, so
-    /// every line it holds is built and measured whether or not anybody can
-    /// see it. A thousand-line edit inside a row is a thousand rows inside a
-    /// row. The rest is a line saying how much was left.
-    private static let lineCap = 200
-
-    private func parse() {
-        shown = FileDiff.fromEditPatch(path: path, patch: patch)
-            .clipped(toLines: Self.lineCap)
-        shownText = diffColoredText(patch, lineLimit: Self.lineCap).text
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            // Centre, not `.firstTextBaseline`. A stack with an explicit
-            // alignment cannot resolve it from sizes: it asks every child for
-            // a baseline guide, and a child that is itself a stack has to
-            // place all of *its* children to answer, which recurses through
-            // the whole nest. In a transcript row that runs on every measuring
-            // pass the lazy stack makes, and a live sample of a stopped
-            // application had `ViewLayoutEngine.explicitAlignment` as its
-            // hottest frame by a distance. Centring is read off the size.
-            HStack(alignment: .center, spacing: Theme.Space.s) {
-                Image(systemName: "square.and.pencil")
-                    .font(Theme.font(12, weight: .medium))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 16)
-                Text(path)
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                DiffStat(
-                    added: Int(added),
-                    removed: Int(removed),
-                    font: Theme.mono(11, weight: .medium)
-                )
-                if !patch.isEmpty {
-                    Button(expanded ? "Hide edit" : "Show edit", .preview) {
-                        if shown == nil { parse() }
-                        expanded.toggle()
-                    }
-                    .buttonStyle(AccentButtonStyle(small: true))
-                    .fixedSize()
-                }
-            }
-            if expanded, let shown, let shownText {
-                Text(shownText)
-                    .font(Theme.mono(11))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.Space.xs)
-                    .background(Theme.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                if shown.cut > 0 {
-                    Text("… \(shown.cut) more lines")
-                        .font(Theme.mono(11))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-        .onChange(of: patch) { _, _ in
-            // A turn still being written grows its own patch. Re-read it only
-            // while it is open, so a closed card costs nothing per token.
-            if expanded { parse() } else { shown = nil; shownText = nil }
-        }
-        .padding(Theme.Space.s)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
-        }
-    }
 }
 
 /// The point where a conversation changed hands.

@@ -435,7 +435,12 @@ struct ClientWorkspaceChangesView: View {
                     }
                 }
                 if let git = current.git, git.isRepo {
-                    branchCard(git)
+                    ClientBranchCard(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        git: git,
+                        onChanged: { await load() }
+                    )
                 }
                 if files.isEmpty {
                     ClientSectionEmpty(
@@ -479,11 +484,23 @@ struct ClientWorkspaceChangesView: View {
         }
     }
 
-    private func branchCard(_ git: GitStatus) -> some View {
+}
+
+/// The branch this folder is on, and the way to switch it.
+///
+/// Same control the Mac workspace header carries. The phone has no header
+/// chip, so Sessions and Changes both draw this card.
+struct ClientBranchCard: View {
+    let peer: String
+    let workspaceID: String
+    let git: GitStatus
+    let onChanged: () async -> Void
+
+    var body: some View {
         BranchPickerPresentation(
             workspaceID: "remote:\(peer):\(workspaceID)",
             currentBranch: git.branch,
-            onChanged: { await load() }
+            onChanged: onChanged
         ) {
             HStack(spacing: Theme.Space.s) {
                 ZStack {
@@ -497,8 +514,10 @@ struct ClientWorkspaceChangesView: View {
                     Text("Branch").font(ClientType.caption).foregroundStyle(.secondary)
                     Text(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")
                         .font(ClientType.label.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 if git.ahead > 0 {
                     Text("⇡\(git.ahead)").font(ClientType.rowFigure).foregroundStyle(Theme.accent)
                 }
@@ -510,7 +529,7 @@ struct ClientWorkspaceChangesView: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
             .cardSurface()
         }
     }

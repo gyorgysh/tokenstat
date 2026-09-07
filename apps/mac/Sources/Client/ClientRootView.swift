@@ -251,7 +251,7 @@ struct ClientRootView: View {
             store.showPaywall = true
         }
         .onChange(of: notificationOpen.request, initial: true) { _, request in
-            guard request?.kind == .chat else { return }
+            guard request?.kind == .chat || request?.kind == .session else { return }
             if navigation.destination != .workspaces {
                 navigation.destination = .workspaces
             }

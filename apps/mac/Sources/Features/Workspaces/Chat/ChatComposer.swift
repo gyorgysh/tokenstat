@@ -18,6 +18,7 @@ struct ChatComposer: View {
     var running: Bool
     var placeholder: String
     var onSend: () -> Void
+    var onSendNow: () -> Void = {}
     var onStop: () -> Void
     var onAttach: (ChatInboxItem) async -> Void
     var onRemove: (ChatAttachment) -> Void
@@ -70,11 +71,17 @@ struct ChatComposer: View {
                         .buttonStyle(DestructiveButtonStyle(small: true))
                         .environment(\.compactActions, true)
                         .keyboardShortcut(.cancelAction)
-                } else {
-                    Button("Send", .send) { onSend() }
+                }
+                if !cannotSend {
+                    Button(running ? "Send after this turn" : "Send", .send, action: onSend)
                         .buttonStyle(AccentButtonStyle(small: true))
                         .environment(\.compactActions, true)
-                        .disabled(cannotSend)
+                        .help(running ? "Waits until this turn finishes. Stop and send now is on the queued message." : "Send")
+                        .contextMenu {
+                            if running {
+                                Button("Stop and send now", .send, action: onSendNow)
+                            }
+                        }
                 }
             }
         }
@@ -149,7 +156,6 @@ struct ChatComposer: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         #endif
-        .disabled(running)
         .help("Attach files or images")
         .accessibilityLabel("Attach")
     }
@@ -160,7 +166,7 @@ struct ChatComposer: View {
             text: $draft,
             selection: $selection,
             placeholder: placeholder,
-            enabled: !running,
+            enabled: !model.sending,
             onSend: {
                 if !cannotSend { onSend() }
             },
@@ -209,8 +215,7 @@ struct ChatComposer: View {
     }
 
     private var cannotSend: Bool {
-        running
-            || model.sending
+        model.sending
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
     }
 

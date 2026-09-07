@@ -45,6 +45,12 @@ struct ClientWorkspaceSessionsView: View {
     /// False until the first `pty.list` and catalog answer land. An empty list
     /// and an unasked question look identical and mean opposite things.
     @State private var loaded = false
+    /// Fresh git state for the branch chip. The folder this screen was
+    /// pushed with is a seed, and a checkout on this surface has to show.
+    @State private var liveFolder: WorkspaceFolder?
+    /// Whether the next launch from this phone skips permission prompts.
+    /// Remembered per folder on this device, same key the Mac uses.
+    @State private var bypassOn = false
     /// How many launch tiles this host had last time, so the grid opens at the
     /// size it will end up. Without it the row painted one Shell tile and then
     /// jumped to eight when the catalog answered.
@@ -84,6 +90,7 @@ struct ClientWorkspaceSessionsView: View {
                     }
                 }
 
+                sessionChrome
                 openCard
                 launchCard
                 sessionsCard
@@ -101,6 +108,9 @@ struct ClientWorkspaceSessionsView: View {
             // sharing one meant a pull here right after a pull there was
             // swallowed while the spinner said otherwise.
             await ClientRefresh.pull("workspace-sessions-\(workspaceID)") { await reload() }
+        }
+        .onAppear {
+            bypassOn = WorkspacePreference.bypassPermissions(for: folder.id)
         }
         .task {
             // A wireframe that cannot end is worse than the spinner it
@@ -202,6 +212,69 @@ struct ClientWorkspaceSessionsView: View {
             }
         }
         .sheet(isPresented: $showPort) { browserPortSheet }
+    }
+
+    private var git: GitStatus? { (liveFolder ?? folder).git }
+
+    /// Branch and bypass, the two controls the Mac keeps next to Launch.
+    /// A launch from this phone has to see the same switches or the next
+    /// agent starts on the wrong branch, or stops to ask for permission
+    /// the Mac would have skipped.
+    @ViewBuilder
+    private var sessionChrome: some View {
+        VStack(spacing: Theme.Space.s) {
+            if let git, git.isRepo {
+                ClientBranchCard(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    git: git,
+                    onChanged: { await reload() }
+                )
+            }
+            bypassCard
+        }
+    }
+
+    private var bypassCard: some View {
+        HStack(spacing: Theme.Space.s) {
+            ZStack {
+                RoundedRectangle(cornerRadius: Theme.Space.xs)
+                    .fill((bypassOn ? Theme.warning : Theme.accent).opacity(0.12))
+                    .frame(width: 32, height: 32)
+                Image(systemName: bypassOn ? "lock.open.fill" : "lock.fill")
+                    .foregroundStyle(bypassOn ? Theme.warning : Theme.accent)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Bypass")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                Text(bypassOn ? "On" : "Off")
+                    .font(ClientType.label.weight(.medium))
+            }
+            Spacer(minLength: 0)
+            Toggle(
+                "Bypass permissions",
+                isOn: Binding(
+                    get: { bypassOn },
+                    set: { next in
+                        bypassOn = next
+                        WorkspacePreference.setBypassPermissions(next, for: folder.id)
+                    }
+                )
+            )
+                .labelsHidden()
+                .tint(Theme.accent)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .cardSurface()
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(bypassOn ? "On" : "Off")
+        .accessibilityHint(
+            bypassOn
+                ? "Agents launched here run without asking for permission. Remembered for this folder."
+                : "Agents launched here ask before acting. Turn on to skip permission prompts."
+        )
     }
 
     private var openCard: some View {
@@ -519,6 +592,9 @@ struct ClientWorkspaceSessionsView: View {
             }
             catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
             adoptHostHidden()
+            if let status = try? await ClientRemote.status(peer: peer, workspace: workspaceID) {
+                liveFolder = status
+            }
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
@@ -601,11 +677,14 @@ struct ClientWorkspaceSessionsView: View {
         )
         openSession = pending
         do {
+            let args = bypassOn
+                ? profile.args + profile.bypassArgs
+                : profile.args
             let info = try await ClientRemote.ptySpawn(
                 peer: peer,
                 workspaceID: workspaceID,
                 command: profile.command,
-                args: profile.args,
+                args: args,
                 rows: 40,
                 cols: 100,
                 dark: dark

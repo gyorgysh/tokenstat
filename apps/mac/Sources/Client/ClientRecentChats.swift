@@ -248,6 +248,9 @@ struct ClientRecentChatView: View {
             }
         }
         .background(Theme.background)
+        // Same hide as a folder conversation. Back pops this whole screen
+        // to Workspaces, so restore has to run on the way out.
+        .clientTabBarHidden(true)
         .task {
             guard !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else {
                 loaded = true

@@ -30,12 +30,13 @@ import AppKit
 /// on first launch, for a feature nobody has asked for yet, is the reason
 /// people say no to notifications forever.
 
-/// A tap on a chat notification, waiting to be opened.
+/// A tap on a notification, waiting to be opened.
 ///
-/// Local Mac banners already know the conversation: they wrote the id. A
-/// phone push cannot: the payload is a reason and a machine, and the thread
-/// is looked up over the tunnel after the tap. Either way the destination
-/// lives here until the window that can open it has appeared.
+/// Local Mac banners already know the conversation or the session: they
+/// wrote the id. A phone push cannot: the payload is a reason and a
+/// machine, and the destination is looked up over the tunnel after the
+/// tap. A terminal that needs the person wins over chat. Either way the
+/// destination lives here until the window that can open it has appeared.
 @MainActor
 @Observable
 final class NotificationOpen {
@@ -44,13 +45,15 @@ final class NotificationOpen {
     struct Request: Equatable, Sendable {
         enum Kind: Equatable, Sendable {
             case chat
+            case session
         }
 
         var kind: Kind
-        var conversationID: String?
-        var workspaceID: String?
-        var machineID: String?
-        var waiting: Bool
+        var conversationID: String? = nil
+        var sessionID: String? = nil
+        var workspaceID: String? = nil
+        var machineID: String? = nil
+        var waiting: Bool = false
     }
 
     private(set) var request: Request?
@@ -104,18 +107,36 @@ final class NotificationOpen {
                 return nil
             }
         }
-        if string("kind", from: ts) == "chat" {
+        switch string("kind", from: ts) {
+        case "session":
+            return Request(
+                kind: .session,
+                sessionID: string("sessionId", from: ts),
+                workspaceID: string("workspaceId", from: ts),
+                waiting: true
+            )
+        case "chat":
             return Request(
                 kind: .chat,
                 conversationID: string("conversationId", from: ts),
                 workspaceID: string("workspaceId", from: ts),
                 waiting: bool("waiting", from: ts)
             )
+        default:
+            break
         }
         return parseIdentifier(identifier)
     }
 
     private nonisolated static func parseIdentifier(_ identifier: String) -> Request? {
+        if identifier.hasPrefix("run.session.") {
+            let rest = String(identifier.dropFirst("run.session.".count))
+            let suffix = ".Waiting for you"
+            guard rest.hasSuffix(suffix) else { return nil }
+            let id = String(rest.dropLast(suffix.count))
+            guard !id.isEmpty else { return nil }
+            return Request(kind: .session, sessionID: id, waiting: true)
+        }
         let prefix = "run.chat."
         guard identifier.hasPrefix(prefix) else { return nil }
         let rest = String(identifier.dropFirst(prefix.count))
@@ -500,12 +521,20 @@ final class RunNotifications {
     ///
     /// Nothing about the session travels: the name is the folder and the
     /// harness, which is what the sidebar already shows.
-    func attention(sessionID: String, name: String) {
+    func attention(sessionID: String, name: String, workspaceID: String = "") {
         guard isOn else { return }
+        var extras: [String: String] = [
+            "kind": "session",
+            "sessionId": sessionID,
+        ]
+        if !workspaceID.isEmpty {
+            extras["workspaceId"] = workspaceID
+        }
         post(
             "session.\(sessionID)",
             title: "Waiting for you",
-            body: "\(name) is asking a question."
+            body: "\(name) is asking a question.",
+            extras: extras
         )
     }
 

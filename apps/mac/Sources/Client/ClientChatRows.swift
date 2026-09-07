@@ -97,8 +97,8 @@ struct ClientChatEventRow: View {
                 running: state.running,
                 failed: state.failed
             )
-        case let .edit(path, added, removed, patch):
-            ClientChatEditRow(path: path, added: added, removed: removed, patch: patch)
+        case let .edit(state):
+            ChatFileEditRow(state: state)
         case let .attachment(attachment):
             // Same as the Mac: stable identity across polls. The revision
             // still redraws through Equatable; recreating collapsed the row.
@@ -280,80 +280,6 @@ private enum ClientChatImageDims {
         let aspect = (5...8).contains(orientation) ? height / width : width / height
         cache.setObject(NSNumber(value: aspect), forKey: key, cost: data.count)
         return aspect
-    }
-}
-
-private struct ClientChatEditRow: View {
-    let path: String
-    let added: UInt32
-    let removed: UInt32
-    let patch: String
-    @State private var expanded = false
-    /// The expanded patch as one colored text, built on press rather than in
-    /// `body`: parsing and hundreds of per-line rows on every evaluation is
-    /// what wedged transcripts mid-scroll.
-    @State private var shownText: AttributedString?
-    @State private var shownCut = 0
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            // Centre, not `.firstTextBaseline`. A stack with an explicit
-            // alignment cannot resolve it from sizes: it asks every child for
-            // a baseline guide, and a child that is itself a stack has to
-            // place all of *its* children to answer, which recurses through
-            // the whole nest. In a transcript row that runs on every measuring
-            // pass the lazy stack makes, and a live sample of a stopped
-            // application had `ViewLayoutEngine.explicitAlignment` as its
-            // hottest frame by a distance. Centring is read off the size.
-            HStack(alignment: .center, spacing: Theme.Space.s) {
-                Image(systemName: "square.and.pencil")
-                    .font(Theme.font(12, weight: .medium))
-                    .foregroundStyle(Theme.accent)
-                Text(path)
-                    .font(ClientType.code)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                DiffStat(
-                    added: Int(added),
-                    removed: Int(removed),
-                    font: ClientType.diffFigure
-                )
-                if !patch.isEmpty {
-                    Button(expanded ? "Hide edit" : "Show edit", .preview) {
-                        if expanded {
-                            shownText = nil
-                        } else {
-                            let rendered = diffColoredText(patch, lineLimit: 200)
-                            shownText = rendered.text
-                            shownCut = rendered.cut
-                        }
-                        expanded.toggle()
-                    }
-                    .clientGlassStyle()
-                    .controlSize(.small)
-                    .fixedSize()
-                }
-            }
-            if expanded, let shownText {
-                Text(shownText)
-                    .font(Theme.mono(11))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.Space.s)
-                    .background(Theme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                if shownCut > 0 {
-                    Text("… \(shownCut) more lines")
-                        .font(Theme.mono(11))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
     }
 }
 
