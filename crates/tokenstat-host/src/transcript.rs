@@ -693,6 +693,40 @@ fn events_claude(value: &Value) -> Vec<Event> {
             })
             .unwrap_or_default();
     }
+    if kind == Some("user") {
+        let content = value
+            .pointer("/message/content")
+            .or_else(|| value.get("content"));
+        return content
+            .and_then(Value::as_array)
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|block| {
+                        if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+                            return None;
+                        }
+                        let call_id = block
+                            .get("tool_use_id")
+                            .or_else(|| block.get("toolUseId"))
+                            .and_then(Value::as_str)?;
+                        if call_id.is_empty() {
+                            return None;
+                        }
+                        let ok = !block
+                            .get("is_error")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        Some(Event::ToolEnd {
+                            call_id: call_id.to_string(),
+                            ok,
+                            detail: claude_tool_result_detail(block),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
     if kind == Some("result") {
         let mut events = event_text(value.get("result").and_then(Value::as_str));
         events.extend(event_usage(value));
@@ -718,6 +752,40 @@ fn claude_assistant_text(value: &Value) -> Option<String> {
         .filter_map(|block| block.get("text").and_then(Value::as_str))
         .collect::<String>();
     (!text.is_empty()).then_some(text)
+}
+
+/// Detail for one Claude `tool_result` block.
+///
+/// `content` is polymorphic: a plain string, a list of content blocks
+/// (`{"type":"text","text":"..."}` plus images/documents the timeline has
+/// no use for), or nothing. Join the text parts so a Bash row shows its
+/// stdout instead of spinning until the turn ends.
+fn claude_tool_result_detail(block: &Value) -> Option<String> {
+    match block.get("content") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(text)) => (!text.is_empty()).then(|| text.clone()),
+        Some(Value::Array(parts)) => {
+            let mut texts = Vec::new();
+            for part in parts {
+                if let Some(text) = part.as_str() {
+                    if !text.is_empty() {
+                        texts.push(text.to_string());
+                    }
+                } else if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    if !text.is_empty() {
+                        texts.push(text.to_string());
+                    }
+                }
+            }
+            (!texts.is_empty()).then(|| texts.join("\n"))
+        }
+        Some(other) => {
+            if let Some(text) = other.as_str().filter(|text| !text.is_empty()) {
+                return Some(text.to_string());
+            }
+            None
+        }
+    }
 }
 
 fn events_cursor(value: &Value) -> Vec<Event> {
@@ -2610,6 +2678,44 @@ mod tests {
                 Event::ToolEnd { call_id, ok: true, .. } if call_id == "read-1"
             )),
             "{events:?}"
+        );
+    }
+
+    #[test]
+    fn claude_tool_result_ends_the_call() {
+        let raw = concat!(
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"grep -rn x"}}]}}"#,
+            "\n",
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"total 2\nREADME.md\n"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"ls"}}]}}"#,
+            "\n",
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":[{"type":"text","text":"Task done"}],"is_error":true}]}}"#,
+            "\n",
+        );
+        let mut parser = Parser::new("claude");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, ok: true, detail: Some(detail) }
+                    if call_id == "toolu_1" && detail.contains("README.md")
+            )),
+            "{events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, ok: false, detail: Some(detail) }
+                    if call_id == "toolu_2" && detail.contains("Task done")
+            )),
+            "{events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::Done { .. })),
+            "a tool result is not a turn outcome: {events:?}"
         );
     }
 
