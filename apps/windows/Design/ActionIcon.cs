@@ -24,7 +24,7 @@ internal enum ActionIcon
     Run, Stop, History, Move, Archive, Restore, Browser, Collapse, Commit,
     Merge, Comment, Reopen, Checkout, Filter, Diff,
     Delete,
-    External, Next, Back, More, Search, Reveal, Docs, Source, Profile, Home, Help,
+    External, Next, Latest, Back, More, Search, Reveal, Docs, Source, Profile, Home, Help,
     Send, Attach, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
 }
@@ -75,6 +75,7 @@ internal static class ActionIconGlyph
         ActionIcon.Browser => Microsoft.UI.Xaml.Controls.Symbol.Globe,
         ActionIcon.Delete => Microsoft.UI.Xaml.Controls.Symbol.Delete,
         ActionIcon.External or ActionIcon.Next => Microsoft.UI.Xaml.Controls.Symbol.Forward,
+        ActionIcon.Latest => Microsoft.UI.Xaml.Controls.Symbol.Down,
         ActionIcon.Back => Microsoft.UI.Xaml.Controls.Symbol.Back,
         ActionIcon.More => Microsoft.UI.Xaml.Controls.Symbol.More,
         ActionIcon.Search => Microsoft.UI.Xaml.Controls.Symbol.Find,

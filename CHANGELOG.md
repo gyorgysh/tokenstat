@@ -42,8 +42,9 @@ at the end.
   latest turn, so the reply is not sitting above a closed keyboard.
 - The composer floats on the same glass as the tab bar, including the
   home-indicator edge, so the lower end is not a grey strip.
-- Jump to latest, Following and Follow share one themed capsule, easier
-  to press over a moving transcript. Following is no longer a grey pill.
+- Jump to latest, Following and Follow share one compact themed capsule
+  with a down arrow, sitting on the transcript. Following is no longer
+  a grey pill.
 - The end-to-end note on Workspaces is a glass divider between the hosts
   and the chats, not a second device card. The keys are still a tap away.
 

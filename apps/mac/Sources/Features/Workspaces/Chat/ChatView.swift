@@ -94,7 +94,12 @@ struct ChatView: View {
                             items: model.queued,
                             onChange: { item, text in model.updateQueued(item, text: text) },
                             onRemove: { model.removeQueued($0) },
-                            onSendNow: { item in Task { await model.sendNow(item) } }
+                            onSendNow: { item in
+                                showNewest()
+                                follow.jump()
+                                followPulse += 1
+                                Task { await model.sendNow(item) }
+                            }
                         )
                         .frame(maxWidth: ReadingRoom.laneWidth)
                         .padding(.horizontal, Theme.Space.l)

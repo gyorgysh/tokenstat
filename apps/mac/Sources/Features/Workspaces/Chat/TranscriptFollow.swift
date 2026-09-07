@@ -699,8 +699,9 @@ struct TranscriptSkeleton: View {
 /// - Paused while live: **Follow**. Press to resume.
 /// - Idle and pinned: nothing. A control nobody needs is clutter, not state.
 ///
-/// All three share `AccentButtonStyle(comfortable:)`, the same themed
-/// capsule, so the control does not change language when the state does.
+/// All three share a compact themed capsule and a down arrow, so the
+/// control does not change language when the state does, and it sits on
+/// the transcript instead of covering it.
 struct TranscriptFollowPill: View {
     var showJump: Bool
     var busy: Bool
@@ -711,20 +712,20 @@ struct TranscriptFollowPill: View {
     var body: some View {
         Group {
             if showJump {
-                Button("Jump to latest", .next, action: resume)
-                    .buttonStyle(AccentButtonStyle(comfortable: true))
+                Button("Jump to latest", .latest, action: resume)
+                    .buttonStyle(AccentButtonStyle(small: true, capsule: true))
             } else if busy, paused {
-                Button("Follow", .next, action: resume)
-                    .buttonStyle(AccentButtonStyle(comfortable: true))
+                Button("Follow", .latest, action: resume)
+                    .buttonStyle(AccentButtonStyle(small: true, capsule: true))
                     .help("Follow new responses as they arrive")
             } else if busy {
-                Button("Following", .next, action: pause)
-                    .buttonStyle(AccentButtonStyle(comfortable: true))
+                Button("Following", .latest, action: pause)
+                    .buttonStyle(AccentButtonStyle(small: true, capsule: true))
                     .help("Pause auto-follow")
             }
         }
-        .padding(.bottom, Theme.Space.m)
-        .animation(.easeOut(duration: 0.15), value: showJump)
+        .padding(.bottom, Theme.Space.s)
+        .animation(.snappy(duration: 0.18), value: showJump)
     }
 }
 

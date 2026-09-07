@@ -477,6 +477,9 @@ final class ChatModel {
     /// leaving the thread and coming back still has them.
     private(set) var queued: [ChatQueuedMessage] = []
     private var queuedConversationID: String?
+    /// Send now is in flight. `drainQueue` must not pick the next waiting
+    /// message while this one is still stopping the open turn.
+    @ObservationIgnored private var sendingNow = false
     private static let queueCap = 20
     private static let queueKeyPrefix = "chat.queuedMessages.v1."
 
@@ -519,25 +522,38 @@ final class ChatModel {
 
     /// Stop the current turn and send this queued message as soon as the
     /// host will take it. Remaining queued items stay waiting.
+    ///
+    /// The item leaves the strip first, so Send now is visible as the turn
+    /// stopping rather than as a no-op on the same waiting row. A stale
+    /// tool row must not hold the send: the conversation's own running
+    /// flag is what the host uses to accept the next prompt.
     func sendNow(_ item: ChatQueuedMessage) async {
-        if let index = queued.firstIndex(where: { $0.id == item.id }) {
-            queued.remove(at: index)
-        }
-        queued.insert(item, at: 0)
-        persistQueue()
-        if busy {
+        guard !sendingNow else { return }
+        sendingNow = true
+        defer { sendingNow = false }
+        removeQueued(item)
+        if selected?.running == true {
             await stop()
             for _ in 0..<80 {
-                if !busy, !sending { break }
+                if selected?.running != true, !sending { break }
                 await poll()
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
-        await drainQueue()
+        if sending || selected?.running == true {
+            queued.insert(item, at: 0)
+            persistQueue()
+            return
+        }
+        let ok = await send(item.text, attachmentIDs: item.attachments.map(\.id))
+        if !ok {
+            queued.insert(item, at: 0)
+            persistQueue()
+        }
     }
 
     func drainQueue() async {
-        guard !busy, !sending, let item = queued.first else { return }
+        guard !busy, !sending, !sendingNow, let item = queued.first else { return }
         queued.removeFirst()
         persistQueue()
         let ok = await send(item.text, attachmentIDs: item.attachments.map(\.id))

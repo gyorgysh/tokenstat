@@ -72,6 +72,7 @@ enum ActionIcon {
     // Navigation out of the current surface
     case external
     case next
+    case latest
     case back
     case more
     case search
@@ -166,6 +167,7 @@ enum ActionIcon {
 
         case .external: return "arrow.up.right"
         case .next: return "arrow.right"
+        case .latest: return "arrow.down"
         case .back: return "arrow.left"
         case .more: return "chevron.down"
         case .search: return "magnifyingglass"
@@ -193,7 +195,7 @@ enum ActionIcon {
     /// Arrow actions sit after the title so they point onward.
     var trails: Bool {
         switch self {
-        case .next, .external, .more, .collapse: return true
+        case .next, .latest, .external, .more, .collapse: return true
         default: return false
         }
     }

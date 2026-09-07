@@ -1518,6 +1518,8 @@ struct AccentButtonStyle: ButtonStyle {
     var small = false
     /// Finger-friendly. Jump to latest over a transcript, not a row chip.
     var comfortable = false
+    /// Stadium ends. Follow sits as a chip on the transcript, not a slab.
+    var capsule = false
 
     func makeBody(configuration: Configuration) -> some View {
         let height: CGFloat = comfortable
@@ -1525,7 +1527,7 @@ struct AccentButtonStyle: ButtonStyle {
             : (small ? Theme.Control.heightSmall : Theme.Control.height)
         let fontSize: CGFloat = comfortable ? 15 : (small ? 12 : 13)
         let pad: CGFloat = comfortable ? 16 : (small ? 10 : 14)
-        let radius: CGFloat = comfortable ? 12 : 8
+        let radius: CGFloat = capsule ? height / 2 : (comfortable ? 12 : 8)
         configuration.label
             .labelStyle(ActionLabelStyle(small: small && !comfortable))
             .font(.system(size: fontSize, weight: .medium))
@@ -1533,7 +1535,7 @@ struct AccentButtonStyle: ButtonStyle {
             .padding(.horizontal, pad)
             .frame(height: height)
             .background(
-                RoundedRectangle(cornerRadius: radius)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(
                         configuration.isPressed
                             ? Theme.accent.opacity(0.18)
@@ -1541,7 +1543,7 @@ struct AccentButtonStyle: ButtonStyle {
                     )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: radius)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
             )
             .contentShape(.rect)
