@@ -110,7 +110,7 @@ struct ClientRecentChatsSection: View {
             },
             nowMs: nowMs
         )
-        let byID = Dictionary(uniqueKeysWithValues: chats.map { ($0.id, $0) })
+        let byID = Dictionary(chats.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         return ranked.compactMap { byID[$0.id] }
     }
 
@@ -249,6 +249,10 @@ struct ClientRecentChatView: View {
         }
         .background(Theme.background)
         .task {
+            guard !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else {
+                loaded = true
+                return
+            }
             await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
             loaded = true
         }

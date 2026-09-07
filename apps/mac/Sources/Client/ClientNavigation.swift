@@ -71,6 +71,7 @@ final class ClientNavigationModel {
 
     /// Open this conversation in its folder's chat section.
     func openChat(folderID: String, chatID: String) {
+        guard !folderID.isEmpty, !chatID.isEmpty else { return }
         self.folderID = folderID
         self.section = .chat
         self.openChatID = chatID

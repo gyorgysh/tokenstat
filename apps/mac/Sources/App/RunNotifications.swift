@@ -77,11 +77,15 @@ final class NotificationOpen {
     /// Read a tap. Local banners carry `ts.kind` and a conversation id. A
     /// push carries `ts.reason` and a machine. The identifier is the fallback
     /// for a banner posted before those keys existed.
+    ///
+    /// Unknown reasons, empty ids and a payload that is not a dictionary all
+    /// return nil. A tap must not crash the app because Apple delivered
+    /// something we did not write.
     nonisolated static func parse(
         userInfo: [AnyHashable: Any],
         identifier: String
     ) -> Request? {
-        let ts = userInfo["ts"] as? [AnyHashable: Any]
+        let ts = payload(named: "ts", from: userInfo) ?? userInfo
         if let reason = string("reason", from: ts) {
             switch reason {
             case "chat.finished", "chat.failed":
@@ -105,7 +109,7 @@ final class NotificationOpen {
                 kind: .chat,
                 conversationID: string("conversationId", from: ts),
                 workspaceID: string("workspaceId", from: ts),
-                waiting: string("waiting", from: ts) == "1"
+                waiting: bool("waiting", from: ts)
             )
         }
         return parseIdentifier(identifier)
@@ -129,13 +133,55 @@ final class NotificationOpen {
         return nil
     }
 
+    private nonisolated static func payload(
+        named key: String,
+        from userInfo: [AnyHashable: Any]
+    ) -> [AnyHashable: Any]? {
+        if let dict = userInfo[key] as? [AnyHashable: Any] {
+            return dict
+        }
+        if let text = userInfo[key] as? String,
+           let data = text.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data),
+           let dict = object as? [AnyHashable: Any]
+        {
+            return dict
+        }
+        return nil
+    }
+
     private nonisolated static func string(_ key: String, from dict: [AnyHashable: Any]?) -> String? {
         guard let value = dict?[key] else { return nil }
         if let text = value as? String {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return number.boolValue ? "1" : "0"
+            }
+            let text = number.stringValue
+            return text.isEmpty ? nil : text
+        }
         return nil
+    }
+
+    private nonisolated static func bool(_ key: String, from dict: [AnyHashable: Any]?) -> Bool {
+        guard let value = dict?[key] else { return false }
+        if let flag = value as? Bool { return flag }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return number.boolValue
+            }
+            return number.intValue != 0
+        }
+        if let text = string(key, from: dict) {
+            switch text.lowercased() {
+            case "1", "true", "yes": return true
+            default: return false
+            }
+        }
+        return false
     }
 }
 
@@ -160,37 +206,54 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .list]
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
     }
 
     /// A tap on a banner. Device access still answers from its own buttons.
     /// Everything else that names a chat is handed to `NotificationOpen` so
     /// the window that owns the transcript can open it.
+    ///
+    /// Completion-handler form on purpose. The async method returned on a
+    /// cooperative thread, and UIKit then snapshotted from
+    /// `_performBlockAfterCATransactionCommitSynchronizes` (TestFlight 83,
+    /// tap on a chat push). Finish on the main queue after the view update.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
         let request = response.notification.request
-        #if os(macOS)
-        if request.content.categoryIdentifier == DeviceAccessRequests.category {
-            let prefix = DeviceAccessRequests.identifier("")
-            guard request.identifier.hasPrefix(prefix) else { return }
-            let requestID = String(request.identifier.dropFirst(prefix.count))
-            await DeviceAccessRequests.shared.handleNotification(
-                action: response.actionIdentifier,
-                requestID: requestID
-            )
-            return
-        }
-        #endif
-        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
-        guard let parsed = NotificationOpen.parse(
+        let action = response.actionIdentifier
+        let parsed = NotificationOpen.parse(
             userInfo: request.content.userInfo,
             identifier: request.identifier
-        ) else { return }
-        await MainActor.run {
+        )
+        #if os(macOS)
+        let category = request.content.categoryIdentifier
+        let identifier = request.identifier
+        #endif
+        Task { @MainActor in
+            defer {
+                DispatchQueue.main.async {
+                    completionHandler()
+                }
+            }
+            #if os(macOS)
+            if category == DeviceAccessRequests.category {
+                let prefix = DeviceAccessRequests.identifier("")
+                guard identifier.hasPrefix(prefix) else { return }
+                let requestID = String(identifier.dropFirst(prefix.count))
+                await DeviceAccessRequests.shared.handleNotification(
+                    action: action,
+                    requestID: requestID
+                )
+                return
+            }
+            #endif
+            guard action == UNNotificationDefaultActionIdentifier, let parsed else { return }
             NotificationOpen.shared.offer(parsed)
         }
     }
@@ -330,7 +393,7 @@ final class RunNotifications {
     ) {
         let pending = Set(approvals.lazy.filter { $0.decision == nil }.map(\.conversationID))
         let current = Dictionary(
-            uniqueKeysWithValues: chats.map { chat in
+            chats.map { chat in
                 (
                     chat.id,
                     ChatState(
@@ -341,7 +404,8 @@ final class RunNotifications {
                         doneStatus: chat.id == selectedID ? selectedDoneStatus : nil
                     )
                 )
-            }
+            },
+            uniquingKeysWith: { _, last in last }
         )
         defer {
             lastChats = current

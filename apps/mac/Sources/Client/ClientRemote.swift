@@ -256,7 +256,9 @@ enum ClientRemote {
 
     /// The newest conversations on this host, across its folders.
     static func recentChats(peer: String, limit: Int = 50) async throws -> [ChatRecentConversation] {
-        try await Bridge.recentChats(peer: peer, limit: limit)
+        let chats = try await Bridge.recentChats(peer: peer, limit: limit)
+        var seen = Set<String>()
+        return chats.filter { !$0.id.isEmpty && seen.insert($0.id).inserted }
     }
 
     // MARK: - A folder's work, on the machine that owns it

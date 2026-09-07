@@ -184,7 +184,7 @@ struct ClientSidebarRoot: View {
             return
         }
         guard let list = try? await ClientRemote.summaries(peer: peer) else { return }
-        summaries = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
+        summaries = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     }
 
     /// How tall a row is here. See `SidebarMetrics`.
@@ -555,6 +555,7 @@ struct ClientSidebarRoot: View {
         guard let opened = await workspaces.chatFromNotification(request, account: account.account) else {
             return
         }
+        guard !opened.peer.isEmpty, !opened.chat.id.isEmpty else { return }
         if let folder = opened.folder {
             navigation.openChat(folderID: folder.id, chatID: opened.chat.id)
         } else {

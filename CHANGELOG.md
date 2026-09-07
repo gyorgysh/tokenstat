@@ -24,6 +24,11 @@ at the end.
 - Account, This device, opens with Notifications. The switch used to sit
   under the cache, below the fold on a phone.
 
+### Fixed
+
+- Tapping a chat notification on iPhone no longer closes the app. A missing
+  host or an empty recents list lands on Workspaces.
+
 ## [1.0.0] - 2026-09-07
 
 Chat on iPhone and iPad keeps the composer on the transcript, a folder has

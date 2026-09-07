@@ -281,6 +281,7 @@ struct ClientWorkspacesView: View {
         guard let opened = await model.chatFromNotification(request, account: account.account) else {
             return
         }
+        guard !opened.peer.isEmpty, !opened.chat.id.isEmpty else { return }
         navigation.presentedChat = PresentedChat(
             peer: opened.peer,
             workspaceID: opened.chat.workspaceID,
@@ -757,14 +758,16 @@ final class ClientWorkspacesModel {
         } else {
             host = hosts.first { $0.peerKey == connectedKey } ?? hosts.first
         }
-        guard let host else { return nil }
+        guard let host, !host.peerKey.isEmpty else { return nil }
         if connectedKey != host.peerKey {
             await connect(host)
         } else {
             await reloadRemote(peerKey: host.peerKey)
         }
         guard connectedKey == host.peerKey else { return nil }
-        guard let chat = Self.pickNotificationChat(from: recentChats, waiting: request.waiting) else {
+        guard let chat = Self.pickNotificationChat(from: recentChats, waiting: request.waiting),
+              !chat.id.isEmpty
+        else {
             return nil
         }
         let folder = folders.first {

@@ -177,7 +177,7 @@ struct ClientChatView: View {
     /// cannot steal the tap.
     @discardableResult
     private func openRequestedChat() async -> Bool {
-        guard let id = navigation.openChatID,
+        guard let id = navigation.openChatID, !id.isEmpty,
               let chat = model.chats.first(where: { $0.id == id })
         else { return false }
         await model.select(chat)

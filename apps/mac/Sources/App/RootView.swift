@@ -2823,11 +2823,11 @@ struct RootView: View {
     /// A tap on a chat notification. The conversation id is local: this Mac
     /// wrote it, and nothing about the thread left the machine.
     private func openFromNotification(_ request: NotificationOpen.Request) {
-        guard request.kind == .chat, let conversationID = request.conversationID else { return }
+        guard request.kind == .chat, let conversationID = request.conversationID, !conversationID.isEmpty else { return }
         let folderID = request.workspaceID.flatMap { workspaceID in
             workspaces.folders.first { $0.id == workspaceID }?.id
         } ?? chat.folderID ?? workspaces.selectedID ?? workspaces.folders.first?.id
-        guard let folderID else { return }
+        guard let folderID, !folderID.isEmpty else { return }
         if chat.selected?.id == conversationID, showsChat, chatFolder == folderID {
             return
         }

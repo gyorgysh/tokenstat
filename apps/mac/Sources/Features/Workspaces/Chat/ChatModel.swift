@@ -140,7 +140,7 @@ final class ChatModel {
             // Nil here means the same thing, and every reader already handles
             // it, so the empty string never gets past this line.
             defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
-            chats = loaded.2
+            chats = Self.uniqued(loaded.2)
             if let pending = pendingRevealID {
                 pendingRevealID = nil
                 if let found = chats.first(where: { $0.id == pending }) {
@@ -178,12 +178,18 @@ final class ChatModel {
         }
     }
 
+    private static func uniqued(_ chats: [ChatConversation]) -> [ChatConversation] {
+        var seen = Set<String>()
+        return chats.filter { !$0.id.isEmpty && seen.insert($0.id).inserted }
+    }
+
     /// Open this conversation once its folder is loaded.
     ///
     /// A notification tap names a thread this model may not have read yet.
     /// Stash the id so `load` selects it instead of the first row. Callers
     /// that already hold the folder also select immediately.
     func reveal(id: String) {
+        guard !id.isEmpty else { return }
         pendingRevealID = id
     }
 
