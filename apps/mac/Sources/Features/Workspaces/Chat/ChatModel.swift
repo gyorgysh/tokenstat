@@ -97,6 +97,9 @@ final class ChatModel {
     private var selectionGeneration: UInt64 = 0
     /// Conversation a notification asked to open, consumed by the next load.
     private var pendingRevealID: String?
+    /// The folder that reveal was asked for, so a load of a different one
+    /// cannot answer for it. See the not-found branch in `load`.
+    private var pendingRevealFolderID: String?
     private var attachmentCacheGeneration: UInt64 = 0
     private var attemptedResponseAttachments: Set<String> = []
     private(set) var loadingResponseAttachments: Set<String> = []
@@ -152,6 +155,7 @@ final class ChatModel {
             if let pending = pendingRevealID {
                 if let found = chats.first(where: { $0.id == pending }) {
                     pendingRevealID = nil
+                    pendingRevealFolderID = nil
                     if selected?.id == found.id {
                         if found != selected { self.selected = found }
                         await refreshOpen(id: found.id)
@@ -165,7 +169,14 @@ final class ChatModel {
                     // Clearing the reveal is the point: it used to survive
                     // this branch and re-run on every load of the folder,
                     // blanking the pane for an id that is never coming back.
-                    pendingRevealID = nil
+                    //
+                    // Only this folder may say so. A reveal armed for another
+                    // one is waiting for its own load, and answering for it
+                    // here would drop the tap on the floor.
+                    if pendingRevealFolderID == nil || pendingRevealFolderID == workspaceID {
+                        pendingRevealID = nil
+                        pendingRevealFolderID = nil
+                    }
                     if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
                         if fresh != selected { self.selected = fresh }
                         await refreshOpen(id: fresh.id)
@@ -205,9 +216,15 @@ final class ChatModel {
     /// A notification tap names a thread this model may not have read yet.
     /// Stash the id so `load` selects it instead of the first row. Callers
     /// that already hold the folder also select immediately.
-    func reveal(id: String) {
+    /// Open this conversation on the next load that can see it.
+    ///
+    /// `folderID` is the folder it lives in, when the caller knows: a load of
+    /// any other folder then leaves the reveal alone rather than deciding on
+    /// a list that was never going to contain it.
+    func reveal(id: String, in folderID: String? = nil) {
         guard !id.isEmpty else { return }
         pendingRevealID = id
+        pendingRevealFolderID = folderID
     }
 
     func select(_ chat: ChatConversation?) async {

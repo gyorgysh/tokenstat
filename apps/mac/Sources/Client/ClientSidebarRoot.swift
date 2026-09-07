@@ -556,8 +556,13 @@ struct ClientSidebarRoot: View {
     private func fulfillNotification() async {
         guard let request = NotificationOpen.shared.request else { return }
         guard let opened = await workspaces.targetFromNotification(request, account: account.account) else {
-            // Same as the phone: keep the tap while it is worth retrying, and
-            // land on the tree once it is not. See `NotificationOpen.patience`.
+            // A cancelled attempt is not a failed one: this runs from a
+            // `.task` the system cancels when the view goes away, and
+            // `targetFromNotification` answers nil for that too.
+            guard !Task.isCancelled else { return }
+            // Otherwise, same as the phone: keep the tap while it is worth
+            // retrying, land on the tree once it is not. See
+            // `NotificationOpen.patience`.
             if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }

@@ -284,10 +284,16 @@ struct ClientWorkspacesView: View {
     private func fulfillNotification() async {
         guard let request = NotificationOpen.shared.request else { return }
         guard let opened = await model.targetFromNotification(request, account: account.account) else {
-            // Not yet, or not ever, and this cannot tell the two apart. Keep
-            // the tap for the next attempt until it goes stale, then land on
-            // the machine list rather than leave somebody looking at whatever
-            // was already on screen with nothing to say why.
+            // A cancelled attempt is not a failed one. This runs from a
+            // `.task`, which the system cancels the moment the view goes
+            // away, and `targetFromNotification` answers nil for that too.
+            // Acting on it would drop the tap and pull somebody back to
+            // Workspaces at the moment they navigated off it.
+            guard !Task.isCancelled else { return }
+            // Otherwise: not yet, or not ever, and this cannot tell the two
+            // apart. Keep the tap for the next attempt until it goes stale,
+            // then land on the machine list rather than leave somebody
+            // looking at whatever was on screen with nothing to say why.
             if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }

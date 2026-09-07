@@ -2846,7 +2846,7 @@ struct RootView: View {
         if chat.selected?.id == conversationID, showsChat, chatFolder == folderID {
             return
         }
-        chat.reveal(id: conversationID)
+        chat.reveal(id: conversationID, in: folderID)
         expandedWorkspaces.insert(folderID)
         expandedChatHistories.insert(folderID)
         openSection(.chat, in: folderID) {

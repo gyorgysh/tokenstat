@@ -460,7 +460,12 @@ struct ClientChatThread: View {
     }
 
     private func transcript(_ chat: ChatConversation) -> some View {
-        ScrollViewReader { proxy in
+        // Once per pass, not once per reader of it. `visibleItems` copies the
+        // window out of the conversation every time it is asked, and the
+        // `ForEach` and the spinner both ask.
+        let rows = visibleItems
+        let spinning = TranscriptFollow.spinningRow(rows)
+        return ScrollViewReader { proxy in
             ScrollView {
                 // Lazy on purpose. A long conversation is hundreds of rows of
                 // markdown, and a plain stack lays out and re-measures every
@@ -478,7 +483,7 @@ struct ClientChatThread: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                         .accessibilityLabel("Show earlier messages")
                     }
-                    ForEach(visibleItems) { item in
+                    ForEach(rows) { item in
                         ClientChatEventRow(
                             item: item,
                             attachmentData: attachmentData(for: item),
@@ -498,7 +503,7 @@ struct ClientChatThread: View {
                             openAttachment: open(_:data:),
                             faceSeed: model.faceSeed,
                             isLive: model.busy && item.id == model.displayItems.last?.id,
-                            animatesRunning: item.id == spinningRowID
+                            animatesRunning: item.id == spinning
                         )
                         .equatable()
                         // No geometry readers mid-fling: each one reports per
@@ -815,11 +820,6 @@ struct ClientChatThread: View {
     /// Rows the transcript builds this pass. Same slice as the Mac.
     private var visibleItems: [ChatDisplayItem] {
         TranscriptSlice.items(model.displayItems, olderOffset: sliceOffset)
-    }
-
-    /// The single row allowed to animate while it runs.
-    private var spinningRowID: String? {
-        TranscriptFollow.spinningRow(visibleItems)
     }
 
     /// Rows above the built slice. Zero while the whole conversation fits.
