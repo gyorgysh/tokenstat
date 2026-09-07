@@ -163,7 +163,11 @@ settings:
     # 83 is the same 1.0.0: the tab bar actually leaves the screen, Notifications
     # first on this device, and tapping a finished-turn notification opens
     # that conversation.
-    CURRENT_PROJECT_VERSION: "83"
+    # 83 went up.
+    # 84 is the same 1.0.0: tapping a chat notification finishes on the
+    # main thread, so the app no longer closes, and a missing host or empty
+    # recents lands on Workspaces.
+    CURRENT_PROJECT_VERSION: "84"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
