@@ -251,9 +251,11 @@ struct ClientRecentChatView: View {
             }
         }
         .background(Theme.background)
-        // Same hide as a folder conversation. Back pops this whole screen
-        // to Workspaces, so restore has to run on the way out.
-        .clientTabBarHidden(true)
+        // Same hide as a folder conversation, but only while the thread is
+        // actually on screen. The "gone" state has no composer to make room
+        // for. Back pops this whole screen to Workspaces, so restore has to
+        // run on the way out.
+        .clientTabBarHidden(!loaded || model.chats.contains(where: { $0.id == chatID }))
         .onAppear {
             // The notification cover is `presentedChat`. Writing here would
             // hide the folder thread sitting under it.

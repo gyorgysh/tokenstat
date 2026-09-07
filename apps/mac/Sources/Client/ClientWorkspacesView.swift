@@ -276,11 +276,17 @@ struct ClientWorkspacesView: View {
 
     /// A tap on a push. A terminal that needs the person opens here. Chat
     /// is the fallback, over the app because this layout has no sidebar.
+    ///
+    /// Peek first, consume only once the tap resolves: taking up front and
+    /// then failing (host offline, connect busy) lost the tap with no
+    /// feedback. A request that never resolves stays pending for the next
+    /// tap rather than vanishing.
     private func fulfillNotification() async {
-        guard let request = NotificationOpen.shared.take() else { return }
+        guard let request = NotificationOpen.shared.request else { return }
         guard let opened = await model.targetFromNotification(request, account: account.account) else {
             return
         }
+        guard NotificationOpen.shared.take() == request else { return }
         switch opened {
         case let .session(session):
             model.openSession(session)
@@ -759,18 +765,21 @@ final class ClientWorkspacesModel {
 
     /// Dial the machine the push named, then pick what needs the person.
     ///
-    /// A live terminal with `attention` wins: that is the thing holding
-    /// the work up. Recents are the chat fallback. The push itself has no
-    /// conversation or session id.
+    /// A named session always wins. The any-attention fallback applies to
+    /// session requests and to pushes naming nothing (a push carries only a
+    /// machine id): a chat request must reach its conversation rather than
+    /// diverting to an unrelated waiting terminal.
     func targetFromNotification(
         _ request: NotificationOpen.Request,
         account: Account?
     ) async -> NotificationTarget? {
         await refresh(account: account)
         for _ in 0..<20 {
+            if Task.isCancelled { return nil }
             if isConnecting == nil { break }
             try? await Task.sleep(for: .milliseconds(250))
         }
+        if Task.isCancelled { return nil }
         let host: ClientHost?
         if let machineID = request.machineID {
             host = hosts.first { $0.machineID == machineID }
@@ -783,9 +792,17 @@ final class ClientWorkspacesModel {
         } else {
             await reloadRemote(peerKey: host.peerKey)
         }
+        if Task.isCancelled { return nil }
         guard connectedKey == host.peerKey else { return nil }
-        if let session = Self.pickNotificationSession(from: sessions, named: request.sessionID) {
-            return .session(session)
+        if request.kind == .session {
+            if let session = Self.pickNotificationSession(from: sessions, named: request.sessionID) {
+                return .session(session)
+            }
+            return nil
+        }
+        if let sessionID = request.sessionID, !sessionID.isEmpty,
+           let named = sessions.first(where: { $0.id == sessionID }) {
+            return .session(named)
         }
         guard request.kind == .chat else { return nil }
         guard let chat = Self.pickNotificationChat(from: recentChats, waiting: request.waiting),

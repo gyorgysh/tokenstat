@@ -2820,9 +2820,9 @@ struct RootView: View {
         }
     }
 
-    /// A tap on a notification. A terminal that is waiting on the person
-    /// wins: that is the thing holding the work up. Chat is the fallback
-    /// when no session needs them.
+    /// A tap on a notification. A named session opens it; a named
+    /// conversation opens that thread. Only a push naming neither falls back
+    /// to whatever session is currently waiting.
     private func openFromNotification(_ request: NotificationOpen.Request) {
         if let session = sessionMatching(request) {
             openSection(.sessions, in: session.workspaceID) {
@@ -2853,11 +2853,18 @@ struct RootView: View {
     }
 
     /// The session a banner is about, or the one currently waiting.
+    ///
+    /// A named session always wins. The any-attention fallback applies to
+    /// session banners and to pushes that name nothing: a chat banner naming
+    /// a conversation must reach that conversation rather than diverting to
+    /// an unrelated waiting terminal (whose request was already taken).
     private func sessionMatching(_ request: NotificationOpen.Request) -> TerminalSession? {
-        if let id = request.sessionID, !id.isEmpty,
-           let session = terminals.sessions.first(where: { $0.id == id })
-        {
-            return session
+        if let id = request.sessionID, !id.isEmpty {
+            return terminals.sessions.first(where: { $0.id == id })
+        }
+        if request.kind == .chat, let conversationID = request.conversationID,
+           !conversationID.isEmpty {
+            return nil
         }
         return terminals.sessions.first { $0.state == .needsAttention }
     }

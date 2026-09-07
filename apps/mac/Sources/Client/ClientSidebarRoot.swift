@@ -550,11 +550,15 @@ struct ClientSidebarRoot: View {
 
     /// A tap on a push. The sidebar can land the folder, a waiting
     /// terminal, or the thread in place.
+    ///
+    /// Peek first, consume only once the tap resolves: taking up front and
+    /// then failing lost the tap with nothing on screen.
     private func fulfillNotification() async {
-        guard let request = NotificationOpen.shared.take() else { return }
+        guard let request = NotificationOpen.shared.request else { return }
         guard let opened = await workspaces.targetFromNotification(request, account: account.account) else {
             return
         }
+        guard NotificationOpen.shared.take() == request else { return }
         switch opened {
         case let .session(session):
             workspaces.openSession(session)

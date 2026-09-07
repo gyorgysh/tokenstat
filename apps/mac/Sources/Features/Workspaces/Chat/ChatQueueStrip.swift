@@ -10,6 +10,9 @@ import SwiftUI
 /// so the list does not cover the transcript.
 struct ChatQueueStrip: View {
     let items: [ChatQueuedMessage]
+    /// Conversation the strip belongs to. Switching threads with the pending
+    /// sheet open must close it rather than retarget it at the new chat.
+    var ownerID: String?
     var onChange: (ChatQueuedMessage, String) -> Void
     var onRemove: (ChatQueuedMessage) -> Void
     var onSendNow: (ChatQueuedMessage) -> Void
@@ -38,6 +41,7 @@ struct ChatQueueStrip: View {
                     onRemove: { onRemove(next) },
                     onSendNow: { onSendNow(next) }
                 )
+                .id(next.id)
             }
         }
         .padding(Theme.Space.s)
@@ -60,6 +64,9 @@ struct ChatQueueStrip: View {
         }
         .onChange(of: items.isEmpty) { _, empty in
             if empty { showingQueue = false }
+        }
+        .onChange(of: ownerID) { _, _ in
+            showingQueue = false
         }
     }
 

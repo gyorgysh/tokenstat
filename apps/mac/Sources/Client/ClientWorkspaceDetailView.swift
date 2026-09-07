@@ -109,10 +109,14 @@ struct ClientWorkspaceSessionsView: View {
             // swallowed while the spinner said otherwise.
             await ClientRefresh.pull("workspace-sessions-\(workspaceID)") { await reload() }
         }
-        .onAppear {
+        .onChange(of: folder.id, initial: true) {
             bypassOn = WorkspacePreference.bypassPermissions(for: folder.id)
+            liveFolder = nil
         }
-        .task {
+        .task(id: workspaceID) {
+            // Keyed on the folder: the sidebar can swap folders under this
+            // screen, and an unkeyed task would keep showing the old one's
+            // sessions with the new one's bypass switch.
             // A wireframe that cannot end is worse than the spinner it
             // replaced: it promises an answer is on its way. If the host has
             // not answered in ten seconds, stop promising and show what is

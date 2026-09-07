@@ -142,8 +142,8 @@ final class ChatModel {
             defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
             chats = Self.uniqued(loaded.2)
             if let pending = pendingRevealID {
-                pendingRevealID = nil
                 if let found = chats.first(where: { $0.id == pending }) {
+                    pendingRevealID = nil
                     if selected?.id == found.id {
                         if found != selected { self.selected = found }
                         await refreshOpen(id: found.id)
@@ -258,6 +258,8 @@ final class ChatModel {
         if instructions == nil {
             await loadInstructions(id: id, generation: generation)
         }
+        guard selectionMatches(id: id, generation: generation) else { return }
+        await drainQueue()
     }
 
     /// Reopen the conversation on its newest page, dropping the window that
@@ -531,35 +533,67 @@ final class ChatModel {
         guard !sendingNow else { return }
         sendingNow = true
         defer { sendingNow = false }
+        let targetID = selected?.id
+        let generation = selectionGeneration
+        let originalIndex = queued.firstIndex(where: { $0.id == item.id }) ?? 0
         removeQueued(item)
         if selected?.running == true {
             await stop()
             for _ in 0..<80 {
+                if Task.isCancelled { break }
+                guard selectionMatches(id: targetID ?? "", generation: generation) else { break }
                 if selected?.running != true, !sending { break }
                 await poll()
-                try? await Task.sleep(for: .milliseconds(100))
+                try? await Task.sleep(for: .milliseconds(200))
             }
         }
+        guard let targetID else {
+            queued.insert(item, at: min(originalIndex, queued.count))
+            persistQueue()
+            return
+        }
+        guard selectionMatches(id: targetID, generation: generation) else {
+            Self.reappendToStoredQueue(item, at: originalIndex, conversationID: targetID)
+            return
+        }
         if sending || selected?.running == true {
-            queued.insert(item, at: 0)
+            queued.insert(item, at: min(originalIndex, queued.count))
             persistQueue()
             return
         }
         let ok = await send(item.text, attachmentIDs: item.attachments.map(\.id))
         if !ok {
-            queued.insert(item, at: 0)
-            persistQueue()
+            // The selection may have moved during the send. Only touch the
+            // live queue when it is still this conversation; otherwise write
+            // back to the owning conversation's stored queue.
+            if selectionMatches(id: targetID, generation: generation) {
+                queued.insert(item, at: min(originalIndex, queued.count))
+                persistQueue()
+            } else {
+                Self.reappendToStoredQueue(item, at: originalIndex, conversationID: targetID)
+            }
         }
     }
 
     func drainQueue() async {
         guard !busy, !sending, !sendingNow, let item = queued.first else { return }
+        guard let ownerID = selected?.id else { return }
+        let generation = selectionGeneration
+        let originalIndex = 0
         queued.removeFirst()
         persistQueue()
         let ok = await send(item.text, attachmentIDs: item.attachments.map(\.id))
         if !ok {
-            queued.insert(item, at: 0)
-            persistQueue()
+            if selectionMatches(id: ownerID, generation: generation) {
+                queued.insert(item, at: min(originalIndex, queued.count))
+                persistQueue()
+            } else {
+                Self.reappendToStoredQueue(item, at: originalIndex, conversationID: ownerID)
+            }
+        } else if selectionMatches(id: ownerID, generation: generation) {
+            // A send that won the race with the turn ending left this item
+            // waiting one extra turn. Chain while still idle and owned.
+            await drainQueue()
         }
     }
 
@@ -1375,11 +1409,32 @@ final class ChatModel {
             queued = []
             return
         }
-        if let data = UserDefaults.standard.data(forKey: Self.queueKeyPrefix + id),
-           let items = try? JSONDecoder().decode([ChatQueuedMessage].self, from: data) {
-            queued = items
-        } else {
-            queued = []
+        queued = Self.storedQueue(for: id)
+    }
+
+    private static func storedQueue(for id: String) -> [ChatQueuedMessage] {
+        guard let data = UserDefaults.standard.data(forKey: Self.queueKeyPrefix + id),
+            let items = try? JSONDecoder().decode([ChatQueuedMessage].self, from: data)
+        else {
+            return []
+        }
+        return items
+    }
+
+    /// Write an item back to the conversation that owns it, without touching
+    /// the live queue (which now belongs to another conversation).
+    private static func reappendToStoredQueue(
+        _ item: ChatQueuedMessage, at index: Int, conversationID: String
+    ) {
+        var stored = storedQueue(for: conversationID)
+        if !stored.contains(where: { $0.id == item.id }) {
+            stored.insert(item, at: min(max(0, index), stored.count))
+        }
+        let key = Self.queueKeyPrefix + conversationID
+        if stored.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else if let data = try? JSONEncoder().encode(stored) {
+            UserDefaults.standard.set(data, forKey: key)
         }
     }
 
@@ -1643,6 +1698,9 @@ struct ChatDisplayItem: Identifiable, Equatable {
         // its own, and most do, but Antigravity sends `call_id: "tool"` for
         // all of them.
         var toolStarts: [String: Int] = [:]
+        // Same duplicate-id hazard as tools, for edits that carry a reused
+        // call id (or none and the same path twice). Row ids feed ForEach.
+        var editStarts: [String: Int] = [:]
         var approvalIndex: [String: Int] = [:]
         var text = ""
         var textID = ""
@@ -1708,7 +1766,18 @@ struct ChatDisplayItem: Identifiable, Equatable {
         }
 
         func matchingEditIndex(callId: String, path: String) -> Int? {
-            if !callId.isEmpty, let index = toolIndex[callId] { return index }
+            if !callId.isEmpty, let index = toolIndex[callId], items.indices.contains(index) {
+                switch items[index].kind {
+                case let .edit(state) where path.isEmpty || state.path == path || state.path == "File":
+                    return index
+                case let .tool(state)
+                    where ChatToolState.isFileEditVerb(state.verb)
+                        && (path.isEmpty || state.target == path || state.target.isEmpty):
+                    return index
+                default:
+                    break
+                }
+            }
             for index in items.indices.reversed() {
                 switch items[index].kind {
                 case let .edit(state) where state.running && (path.isEmpty || state.path == path):
@@ -1935,17 +2004,17 @@ struct ChatDisplayItem: Identifiable, Equatable {
                         state.applyPatch(added: added, removed: removed, patch: patch)
                         if state.path == "File", !path.isEmpty { state.path = path }
                         items[index] = ChatDisplayItem(id: items[index].id, kind: .edit(state))
-                    case .tool:
+                    case .tool(let toolState):
                         var state = ChatEditState(
                             path: path,
                             added: added,
                             removed: removed,
                             patch: patch,
                             revision: nextEditRevision(path),
-                            running: false,
+                            running: toolState.running,
                             failed: false,
-                            startedAtMs: event.atMs ?? 0,
-                            endedAtMs: nil
+                            startedAtMs: toolState.startedAtMs,
+                            endedAtMs: toolState.running ? nil : (event.atMs ?? toolState.endedAtMs)
                         )
                         state.recountIfNeeded()
                         items[index] = ChatDisplayItem(id: items[index].id, kind: .edit(state))
@@ -1966,7 +2035,12 @@ struct ChatDisplayItem: Identifiable, Equatable {
                         endedAtMs: nil
                     )
                     state.recountIfNeeded()
-                    let rowID = "edit-\(callId.isEmpty ? (agent.path ?? stamp(event, items.count)) : callId)"
+                    let rowID: String = {
+                        if callId.isEmpty { return "edit-\(stamp(event, items.count))" }
+                        let occurrence = (editStarts[callId] ?? 0) + 1
+                        editStarts[callId] = occurrence
+                        return occurrence == 1 ? "edit-\(callId)" : "edit-\(callId)#\(occurrence)"
+                    }()
                     if !callId.isEmpty { toolIndex[callId] = items.count }
                     items.append(ChatDisplayItem(id: rowID, kind: .edit(state)))
                 }

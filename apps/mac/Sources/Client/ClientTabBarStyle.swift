@@ -176,7 +176,6 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
             }
             let viewHidden = barHidden && platterHidden
             if reportedHidden == hidden && viewHidden == hidden {
-                if hidden { hidByUs = true }
                 return
             }
             ClientTabBarHost.setHidden(hidden, on: tabs, animated: animated)

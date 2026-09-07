@@ -184,6 +184,9 @@ struct ClientChatView: View {
     private func reload() async {
         await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
         loaded = true
+        // A tap that arrived mid-reload found an empty list and returned
+        // without consuming. Retry now that the folder has answered.
+        await openRequestedChat()
     }
 
     private func create() async {
@@ -399,6 +402,7 @@ struct ClientChatThread: View {
                 if !model.queued.isEmpty {
                     ChatQueueStrip(
                         items: model.queued,
+                        ownerID: chat.id,
                         onChange: { item, text in model.updateQueued(item, text: text) },
                         onRemove: { model.removeQueued($0) },
                         onSendNow: { item in
@@ -917,25 +921,33 @@ struct ClientChatThread: View {
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
         guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
-        draft = ""
-        // Sending is engaging: follow is the default, so a new turn resumes
-        // it even if it was paused before. Pausing again is one tap. Hide the
-        // keyboard and snap to the end so the next tokens are not off-screen
-        // above a closed keyboard.
-        showNewest()
-        follow.jump()
-        followPulse += 1
+        // Enqueue first: a full queue reports an error and returns nil, and
+        // the words must survive that path rather than being wiped.
         if sendNow {
-            let item = model.enqueue(text, atFront: true)
-            if let item {
-                Task { await model.sendNow(item) }
-            }
+            guard let item = model.enqueue(text, atFront: true) else { return }
+            draft = ""
+            // Sending is engaging: follow is the default, so a new turn resumes
+            // it even if it was paused before. Pausing again is one tap. Hide the
+            // keyboard and snap to the end so the next tokens are not off-screen
+            // above a closed keyboard.
+            showNewest()
+            follow.jump()
+            followPulse += 1
+            Task { await model.sendNow(item) }
             return
         }
         if model.busy {
-            _ = model.enqueue(text)
+            guard model.enqueue(text) != nil else { return }
+            draft = ""
+            showNewest()
+            follow.jump()
+            followPulse += 1
             return
         }
+        draft = ""
+        showNewest()
+        follow.jump()
+        followPulse += 1
         Task { await model.send(text) }
     }
 

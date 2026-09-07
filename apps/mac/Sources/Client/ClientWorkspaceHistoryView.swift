@@ -103,13 +103,16 @@ struct ClientWorkspaceHistoryView: View {
         async let status = try? ClientRemote.status(peer: peer, workspace: workspaceID)
         do {
             let log = try await ClientRemote.log(peer: peer, workspace: workspaceID)
+            guard !Task.isCancelled else { return }
             if let fresh = await status { live = fresh }
             commits = log
             errorMessage = nil
         } catch {
+            guard !Task.isCancelled else { return }
             if let fresh = await status { live = fresh }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
+        guard !Task.isCancelled else { return }
         loaded = true
     }
 }
