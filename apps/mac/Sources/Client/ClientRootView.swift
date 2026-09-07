@@ -156,13 +156,6 @@ struct ClientRootView: View {
         // new screen appearing from nowhere.
         .animation(.easeInOut(duration: 0.28), value: layout)
         .tint(Theme.accent)
-        .environment(account)
-        .environment(connectivity)
-        .environment(connection)
-        .environment(store)
-        .environment(input)
-        .environment(navigation)
-        .environment(editors)
         .clientPointerProbe(input)
         .background {
             GeometryReader { geo in
@@ -236,16 +229,12 @@ struct ClientRootView: View {
         }
         .sheet(isPresented: $showAccount) {
             ClientAccountSheet()
-                .environment(account)
-                .environment(store)
         }
         .sheet(isPresented: Binding(
             get: { store.showPaywall },
             set: { store.showPaywall = $0 }
         )) {
             ClientPaywallView()
-                .environment(account)
-                .environment(store)
         }
         .onReceive(NotificationCenter.default.publisher(for: .tokenstatOpenPaywall)) { _ in
             store.showPaywall = true
@@ -275,6 +264,24 @@ struct ClientRootView: View {
                 }
             }
         }
+        // **Last in the chain, after every presentation.** A sheet or a cover
+        // inherits the environment as it stood where its modifier is written,
+        // not as it stands inside the view it is attached to, so an
+        // `.environment` above them reaches the screen and nothing presented
+        // over it. The two sheets here used to carry their own copies of
+        // `account` and `store` for that reason; the cover that a finished-turn
+        // notification presents was added later without them, and reading
+        // `ClientNavigationModel` out of an environment that did not have it
+        // is a trap, not a nil. TestFlight 1.0.0 (88) crashed on every tap of
+        // a chat notification. Injecting here covers whatever is presented
+        // next as well.
+        .environment(account)
+        .environment(connectivity)
+        .environment(connection)
+        .environment(store)
+        .environment(input)
+        .environment(navigation)
+        .environment(editors)
     }
 
     @ViewBuilder
