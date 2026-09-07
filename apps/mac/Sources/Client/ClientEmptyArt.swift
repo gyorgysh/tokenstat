@@ -21,6 +21,10 @@ enum EmptyArtKind {
     case workflows
     case automations
     case changes
+    /// Previous commits, when the folder is a repository that has none yet.
+    case history
+    /// The folder is not a git repository, so there is nothing to browse.
+    case notGit
     case files
     /// The host has not answered yet. Deliberately not one of the others: a
     /// question nobody replied to is not an empty answer.
@@ -64,6 +68,8 @@ struct ClientEmptyArt: View {
             case .workflows: WorkflowsScene(reduceMotion: reduceMotion)
             case .automations: AutomationsScene(reduceMotion: reduceMotion)
             case .changes: ChangesScene(reduceMotion: reduceMotion)
+            case .history: HistoryScene(reduceMotion: reduceMotion)
+            case .notGit: NotGitScene(reduceMotion: reduceMotion)
             case .files: FilesScene(reduceMotion: reduceMotion)
             case .waiting: WaitingScene(reduceMotion: reduceMotion)
             case .remoteReach: RemoteReachScene(reduceMotion: reduceMotion)
@@ -384,6 +390,138 @@ private struct ChangesScene: View {
                 settled = true
             }
         }
+    }
+}
+
+// MARK: - History
+
+/// A commit list with nothing in it yet: the rail is there, the newest seat is
+/// still an outline, and it breathes so the screen reads as waiting rather
+/// than as a diagram.
+private struct HistoryScene: View {
+    var reduceMotion: Bool
+    @State private var lit = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Capsule()
+                    .fill(Ink.quiet)
+                    .frame(width: Ink.width, height: 52)
+                VStack(spacing: 14) {
+                    Circle()
+                        .strokeBorder(
+                            Ink.lead,
+                            style: StrokeStyle(lineWidth: Ink.width, lineCap: .round, dash: [3, 3])
+                        )
+                        .background(
+                            Circle().fill(Theme.accentSoft.opacity(lit || reduceMotion ? 1 : 0.2))
+                        )
+                        .frame(width: 14, height: 14)
+                        .scaleEffect(reduceMotion || lit ? 1 : 0.82)
+                    Circle()
+                        .strokeBorder(Ink.quiet, style: Ink.style)
+                        .frame(width: 12, height: 12)
+                    Circle()
+                        .strokeBorder(Ink.quiet, style: Ink.style)
+                        .frame(width: 12, height: 12)
+                }
+            }
+            .frame(width: 14)
+
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Ghost(width: 48, color: Ink.lead)
+                    Ghost(width: 28)
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    Ghost(width: 56)
+                    Ghost(width: 36)
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    Ghost(width: 40)
+                    Ghost(width: 24)
+                }
+            }
+            .padding(.top, 1)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true)) {
+                lit = true
+            }
+        }
+    }
+}
+
+// MARK: - Not a git repository
+
+/// A folder that has no history behind it: the branch is drawn and never
+/// meets the folder, so the picture is the missing connection rather than an
+/// empty list.
+private struct NotGitScene: View {
+    var reduceMotion: Bool
+    @State private var travelled = false
+
+    var body: some View {
+        HStack(spacing: 16) {
+            folder
+                .fill(Theme.accentSoft)
+                .overlay { folder.stroke(Ink.lead, style: Ink.style) }
+                .frame(width: 56, height: 34)
+
+            ZStack {
+                Path { path in
+                    path.move(to: CGPoint(x: 2, y: 25))
+                    path.addLine(to: CGPoint(x: 20, y: 25))
+                    path.addLine(to: CGPoint(x: 36, y: 10))
+                    path.move(to: CGPoint(x: 20, y: 25))
+                    path.addLine(to: CGPoint(x: 36, y: 40))
+                }
+                .stroke(
+                    Ink.lead.opacity(0.85),
+                    style: StrokeStyle(
+                        lineWidth: Ink.width,
+                        lineCap: .round,
+                        lineJoin: .round,
+                        dash: [4, 4],
+                        dashPhase: reduceMotion || !travelled ? 0 : -16
+                    )
+                )
+                Circle()
+                    .strokeBorder(Ink.lead, style: Ink.style)
+                    .background(Circle().fill(Theme.accentSoft))
+                    .frame(width: 11, height: 11)
+                    .offset(x: -18, y: 0)
+                Circle()
+                    .strokeBorder(Ink.quiet, style: Ink.style)
+                    .frame(width: 9, height: 9)
+                    .offset(x: 16, y: -15)
+                Circle()
+                    .strokeBorder(Ink.quiet, style: Ink.style)
+                    .frame(width: 9, height: 9)
+                    .offset(x: 16, y: 15)
+            }
+            .frame(width: 44, height: 50)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                travelled = true
+            }
+        }
+    }
+
+    private var folder: Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 1, y: 33))
+        path.addLine(to: CGPoint(x: 1, y: 6))
+        path.addLine(to: CGPoint(x: 16, y: 6))
+        path.addLine(to: CGPoint(x: 21, y: 12))
+        path.addLine(to: CGPoint(x: 55, y: 12))
+        path.addLine(to: CGPoint(x: 55, y: 33))
+        path.closeSubpath()
+        return path
     }
 }
 

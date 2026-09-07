@@ -261,6 +261,18 @@ struct ClientWorkspaceSessionsView: View {
                 .buttonStyle(.plain)
 
                 NavigationLink {
+                    ClientWorkspaceHistoryView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        folder: folder,
+                        hostName: hostName
+                    )
+                } label: {
+                    ClientLauncherDestinationTile(section: .history)
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
                     PullsView(
                         workspaceID: workspaceID,
                         peer: peer,

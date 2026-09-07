@@ -168,6 +168,18 @@ struct ClientWorkspaceDetailView: View {
             .buttonStyle(.plain)
 
             NavigationLink {
+                ClientWorkspaceHistoryView(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    folder: current,
+                    hostName: hostName
+                )
+            } label: {
+                ClientSectionRow(section: .history, count: nil)
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
                 PullsView(
                     workspaceID: workspaceID,
                     peer: peer,

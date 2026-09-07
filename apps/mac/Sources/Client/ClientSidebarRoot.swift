@@ -449,6 +449,7 @@ struct ClientSidebarRoot: View {
         case .sessions: return summary.sessions
         case .chat: return summary.chats
         case .changes: return summary.changed ?? folder.git?.files.count
+        case .history: return nil
         case .pulls:
             return summary.pulls
                 ?? pullCounts.count(

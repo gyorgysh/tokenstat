@@ -17,6 +17,9 @@ at the end.
 
 - A conversation on iPhone and iPad hides the tab bar, so the composer sits on
   the transcript instead of above a floating folder pill.
+- A folder on iPhone and iPad has History, the same previous-commit list the
+  Mac inspector already showed. A folder that is not a git repository, or one
+  that has no commits yet, gets a drawn empty state instead of a blank list.
 
 ### Fixed
 

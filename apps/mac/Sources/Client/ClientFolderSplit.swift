@@ -154,6 +154,7 @@ struct ClientFolderSplit: View {
         case .sessions: return counts.sessions
         case .chat: return counts.chats
         case .changes: return counts.changes
+        case .history: return nil
         case .pulls: return counts.pulls > 0
             ? counts.pulls
             : pullCounts.count(workspaceID: workspaceID, peer: peer)
@@ -274,6 +275,13 @@ struct ClientWorkspaceSectionDetail: View {
             }
         case .changes:
             ClientWorkspaceChangesView(
+                peer: peer,
+                workspaceID: workspaceID,
+                folder: folderNow,
+                hostName: hostName
+            )
+        case .history:
+            ClientWorkspaceHistoryView(
                 peer: peer,
                 workspaceID: workspaceID,
                 folder: folderNow,

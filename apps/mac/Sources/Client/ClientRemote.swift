@@ -226,6 +226,29 @@ enum ClientRemote {
         )
     }
 
+    /// Recent commits, newest first. Empty when the folder is not a
+    /// repository, and when its first commit has not happened yet. The
+    /// caller distinguishes those with `status`.
+    static func log(peer: String, workspace: String, limit: Int = 100) async throws -> [Commit] {
+        try await Bridge.onPeer(
+            peer,
+            "workspace.log",
+            ["id": workspace, "limit": limit],
+            as: [Commit].self
+        )
+    }
+
+    /// One commit in full, including the patches. Separate from `log`,
+    /// which is only the list.
+    static func showCommit(peer: String, workspace: String, commit: String) async throws -> CommitDetail {
+        try await Bridge.onPeer(
+            peer,
+            "workspace.show",
+            ["id": workspace, "path": commit],
+            as: CommitDetail.self
+        )
+    }
+
     /// Every badge on the folder screen, in one call instead of five lists.
     static func summaries(peer: String) async throws -> [WorkspaceSummary] {
         try await Bridge.onPeer(peer, "workspace.summary", as: [WorkspaceSummary].self)

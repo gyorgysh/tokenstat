@@ -152,6 +152,10 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     /// about.
     case chat
     case changes
+    /// Previous commits. On Mac this lives in the inspector. On iPhone and
+    /// iPad there is no inspector column, so it is a folder section like
+    /// Changes.
+    case history
     case pulls
     case todo
     case notes
@@ -167,6 +171,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .sessions: return "Sessions"
         case .chat: return "Chat"
         case .changes: return "Changes"
+        case .history: return "History"
         case .pulls: return "Pull requests"
         case .todo: return "Tasks"
         case .notes: return "Notes"
@@ -182,6 +187,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .sessions: return "terminal.fill"
         case .chat: return "bubble.left.and.bubble.right"
         case .changes: return "plusminus"
+        case .history: return "clock.arrow.circlepath"
         case .pulls: return "arrow.triangle.merge"
         case .todo: return "checklist"
         case .notes: return "note.text"

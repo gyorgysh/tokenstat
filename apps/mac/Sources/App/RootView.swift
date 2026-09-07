@@ -1795,7 +1795,10 @@ struct RootView: View {
                             // section that owns them, so a running workflow is
                             // found where workflows are and not in a pile at
                             // the bottom of the folder.
-                            ForEach(WorkspaceSection.allCases) { section in
+                            // History is an inspector tab on Mac, not a
+                            // centre-pane section. iPhone and iPad have no
+                            // inspector column, so they list it with Changes.
+                            ForEach(WorkspaceSection.allCases.filter { $0 != .history }) { section in
                                 WorkspaceSectionRow(
                                     section: section,
                                     count: count(of: section, in: folder),
@@ -2161,7 +2164,7 @@ struct RootView: View {
     private var showsWorkspaceSurface: Bool {
         switch route.workspaceSection {
         case .sessions, .changes, .files, .browser: return true
-        case .chat, .pulls, .todo, .notes, .workflows, .automations, nil: return false
+        case .chat, .history, .pulls, .todo, .notes, .workflows, .automations, nil: return false
         }
     }
 
@@ -2272,6 +2275,10 @@ struct RootView: View {
         switch route {
         case .workspace(_, .sessions), .workspace(_, .changes),
              .workspace(_, .files), .workspace(_, .browser):
+            EmptyView()
+        case .workspace(_, .history):
+            // History is an inspector tab on Mac. iPhone and iPad draw it
+            // as a folder section in the client root, not here.
             EmptyView()
         case let .workspace(id, .chat):
             #if os(macOS)
@@ -2631,6 +2638,7 @@ struct RootView: View {
                 value = workspaces.summary(for: folder.id)?.chats ?? 0
             }
         case .changes: value = folder.git?.files.count ?? 0
+        case .history: return nil
         case .pulls: value = remote?.pulls ?? pullCounts.count(key: folder.id) ?? 0
         case .todo: value = remote?.tasks ?? todo.openCount(in: folder.id)
         case .notes:
@@ -2721,7 +2729,7 @@ struct RootView: View {
                 } else {
                     workspaces.showBrowser(in: folderID)
                 }
-            case .chat, .pulls, .todo, .notes, .workflows, .automations:
+            case .chat, .history, .pulls, .todo, .notes, .workflows, .automations:
                 // Not a tab in the terminal pane. These are drawn where their
                 // global versions are, so there is nothing to bring forward.
                 break
