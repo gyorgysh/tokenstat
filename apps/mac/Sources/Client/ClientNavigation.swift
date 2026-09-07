@@ -33,6 +33,14 @@ final class ClientNavigationModel {
     /// the detail column draws one section rather than the sections again.
     var section: WorkspaceSection = .sessions
 
+    /// Conversation a notification asked to open, consumed by the chat list
+    /// once that folder is on screen.
+    var openChatID: String?
+
+    /// A chat opened from a notification on the tab layout, where there is
+    /// no sidebar to land the folder in. Dismissing it returns where you were.
+    var presentedChat: PresentedChat?
+
     /// The machine Devices should be showing, when something outside that tab
     /// asked for it.
     ///
@@ -60,6 +68,26 @@ final class ClientNavigationModel {
         deviceMachineID = machineID
         destination = .machines
     }
+
+    /// Open this conversation in its folder's chat section.
+    func openChat(folderID: String, chatID: String) {
+        self.folderID = folderID
+        self.section = .chat
+        self.openChatID = chatID
+        self.destination = .workspaces
+    }
+}
+
+/// Enough to open one thread from a notification without keeping a folder
+/// model around. The ids are host-local and arrived over the tunnel, not
+/// on the push.
+struct PresentedChat: Identifiable, Equatable {
+    var id: String { "\(peer)/\(chatID)" }
+    var peer: String
+    var workspaceID: String
+    var folderName: String
+    var hostName: String
+    var chatID: String
 }
 
 #endif

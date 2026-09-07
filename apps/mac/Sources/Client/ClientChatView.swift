@@ -37,6 +37,7 @@ struct ClientChatView: View {
     /// The launcher may skip the list once. Back from the thread must still
     /// reach the list rather than immediately pushing the same chat again.
     @State private var didOpenConversation = false
+    @Environment(ClientNavigationModel.self) private var navigation
 
     private var place: String { folderName.isEmpty ? "this folder" : folderName }
 
@@ -109,6 +110,7 @@ struct ClientChatView: View {
         }
         .task {
             await reload()
+            if await openRequestedChat() { return }
             if openConversationOnAppear, !didOpenConversation {
                 didOpenConversation = true
                 if let recent = model.mostRecent {
@@ -118,6 +120,9 @@ struct ClientChatView: View {
                     await create()
                 }
             }
+        }
+        .onChange(of: navigation.openChatID) { _, _ in
+            Task { await openRequestedChat() }
         }
     }
 
@@ -165,6 +170,20 @@ struct ClientChatView: View {
     private func create() async {
         await model.create()
         opened = model.selected
+    }
+
+    /// A notification named this conversation. Only consume it if it is in
+    /// this folder, so a list that is still on screen for another workspace
+    /// cannot steal the tap.
+    @discardableResult
+    private func openRequestedChat() async -> Bool {
+        guard let id = navigation.openChatID,
+              let chat = model.chats.first(where: { $0.id == id })
+        else { return false }
+        await model.select(chat)
+        opened = chat
+        navigation.openChatID = nil
+        return true
     }
 }
 

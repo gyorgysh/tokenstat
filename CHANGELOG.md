@@ -13,6 +13,12 @@ at the end.
 
 ## [Unreleased]
 
+### Added
+
+- Tapping a chat notification opens that conversation. On a Mac it brings
+  the window forward and selects the thread. On iPhone and iPad it opens
+  the thread. The push still names only the machine.
+
 ### Changed
 
 - Account, This device, opens with Notifications. The switch used to sit

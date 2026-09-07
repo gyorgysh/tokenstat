@@ -54,6 +54,8 @@ struct RootView: View {
     /// singleton rather than a fresh model, because the notification delegate
     /// answers through the same object from outside any view.
     @State private var deviceRequests = DeviceAccessRequests.shared
+    /// A tap on a chat banner, same reason: the delegate is outside this view.
+    @State private var notificationOpen = NotificationOpen.shared
     #endif
     @State private var automations = AutomationsModel()
     @State private var workflows = WorkflowsModel()
@@ -241,6 +243,11 @@ struct RootView: View {
             // laptop that was off.
             .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
                 Task { await Bridge.nudgeTunnelOnForeground() }
+            }
+            .onChange(of: notificationOpen.request, initial: true) { _, request in
+                guard let request else { return }
+                notificationOpen.take()
+                openFromNotification(request)
             }
             // One accent for every control in the window. Set here so a toggle,
             // a segmented picker or a prominent button does not have to
@@ -2810,6 +2817,31 @@ struct RootView: View {
             }
         default:
             break
+        }
+    }
+
+    /// A tap on a chat notification. The conversation id is local: this Mac
+    /// wrote it, and nothing about the thread left the machine.
+    private func openFromNotification(_ request: NotificationOpen.Request) {
+        guard request.kind == .chat, let conversationID = request.conversationID else { return }
+        let folderID = request.workspaceID.flatMap { workspaceID in
+            workspaces.folders.first { $0.id == workspaceID }?.id
+        } ?? chat.folderID ?? workspaces.selectedID ?? workspaces.folders.first?.id
+        guard let folderID else { return }
+        if chat.selected?.id == conversationID, showsChat, chatFolder == folderID {
+            return
+        }
+        chat.reveal(id: conversationID)
+        expandedWorkspaces.insert(folderID)
+        expandedChatHistories.insert(folderID)
+        openSection(.chat, in: folderID) {
+            Task {
+                guard chat.folderID == folderID,
+                      chat.selected?.id != conversationID,
+                      let conversation = chat.chats.first(where: { $0.id == conversationID })
+                else { return }
+                await chat.select(conversation)
+            }
         }
     }
 

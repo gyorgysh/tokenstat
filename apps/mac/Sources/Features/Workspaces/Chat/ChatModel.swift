@@ -89,6 +89,8 @@ final class ChatModel {
     /// that started them may mutate the currently displayed workspace/chat.
     private var loadGeneration: UInt64 = 0
     private var selectionGeneration: UInt64 = 0
+    /// Conversation a notification asked to open, consumed by the next load.
+    private var pendingRevealID: String?
     private var attachmentCacheGeneration: UInt64 = 0
     private var attemptedResponseAttachments: Set<String> = []
     private(set) var loadingResponseAttachments: Set<String> = []
@@ -139,7 +141,24 @@ final class ChatModel {
             // it, so the empty string never gets past this line.
             defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
             chats = loaded.2
-            if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
+            if let pending = pendingRevealID {
+                pendingRevealID = nil
+                if let found = chats.first(where: { $0.id == pending }) {
+                    if selected?.id == found.id {
+                        if found != selected { self.selected = found }
+                        await refreshOpen(id: found.id)
+                    } else {
+                        await select(found)
+                    }
+                } else if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
+                    if fresh != selected { self.selected = fresh }
+                    await refreshOpen(id: fresh.id)
+                } else if selectFirst {
+                    await select(chats.first)
+                } else {
+                    await select(nil)
+                }
+            } else if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
                 // This conversation is already open. Re-selecting it would
                 // empty the transcript and read it back, which is a blank
                 // pane, a persona where the last turn was, and a lost scroll
@@ -157,6 +176,15 @@ final class ChatModel {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    /// Open this conversation once its folder is loaded.
+    ///
+    /// A notification tap names a thread this model may not have read yet.
+    /// Stash the id so `load` selects it instead of the first row. Callers
+    /// that already hold the folder also select immediately.
+    func reveal(id: String) {
+        pendingRevealID = id
     }
 
     func select(_ chat: ChatConversation?) async {

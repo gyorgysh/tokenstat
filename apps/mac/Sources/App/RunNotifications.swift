@@ -30,6 +30,115 @@ import AppKit
 /// on first launch, for a feature nobody has asked for yet, is the reason
 /// people say no to notifications forever.
 
+/// A tap on a chat notification, waiting to be opened.
+///
+/// Local Mac banners already know the conversation: they wrote the id. A
+/// phone push cannot: the payload is a reason and a machine, and the thread
+/// is looked up over the tunnel after the tap. Either way the destination
+/// lives here until the window that can open it has appeared.
+@MainActor
+@Observable
+final class NotificationOpen {
+    static let shared = NotificationOpen()
+
+    struct Request: Equatable, Sendable {
+        enum Kind: Equatable, Sendable {
+            case chat
+        }
+
+        var kind: Kind
+        var conversationID: String?
+        var workspaceID: String?
+        var machineID: String?
+        var waiting: Bool
+    }
+
+    private(set) var request: Request?
+
+    func offer(_ request: Request) {
+        self.request = request
+        #if os(macOS)
+        NSApp.activate(ignoringOtherApps: true)
+        let window = NSApp.windows.first { $0.canBecomeMain && $0.isVisible }
+            ?? NSApp.windows.first { $0.canBecomeMain }
+        if let window {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        }
+        #endif
+    }
+
+    func take() -> Request? {
+        let value = request
+        request = nil
+        return value
+    }
+
+    /// Read a tap. Local banners carry `ts.kind` and a conversation id. A
+    /// push carries `ts.reason` and a machine. The identifier is the fallback
+    /// for a banner posted before those keys existed.
+    nonisolated static func parse(
+        userInfo: [AnyHashable: Any],
+        identifier: String
+    ) -> Request? {
+        let ts = userInfo["ts"] as? [AnyHashable: Any]
+        if let reason = string("reason", from: ts) {
+            switch reason {
+            case "chat.finished", "chat.failed":
+                return Request(
+                    kind: .chat,
+                    machineID: string("machine", from: ts),
+                    waiting: false
+                )
+            case "run.needs_input":
+                return Request(
+                    kind: .chat,
+                    machineID: string("machine", from: ts),
+                    waiting: true
+                )
+            default:
+                return nil
+            }
+        }
+        if string("kind", from: ts) == "chat" {
+            return Request(
+                kind: .chat,
+                conversationID: string("conversationId", from: ts),
+                workspaceID: string("workspaceId", from: ts),
+                waiting: string("waiting", from: ts) == "1"
+            )
+        }
+        return parseIdentifier(identifier)
+    }
+
+    private nonisolated static func parseIdentifier(_ identifier: String) -> Request? {
+        let prefix = "run.chat."
+        guard identifier.hasPrefix(prefix) else { return nil }
+        let rest = String(identifier.dropFirst(prefix.count))
+        for title in ["Waiting for you", "Chat finished", "Chat did not finish"] {
+            let suffix = ".\(title)"
+            guard rest.hasSuffix(suffix) else { continue }
+            let id = String(rest.dropLast(suffix.count))
+            guard !id.isEmpty else { return nil }
+            return Request(
+                kind: .chat,
+                conversationID: id,
+                waiting: title == "Waiting for you"
+            )
+        }
+        return nil
+    }
+
+    private nonisolated static func string(_ key: String, from dict: [AnyHashable: Any]?) -> String? {
+        guard let value = dict?[key] else { return nil }
+        if let text = value as? String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return nil
+    }
+}
+
 /// Presents banners while the app is in front.
 ///
 /// Without a delegate the system swallows a notification whose app is already
@@ -56,25 +165,35 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         [.banner, .sound, .list]
     }
 
-    /// A button on a banner was pressed.
-    ///
-    /// Only device access answers here. The request comes from the
-    /// notification's own identifier, which this app wrote, rather than from
-    /// anything in its text.
-    #if os(macOS)
+    /// A tap on a banner. Device access still answers from its own buttons.
+    /// Everything else that names a chat is handed to `NotificationOpen` so
+    /// the window that owns the transcript can open it.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
         let request = response.notification.request
-        guard request.content.categoryIdentifier == DeviceAccessRequests.category else { return }
-        let prefix = DeviceAccessRequests.identifier("")
-        guard request.identifier.hasPrefix(prefix) else { return }
-        let requestID = String(request.identifier.dropFirst(prefix.count))
-        let action = response.actionIdentifier
-        await DeviceAccessRequests.shared.handleNotification(action: action, requestID: requestID)
+        #if os(macOS)
+        if request.content.categoryIdentifier == DeviceAccessRequests.category {
+            let prefix = DeviceAccessRequests.identifier("")
+            guard request.identifier.hasPrefix(prefix) else { return }
+            let requestID = String(request.identifier.dropFirst(prefix.count))
+            await DeviceAccessRequests.shared.handleNotification(
+                action: response.actionIdentifier,
+                requestID: requestID
+            )
+            return
+        }
+        #endif
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+        guard let parsed = NotificationOpen.parse(
+            userInfo: request.content.userInfo,
+            identifier: request.identifier
+        ) else { return }
+        await MainActor.run {
+            NotificationOpen.shared.offer(parsed)
+        }
     }
-    #endif
 }
 
 #if os(macOS)
@@ -126,6 +245,7 @@ final class RunNotifications {
 
     private struct ChatState {
         let title: String
+        let workspaceID: String
         let running: Bool
         let pending: Bool
         let doneStatus: String?
@@ -215,6 +335,7 @@ final class RunNotifications {
                     chat.id,
                     ChatState(
                         title: chat.title,
+                        workspaceID: chat.workspaceID,
                         running: chat.running,
                         pending: pending.contains(chat.id),
                         doneStatus: chat.id == selectedID ? selectedDoneStatus : nil
@@ -237,18 +358,25 @@ final class RunNotifications {
                 post(
                     "chat.\(id)",
                     title: "Waiting for you",
-                    body: "\(chat.title) needs an answer."
+                    body: "\(chat.title) needs an answer.",
+                    extras: chatExtras(id: id, workspaceID: chat.workspaceID, waiting: true)
                 )
             }
             guard before.running, !chat.running, !watching else { continue }
             switch chat.doneStatus {
             case "ok":
-                post("chat.\(id)", title: "Chat finished", body: "\(chat.title) is done.")
+                post(
+                    "chat.\(id)",
+                    title: "Chat finished",
+                    body: "\(chat.title) is done.",
+                    extras: chatExtras(id: id, workspaceID: chat.workspaceID, waiting: false)
+                )
             case "error":
                 post(
                     "chat.\(id)",
                     title: "Chat did not finish",
-                    body: "\(chat.title) did not finish cleanly."
+                    body: "\(chat.title) did not finish cleanly.",
+                    extras: chatExtras(id: id, workspaceID: chat.workspaceID, waiting: false)
                 )
             default:
                 // Explicit Stop and an old host with no trustworthy terminal
@@ -336,7 +464,21 @@ final class RunNotifications {
         )
     }
 
-    private func post(_ runID: String, title: String, body: String) {
+    private func chatExtras(id: String, workspaceID: String, waiting: Bool) -> [String: String] {
+        [
+            "kind": "chat",
+            "conversationId": id,
+            "workspaceId": workspaceID,
+            "waiting": waiting ? "1" : "0",
+        ]
+    }
+
+    private func post(
+        _ runID: String,
+        title: String,
+        body: String,
+        extras: [String: String] = [:]
+    ) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -344,6 +486,9 @@ final class RunNotifications {
         // Grouped per run, so a run that ends and is retried replaces its own
         // banner rather than stacking a history in Notification Centre.
         content.threadIdentifier = runID
+        if !extras.isEmpty {
+            content.userInfo = ["ts": extras]
+        }
         let request = UNNotificationRequest(
             identifier: "run.\(runID).\(title)",
             content: content,

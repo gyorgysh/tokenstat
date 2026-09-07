@@ -31,6 +31,7 @@ struct ClientSidebarRoot: View {
     /// One workspaces model for the whole layout: the tree in the sidebar and
     /// the screen in the detail column are the same connection, not two.
     @State private var workspaces = ClientWorkspacesModel()
+    @State private var notificationOpen = NotificationOpen.shared
     /// What each folder holds, keyed by workspace id. One call for the whole
     /// tree rather than one per folder: the Mac's sidebar draws these counts
     /// too, and asking per row is five tunnel hops per folder.
@@ -115,7 +116,13 @@ struct ClientSidebarRoot: View {
         // owns is replaced.
         .id(detailGeneration)
         .clientShortcuts(shortcuts)
-        .task { await reload() }
+        .task {
+            await reload()
+            await fulfillNotification()
+        }
+        .onChange(of: notificationOpen.request) { _, _ in
+            Task { await fulfillNotification() }
+        }
         .onChange(of: workspaces.connectedKey) { _, _ in
             Task { await loadSummaries() }
         }
@@ -539,6 +546,26 @@ struct ClientSidebarRoot: View {
     private func sessionTitle(_ session: PtySessionInfo) -> String {
         if let harness = harnessID(forCommand: session.command) { return harnessName(harness) }
         return URL(fileURLWithPath: session.command).lastPathComponent
+    }
+
+    /// A tap on a push. The sidebar can land the folder and the thread in
+    /// place, which is the iPad equivalent of bringing that window forward.
+    private func fulfillNotification() async {
+        guard let request = NotificationOpen.shared.take(), request.kind == .chat else { return }
+        guard let opened = await workspaces.chatFromNotification(request, account: account.account) else {
+            return
+        }
+        if let folder = opened.folder {
+            navigation.openChat(folderID: folder.id, chatID: opened.chat.id)
+        } else {
+            navigation.presentedChat = PresentedChat(
+                peer: opened.peer,
+                workspaceID: opened.chat.workspaceID,
+                folderName: "Workspace",
+                hostName: opened.hostName,
+                chatID: opened.chat.id
+            )
+        }
     }
 
     /// The sessions running in one folder, matched on the directory rather

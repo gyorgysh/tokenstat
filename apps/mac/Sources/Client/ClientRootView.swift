@@ -57,6 +57,7 @@ struct ClientRootView: View {
     /// `AvatarButton`.
     @State private var showAccount = false
     @State private var store = ClientStore()
+    @State private var notificationOpen = NotificationOpen.shared
 
     /// The door for a phone or an iPad with no account on it.
     ///
@@ -248,6 +249,31 @@ struct ClientRootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .tokenstatOpenPaywall)) { _ in
             store.showPaywall = true
+        }
+        .onChange(of: notificationOpen.request, initial: true) { _, request in
+            guard request?.kind == .chat else { return }
+            if navigation.destination != .workspaces {
+                navigation.destination = .workspaces
+            }
+        }
+        .fullScreenCover(item: Binding(
+            get: { navigation.presentedChat },
+            set: { navigation.presentedChat = $0 }
+        )) { target in
+            NavigationStack {
+                ClientRecentChatView(
+                    peer: target.peer,
+                    workspaceID: target.workspaceID,
+                    folderName: target.folderName,
+                    hostName: target.hostName,
+                    chatID: target.chatID
+                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { navigation.presentedChat = nil }
+                    }
+                }
+            }
         }
     }
 

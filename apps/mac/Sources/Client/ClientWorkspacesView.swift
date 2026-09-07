@@ -23,6 +23,7 @@ struct ClientWorkspacesView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: ClientWorkspacesModel
     @State private var pendingClose: PtySessionInfo?
+    @State private var notificationOpen = NotificationOpen.shared
     // Per-host, not global: each host card owns its row. A global key would
     // make every toggle move together, which is the extra card in the
     // screenshot. The rule itself lives on the model, because the iPad's
@@ -48,8 +49,15 @@ struct ClientWorkspacesView: View {
     /// Nil means "make your own". A default argument cannot construct one:
     /// the model is main-actor isolated and a default is evaluated where the
     /// caller is, which is not always here.
+    ///
+    /// When this view owns the model, it also consumes notification taps.
+    /// The sidebar passes its model in and handles those itself, so two
+    /// surfaces do not open the same thread.
+    private let handlesNotifications: Bool
+
     @MainActor
     init(model: ClientWorkspacesModel? = nil) {
+        handlesNotifications = model == nil
         _model = State(initialValue: model ?? ClientWorkspacesModel())
     }
 
@@ -205,6 +213,11 @@ struct ClientWorkspacesView: View {
             .task {
                 await model.refresh(account: account.account)
                 await model.autoConnectLastHost()
+                if handlesNotifications { await fulfillNotification() }
+            }
+            .onChange(of: notificationOpen.request) { _, _ in
+                guard handlesNotifications else { return }
+                Task { await fulfillNotification() }
             }
             // When the host list refreshes and the last host comes online
             // after being offline (Mac wakes, lid opens), try again. This is
@@ -259,6 +272,22 @@ struct ClientWorkspacesView: View {
                     "Stops the process on \($0.name)."
                 } ?? "Stops the process on the computer.")
             }
+    }
+
+    /// A tap on a push. The tab layout has no sidebar to land a folder in,
+    /// so the thread opens over the app and Close puts you back.
+    private func fulfillNotification() async {
+        guard let request = NotificationOpen.shared.take(), request.kind == .chat else { return }
+        guard let opened = await model.chatFromNotification(request, account: account.account) else {
+            return
+        }
+        navigation.presentedChat = PresentedChat(
+            peer: opened.peer,
+            workspaceID: opened.chat.workspaceID,
+            folderName: opened.folder?.name ?? "Workspace",
+            hostName: opened.hostName,
+            chatID: opened.chat.id
+        )
     }
 
     /// This phone, on the screen that lists the devices it can reach.
@@ -706,6 +735,53 @@ final class ClientWorkspacesModel {
         folders = (try? await Bridge.remoteWorkspaces(peer: peer)) ?? folders
         sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? sessions
         recentChats = (try? await ClientRemote.recentChats(peer: peer.key)) ?? recentChats
+    }
+
+    /// Dial the machine the push named, then pick the thread that matches.
+    ///
+    /// The push itself has no conversation id. Recents on this host are the
+    /// lookup: a waiting banner wants a pending approval, a finished turn
+    /// wants the newest agent reply.
+    func chatFromNotification(
+        _ request: NotificationOpen.Request,
+        account: Account?
+    ) async -> (peer: String, hostName: String, folder: WorkspaceFolder?, chat: ChatRecentConversation)? {
+        await refresh(account: account)
+        for _ in 0..<20 {
+            if isConnecting == nil { break }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        let host: ClientHost?
+        if let machineID = request.machineID {
+            host = hosts.first { $0.machineID == machineID }
+        } else {
+            host = hosts.first { $0.peerKey == connectedKey } ?? hosts.first
+        }
+        guard let host else { return nil }
+        if connectedKey != host.peerKey {
+            await connect(host)
+        } else {
+            await reloadRemote(peerKey: host.peerKey)
+        }
+        guard connectedKey == host.peerKey else { return nil }
+        guard let chat = Self.pickNotificationChat(from: recentChats, waiting: request.waiting) else {
+            return nil
+        }
+        let folder = folders.first {
+            (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == chat.workspaceID
+        }
+        return (host.peerKey, host.name, folder, chat)
+    }
+
+    static func pickNotificationChat(
+        from recents: [ChatRecentConversation],
+        waiting: Bool
+    ) -> ChatRecentConversation? {
+        let ranked = recents.sorted { ($0.lastMessageAtMs ?? 0) > ($1.lastMessageAtMs ?? 0) }
+        if waiting {
+            return ranked.first(where: { $0.needsAttention }) ?? ranked.first
+        }
+        return ranked.first { $0.lastMessageAuthor == "agent" } ?? ranked.first
     }
 }
 
