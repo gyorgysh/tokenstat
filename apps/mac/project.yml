@@ -176,7 +176,12 @@ settings:
     # 86 is the same 1.0.0: composer glass covers the home-indicator edge,
     # and Stop stays a small glyph instead of a glass circle that widened
     # the bar.
-    CURRENT_PROJECT_VERSION: "86"
+    # 86 went up.
+    # 87 is the same 1.0.0: Following uses theme colours, the send queue
+    # names the current turn, two or more waiting messages open from
+    # View pending, a tap for the open chat stays on that window, and
+    # the end-to-end note is a glass divider.
+    CURRENT_PROJECT_VERSION: "87"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
