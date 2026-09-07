@@ -11,40 +11,50 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
-## [Unreleased]
+## [0.9.1] - 2026-09-08
+
+Chat on the phone catches up with the Mac: sends that queue, notifications
+that open the work, folder history, and a composer that stays on the
+transcript.
 
 ### Added
 
 - Tapping a notification opens the work that needs you. A terminal waiting
-  on a permission prompt or a gate opens that session. Otherwise the chat
-  that finished, or is waiting, opens. On a Mac it brings the window
-  forward. On iPhone and iPad it opens over the app, unless that
-  conversation is already on screen, in which case the same window stays.
-  The push still names only the machine.
+  on a permission prompt opens that session. Otherwise the chat that
+  finished, or is waiting, opens. On a Mac it brings the window forward.
+  On iPhone and iPad it opens over the app, unless that conversation is
+  already on screen, in which case the same window stays.
 - Send while a turn is still running queues the next message. A compact
   strip above the composer says it is waiting to send after this turn.
   The next message can be edited or removed there, and Send now stops
   the current turn so that message goes out next. Two or more waiting
   messages open from View pending, so the list does not cover the
   transcript.
+- A folder on iPhone and iPad has History, the same previous-commit list
+  the Mac inspector already showed. A folder that is not a git repository,
+  or one that has no commits yet, gets a drawn empty state instead of a
+  blank list.
 - Sessions on iPhone has the branch picker and the bypass switch the Mac
   already shows. A launch from the phone can skip permission prompts the
   same way.
 
 ### Changed
 
-- Account, This device, opens with Notifications. The switch used to sit
-  under the cache, below the fold on a phone.
-- A file the agent edits is one card named after the file, not an Edit
-  tool row plus a second copy of the same patch. A later change of that
-  file in the same turn is marked 2nd change.
-- Sending a chat message on iPhone hides the keyboard and jumps to the
-  latest turn, so the reply is not sitting above a closed keyboard.
+- Opening a conversation on iPhone hides the tab bar, so the composer sits
+  on the transcript. Coming back to the list brings the bar back. The chat
+  list and the other folder sections keep the bar throughout.
 - The composer floats on the same glass as the tab bar, including the
   home-indicator edge, so the lower end is not a grey strip.
+- Sending a chat message on iPhone hides the keyboard and jumps to the
+  latest turn, so the reply is not sitting above a closed keyboard.
 - Jump to latest, Following and Follow share one compact themed capsule
   with a down arrow, sitting on the transcript. Following is no longer
   a grey pill.
+- A file the agent edits is one card named after the file, not an Edit
+  tool row plus a second copy of the same patch. A later change of that
+  file in the same turn is marked 2nd change.
+- Account, This device, opens with Notifications. The switch used to sit
+  under the cache, below the fold on a phone.
 - The end-to-end note on Workspaces is a glass divider between the hosts
   and the chats, not a second device card. The keys are still a tap away.
 
@@ -52,30 +62,10 @@ at the end.
 
 - Tapping a chat notification on iPhone no longer closes the app. A missing
   host or an empty recents list lands on Workspaces.
-- Back from a conversation left the floating tab bar hidden, so Workspaces
-  had no tabs to switch with.
-- A sent chat prompt could be missing until you clicked off the composer
-  and back. It is on the transcript as soon as it is sent, including when
-  the conversation is just opening.
-
-## [1.0.0] - 2026-09-07
-
-Chat on iPhone and iPad keeps the composer on the transcript, a folder has
-History, and grok in Plan can spawn a subagent.
-
-### Added
-
-- Opening a conversation on iPhone hides the tab bar, so the composer sits on
-  the transcript. The floating tab is gone, not shrunk into a pill that opens
-  the tab menu when tapped. The chat list and the other folder sections keep
-  the bar.
-- A folder on iPhone and iPad has History, the same previous-commit list the
-  Mac inspector already showed. A folder that is not a git repository, or one
-  that has no commits yet, gets a drawn empty state instead of a blank list.
-
-### Fixed
-
-- A grok chat in Plan could not spawn a subagent. The call came back as
+- A sent chat prompt is on the transcript as soon as it is sent, including
+  when the conversation is just opening. It used to appear only after
+  leaving the composer and coming back.
+- A grok chat in Plan can spawn a subagent. The call came back as
   cancelled even after you had allowed it, so the agent stopped exploring
   instead of reading the project. Plan still blocks edits.
 
