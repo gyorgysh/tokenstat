@@ -13,6 +13,11 @@ at the end.
 
 ## [Unreleased]
 
+### Added
+
+- A conversation on iPhone and iPad hides the tab bar, so the composer sits on
+  the transcript instead of above a floating folder pill.
+
 ### Fixed
 
 - A grok chat in Plan could not spawn a subagent. The call came back as

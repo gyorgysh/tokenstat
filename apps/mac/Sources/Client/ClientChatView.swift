@@ -41,17 +41,23 @@ struct ClientChatView: View {
     private var place: String { folderName.isEmpty ? "this folder" : folderName }
 
     var body: some View {
-        if let opened {
-            ClientChatThread(
-                model: model,
-                chatID: opened.id,
-                folderName: folderName,
-                hostName: hostName,
-                onBack: { self.opened = nil }
-            )
-        } else {
-            list
+        Group {
+            if let opened {
+                ClientChatThread(
+                    model: model,
+                    chatID: opened.id,
+                    folderName: folderName,
+                    hostName: hostName,
+                    onBack: { self.opened = nil }
+                )
+            } else {
+                list
+            }
         }
+        // The floating tab bar sits under the composer and steals a row the
+        // transcript could have had. Chat is already a pushed folder screen,
+        // so Back is the way out. Other sections keep the bar.
+        .toolbar(.hidden, for: .tabBar)
     }
 
     private var list: some View {
