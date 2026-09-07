@@ -11,6 +11,33 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
+## [0.9.2] - 2026-09-08
+
+Three ways a chat could stop working: a tool that never finished, a transcript
+that stopped responding behind it, and a notification tap that closed the app.
+
+### Fixed
+
+- A Claude tool call ends when its result arrives. Bash and the rest used to
+  stay marked Running, with an indicator that never stopped, for the rest of
+  the conversation.
+- A chat with several tools running no longer stops responding. Every running
+  row turned its own indicator, and a transcript full of them spent all its
+  time laying itself out again instead of drawing. One row turns now and the
+  rest say Running in words, so however many the computer reports, the
+  conversation stays usable.
+- Tapping a chat notification on iPhone and iPad no longer closes the app.
+  0.9.1 fixed one cause of that. This is the other one, and it closed the app
+  every time.
+- A notification for a conversation or a terminal that is no longer there
+  lands on Workspaces instead of doing nothing at all. It also stops trying
+  after a minute, rather than dialling the computer again on every later
+  visit to that screen.
+- A long reply is lighter to stream on both the Mac and the phone. The turn
+  being written used to push the rest of the conversation out of the store
+  that keeps finished messages ready to draw, so scrolling back through a
+  long chat had to rebuild what it passed.
+
 ## [0.9.1] - 2026-09-08
 
 Chat on the phone catches up with the Mac: sends that queue, notifications
