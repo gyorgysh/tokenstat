@@ -57,9 +57,26 @@ final class NotificationOpen {
     }
 
     private(set) var request: Request?
+    /// When an unresolved tap stops being worth chasing.
+    private var deadline: Date = .distantPast
+
+    /// How long a tap is retried before the app gives up and lands on a
+    /// usable screen instead.
+    ///
+    /// Resolving one is not instant: the phone refreshes the directory, waits
+    /// for a connect already in flight, dials the machine the push named and
+    /// reads its recent chats. A Mac waking as its lid opens deserves that
+    /// runway, which is why a failed attempt keeps the tap rather than
+    /// consuming it. What it does not deserve is forever. A conversation
+    /// deleted on the host never resolves, and a tap for one used to sit here
+    /// for the life of the process: every later mount of Workspaces or the
+    /// sidebar paid another refresh, another wait and another dial for a tap
+    /// made days ago, and showed nothing for it either time.
+    static let patience: TimeInterval = 60
 
     func offer(_ request: Request) {
         self.request = request
+        deadline = Date().addingTimeInterval(Self.patience)
         #if os(macOS)
         NSApp.activate(ignoringOtherApps: true)
         let window = NSApp.windows.first { $0.canBecomeMain && $0.isVisible }
@@ -74,7 +91,18 @@ final class NotificationOpen {
     func take() -> Request? {
         let value = request
         request = nil
+        deadline = .distantPast
         return value
+    }
+
+    /// An attempt that could not resolve. True once the tap is stale, having
+    /// dropped it, which is the caller's signal to land on a usable screen
+    /// rather than keep chasing a destination that is not coming.
+    func dropIfStale() -> Bool {
+        guard request != nil, Date() >= deadline else { return false }
+        request = nil
+        deadline = .distantPast
+        return true
     }
 
     /// Read a tap. Local banners carry `ts.kind` and a conversation id. A

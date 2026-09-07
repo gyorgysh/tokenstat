@@ -284,6 +284,11 @@ struct ClientWorkspacesView: View {
     private func fulfillNotification() async {
         guard let request = NotificationOpen.shared.request else { return }
         guard let opened = await model.targetFromNotification(request, account: account.account) else {
+            // Not yet, or not ever, and this cannot tell the two apart. Keep
+            // the tap for the next attempt until it goes stale, then land on
+            // the machine list rather than leave somebody looking at whatever
+            // was already on screen with nothing to say why.
+            if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }
         guard NotificationOpen.shared.take() == request else { return }
@@ -291,7 +296,10 @@ struct ClientWorkspacesView: View {
         case let .session(session):
             model.openSession(session)
         case let .chat(peer, hostName, folder, chat):
-            guard !peer.isEmpty, !chat.id.isEmpty else { return }
+            guard !peer.isEmpty, !chat.id.isEmpty else {
+                landAfterFailedTap()
+                return
+            }
             // Same thread, phone was just locked: bring that window
             // forward. Presenting again remounts the transcript on top.
             if navigation.isShowing(chatID: chat.id) {
@@ -307,6 +315,19 @@ struct ClientWorkspacesView: View {
                 hostName: hostName,
                 chatID: chat.id
             )
+        }
+    }
+
+    /// Where a tap ends up when what it named cannot be found.
+    ///
+    /// Workspaces, not Home: every notification this app sends is about work
+    /// on a machine, so the machine list is both where the tap was heading
+    /// and the screen that can say the host is offline. It is also where the
+    /// root already sent them on the way in, so this is a landing rather than
+    /// a second move.
+    private func landAfterFailedTap() {
+        if navigation.destination != .workspaces {
+            navigation.destination = .workspaces
         }
     }
 

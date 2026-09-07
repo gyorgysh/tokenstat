@@ -2830,10 +2830,18 @@ struct RootView: View {
             }
             return
         }
-        guard request.kind == .chat, let conversationID = request.conversationID, !conversationID.isEmpty else { return }
+        guard request.kind == .chat, let conversationID = request.conversationID, !conversationID.isEmpty else {
+            // A session banner whose terminal has since closed, or a payload
+            // naming nothing this build understands. The window is already
+            // forward from `offer`; put a screen in it rather than activate
+            // over whatever happened to be open and say nothing.
+            landAfterFailedTap()
+            return
+        }
         let folderID = request.workspaceID.flatMap { workspaceID in
             workspaces.folders.first { $0.id == workspaceID }?.id
         } ?? chat.folderID ?? workspaces.selectedID ?? workspaces.folders.first?.id
+        // No folder at all is an empty app, and there is no screen to land on.
         guard let folderID, !folderID.isEmpty else { return }
         if chat.selected?.id == conversationID, showsChat, chatFolder == folderID {
             return
@@ -2850,6 +2858,19 @@ struct RootView: View {
                 await chat.select(conversation)
             }
         }
+    }
+
+    /// Where a tap ends up when what it named cannot be found. The sessions
+    /// of the folder already selected, which is this window's own main screen.
+    ///
+    /// The conversation case needs nothing here: `openSection(.chat, in:)`
+    /// runs before the lookup, so a banner for a deleted thread still lands on
+    /// that folder's chat list.
+    private func landAfterFailedTap() {
+        guard let id = workspaces.selectedID ?? workspaces.folders.first?.id,
+              !id.isEmpty
+        else { return }
+        openSection(.sessions, in: id)
     }
 
     /// The session a banner is about, or the one currently waiting.

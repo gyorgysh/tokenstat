@@ -556,6 +556,9 @@ struct ClientSidebarRoot: View {
     private func fulfillNotification() async {
         guard let request = NotificationOpen.shared.request else { return }
         guard let opened = await workspaces.targetFromNotification(request, account: account.account) else {
+            // Same as the phone: keep the tap while it is worth retrying, and
+            // land on the tree once it is not. See `NotificationOpen.patience`.
+            if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }
         guard NotificationOpen.shared.take() == request else { return }
@@ -563,7 +566,10 @@ struct ClientSidebarRoot: View {
         case let .session(session):
             workspaces.openSession(session)
         case let .chat(peer, hostName, folder, chat):
-            guard !peer.isEmpty, !chat.id.isEmpty else { return }
+            guard !peer.isEmpty, !chat.id.isEmpty else {
+                landAfterFailedTap()
+                return
+            }
             if navigation.isShowing(chatID: chat.id) {
                 if navigation.destination != .workspaces {
                     navigation.destination = .workspaces
@@ -581,6 +587,14 @@ struct ClientSidebarRoot: View {
                     chatID: chat.id
                 )
             }
+        }
+    }
+
+    /// Where a tap ends up when what it named cannot be found. The sidebar's
+    /// own tree, which is this layout's machine list.
+    private func landAfterFailedTap() {
+        if navigation.destination != .workspaces {
+            navigation.destination = .workspaces
         }
     }
 

@@ -158,13 +158,22 @@ final class ChatModel {
                     } else {
                         await select(found)
                     }
-                } else if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
-                    if fresh != selected { self.selected = fresh }
-                    await refreshOpen(id: fresh.id)
-                } else if selectFirst {
-                    await select(chats.first)
                 } else {
-                    await select(nil)
+                    // The host has just answered with the whole list and the
+                    // conversation a notification named is not in it, so it
+                    // was deleted and no later load will find it either.
+                    // Clearing the reveal is the point: it used to survive
+                    // this branch and re-run on every load of the folder,
+                    // blanking the pane for an id that is never coming back.
+                    pendingRevealID = nil
+                    if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
+                        if fresh != selected { self.selected = fresh }
+                        await refreshOpen(id: fresh.id)
+                    } else if selectFirst {
+                        await select(chats.first)
+                    } else {
+                        await select(nil)
+                    }
                 }
             } else if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
                 // This conversation is already open. Re-selecting it would
