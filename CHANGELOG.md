@@ -13,6 +13,11 @@ at the end.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-07
+
+Chat on iPhone and iPad keeps the composer on the transcript, a folder has
+History, and grok in Plan can spawn a subagent.
+
 ### Added
 
 - A conversation on iPhone and iPad hides the tab bar, so the composer sits on

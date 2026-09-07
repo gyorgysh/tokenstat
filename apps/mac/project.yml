@@ -37,7 +37,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.9.0"
+    MARKETING_VERSION: "1.0.0"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -156,7 +156,10 @@ settings:
     # 81 is the same 0.9.0 with a chat window that slides instead of growing,
     # +/− on the right of edit rows, last-sync on one row, and initials
     # when the account has no photo.
-    CURRENT_PROJECT_VERSION: "81"
+    # 81 went up.
+    # 82 is 1.0.0: the phone and iPad hide the tab bar while a chat is open,
+    # a folder has History, and grok in Plan can spawn a subagent.
+    CURRENT_PROJECT_VERSION: "82"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
