@@ -121,6 +121,34 @@ final class ClientSetupModel {
         }
     }
 
+    /// Re-entering the address step invalidates every result tied to it.
+    func resetServer() {
+        cancelWork()
+        fingerprint = nil
+        trusted = false
+        check = nil
+        finished = nil
+        line = nil
+        terminal?.stop()
+        terminal = nil
+        error = nil
+    }
+
+    /// Offer a distinct name when this account already has a server with it.
+    func chooseAvailableMachineName() async throws {
+        let account = try await Bridge.account()
+        let labels = Set(account.machines.compactMap(\.label))
+        let base = machineName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stem = base.isEmpty ? "server" : base
+        var candidate = stem
+        var suffix = 2
+        while labels.contains(candidate) {
+            candidate = "\(stem.prefix(54))-\(suffix)"
+            suffix += 1
+        }
+        machineName = candidate
+    }
+
     // MARK: - Steps
 
     /// Ask the server for its host key, before any credential is offered.
@@ -128,10 +156,15 @@ final class ClientSetupModel {
     /// The one screen in this wizard where a mistake is permanent, which is
     /// why it is a step of its own rather than a line in another one.
     func probe(library: SSHLibraryModel) async {
+        fingerprint = nil
+        trusted = false
+        check = nil
         await run {
             var host = self.resolvedHost(library: library)
             host.hostKeys = []
-            self.fingerprint = try await Bridge.probeSSHHost(host).fingerprint
+            let fingerprint = try await Bridge.probeSSHHost(host).fingerprint
+            try Task.checkCancellation()
+            self.fingerprint = fingerprint
         }
     }
 
@@ -150,6 +183,7 @@ final class ClientSetupModel {
                     message: library.error ?? "The fingerprint could not be saved."
                 )
             }
+            try Task.checkCancellation()
             self.pickedHostID = saved.id
             self.host = saved
             self.trusted = true
@@ -161,6 +195,7 @@ final class ClientSetupModel {
             let host = self.resolvedHost(library: library)
             let auth = try self.authPayload(library: library)
             let check = try await Bridge.probeServerForSetup(host, auth: auth)
+            try Task.checkCancellation()
             self.check = check
             if self.machineName == "server", let distro = check.distro {
                 // A name somebody would recognise, offered rather than imposed.
@@ -179,37 +214,42 @@ final class ClientSetupModel {
         await run {
             let host = self.resolvedHost(library: library)
             let auth = try self.authPayload(library: library)
+            guard let myKey = self.myKey else {
+                throw BridgeError.core(code: "identity_unavailable",
+                    message: "This device’s identity could not be loaded. Close setup and try again.")
+            }
+            try await self.chooseAvailableMachineName()
+            try Task.checkCancellation()
             let code = try await Bridge.mintPairingCode().code
+            try Task.checkCancellation()
             try await Bridge.stagePairingCode(host, code: code, auth: auth)
-            let line = try await Bridge.installLine(
-                allow: self.myKey,
-                name: self.machineName,
-                agents: self.agents,
-                printInvite: self.printInvite,
-                codeFile: true
-            )
-            self.line = line
-            let handle = try await Bridge.openSSHWithResolvedAuth(
-                host, auth: auth, rows: 24, cols: 100
-            )
-            let terminal = SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id)
-            self.terminal = terminal
-            // A moment for the shell to draw its prompt. Typing into a shell
-            // that has not started echoing yet loses the first characters.
-            try? await Task.sleep(for: .milliseconds(700))
-            terminal.sendBytes(Array((line.oneLine + "\n").utf8))
+            do {
+                try Task.checkCancellation()
+                let line = try await Bridge.installLine(
+                    allow: myKey,
+                    name: self.machineName,
+                    agents: self.agents,
+                    printInvite: self.printInvite,
+                    codeFile: true
+                )
+                self.line = line
+                let handle = try await Bridge.openSSHWithResolvedAuth(
+                    host, auth: auth, rows: 24, cols: 100
+                )
+                let terminal = SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id)
+                self.terminal = terminal
+                // A moment for the shell to draw its prompt. Typing into a shell
+                // that has not started echoing yet loses the first characters.
+                try await Task.sleep(for: .milliseconds(700))
+                try Task.checkCancellation()
+                terminal.sendBytes(Array((line.oneLine + "\n").utf8))
+            } catch {
+                self.terminal?.stop()
+                self.terminal = nil
+                try? await Bridge.clearPairingCode(host, auth: auth)
+                throw error
+            }
         }
-    }
-
-    /// Take the staged code back off the server, whatever happened to it.
-    ///
-    /// This app put that file there, so this app removes it. A code that was
-    /// used is spent and a code that was not will expire, but neither is a
-    /// reason to leave a credential lying in somebody's home directory.
-    func clearStagedCode(library: SSHLibraryModel) async {
-        guard let auth = try? authPayload(library: library) else { return }
-        let host = resolvedHost(library: library)
-        try? await Bridge.clearPairingCode(host, auth: auth)
     }
 
     /// Ask the machine itself whether it is set up, over the tunnel it now has.
@@ -226,12 +266,11 @@ final class ClientSetupModel {
                let status = try? await Bridge.provisionStatus(peer: peer)
             {
                 finished = status
-                await clearStagedCode(library: library)
                 return
             }
             try? await Task.sleep(for: .seconds(3))
         }
-        if finished == nil {
+        if finished == nil, !Task.isCancelled {
             error = "The machine has not appeared on your account yet. It keeps trying, and "
                 + "the terminal above says whether the install finished."
         }
@@ -243,10 +282,11 @@ final class ClientSetupModel {
     private func provisionedPeer(_ account: AccountModel) async -> String? {
         await account.load()
         let name = machineName.trimmingCharacters(in: .whitespaces)
-        return account.account?.machines
-            .filter { $0.isHost && $0.publicIdentity != nil }
-            .first { ($0.label ?? "") == name }?
-            .publicIdentity
+        let matches = (account.account?.machines ?? [])
+            .filter { $0.isHost && $0.publicIdentity != nil && ($0.label ?? "") == name }
+        // Labels are editable and not unique. Never arbitrarily adopt a row.
+        guard matches.count == 1 else { return nil }
+        return matches.first?.publicIdentity
     }
 
     /// The step that is running, so it can be stopped.
@@ -286,6 +326,7 @@ final class ClientSetupModel {
     }
 
     private func run(_ body: @escaping () async throws -> Void) async {
+        guard !working else { return }
         error = nil
         working = true
         step = Task { [weak self] in
@@ -295,6 +336,7 @@ final class ClientSetupModel {
                 guard !Task.isCancelled else { return }
                 self?.error = ClientSetupModel.readable(error)
             }
+            guard !Task.isCancelled else { return }
             self?.working = false
         }
         await step?.value

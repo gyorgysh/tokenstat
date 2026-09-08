@@ -57,7 +57,7 @@ struct ClientAddThisDevice: View {
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         TextField("WXYZ-2345", text: $code)
                             .textFieldStyle(.themed)
-                            .font(.system(.title3, design: .monospaced))
+                            .font(Theme.monoText(20, relativeTo: .title3))
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
                         Text(

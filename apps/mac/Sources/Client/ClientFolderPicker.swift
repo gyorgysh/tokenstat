@@ -91,7 +91,7 @@ struct ClientFolderPicker: View {
                         .tint(Theme.accent)
                 }
                 Text(listing.path)
-                    .font(.system(.footnote, design: .monospaced))
+                    .font(Theme.monoText(13))
                     .lineLimit(1)
                     .truncationMode(.head)
                 Spacer(minLength: 0)
@@ -171,7 +171,7 @@ struct ClientFolderPicker: View {
                 Spacer(minLength: 0)
                 if entry.isDirectory {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(Theme.fixed(12, weight: .semibold))
                         .foregroundStyle(.tertiary)
                 }
             }

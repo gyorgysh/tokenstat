@@ -83,7 +83,15 @@ struct ClientSetupByHand: View {
                     copied = true
                 }
                 .clientProminentStyle()
-                .disabled(line == nil)
+                .disabled(line == nil || working)
+                Button("Generate a new code", .refresh) {
+                    line = nil
+                    code = nil
+                    copied = false
+                    Task { await prepare() }
+                }
+                .font(ClientType.label)
+                .disabled(working)
                 Button("I ran it, check my account", .next) { path.append(.finish) }
                     .font(ClientType.label)
             }
@@ -102,7 +110,7 @@ struct ClientSetupByHand: View {
                 .font(ClientType.label.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(code.code)
-                .font(.system(.title2, design: .monospaced).weight(.semibold))
+                .font(Theme.monoText(22, weight: .semibold, relativeTo: .title2))
                 .textSelection(.enabled)
             Text(
                 "Good for \(code.expiresIn / 60) minutes and for one machine. It is already "
@@ -125,7 +133,7 @@ struct ClientSetupByHand: View {
                 .foregroundStyle(.secondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(line.annotated)
-                    .font(.system(.footnote, design: .monospaced))
+                    .font(Theme.monoText(13))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: false)
             }
@@ -138,12 +146,15 @@ struct ClientSetupByHand: View {
     private func prepare() async {
         guard line == nil, !working else { return }
         working = true
+        error = nil
         defer { working = false }
         do {
+            try await model.chooseAvailableMachineName()
+            let key = try await Bridge.machineIdentity().key
             let minted = try await Bridge.mintPairingCode()
             code = minted
             line = try await Bridge.installLine(
-                allow: try? await Bridge.machineIdentity().key,
+                allow: key,
                 name: model.machineName.isEmpty ? nil : model.machineName,
                 agents: model.agents,
                 printInvite: false,

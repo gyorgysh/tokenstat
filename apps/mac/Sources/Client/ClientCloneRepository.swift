@@ -85,13 +85,13 @@ struct ClientCloneRepository: View {
                         } label: {
                             HStack {
                                 Text(parent ?? "Choose a folder")
-                                    .font(.system(.footnote, design: .monospaced))
+                                    .font(Theme.monoText(13))
                                     .foregroundStyle(parent == nil ? .secondary : .primary)
                                     .lineLimit(1)
                                     .truncationMode(.head)
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(Theme.fixed(12, weight: .semibold))
                                     .foregroundStyle(.tertiary)
                             }
                         }
@@ -243,7 +243,7 @@ private struct ClientFolderPickerForClone: View {
                             .tint(Theme.accent)
                     }
                     Text(listing.path)
-                        .font(.system(.footnote, design: .monospaced))
+                        .font(Theme.monoText(13))
                         .lineLimit(1)
                         .truncationMode(.head)
                     Spacer(minLength: 0)
@@ -268,7 +268,7 @@ private struct ClientFolderPickerForClone: View {
                                 Text(entry.name).font(ClientType.body)
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(Theme.fixed(12, weight: .semibold))
                                     .foregroundStyle(.tertiary)
                             }
                             .padding(.horizontal, Theme.Space.m)

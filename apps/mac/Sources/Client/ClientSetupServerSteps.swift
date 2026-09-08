@@ -19,6 +19,7 @@ struct ClientSetupServerStep: View {
     @Bindable var model: ClientSetupModel
     @Bindable var library: SSHLibraryModel
     @Binding var path: [SetupStep]
+    var onFinish: () -> Void
 
     @Environment(AccountModel.self) private var account
     @Environment(\.dismiss) private var dismiss
@@ -31,7 +32,7 @@ struct ClientSetupServerStep: View {
             case .fingerprint: FingerprintStep(model: model, library: library, path: $path)
             case .check: CheckStep(model: model, library: library, path: $path)
             case .install: InstallStep(model: model, library: library, path: $path)
-            case .finish: FinishStep(model: model, library: library, path: $path)
+            case .finish: FinishStep(model: model, library: library, path: $path, onFinish: onFinish)
             case .byHand: ClientSetupByHand(model: model, path: $path)
             case .cloud: ClientSetupCloudDoor(model: model, library: library, path: $path)
             case .mac: ClientSetupMacDoor()
@@ -191,6 +192,7 @@ private struct WhereStep: View {
             .font(ClientType.label)
         }
         .navigationTitle("Where")
+        .onAppear { model.resetServer() }
         .onChange(of: model.pickedHostID) { _, picked in
             guard let picked, let host = library.hosts.first(where: { $0.id == picked }) else {
                 return
@@ -294,8 +296,8 @@ private struct FingerprintStep: View {
     var body: some View {
         StepScaffold(
             title: "Is this your server?",
-            subtitle: "Every server has a fingerprint. Trusting the wrong one is the one "
-                + "mistake here that cannot be taken back, so it gets its own screen.",
+            subtitle: "Compare this fingerprint with your server before continuing. "
+                + "It identifies the machine that will receive your credentials.",
             number: 3,
             art: .identify,
             error: model.error,
@@ -304,7 +306,7 @@ private struct FingerprintStep: View {
             StepSection(title: "Fingerprint") {
                 if let fingerprint = model.fingerprint {
                     Text(fingerprint)
-                        .font(.system(.footnote, design: .monospaced))
+                        .font(Theme.monoText(13))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(
@@ -439,7 +441,7 @@ private struct CheckStep: View {
                 Button("Install", .download) { path.append(.install) }
                     .clientProminentStyle()
                     .disabled(model.working || model.machineName.trimmingCharacters(in: .whitespaces).isEmpty)
-            } else if model.check != nil {
+            } else {
                 Button("Check again", .refresh) {
                     Task { await model.inspect(library: library) }
                 }
@@ -521,20 +523,18 @@ private struct InstallStep: View {
                             + "server costs.")
                     }
                     StepSection(title: "Agents") {
-                        Toggle("Install Claude Code", isOn: Binding(
-                            get: { model.agents.contains("claude_code") },
-                            set: { on in
-                                model.agents = on ? ["claude_code"] : []
-                            }
-                        ))
-                        .tint(Theme.accent)
-                        Text(
-                            "A fresh machine has no agent signed in. You can do that in a "
-                            + "terminal once it is up."
-                        )
-                        .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        agentChoice("claude_code", name: "Claude Code",
+                            detail: "Anthropic’s coding agent for your projects.")
+                        ThemeRule()
+                        agentChoice("codex", name: "Codex",
+                            detail: "OpenAI’s coding agent for your projects.")
+                        Text("Choose either, both, or neither. You can install more later.")
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                        Text("After setup, open a terminal on this machine and run claude or codex to sign in. Then add a project folder in Workspaces and start a session.")
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 } footer: {
                     Button("Start the install", .download) {
@@ -549,6 +549,27 @@ private struct InstallStep: View {
         }
         .navigationTitle("Install")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func agentChoice(_ id: String, name: String, detail: String) -> some View {
+        Toggle(isOn: Binding(
+            get: { model.agents.contains(id) },
+            set: { selected in
+                model.agents.removeAll { $0 == id }
+                if selected { model.agents.append(id) }
+            }
+        )) {
+            HStack(spacing: Theme.Space.s) {
+                HarnessMark(id: id, size: 40).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(name).font(ClientType.body)
+                    Text(detail)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private func bullet(_ text: String) -> some View {
@@ -568,6 +589,7 @@ private struct FinishStep: View {
     @Bindable var model: ClientSetupModel
     @Bindable var library: SSHLibraryModel
     @Binding var path: [SetupStep]
+    var onFinish: () -> Void
 
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
@@ -591,7 +613,7 @@ private struct FinishStep: View {
                     fact("Always on", (status.alwaysOn ?? false) ? "on" : "off")
                     fact("Reachable", (status.tunnel.online ?? false) ? "yes" : "connecting")
                     fact("Runs as", status.runsAs?.name ?? "unknown")
-                    fact("This phone", status.allowedDevices > 0 ? "allowed" : "not allowed yet")
+                    fact("Allowed devices", "\(status.allowedDevices)")
                 }
                 StepSection(title: "What is next") {
                     Text(
@@ -613,9 +635,9 @@ private struct FinishStep: View {
                 .clientProminentStyle()
                 .disabled(model.working)
             } else {
-                Button("Open this machine", .next) {
+                Button("Open Workspaces", .next) {
                     navigation.destination = .workspaces
-                    dismiss()
+                    onFinish()
                 }
                 .clientProminentStyle()
             }

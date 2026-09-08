@@ -260,7 +260,7 @@ private struct IdentifyScene: View {
 
     private var badge: some View {
         Image(systemName: "checkmark.circle.fill")
-            .font(.system(size: 17, weight: .semibold))
+            .font(Theme.fixed(17, weight: .semibold))
             .symbolRenderingMode(.palette)
             .foregroundStyle(Theme.background, Ink.lead)
             .opacity(complete ? 1 : 0)
@@ -314,7 +314,7 @@ private struct InspectScene: View {
                                     )
                                     .frame(width: 9, height: 9)
                                 Image(systemName: "checkmark")
-                                    .font(.system(size: 6, weight: .black))
+                                    .font(Theme.fixed(6, weight: .black))
                                     .foregroundStyle(Ink.lead)
                                     .opacity(ticked(line) ? 1 : 0)
                             }

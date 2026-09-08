@@ -24,9 +24,6 @@ struct ClientSetupMacDoor: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var sharing = false
-    /// The machines the account already had when this screen opened, so a
-    /// computer that arrives while somebody watches is the one that ticks.
-    @State private var known: Set<String> = []
     @State private var arrived: Machine?
 
     private static let address = "https://tokenstat.ai/download"
@@ -66,7 +63,6 @@ struct ClientSetupMacDoor: View {
             ClientShareSheet(items: [Self.address])
         }
         .task {
-            known = Set((account.account?.machines ?? []).compactMap(\.machineID))
             await watch()
         }
     }
@@ -100,7 +96,7 @@ struct ClientSetupMacDoor: View {
         ]
     }
 
-    /// Poll the account for a computer that was not there when this opened.
+    /// Recognize a Mac already on the account as well as one just added.
     ///
     /// Ends when one arrives or when the screen goes away. Nothing is written
     /// and nothing is installed: this is a screen watching, which is the only
@@ -110,7 +106,8 @@ struct ClientSetupMacDoor: View {
         while arrived == nil, Date() < deadline, !Task.isCancelled {
             await account.load()
             arrived = (account.account?.machines ?? []).first { machine in
-                machine.isHost && !known.contains(machine.machineID ?? "")
+                let platform = machine.platform?.lowercased() ?? ""
+                return machine.isHost && (platform.contains("macos") || platform.contains("darwin"))
             }
             if arrived != nil { return }
             try? await Task.sleep(for: .seconds(5))
@@ -175,23 +172,22 @@ struct ClientSetupCloudDoor: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     } else {
-                        TextField("AWS CLI profile", text: $profile)
-                            .textFieldStyle(.themed)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        TextField("Region (optional)", text: $region)
+                        Label("Connect with your server’s address", systemImage: "server.rack")
+                            .font(ClientType.body)
+                        Text("Find the public address in your AWS console. On the next screen, enter it with your SSH username and key. AWS inventory import requires the desktop app.")
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if provider == .digitalOcean {
+                        TextField("SSH username", text: $username)
                             .textFieldStyle(.themed)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
-                    TextField("SSH username", text: $username)
-                        .textFieldStyle(.themed)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
                     Text(provider == .digitalOcean
                         ? "Only the droplet list is read. The token is used once and is not saved."
-                        : "Uses your AWS CLI profile and only calls describe-instances. AWS keys "
-                        + "never enter tokenstat.")
+                        : "Use ec2-user for Amazon Linux, or ubuntu for Ubuntu.")
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -215,7 +211,14 @@ struct ClientSetupCloudDoor: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Theme.Space.s) {
-                if imported == nil {
+                if provider == .aws {
+                    Button("Enter server address", .next) {
+                        model.pickedHostID = nil
+                        model.host.username = "ec2-user"
+                        path.append(.where)
+                    }
+                    .clientProminentStyle()
+                } else if imported == nil {
                     Button(working ? "Reading the list…" : "Read my servers", .download) {
                         Task { await load() }
                     }
@@ -249,7 +252,16 @@ struct ClientSetupCloudDoor: View {
             // Saved through the model, which is what also puts them in the
             // encrypted vault, so an import from the phone reaches every other
             // device the same way a hand-typed server does.
-            for host in result.hosts { _ = await library.save(host: host) }
+            for host in result.hosts {
+                guard await library.save(host: host) != nil else {
+                    throw BridgeError.core(code: "not_saved",
+                        message: library.error ?? "The server could not be saved. Try again.")
+                }
+            }
+            guard !result.hosts.isEmpty else {
+                throw BridgeError.core(code: "no_servers",
+                    message: "No servers were found. Check the account token or enter a server address instead.")
+            }
             // The token was a credential and its job is done. It is never
             // written to the archive and is not eligible for sync.
             token = ""

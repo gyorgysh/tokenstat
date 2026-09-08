@@ -35,7 +35,7 @@ struct ClientSetupWizard: View {
                     }
                 }
                 .navigationDestination(for: SetupStep.self) { step in
-                    ClientSetupServerStep(step: step, model: model, library: library, path: $path)
+                    ClientSetupServerStep(step: step, model: model, library: library, path: $path, onFinish: { dismiss() })
                 }
         }
         .tint(Theme.accent)
@@ -43,6 +43,7 @@ struct ClientSetupWizard: View {
             await model.prepare(library: library)
             await account.load()
         }
+        .onDisappear { model.cancelWork() }
         .environment(account)
     }
 
@@ -57,16 +58,16 @@ struct ClientSetupWizard: View {
                     body: "Connect over SSH and set it up. tokenstat installs itself, "
                         + "signs the machine in and comes back paired.",
                     requirement: paywalled ? "Reaching it needs patron" : nil,
-                    icon: .connect
+                    symbol: "server.rack"
                 ) {
                     path = [.where]
                 }
                 door(
                     title: "On a cloud machine",
-                    body: "Bring DigitalOcean or AWS, pick a server you already have, and "
+                    body: "Import from DigitalOcean, or enter an AWS server’s address, and "
                         + "set it up the same way.",
                     requirement: paywalled ? "Reaching it needs patron" : nil,
-                    icon: .download
+                    symbol: "cloud.fill"
                 ) {
                     path = [.cloud]
                 }
@@ -75,16 +76,16 @@ struct ClientSetupWizard: View {
                     body: "Install the desktop app on the computer you work on, sign in "
                         + "to this account, and let this phone in.",
                     requirement: nil,
-                    icon: .device
+                    symbol: "laptopcomputer"
                 ) {
                     path = [.mac]
                 }
                 door(
                     title: "Just my numbers",
-                    body: "Skip all of this. Usage from every machine you already have "
+                    body: "See your usage and spending. Data from machines you already have "
                         + "keeps arriving on its own.",
                     requirement: nil,
-                    icon: .home
+                    symbol: "chart.bar.xaxis"
                 ) {
                     dismiss()
                 }
@@ -130,15 +131,17 @@ struct ClientSetupWizard: View {
         title: String,
         body: String,
         requirement: String?,
-        icon: ActionIcon,
+        symbol: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: Theme.Space.m) {
-                Image(systemName: icon.symbol)
-                    .font(.system(size: 18, weight: .semibold))
+                Image(systemName: symbol)
+                    .font(Theme.fixed(25, weight: .medium))
                     .foregroundStyle(Theme.accent)
-                    .frame(width: 26, height: 26)
+                    .frame(width: 54, height: 54)
+                    .background(Theme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 15))
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text(title).font(Theme.headline)
                     Text(body)
@@ -154,7 +157,7 @@ struct ClientSetupWizard: View {
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.fixed(13, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .padding(.top, 4)
             }
