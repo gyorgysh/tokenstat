@@ -45,7 +45,7 @@ pub(crate) const CHECK_SCRIPT: &str = concat!(
 );
 
 pub(crate) fn stage_code_command() -> String {
-    format!("umask 077; cat > \"{CODE_PATH}\"")
+    format!("umask 077; set -C; cat > \"{CODE_PATH}\"")
 }
 
 pub(crate) fn clear_code_command() -> String {
@@ -151,7 +151,7 @@ pub(crate) fn install_line(p: &LineParams) -> Result<Value, String> {
     )];
     if p.code_file {
         flags.push((
-            format!("--code-file {}", super::ssh_provision::CODE_PATH),
+            format!("--code-file \"{}\"", super::ssh_provision::CODE_PATH),
             "sign this machine in with the code already written there",
         ));
     } else if let Some(code) = p.code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
@@ -197,20 +197,13 @@ pub(crate) fn install_line(p: &LineParams) -> Result<Value, String> {
             .collect::<Vec<_>>()
             .join(" ")
     );
-    let width = flags
+    // Comments belong on separate lines: a backslash followed by a comment
+    // escapes a space, not the newline, and silently drops the remaining flags.
+    let mut annotated = flags
         .iter()
-        .map(|(flag, _)| flag.len())
-        .max()
-        .unwrap_or_default();
-    let mut annotated =
-        String::from("curl -fsSL https://tokenstat.ai/install.sh | bash -s -- \\\n");
-    for (index, (flag, why)) in flags.iter().enumerate() {
-        let last = index + 1 == flags.len();
-        annotated.push_str(&format!(
-            "  {flag:<width$} {continuation} # {why}\n",
-            continuation = if last { " " } else { "\\" }
-        ));
-    }
+        .map(|(flag, why)| format!("# {flag}: {why}\n"))
+        .collect::<String>();
+    annotated.push_str(&one_line);
     Ok(json!({"oneLine": one_line, "annotated": annotated.trim_end()}))
 }
 
@@ -257,6 +250,64 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(unix)]
+    fn annotated_command_preserves_every_argument() {
+        let line = install_line(&LineParams {
+            allow: Some("ab".repeat(32)),
+            name: Some("cloud one's machine".into()),
+            agents: vec!["claude_code".into(), "codex".into()],
+            code_file: true,
+            ..Default::default()
+        })
+        .unwrap();
+        // Replace the network/installer pipeline with an argument printer.
+        let script = line["annotated"].as_str().unwrap().replace(
+            "curl -fsSL https://tokenstat.ai/install.sh | bash -s --",
+            "printf '%s\\n'",
+        );
+        let output = std::process::Command::new("sh")
+            .args(["-c", &script])
+            .env("HOME", "/tmp/home with spaces")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output);
+        assert_eq!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            vec![
+                "--host",
+                "--code-file",
+                "/tmp/home with spaces/.tokenstat-pairing",
+                "--allow",
+                &"ab".repeat(32),
+                "--name",
+                "cloud one's machine",
+                "--agents",
+                "claude_code,codex"
+            ]
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn staging_never_overwrites_an_existing_file() {
+        let root = std::env::temp_dir().join(format!("tokenstat-stage-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(".tokenstat-pairing");
+        std::fs::write(&path, "keep me").unwrap();
+        let output = std::process::Command::new("sh")
+            .args(["-c", &stage_code_command()])
+            .env("HOME", &root)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep me");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn a_check_reads_as_facts_and_one_verdict() {
         let facts = parse_check(
             "os=Linux\narch=x86_64\nuid=0\nuser=root\nhome=/root\n\
@@ -288,14 +339,14 @@ mod tests {
         .unwrap();
         let one = line["oneLine"].as_str().unwrap();
         assert!(one.contains("--host"));
-        assert!(one.contains("--code-file $HOME/.tokenstat-pairing"));
+        assert!(one.contains("--code-file \"$HOME/.tokenstat-pairing\""));
         assert!(one.contains("--name 'cloud one'"));
         assert!(one.contains("--agents claude_code,codex"));
         assert!(
             line["annotated"]
                 .as_str()
                 .unwrap()
-                .contains("# what this machine is called")
+                .contains("what this machine is called")
         );
 
         assert!(

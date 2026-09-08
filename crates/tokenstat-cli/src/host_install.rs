@@ -32,6 +32,15 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
         allow,
         print_invite,
     } = *request;
+    // Enrollment and socket RPC currently run as the installer. A system
+    // unit for another user would read a different identity and data directory.
+    // Refuse before redeeming a one-time code or changing a service.
+    if service.run_as != crate::host_service::current_user()? {
+        bail!(
+            "Installing for another account is not supported yet. Sign in as {} and run `tokenstat host --user install` so enrollment and the daemon use the same identity.",
+            service.run_as
+        );
+    }
     let binary = resolve_binary(binary)?;
     if let Some(name) = name {
         tokenstat_identity::set_machine_label(name).map_err(anyhow::Error::msg)?;

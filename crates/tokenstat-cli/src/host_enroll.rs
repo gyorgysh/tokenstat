@@ -36,7 +36,15 @@ impl PairingCode {
                 if value.len() > 128 {
                     bail!("The pairing-code file is too long");
                 }
-                Self::parse(&value).map(Some)
+                let code = Self::parse(&value)?;
+                // The SSH wizard owns this reserved staging file. Once read,
+                // keep the code in memory and retire the file even if enrollment
+                // fails later or the phone disconnects. Other input files belong
+                // to the caller and are left alone.
+                if let Some(dirs) = directories::BaseDirs::new() {
+                    remove_staged_file(path, dirs.home_dir())?;
+                }
+                Ok(Some(code))
             }
         }
     }
@@ -62,6 +70,13 @@ impl PairingCode {
                 anyhow::anyhow!("Could not pair this machine: {message}")
             })
     }
+}
+
+fn remove_staged_file(path: &Path, home: &Path) -> Result<()> {
+    if path == home.join(".tokenstat-pairing") {
+        std::fs::remove_file(path).context("Could not remove the staged pairing-code file")?;
+    }
+    Ok(())
 }
 
 fn validate_file(metadata: &std::fs::Metadata) -> Result<()> {
@@ -108,6 +123,21 @@ mod tests {
         std::fs::write(&path, "A".repeat(129)).unwrap();
         assert!(PairingCode::read(None, Some(&path)).is_err());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn only_the_wizards_reserved_file_is_removed() {
+        let home = std::env::temp_dir().join(format!("tokenstat-retire-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let staged = home.join(".tokenstat-pairing");
+        let other = home.join("my-code");
+        std::fs::write(&staged, "WXYZ-1234").unwrap();
+        std::fs::write(&other, "WXYZ-1234").unwrap();
+        remove_staged_file(&other, &home).unwrap();
+        assert!(other.is_file());
+        remove_staged_file(&staged, &home).unwrap();
+        assert!(!staged.exists());
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

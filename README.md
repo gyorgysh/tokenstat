@@ -195,8 +195,9 @@ tokenstat host uninstall [--purge]   # folders are never touched
 `install` takes `--code` or `--code-file` to sign the machine in while it is
 being set up, `--name` for what it is called on your account, `--agents` to
 install agents on it, `--allow <device>` to let the device that is installing it
-work here straight away, and `--run-as <user>` to run the host and its agents as
-a specific account. `tokenstat host` says who it runs as at the top, because on
+work here straight away. To run the host and its agents as a specific account,
+install from that user’s own login session. Cross-user `--run-as` installation
+is not supported yet. `tokenstat host` says who it runs as at the top, because on
 a root install every agent on that machine has root.
 
 Being on the account is not the same as being let in. A device that can reach a
