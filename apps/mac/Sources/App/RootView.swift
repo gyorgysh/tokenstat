@@ -1075,9 +1075,7 @@ struct RootView: View {
             case .global(.account):
                 EmptyView()
             case .workspacesOverview:
-                // The grid is the whole answer. There is no folder beside it
-                // to inspect, so the column stays shut like Account's does.
-                EmptyView()
+                WorkspacesOverviewPlaceholder()
             }
         }
     }

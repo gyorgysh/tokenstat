@@ -212,4 +212,26 @@ struct WorkspacesOverviewView: View {
     }
 }
 
+/// The inspector column while the overview is showing.
+///
+/// The column exists here, so it says what it is waiting for rather than
+/// standing blank: pick a card and this becomes that folder's inspector.
+struct WorkspacesOverviewPlaceholder: View {
+    var body: some View {
+        VStack(spacing: Theme.Space.s) {
+            Image(systemName: "folder")
+                .font(Theme.font(22, weight: .medium))
+                .foregroundStyle(.tertiary)
+            Text("Select a folder")
+                .font(Theme.body.weight(.medium))
+            Text("Pick one from the overview to see it here.")
+                .font(Theme.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(Theme.Space.l)
+    }
+}
+
 #endif
