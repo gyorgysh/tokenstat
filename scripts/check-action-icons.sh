@@ -108,6 +108,9 @@ ALLOWED = [
     # A machine row on Home. The whole row is the label and it ends in a
     # chevron, like the device rows it resembles.
     ("Client/ClientHomeMachinesSection.swift", "navigation.openDevice"),
+    # A folder card in the all-folders overview. The whole card is the label
+    # and it already carries the archive mark; a second glyph would duplicate it.
+    ("Features/Workspaces/WorkspacesOverviewView.swift", "onOpenFolder(folder.id)"),
     ("Client/ClientStates.swift", 'Button(showingDetail ?'),
     ("Client/ClientWorkspaceDetailView.swift", "openExisting(session)"),
     # A launcher destination tile. The browser glyph is inside the shared

@@ -21,6 +21,10 @@ enum Route: Hashable {
     case global(GlobalSection)
     /// One folder, one of its sections. The daily question.
     case workspace(id: String, section: WorkspaceSection)
+    /// Every registered folder on every machine, as cards. The first row
+    /// under the Workspaces heading, above the folders, where a growing list
+    /// stays findable. See `docs/plan-remote-expansion-1.0.md` workstream F.
+    case workspacesOverview
     /// The SSH library, one of its sections.
     ///
     /// Its own case rather than a `GlobalSection`, because a global section is
@@ -277,6 +281,8 @@ enum NavigationRequest: Hashable {
     case ssh
     /// The workspace surface, whichever folder is current.
     case workspaces
+    /// The all-folders overview, wherever it was last left.
+    case workspacesOverview
     /// That folder's launch grid. A setup hint uses this when the next
     /// step is to unhide an agent, not to reopen last week's Tasks board.
     case launcher

@@ -1074,6 +1074,10 @@ struct RootView: View {
                 InspectorView(model: model) { closeInspector() }
             case .global(.account):
                 EmptyView()
+            case .workspacesOverview:
+                // The grid is the whole answer. There is no folder beside it
+                // to inspect, so the column stays shut like Account's does.
+                EmptyView()
             }
         }
     }
@@ -1701,6 +1705,18 @@ struct RootView: View {
                     .help("Add a project folder")
                     .accessibilityLabel("Add a project folder")
                     #endif
+                }
+
+                // The dashboard first, above folders that grow past it. An empty
+                // list still shows it: with nothing registered it is the
+                // screen that offers the add menu.
+                SidebarRow(
+                    label: "All folders",
+                    symbol: "square.grid.2x2",
+                    trailing: "\(workspaces.folders.count)",
+                    isSelected: route == .workspacesOverview
+                ) {
+                    navigate(to: .workspacesOverview)
                 }
 
                 if workspaces.folders.isEmpty {
@@ -2366,6 +2382,14 @@ struct RootView: View {
             MachinesView(model: machines) { handle($0) }
         case .global(.account):
             AccountView(model: account)
+        case .workspacesOverview:
+            WorkspacesOverviewView(
+                folders: workspaces.folders,
+                summaries: workspaces.summaries,
+                sessionsIn: { id in terminals.sessions(in: id).filter(\.alive).count },
+                onOpenFolder: { selectWorkspace($0) },
+                onAdd: { workspaces.requestAdd() }
+            )
         case let .ssh(section):
             #if os(macOS)
             SSHSectionView(
@@ -2902,6 +2926,8 @@ struct RootView: View {
         case .workspaces:
             guard let id = workspaces.selectedID ?? workspaces.folders.first?.id else { return }
             openSection(.sessions, in: id)
+        case .workspacesOverview:
+            navigate(to: .workspacesOverview)
         case .launcher:
             guard let id = workspaces.selectedID ?? workspaces.folders.first?.id else { return }
             openSection(.sessions, in: id) {
