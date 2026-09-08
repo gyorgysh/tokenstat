@@ -95,6 +95,7 @@ struct ClientSetupAgentStep: View {
                 .disabled(loading || busyID != nil)
         }
         .navigationTitle("Agent")
+        .accessibilityIdentifier("setup.agents")
         .task { await load() }
         .fullScreenCover(item: $session) { open in
             ClientTerminalScreen(
@@ -204,6 +205,7 @@ private struct AgentCard: View {
                     Button("Install", .download, action: onInstall)
                         .buttonStyle(.bordered)
                         .disabled(anyBusy)
+                        .accessibilityIdentifier("setup.agent.install.\(profile.id)")
                 } else {
                     Text("This one has no installer we have checked on this machine.")
                         .font(ClientType.caption)
@@ -213,6 +215,7 @@ private struct AgentCard: View {
                 Button(state == .signedIn ? "Sign in again" : "Sign in", .signIn, action: onSignIn)
                     .buttonStyle(.bordered)
                     .disabled(anyBusy)
+                    .accessibilityIdentifier("setup.agent.signIn.\(profile.id)")
             }
         }
         .padding(Theme.Space.m)

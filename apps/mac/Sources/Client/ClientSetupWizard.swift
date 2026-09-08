@@ -32,6 +32,11 @@ struct ClientSetupWizard: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Close") { dismiss() }
+                            // Escape leaves, for somebody on a keyboard. The
+                            // sheet is dismissible by gesture already, and a
+                            // keyboard had no equivalent.
+                            .keyboardShortcut(.cancelAction)
+                            .accessibilityIdentifier("setup.close")
                     }
                 }
                 .navigationDestination(for: SetupStep.self) { step in
@@ -141,10 +146,12 @@ struct ClientSetupWizard: View {
                     if let step = model.resume(library: library) { path = [step] }
                 }
                 .clientProminentStyle()
+                .accessibilityIdentifier("setup.resume")
                 Button("Start over", .restore) {
                     if model.startNewSetup() { path = [.where] }
                 }
                 .buttonStyle(.bordered)
+                .accessibilityIdentifier("setup.startOver")
             }
             .padding(.top, Theme.Space.xs)
             Text("Starting over forgets this progress on your phone. Nothing on the server is removed.")

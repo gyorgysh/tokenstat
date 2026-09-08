@@ -68,6 +68,12 @@ struct StepScaffold<Content: View, Footer: View>: View {
     @ViewBuilder var content: () -> Content
     @ViewBuilder var footer: () -> Footer
 
+    /// The last thing announced, so a redraw does not say it again.
+    ///
+    /// SwiftUI rebuilds a step's body whenever anything on it moves, and an
+    /// announcement posted from that path is read out on every keystroke.
+    @State private var announced: String?
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -107,6 +113,15 @@ struct StepScaffold<Content: View, Footer: View>: View {
                 .setupColumn()
         }
         .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("setup.step.\(number)")
+        // A failure is the one state change worth interrupting for: somebody
+        // is waiting on a step that has stopped, and the next action is in the
+        // banner they cannot see.
+        .onChange(of: failure?.explanation) { _, now in
+            guard let now, now != announced else { return }
+            announced = now
+            AccessibilityNotification.Announcement(now).post()
+        }
     }
 }
 
@@ -192,6 +207,7 @@ struct SetupFailureBanner: View {
                         onRecover(failure.action)
                     }
                     .buttonStyle(.bordered)
+                    .accessibilityIdentifier("setup.recover")
                 }
                 if failure.details != nil {
                     Button(showingDetails ? "Hide details" : "Details", .more) {
@@ -215,6 +231,7 @@ struct SetupFailureBanner: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("setup.failure")
     }
 }
 
@@ -253,6 +270,22 @@ struct SetupRail: View {
     }
 
     var body: some View {
+        // Four words fit on a phone at the usual text size and stop fitting
+        // some way up the Dynamic Type scale. Rather than truncate the names,
+        // which would leave somebody reading "Conn…", the rail falls back to
+        // the milestone they are on and how far along it is.
+        ViewThatFits(in: .horizontal) {
+            full
+            short
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "Step \(number) of \(total), \(Self.milestones[index].name)"
+        )
+        .accessibilityIdentifier("setup.rail.\(Self.milestones[index].name.lowercased())")
+    }
+
+    private var full: some View {
         HStack(spacing: Theme.Space.xs) {
             ForEach(Array(Self.milestones.enumerated()), id: \.offset) { position, milestone in
                 if position > 0 {
@@ -261,23 +294,34 @@ struct SetupRail: View {
                         .frame(width: 14, height: 1)
                         .accessibilityHidden(true)
                 }
-                Text(milestone.name)
-                    .font(ClientType.caption.weight(position == index ? .semibold : .regular))
-                    .foregroundStyle(tint(for: position))
-                    .padding(.horizontal, position == index ? Theme.Space.s : 0)
-                    .padding(.vertical, position == index ? 3 : 0)
-                    .background {
-                        if position == index {
-                            Capsule().fill(Theme.accent.opacity(0.12))
-                        }
-                    }
+                chip(milestone.name, at: position)
             }
             Spacer(minLength: 0)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "Step \(number) of \(total), \(Self.milestones[index].name)"
-        )
+        .lineLimit(1)
+    }
+
+    private var short: some View {
+        HStack(spacing: Theme.Space.xs) {
+            chip(Self.milestones[index].name, at: index)
+            Text("\(number) of \(total)")
+                .font(ClientType.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func chip(_ name: String, at position: Int) -> some View {
+        Text(name)
+            .font(ClientType.caption.weight(position == index ? .semibold : .regular))
+            .foregroundStyle(tint(for: position))
+            .padding(.horizontal, position == index ? Theme.Space.s : 0)
+            .padding(.vertical, position == index ? 3 : 0)
+            .background {
+                if position == index {
+                    Capsule().fill(Theme.accent.opacity(0.12))
+                }
+            }
     }
 
     private func tint(for position: Int) -> Color {

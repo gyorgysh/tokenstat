@@ -66,6 +66,7 @@ struct ClientSetupProjectStep: View {
                 .buttonStyle(.bordered)
         }
         .navigationTitle("Project")
+        .accessibilityIdentifier("setup.project")
         .navigationDestination(item: $route) { chosen in
             if let peer {
                 switch chosen {
@@ -148,6 +149,7 @@ struct ClientSetupProjectStep: View {
         .buttonStyle(.plain)
         .disabled(peer == nil)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("setup.project.\(value.rawValue)")
     }
 }
 
