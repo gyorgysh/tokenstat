@@ -159,6 +159,9 @@ jobs:
       - name: The sample reaches nothing outside itself
         run: bash scripts/check-sample-offline.sh
 
+      - name: Home recent places never contact a machine
+        run: bash scripts/check-home-account-plane.sh
+
   # The client's state, without a simulator. These are plain executables that
   # compile a handful of real sources with their own stubs, so they run in
   # seconds and catch the class of bug an Xcode build cannot see: a draft that

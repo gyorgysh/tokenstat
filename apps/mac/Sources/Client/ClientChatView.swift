@@ -223,6 +223,7 @@ struct ClientChatThread: View {
     /// pushed on top of it. `PullDetailView` takes the same closure for the
     /// same reason.
     var onBack: (() -> Void)?
+    @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
     @State private var draft = ""
     /// A row the transcript should jump to, set by the pending-approval bar.
@@ -370,6 +371,12 @@ struct ClientChatThread: View {
         // `isWatching()` is always false on iOS and on-device banners are
         // never suppressed (host push suppression still works via heartbeat).
         .onChange(of: chatID, initial: true) { _, id in
+            if let peer = model.peer, let workspace = model.workspaceID {
+                ClientRecentPlaces.shared.record(
+                    in: account.account?.recentPlacesScope, peer: peer,
+                    workspaceID: workspace, workspaceName: folderName, kind: .chat, itemID: id
+                )
+            }
             UserPresence.shared.chatSurface(showing: id.isEmpty ? nil : id)
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in

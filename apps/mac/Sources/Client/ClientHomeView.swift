@@ -29,6 +29,7 @@ struct ClientHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 greeting
+                ClientContinueSection()
                 // A quiet, locked or cached grid still belongs to an existing
                 // account. Setup requires a successful empty response.
                 if let calendar = model.calendar {

@@ -75,13 +75,13 @@ struct ClientDevicesView: View {
                     .cardSurface()
                 }
                 .buttonStyle(.plain)
-                if machines.isEmpty {
+                if !machines.contains(where: \.isHost) {
                     if account.isLoading {
                         ClientWireframe.Rows(count: 3)
                     } else {
                         ClientEmptyState(
                             kind: .nothingYet,
-                            title: "No machines yet",
+                            title: "No computer connected yet",
                             message: "Connect a computer you own, or give tokenstat a server "
                                 + "and it will set the machine up for you.",
                             actionTitle: "Set up a machine",
@@ -92,7 +92,8 @@ struct ClientDevicesView: View {
                             secondaryAction: { showSample = true }
                         )
                     }
-                } else {
+                }
+                if !machines.isEmpty {
                     header
                     alwaysOnHost
                     ForEach(sorted) { machine in

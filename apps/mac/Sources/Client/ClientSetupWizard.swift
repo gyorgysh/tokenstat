@@ -245,32 +245,4 @@ struct ClientSetupWizard: View {
     }
 }
 
-/// The six steps of door two, in the order they have to happen.
-///
-/// A step per screen rather than one long form, because each of them can fail
-/// on its own and each failure has its own thing to say. Trusting a host key
-/// in particular is the one place where a mistake is permanent, so it is not a
-/// row inside somebody else's screen.
-enum SetupStep: Hashable {
-    case `where`
-    case credential
-    case fingerprint
-    case check
-    case install
-    case finish
-    /// The agent's own sign-in, which the machine's is not.
-    case agents
-    /// The project, which is what all of it was for.
-    case project
-    /// For somebody who has no machine at all yet.
-    case needServer
-    /// The install line, for somebody who would rather run it themselves.
-    case byHand
-    /// Door three, which ends by handing over to `where` with the addresses
-    /// already known.
-    case cloud
-    /// Door one, which is a screen that watches rather than one that acts.
-    case mac
-}
-
 #endif

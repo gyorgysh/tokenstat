@@ -266,6 +266,10 @@ struct ClientWorkspaceSectionDetail: View {
     private var folderNow: WorkspaceFolder { current ?? folder }
 
     var body: some View {
+        sectionContent.rememberWorkspace(peer: peer, folder: folder)
+    }
+
+    @ViewBuilder private var sectionContent: some View {
         switch section {
         case .sessions:
             ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)

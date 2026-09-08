@@ -9,12 +9,6 @@ enum ActionIcon {
     case search, security, token, pair, signIn, docs, refresh
 }
 
-/// The wizard's steps, as far as `ClientSetupFailure.Action` names them.
-enum SetupStep: Hashable {
-    case `where`, credential, fingerprint, check, install, finish, agents, project
-    case byHand, cloud, mac, needServer
-}
-
 enum BridgeError: LocalizedError {
     case core(code: String, message: String)
     case decoding(method: String, underlying: String)

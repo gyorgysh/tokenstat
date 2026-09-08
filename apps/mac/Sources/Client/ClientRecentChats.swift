@@ -229,6 +229,12 @@ struct ClientRecentChatView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        ClientPlaceAvailability(peer: peer, hostName: hostName) {
+            thread.task { await load() }
+        }
+    }
+
+    private var thread: some View {
         Group {
             if model.chats.contains(where: { $0.id == chatID }) {
                 ClientChatThread(
@@ -237,6 +243,11 @@ struct ClientRecentChatView: View {
                     folderName: folderName,
                     hostName: hostName
                 )
+            } else if let error = model.error {
+                ClientErrorCard(message: ClientTunnelCopy.display(error, host: hostName)) {
+                    Task { await load() }
+                }
+                .padding(Theme.Space.m)
             } else if loaded {
                 ClientEmptyState(
                     kind: .nothingYet,
@@ -271,14 +282,15 @@ struct ClientRecentChatView: View {
                 navigation.visibleChatID = nil
             }
         }
-        .task {
-            guard !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else {
-                loaded = true
-                return
-            }
-            await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
+    }
+
+    private func load() async {
+        guard !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else {
             loaded = true
+            return
         }
+        await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
+        loaded = true
     }
 }
 

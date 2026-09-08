@@ -71,6 +71,7 @@ struct ClientWorkspaceDetailView: View {
                 stacked
             }
         }
+        .rememberWorkspace(peer: peer, folder: folder)
     }
 
     private var stacked: some View {

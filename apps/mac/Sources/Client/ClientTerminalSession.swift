@@ -24,6 +24,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     private(set) var hostID: String
     let command: String
     let cwd: String
+    private(set) var workspaceID: String?
 
     private(set) var alive: Bool
     private(set) var exitCode: Int?
@@ -65,6 +66,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         id = UUID().uuidString
         self.peer = peer
         hostID = info.id
+        workspaceID = info.workspaceID
         command = info.command
         cwd = info.cwd
         alive = info.alive
@@ -92,6 +94,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         guard isPending else { return }
         if removed && !closeWhenAttached { return }
         hostID = info.id
+        workspaceID = info.workspaceID
         alive = info.alive
         exitCode = info.exitCode
         rows = info.rows
@@ -491,6 +494,7 @@ struct ClientTerminalRepresentable: UIViewRepresentable {
 
 /// Full-screen terminal for one remote session.
 struct ClientTerminalScreen: View {
+    @Environment(AccountModel.self) private var account
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     let session: ClientTerminalSession
@@ -499,6 +503,18 @@ struct ClientTerminalScreen: View {
     var onClosedProcess: (() -> Void)?
 
     @State private var confirmClose = false
+
+    private func rememberTerminal() {
+        guard !session.hostID.hasPrefix("pending-") else { return }
+        // A basename is a label. Never hand the working directory or command
+        // (which may include a prompt) to the persistence boundary.
+        ClientRecentPlaces.shared.record(
+            in: account.account?.recentPlacesScope, peer: session.peer,
+            workspaceID: session.workspaceID,
+            workspaceName: URL(fileURLWithPath: session.cwd).lastPathComponent,
+            kind: .terminal, itemID: session.hostID
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -577,7 +593,9 @@ struct ClientTerminalScreen: View {
         .navigationBarHidden(true)
         .onAppear {
             session.setForeground(true)
+            rememberTerminal()
         }
+        .onChange(of: session.hostID) { _, _ in rememberTerminal() }
         .onChange(of: scenePhase) { _, phase in
             session.setForeground(phase == .active)
             if phase == .active {
