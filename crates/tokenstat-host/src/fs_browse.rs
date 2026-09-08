@@ -94,6 +94,13 @@ fn resolve(path: &Path, roots: &[(PathBuf, String, &'static str)]) -> Result<Pat
     Err("That folder is outside what this machine offers. Browse from home, or from a folder that is already registered.".into())
 }
 
+/// The same containment rule, for a caller outside this module.
+///
+/// A clone lands where browsing would have shown it, and nowhere else.
+pub(crate) fn resolve_root(path: &Path) -> Result<PathBuf, String> {
+    resolve(path, &roots())
+}
+
 fn browse(params: &str) -> Result<Value, String> {
     let p: BrowseParams =
         serde_json::from_str(params.trim()).unwrap_or(BrowseParams { path: None });

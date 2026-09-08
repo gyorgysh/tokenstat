@@ -14,6 +14,7 @@ enum RemoteHostFeature {
     case pulls
     case modelRefresh
     case folderPicker
+    case cloneRepository
     case provisioning
     case inviteCode
 
@@ -23,6 +24,7 @@ enum RemoteHostFeature {
         case .pulls: "Pull requests"
         case .modelRefresh: "Model list refresh"
         case .folderPicker: "Choosing a folder"
+        case .cloneRepository: "Cloning a repository"
         case .provisioning: "Setup"
         case .inviteCode: "Adding this device"
         }
@@ -32,13 +34,14 @@ enum RemoteHostFeature {
     /// `chat.eventPage`, which the mobile transcript needs for older pages.
     /// Version 6 added the `refresh` parameter on `chat.backends`. Version 7
     /// added `fs.browse` and `fs.mkdir`, `host.provisionStatus` and
-    /// `host.logs`, and the invite half of workspace access.
+    /// `host.logs`, the invite half of workspace access, and `workspace.clone`.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
         case .pulls: 3
         case .modelRefresh: 6
         case .folderPicker: 7
+        case .cloneRepository: 7
         case .provisioning: 7
         case .inviteCode: 7
         }
@@ -50,6 +53,7 @@ enum RemoteHostFeature {
         case .pulls: "arrow.triangle.merge"
         case .modelRefresh: "arrow.clockwise"
         case .folderPicker: "folder.badge.plus"
+        case .cloneRepository: "arrow.down.doc"
         case .provisioning: "sparkles"
         case .inviteCode: "key.horizontal.fill"
         }

@@ -112,6 +112,8 @@ pub(crate) mod ssh_suggest;
 mod sync_scheduler;
 #[cfg(test)]
 pub(crate) mod test_identity;
+#[cfg(feature = "local-host")]
+pub(crate) mod workspace_clone;
 pub mod workspace_policy;
 
 #[cfg(feature = "local-host")]
@@ -156,8 +158,9 @@ pub use tokenstat_pty::warm_shell_pool;
 /// from a phone: `fs.browse` and `fs.mkdir` so a folder can be picked on a
 /// machine with no file panel, `host.provisionStatus` so the wizard and the
 /// empty states read the same answer, `host.logs` so a headless machine can
-/// say why it is unhappy, and `workspace.access.invite` / `.redeem` /
-/// `.log` for letting a second device in from the console.
+/// say why it is unhappy, `workspace.access.invite` / `.redeem` / `.log` for
+/// letting a second device in from the console, and `workspace.clone` /
+/// `.cloneStatus` so a repository can arrive on a machine that had none.
 ///
 /// That last one is a parameter, not a method, which is the weaker case: an
 /// older host deserializes the call, ignores the field it does not

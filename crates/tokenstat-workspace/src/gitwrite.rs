@@ -430,3 +430,128 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// What a clone should be run as, or why it will not be.
+///
+/// Separate from running it because a clone is the one mutating command this
+/// product runs in a terminal rather than capturing: the progress belongs on
+/// screen, and a clone that asks for a passphrase or an unknown host key has
+/// to be answerable. So the host owns the pty and this owns the decision about
+/// what is safe to hand git.
+///
+/// The checks are not decoration. `git clone` takes options before its
+/// arguments, so a URL beginning with `-` is an option, and `--upload-pack=`
+/// names a command to run on the far side. `ext::` is git's own escape hatch
+/// for running an arbitrary command as a transport. Neither may arrive from a
+/// caller, and both are refused by name rather than by hoping a parser catches
+/// them.
+pub fn clone_command(url: &str, name: &str) -> Result<Vec<String>, String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err("A clone needs an address.".into());
+    }
+    if url.starts_with('-') {
+        return Err("That address starts with a dash, which git would read as an option.".into());
+    }
+    if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("That address has a space or a control character in it.".into());
+    }
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("ext::") {
+        return Err("`ext::` addresses run a command of their own and are not accepted.".into());
+    }
+    let scheme_ok = ["https://", "http://", "ssh://", "git://"]
+        .iter()
+        .any(|scheme| lower.starts_with(scheme));
+    // The scp-like form, `git@github.com:owner/repo.git`, which is what most
+    // people paste. A colon after a host, and no scheme in front of it.
+    let scp_like = !lower.contains("://")
+        && url.split_once(':').is_some_and(|(host, path)| {
+            !host.is_empty() && !path.is_empty() && !host.contains('/')
+        });
+    if !scheme_ok && !scp_like {
+        return Err(
+            "That does not look like a repository address. Use an https:// or ssh:// URL, or the git@host:owner/repo form."
+                .into(),
+        );
+    }
+    validate_clone_name(name)?;
+    Ok(vec![
+        "clone".into(),
+        "--progress".into(),
+        url.to_string(),
+        name.to_string(),
+    ])
+}
+
+/// The folder a clone lands in: one name, in the directory that was chosen.
+pub fn validate_clone_name(name: &str) -> Result<(), String> {
+    let bad = name.is_empty()
+        || name.starts_with('-')
+        || name.starts_with('.')
+        || name.len() > 255
+        || name.contains(['/', '\\'])
+        || name.chars().any(|c| c.is_control());
+    if bad {
+        return Err("A folder name is one name, without a path in it.".into());
+    }
+    Ok(())
+}
+
+/// The folder name a repository address implies, for the field's placeholder.
+pub fn name_from_url(url: &str) -> Option<String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let last = trimmed.rsplit(['/', ':']).next()?;
+    let name = last.strip_suffix(".git").unwrap_or(last);
+    validate_clone_name(name).ok().map(|()| name.to_string())
+}
+
+#[cfg(test)]
+mod clone_tests {
+    use super::*;
+
+    #[test]
+    fn a_clone_address_can_never_become_an_option_or_a_command() {
+        assert_eq!(
+            clone_command("https://github.com/o/r.git", "r").unwrap(),
+            ["clone", "--progress", "https://github.com/o/r.git", "r"]
+        );
+        assert!(clone_command("git@github.com:o/r.git", "r").is_ok());
+        assert!(clone_command("ssh://git@host/o/r", "r").is_ok());
+        for url in [
+            "--upload-pack=touch /tmp/pwned",
+            "-u",
+            "ext::sh -c whoami",
+            "EXT::sh -c whoami",
+            "file:///etc",
+            "https://host/a b",
+            "",
+            "just-a-word",
+        ] {
+            assert!(clone_command(url, "r").is_err(), "{url} was accepted");
+        }
+        for name in ["", "../escape", "a/b", "-x", ".git", &"n".repeat(256)] {
+            assert!(
+                clone_command("https://github.com/o/r.git", name).is_err(),
+                "{name} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn a_folder_name_is_guessed_from_the_address() {
+        assert_eq!(
+            name_from_url("https://github.com/owner/repo.git").as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            name_from_url("git@github.com:owner/repo").as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            name_from_url("https://github.com/owner/repo/").as_deref(),
+            Some("repo")
+        );
+        assert_eq!(name_from_url("https://github.com/owner/.git"), None);
+    }
+}
