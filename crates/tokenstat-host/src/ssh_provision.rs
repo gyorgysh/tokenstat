@@ -44,6 +44,22 @@ pub(crate) const CHECK_SCRIPT: &str = concat!(
     "echo diskFreeMb=$(df -Pm \"$HOME\" 2>/dev/null | awk 'NR==2 {print $4}')",
 );
 
+/// A fresh non-login SSH shell may not have ~/.local/bin in PATH yet.
+/// This reads the daemon's identity over its local socket, never creates one.
+pub(crate) const IDENTITY_SCRIPT: &str = "if [ -x \"$HOME/.local/bin/tokenstat\" ]; then \"$HOME/.local/bin/tokenstat\" host identity --json; else tokenstat host identity --json; fi";
+
+pub(crate) fn parse_identity(output: &str) -> Result<Value, String> {
+    let value: Value = serde_json::from_str(output.trim()).map_err(
+        |_| "The server did not return a valid host identity. Check that installation finished.",
+    )?;
+    let key = value["key"]
+        .as_str()
+        .ok_or("The server did not return its host key.")?;
+    validate_hex_key(key)?;
+    // Only the public key is needed; do not expose unrelated console output.
+    Ok(json!({"key": key.to_ascii_lowercase()}))
+}
+
 pub(crate) fn stage_code_command() -> String {
     format!("umask 077; set -C; cat > \"{CODE_PATH}\"")
 }
@@ -248,6 +264,17 @@ fn shell_quote(value: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identity_is_a_full_public_key_not_a_label_or_partial_status() {
+        let key = "AB".repeat(32);
+        let parsed = parse_identity(&json!({"key": key, "extra": "discard"}).to_string()).unwrap();
+        assert_eq!(parsed, json!({"key": "ab".repeat(32)}));
+        for bad in ["", "server", "{}", r#"{"key":"short"}"#, r#"{"key":12}"#] {
+            assert!(parse_identity(bad).is_err());
+        }
+        assert!(parse_identity(&json!({"key": "zz".repeat(32)}).to_string()).is_err());
+    }
 
     #[test]
     #[cfg(unix)]

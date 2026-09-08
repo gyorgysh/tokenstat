@@ -461,13 +461,19 @@ mod tests {
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "tokenstat-server-{tag}-{}-{}",
-            std::process::id(),
-            SEQ.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        // PIDs can be reused while a prior test's socket still exists.
+        loop {
+            let dir = std::env::temp_dir().join(format!(
+                "tokenstat-server-{tag}-{}-{}",
+                std::process::id(),
+                SEQ.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => return dir,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("create test directory: {error}"),
+            }
+        }
     }
 
     fn session(dir: &Path) -> Session {

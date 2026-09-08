@@ -2877,6 +2877,14 @@ extension Bridge {
         ), as: ServerCheck.self)
     }
 
+    /// Bind setup to the daemon reached through the trusted SSH connection.
+    static func setupServerIdentity(_ host: SSHHost, auth: [String: Any]) async throws -> String {
+        struct Identity: Codable, Sendable { var key: String }
+        return try await background("ssh.provision.identity", sessionParams(
+            host, rows: 24, cols: 100, auth: auth, jump: nil
+        ), as: Identity.self).key
+    }
+
     /// Put the pairing code on the server as a private file.
     ///
     /// Never on the command line: there it lands in the shell history and,

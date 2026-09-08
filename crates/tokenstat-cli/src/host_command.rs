@@ -79,6 +79,8 @@ impl InstallArgs {
 enum HostCommand {
     /// Show the service and the running host's state
     Status,
+    /// Read the running host’s public identity without fetching account data
+    Identity,
     /// Install and activate the always-on service
     Install(InstallArgs),
     /// Stop the host and remove the service, leaving every folder alone
@@ -220,6 +222,20 @@ pub fn run(args: &HostArgs, json_output: bool) -> Result<()> {
             .join("host.sock"),
     };
     match &args.command {
+        Some(HostCommand::Identity) => {
+            let identity = host_rpc::call(&socket, "machine.identity", json!({}))?;
+            if json_output {
+                println!("{identity}");
+            } else {
+                println!(
+                    "{}",
+                    identity["key"]
+                        .as_str()
+                        .context("The host returned no identity")?
+                );
+            }
+            Ok(())
+        }
         Some(HostCommand::Access { command }) => access(&socket, command.as_ref(), json_output),
         None | Some(HostCommand::Status) => status(
             &socket,
@@ -708,6 +724,7 @@ mod tests {
         for arguments in [
             vec!["tokenstat", "host"],
             vec!["tokenstat", "host", "status", "--json"],
+            vec!["tokenstat", "host", "identity", "--json"],
             vec!["tokenstat", "host", "install", "--name", "server"],
             vec!["tokenstat", "host", "--install"],
             vec!["tokenstat", "host", "access"],

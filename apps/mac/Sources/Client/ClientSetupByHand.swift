@@ -92,7 +92,11 @@ struct ClientSetupByHand: View {
                 }
                 .font(ClientType.label)
                 .disabled(working)
-                Button("I ran it, check my account", .next) { path.append(.finish) }
+                Button("I ran it, check my account", .next) {
+                    model.manualInstall = true
+                    model.expectedPeer = nil
+                    path.append(.finish)
+                }
                     .font(ClientType.label)
             }
             .padding(.horizontal, Theme.Space.m)

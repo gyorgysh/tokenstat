@@ -174,4 +174,6 @@ pub use tokenstat_pty::warm_shell_pool;
 /// new method answers `unknown method`, and the feature is simply absent with
 /// nothing on screen to say why. `Bridge.connect` replaces a helper whose
 /// number does not match, and that check is the only thing that notices.
-pub const PROTOCOL_VERSION: &str = "7";
+/// Version 8 adds the local-only `ssh.provision.identity` handoff. The
+/// remote workspace provisioning methods themselves remain available at 7.
+pub const PROTOCOL_VERSION: &str = "8";

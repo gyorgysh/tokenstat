@@ -56,6 +56,13 @@ final class ClientSetupModel {
     /// The machine's own answer, once it is a peer. The wizard's last step
     /// reads this rather than believing what scrolled past in the terminal.
     var finished: ProvisionStatus?
+    var expectedPeer: String?
+    var manualInstall = false
+    var manualMachineKey = ""
+
+    var canCheckMachine: Bool {
+        !manualInstall || expectedPeer != nil || ClientSetupIdentity.normalize(manualMachineKey) != nil
+    }
 
     var working = false
     var error: String?
@@ -128,6 +135,9 @@ final class ClientSetupModel {
         trusted = false
         check = nil
         finished = nil
+        expectedPeer = nil
+        manualInstall = false
+        manualMachineKey = ""
         line = nil
         terminal?.stop()
         terminal = nil
@@ -257,36 +267,51 @@ final class ClientSetupModel {
     /// Polled rather than assumed: the installer's output scrolling past is
     /// not the same as a machine that answers.
     func waitForMachine(library: SSHLibraryModel, account: AccountModel) async {
-        error = nil
-        working = true
-        defer { working = false }
-        let deadline = Date().addingTimeInterval(180)
-        while Date() < deadline, !Task.isCancelled {
-            if let peer = await provisionedPeer(account),
-               let status = try? await Bridge.provisionStatus(peer: peer)
-            {
-                finished = status
-                return
+        await run {
+            if self.expectedPeer == nil {
+                if self.manualInstall {
+                    guard let key = ClientSetupIdentity.normalize(self.manualMachineKey) else {
+                        throw BridgeError.core(code: "identity_required",
+                            message: "Paste the full machine key printed by the installer.")
+                    }
+                    self.expectedPeer = key
+                } else {
+                    let host = self.resolvedHost(library: library)
+                    let auth = try self.authPayload(library: library)
+                    let key = try await Bridge.setupServerIdentity(host, auth: auth)
+                    try Task.checkCancellation()
+                    self.expectedPeer = key
+                }
             }
-            try? await Task.sleep(for: .seconds(3))
+            guard let peer = self.expectedPeer else { return }
+            let deadline = Date().addingTimeInterval(180)
+            while Date() < deadline {
+                try Task.checkCancellation()
+                // Use a fresh response, not AccountModel's retained offline snapshot.
+                let fresh = try await Bridge.account()
+                try Task.checkCancellation()
+                if fresh.machines.contains(where: {
+                    $0.isHost && ClientSetupIdentity.matches($0.publicIdentity ?? "", expected: peer)
+                }) {
+                    guard try await Bridge.workspaceAccessAllowed(peer: peer) else {
+                        throw BridgeError.core(code: "access_required",
+                            message: "This machine is on your account, but this device is not allowed yet. Use Add this device in Machines.")
+                    }
+                    let status = try await Bridge.provisionStatus(peer: peer)
+                    try Task.checkCancellation()
+                    guard ClientSetupIdentity.matches(status.machineKey, expected: peer) else {
+                        throw BridgeError.core(code: "identity_mismatch",
+                            message: "The machine answered with a different identity. Reconnect and verify the server.")
+                    }
+                    self.finished = status
+                    await account.load()
+                    return
+                }
+                try await Task.sleep(for: .seconds(3))
+            }
+            throw BridgeError.core(code: "setup_pending",
+                message: "This machine has not appeared on your account yet. Check that the install finished, then try again.")
         }
-        if finished == nil, !Task.isCancelled {
-            error = "The machine has not appeared on your account yet. It keeps trying, and "
-                + "the terminal above says whether the install finished."
-        }
-    }
-
-    /// The machine this wizard just made, found by the name it was given
-    /// rather than by being the newest row: two servers being set up at once
-    /// must not each adopt the other's.
-    private func provisionedPeer(_ account: AccountModel) async -> String? {
-        await account.load()
-        let name = machineName.trimmingCharacters(in: .whitespaces)
-        let matches = (account.account?.machines ?? [])
-            .filter { $0.isHost && $0.publicIdentity != nil && ($0.label ?? "") == name }
-        // Labels are editable and not unique. Never arbitrarily adopt a row.
-        guard matches.count == 1 else { return nil }
-        return matches.first?.publicIdentity
     }
 
     /// The step that is running, so it can be stopped.

@@ -437,6 +437,18 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         // caller: this is the one place where an SSH session and a client that
         // is not at the machine meet, and it must not become a way to run
         // something arbitrary on somebody's server.
+        "ssh.provision.identity" => {
+            let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let output = runtime()?.block_on(async {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    provision_exec(p, crate::ssh_provision::IDENTITY_SCRIPT.to_string(), None),
+                )
+                .await
+                .map_err(|_| "The server took too long to return its identity.".to_string())?
+            })?;
+            crate::ssh_provision::parse_identity(&output)
+        }
         "ssh.provision.check" => {
             let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
             let output = runtime()?.block_on(provision_exec(
@@ -1076,6 +1088,7 @@ mod tests {
                     r#"{"hostname":"example.com","username":"root","hostKeys":["x"]}"#,
                 ),
                 ("ssh.provision.line", "{}"),
+                ("ssh.provision.identity", "{}"),
             ] {
                 let refused = call(method, params).unwrap().expect_err("must refuse");
                 assert!(refused.contains("local-only"), "{method}: {refused}");

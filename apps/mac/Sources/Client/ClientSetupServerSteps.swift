@@ -605,6 +605,19 @@ private struct FinishStep: View {
             error: model.error,
             onDismissError: { model.error = nil }
         ) {
+            if model.manualInstall, model.finished == nil {
+                StepSection(title: "Confirm the installed machine") {
+                    Text("Paste the full machine key printed at the end of the installer, or run tokenstat host identity on the server. This selects the exact machine, even when two servers have the same name.")
+                        .font(ClientType.label)
+                        .foregroundStyle(.secondary)
+                    TextField("64-character machine key", text: $model.manualMachineKey)
+                        .font(Theme.monoText(13))
+                        .textFieldStyle(.themed)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .disabled(model.working || model.expectedPeer != nil)
+                }
+            }
             ClientEmptyArt(kind: model.finished == nil ? .provisioning : .serverReady)
                 .frame(maxWidth: .infinity)
             if let status = model.finished {
@@ -633,7 +646,7 @@ private struct FinishStep: View {
                     Task { await model.waitForMachine(library: library, account: account) }
                 }
                 .clientProminentStyle()
-                .disabled(model.working)
+                .disabled(model.working || !model.canCheckMachine)
             } else {
                 Button("Open Workspaces", .next) {
                     navigation.destination = .workspaces
@@ -644,7 +657,7 @@ private struct FinishStep: View {
         }
         .navigationTitle("Finish")
         .task {
-            guard model.finished == nil, !model.working else { return }
+            guard model.finished == nil, !model.working, model.canCheckMachine else { return }
             await model.waitForMachine(library: library, account: account)
         }
     }
