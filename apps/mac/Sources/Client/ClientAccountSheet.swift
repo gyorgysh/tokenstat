@@ -379,7 +379,7 @@ private struct ClientAccountContent: View {
                     .monospacedDigit()
             }
             .font(ClientType.label)
-            Text("This phone reads that data. It does not upload an archive of its own.")
+            Text("This device reads that data. It does not upload an archive of its own.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -507,7 +507,7 @@ private struct ClientAccountContent: View {
     private var signedOut: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             ClientSectionTitle(title: "Not signed in", mark: "mark_account")
-            Text("Signing in lets this phone read usage from every device on your account. Only aggregate counters leave a computer.")
+            Text("Signing in lets this device read usage from every device on your account. Only aggregate counters leave a computer.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
             Button {

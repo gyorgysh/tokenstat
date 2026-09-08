@@ -668,7 +668,7 @@ struct ClientDeviceDetailView: View {
     }
 }
 
-/// One row inside the From this phone card: a glyph, a title, a line of why,
+/// One row inside the From this device card: a glyph, a title, a line of why,
 /// a chevron.
 ///
 /// The glyph and the panel under it are what say this is a button. Without
@@ -798,7 +798,7 @@ private enum DeviceCopy {
            let family = platform.split(separator: "·").first?
                .split(separator: " ").first,
            !family.isEmpty {
-            return "\(family) \(machine.isHost ? "computer" : "phone")"
+            return "\(family) \(machine.isHost ? "computer" : "device")"
         }
         return "Unnamed device"
     }
@@ -810,7 +810,7 @@ private enum DeviceCopy {
            machine.online == true,
            machine.isHost,
            machine.publicIdentity?.isEmpty == false {
-            return "Awake. Open work from this phone."
+            return "Awake. Open work from this device."
         }
         guard machine.label?.isEmpty != false, let id = machine.machineID else {
             return lastSeen(machine, isThisDevice: isThisDevice)
@@ -842,10 +842,10 @@ private enum DeviceCopy {
     static func reach(_ machine: Machine, isThisDevice: Bool) -> String {
         if isThisDevice { return "This is the device you are holding." }
         if machine.online == true {
-            return "Awake and reachable through the tunnel from this phone, and from any other device signed in to this account."
+            return "Awake and reachable through the tunnel from this device, and from any other device signed in to this account."
         }
         if machine.publicIdentity?.isEmpty == false {
-            return "Asleep. It has a connection key, so it can be reached from this phone once it is awake."
+            return "Asleep. It has a connection key, so it can be reached from this device once it is awake."
         }
         // Not a fault, and not something to fix from a phone. Saying which
         // switch it is beats "unavailable".

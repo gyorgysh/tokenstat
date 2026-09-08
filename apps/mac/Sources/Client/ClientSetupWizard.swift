@@ -98,7 +98,7 @@ struct ClientSetupWizard: View {
                 door(
                     title: "On my Mac",
                     body: "Install the desktop app on the computer you work on, sign in "
-                        + "to this account, and let this phone in.",
+                        + "to this account, and let this device in.",
                     requirement: nil,
                     symbol: "laptopcomputer"
                 ) {
@@ -168,7 +168,7 @@ struct ClientSetupWizard: View {
                 .accessibilityIdentifier("setup.startOver")
             }
             .padding(.top, Theme.Space.xs)
-            Text("Starting over forgets this progress on your phone. Nothing on the server is removed.")
+            Text("Starting over forgets this progress on this device. Nothing on the server is removed.")
                 .font(ClientType.caption)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

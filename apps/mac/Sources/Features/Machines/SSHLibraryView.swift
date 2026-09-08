@@ -562,7 +562,7 @@ struct SSHLibraryView: View {
         ClientEmptyState(
             kind: .needsAccount,
             title: "Sync SSH between your devices",
-            message: "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above.",
+            message: "An encrypted vault keeps hosts and keys on every device signed in to this account. Supporter and above.",
             actionTitle: "See plans",
             actionIcon: .plans,
             action: { store.showPaywall = true },

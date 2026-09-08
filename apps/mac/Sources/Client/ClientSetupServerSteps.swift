@@ -506,7 +506,7 @@ private struct CredentialStep: View {
                     }
                 Text(
                     "Used for this connection and dropped when the wizard closes. It is "
-                    + "never saved to the vault or to this phone."
+                    + "never saved to the vault or to this device."
                 )
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
@@ -757,7 +757,7 @@ private struct InstallStep: View {
                         bullet("The CLI and the always-on host are installed.")
                         bullet("The machine signs in to your account with a code that "
                             + "expires in fifteen minutes and works once.")
-                        bullet("This phone is allowed to open the work here, granted over "
+                        bullet("This device is allowed to open the work here, granted over "
                             + "this SSH session rather than through our servers.")
                         bullet("It stays on and keeps counting, which costs whatever the "
                             + "server costs.")
@@ -837,7 +837,7 @@ private struct FinishStep: View {
             title: model.finished == nil ? "Waiting for the machine" : "It is up",
             subtitle: model.finished == nil
                 ? "The server signs in, joins the tunnel and answers. This takes a few seconds."
-                : "\(model.machineName) is on your account and this phone can reach it.",
+                : "\(model.machineName) is on your account and this device can reach it.",
             number: 6,
             failure: model.failure,
             onDismissError: { model.failure = nil },

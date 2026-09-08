@@ -167,7 +167,7 @@ struct ClientSetupStateTests {
             BridgeError.core(code: "call_failed", message: "not logged in: run tokenstat login")
         )
         precondition(signedOut.action == .signInToAccount)
-        precondition(!signedOut.explanation.contains("tokenstat login"), "No CLI advice on a phone")
+        precondition(!signedOut.explanation.contains("tokenstat login"), "No CLI advice on a hand-held device")
 
         // Anything that is not a bridge failure still says something.
         struct Plain: Error {}

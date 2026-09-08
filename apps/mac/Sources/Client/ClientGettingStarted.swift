@@ -57,7 +57,7 @@ struct ClientGettingStarted: View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             ClientSectionTitle(title: "Get tokenstat counting", mark: "mark_activity")
             Text(
-                "tokenstat counts on the computers you work on. This phone shows "
+                "tokenstat counts on the computers you work on. This device shows "
                 + "what they counted, with every laptop shut."
             )
             .font(ClientType.label)
@@ -71,8 +71,8 @@ struct ClientGettingStarted: View {
             GettingStartedStep(
                 number: 1,
                 title: "Signed in",
-                body: phoneName.map { "This phone is on your account as \($0)." }
-                    ?? "This phone is on your account.",
+                body: phoneName.map { "This device is on your account as \($0)." }
+                    ?? "This device is on your account.",
                 state: .done
             ),
             GettingStartedStep(
@@ -80,7 +80,7 @@ struct ClientGettingStarted: View {
                 title: "Connect a machine",
                 body: "A Mac you already work on, or a server tokenstat sets up "
                     + "for you over SSH. Free includes two devices, so a machine "
-                    + "and this phone fit.",
+                    + "and this device fit.",
                 state: .now,
                 actionTitle: "Set up a machine",
                 actionIcon: .connect,

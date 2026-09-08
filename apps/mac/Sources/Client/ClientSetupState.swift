@@ -262,9 +262,9 @@ struct ClientSetupFailure: Equatable {
                 // The wizard is behind the sign-in, so this is only reachable
                 // when a token was revoked mid-flow. The shared message tells
                 // somebody to run a CLI command, which is not an answer a
-                // person holding a phone can act on.
+                // person holding an iPhone or iPad can act on.
                 return ClientSetupFailure(
-                    explanation: "This phone is signed out. Sign in again, then set the "
+                    explanation: "This device is signed out. Sign in again, then set the "
                         + "machine up.",
                     action: .signInToAccount,
                     details: message

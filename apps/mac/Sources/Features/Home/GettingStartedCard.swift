@@ -96,10 +96,10 @@ struct GettingStartedCard: View {
             ),
             GettingStartedStep(
                 number: 3,
-                title: signedIn ? "Connected to your account" : "Add your phone, if you want it",
+                title: signedIn ? "Connected to your account" : "Add your iPhone or iPad, if you want it",
                 body: signedIn
-                    ? "Your devices share one account, so the phone shows these numbers with the lid shut."
-                    : "Optional, and this Mac counts either way. An account is what puts these numbers on your phone and lets a second computer join. Free includes two devices.",
+                    ? "Your devices share one account, so they show these numbers with the lid shut."
+                    : "Optional, and this Mac counts either way. An account is what puts these numbers on your iPhone or iPad and lets a second computer join. Free includes two devices.",
                 state: signedIn ? .done : .next,
                 actionTitle: signedIn ? nil : "Sign in",
                 actionIcon: .signIn,

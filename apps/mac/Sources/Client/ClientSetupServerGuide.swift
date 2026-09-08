@@ -30,9 +30,9 @@ struct ClientSetupServerGuide: View {
                     Text("Renting a server")
                         .font(Theme.title.weight(.semibold))
                     Text(
-                        "Your iPad is where you work. The machine is what runs the agent, "
-                        + "holds your projects and stays on when you close this. A small "
-                        + "rented Linux server is the usual way to have one."
+                        "This device is where you work. The machine is what runs the "
+                        + "agent, holds your projects and stays on when you close this. A "
+                        + "small rented Linux server is the usual way to have one."
                     )
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)

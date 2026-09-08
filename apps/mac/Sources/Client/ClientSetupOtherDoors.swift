@@ -45,7 +45,7 @@ struct ClientSetupMacDoor: View {
                 GettingStartedRail(steps: steps)
                 if arrived != nil {
                     Text(
-                        "One step is left and it happens on the computer: when this phone asks "
+                        "One step is left and it happens on the computer: when this device asks "
                         + "to open a folder, say yes there."
                     )
                     .font(ClientType.caption)
@@ -72,7 +72,7 @@ struct ClientSetupMacDoor: View {
             GettingStartedStep(
                 number: 1,
                 title: "Install tokenstat on the computer",
-                body: "Nobody installs a desktop app from a phone, so this step sends the "
+                body: "Nobody installs a desktop app from an iPhone or iPad, so this step sends the "
                     + "address to it instead. \(Self.address)",
                 state: arrived == nil ? .now : .done,
                 actionTitle: arrived == nil ? "Send it to my computer" : nil,
@@ -83,12 +83,12 @@ struct ClientSetupMacDoor: View {
                 number: 2,
                 title: "Sign in to this account",
                 body: arrived.map { "\($0.label ?? "It") is on your account." }
-                    ?? "Open it there and sign in with the same account this phone uses.",
+                    ?? "Open it there and sign in with the same account this device uses.",
                 state: arrived == nil ? .next : .done
             ),
             GettingStartedStep(
                 number: 3,
-                title: "Let this phone in",
+                title: "Let this device in",
                 body: "Folders and terminals are only open to devices that computer has "
                     + "allowed. Ask from Workspaces, and say yes on the computer.",
                 state: arrived == nil ? .next : .now

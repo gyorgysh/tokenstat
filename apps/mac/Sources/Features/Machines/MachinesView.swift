@@ -476,7 +476,7 @@ struct MachinesView: View {
                         // account qualifies again.
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Text(model.account?.signedIn == true
-                                ? "This computer and a phone already share the account."
+                                ? "This computer and another device already share the account."
                                 : "Remote reach needs a signed-in Patron account.")
                                 .font(Theme.callout.weight(.medium))
                             Text(model.account?.signedIn == true
@@ -946,14 +946,14 @@ struct MachinesView: View {
             case .approved:
                 Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                    .help("Stops this phone from reaching this Mac")
+                    .help("Stops that device from reaching this Mac")
             case .pending, .revoked:
                 Button("Approve", .approve) { Task { await model.approve(peer) } }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             }
             Button("Forget", .delete, role: .destructive) { confirmForget = peer }
                 .buttonStyle(SecondaryButtonStyle(small: true))
-                .help("Removes the pairing. The phone has to knock again.")
+                .help("Removes the pairing. That device has to knock again.")
         }
         // Whatever else a phone row offers, it can be named. Two devices both
         // called "iPad" is the list this account actually has, and the row
@@ -983,7 +983,7 @@ struct MachinesView: View {
     /// title in monospace, where an identifier belongs.
     private func deviceTitle(resolved: String?, machine: Machine) -> String {
         if let resolved, !resolved.isEmpty { return resolved }
-        return machine.isHost ? "Unnamed computer" : "Unnamed phone"
+        return machine.isHost ? "Unnamed computer" : "Unnamed device"
     }
 
     /// One caption line under a machine's name. The presence light is the

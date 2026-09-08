@@ -484,7 +484,7 @@ private fun WorkflowsSection(
                 EmptyState(
                     Icons.Default.AccountTree,
                     "No workflows yet",
-                    "Workflows built on the Mac appear here. Run one from this phone.",
+                    "Workflows built on the Mac appear here. Run one from this device.",
                     art = { EmptyArt(EmptyArtKind.Workflows) },
                 )
             }
@@ -833,7 +833,7 @@ private fun BrowserSection(
     var portText by remember { mutableStateOf("3000") }
     var error by remember { mutableStateOf<String?>(null) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        Text("Open a port on that computer in this phone's browser.", color = LocalTsColors.current.textSecondary)
+        Text("Open a port on that computer in this device's browser.", color = LocalTsColors.current.textSecondary)
         OutlinedTextField(
             portText,
             { portText = it.filter(Char::isDigit).take(5) },

@@ -407,7 +407,7 @@ struct AccountView: View {
                 EmptyState(
                     symbol: "laptopcomputer.and.iphone",
                     title: "No devices yet",
-                    message: "Install tokenstat on a computer and sign in there. This phone uses one of the two Free slots."
+                    message: "Install tokenstat on a computer and sign in there. This device uses one of the two Free slots."
                 )
                 #endif
             } else {
@@ -519,7 +519,7 @@ struct AccountView: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 toggleRow(
                     "Share with my devices",
-                    detail: "Posts how full each window is, so a phone can show what is left while this Mac is asleep. Percentages and reset times only, never a credential. Turning a vendor off below also stops tracking it on this Mac.",
+                    detail: "Posts how full each window is, so an iPhone or iPad can show what is left while this Mac is asleep. Percentages and reset times only, never a credential. Turning a vendor off below also stops tracking it on this Mac.",
                     isOn: Binding(
                         get: { model.limitsSyncEnabled },
                         set: { on in Task { await model.setLimitsSync(on) } }

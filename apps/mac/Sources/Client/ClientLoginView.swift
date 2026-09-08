@@ -50,7 +50,7 @@ struct ClientLoginView: View {
                 } else {
                     if account.deletionConfirmed {
                         Label {
-                            Text("Your account was deleted. This phone is signed out, and there is no data left to restore.")
+                            Text("Your account was deleted. This device is signed out, and there is no data left to restore.")
                         } icon: {
                             Image(systemName: "trash")
                         }

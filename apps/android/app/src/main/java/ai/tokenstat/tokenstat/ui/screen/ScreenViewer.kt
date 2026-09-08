@@ -75,7 +75,7 @@ fun ScreenViewerScreen(
         runCatching {
             val identity = model.core("machine.identity") as JsonObject
             val peerId = identity["publicIdentity"]?.jsonPrimitive?.contentOrNull
-                ?: throw IllegalStateException("This phone has no identity yet.")
+                ?: throw IllegalStateException("This device has no identity yet.")
             val cap = model.workspaceSection(
                 peer,
                 "screen.capability.issue",

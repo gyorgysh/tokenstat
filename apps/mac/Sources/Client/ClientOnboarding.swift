@@ -34,7 +34,7 @@ struct ClientOnboarding: View {
             title: "What tokenstat is",
             body: "One place for the AI coding tools you already use. Usage, "
                 + "plan windows, workspaces, and live sessions, on the computers "
-                + "you work on and on this phone."
+                + "you work on and on this device."
         ),
         OnboardingPage(
             art: .heatmap,
@@ -46,8 +46,9 @@ struct ClientOnboarding: View {
         OnboardingPage(
             art: .devices,
             title: "All your devices",
-            body: "Laptops and phones share one account. Open the phone while "
-                + "every computer is asleep, and the numbers are still there."
+            body: "Laptops, iPhones and iPads share one account. Open the one in "
+                + "your hand while every computer is asleep, and the numbers are "
+                + "still there."
         ),
         OnboardingPage(
             art: .spend,
@@ -73,12 +74,12 @@ struct ClientOnboarding: View {
             art: .sessions,
             title: "Sessions",
             body: "Live terminals on the host, from the desktop or from this "
-                + "phone. Spawn an agent, watch it work, type when you need to."
+                + "device. Spawn an agent, watch it work, type when you need to."
         ),
         OnboardingPage(
             art: .onTheGo,
             title: "On the go",
-            body: "This phone is a client of a Mac that is on. Folders and "
+            body: "This device is a client of a Mac that is on. Folders and "
                 + "sessions travel over an encrypted tunnel. Usage is already "
                 + "on the account, so the heatmap does not need the laptop open."
         ),

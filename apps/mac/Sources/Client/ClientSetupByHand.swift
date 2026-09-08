@@ -62,7 +62,7 @@ struct ClientSetupByHand: View {
                         .foregroundStyle(.secondary)
                 }
                 Text(
-                    "The machine signs itself in with that code, and lets this phone open "
+                    "The machine signs itself in with that code, and lets this device open "
                     + "its work. Nothing about it goes through a browser."
                 )
                 .font(ClientType.caption)

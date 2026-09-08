@@ -392,7 +392,7 @@ private fun RemotePaywall(onPlans: () -> Unit) {
         Text("Remote is on Patron", style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
         Spacer(Modifier.height(8.dp))
         Text(
-            "This phone already shares the account and sees the usage from every device on it. Opening folders and terminals on the computer is a paid feature.",
+            "This device already shares the account and sees the usage from every device on it. Opening folders and terminals on the computer is a paid feature.",
             color = colors.textSecondary,
         )
         Spacer(Modifier.height(20.dp))
@@ -734,7 +734,7 @@ private fun DevicesScreen(
                             Text(
                                 when {
                                     isHost && online && !value.string("publicIdentity").isNullOrEmpty() ->
-                                        "Awake. Open work from this phone."
+                                        "Awake. Open work from this device."
                                     else -> listOfNotNull(value.string("platform"), value.string("lastSeenAt")).joinToString(" · ")
                                 },
                                 color = colors.textSecondary,
@@ -795,8 +795,8 @@ private fun DeviceDetailScreen(
                 Text(
                     when {
                         isThis -> "This is the device you are holding."
-                        online -> "Awake and reachable through the tunnel from this phone, and from any other device signed in to this account."
-                        !peer.isNullOrEmpty() -> "Asleep. It has a connection key, so it can be reached from this phone once it is awake."
+                        online -> "Awake and reachable through the tunnel from this device, and from any other device signed in to this account."
+                        !peer.isNullOrEmpty() -> "Asleep. It has a connection key, so it can be reached from this device once it is awake."
                         else -> "Not set up for remote reach. Turn on Reach devices from anywhere on that computer."
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -806,7 +806,7 @@ private fun DeviceDetailScreen(
         if (!isThis && isHost && !peer.isNullOrEmpty()) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("From this phone", style = MaterialTheme.typography.titleMedium)
+                    Text("From this device", style = MaterialTheme.typography.titleMedium)
                     if (state.canRemote) {
                         TsAccentButton(label = "Open work", onClick = onOpenWork, modifier = Modifier.fillMaxWidth())
                         Text(
@@ -1882,7 +1882,7 @@ private fun VaultUpgradeCard(onPlans: () -> Unit) {
                     EmptyArt(EmptyArtKind.Vault)
             Text("Sync SSH between your devices", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above.",
+                "An encrypted vault keeps hosts and keys on every device signed in to this account. Supporter and above.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Button(onClick = onPlans) { Text("See plans") }

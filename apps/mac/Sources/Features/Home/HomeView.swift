@@ -249,10 +249,10 @@ struct HomeView: View {
                 .foregroundStyle(Theme.accent)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Your phone cannot see these numbers")
+                Text("Your other devices cannot see these numbers")
                     .font(Theme.callout.weight(.medium))
                 Text("Account has a Plan limits card that posts how full each window is, "
-                    + "so the phone still shows what is left while this Mac is asleep. "
+                    + "so they still show what is left while this Mac is asleep. "
                     + "Turn a vendor off there if you do not want it shared.")
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)

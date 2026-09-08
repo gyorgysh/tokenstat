@@ -42,7 +42,7 @@ private val onboardingPages = listOf(
     OnboardingPage(
         OnboardingArtKind.Intro,
         "What tokenstat is",
-        "One place for the AI coding tools you already use. Usage, plan windows, workspaces, and live sessions, on the computers you work on and on this phone.",
+        "One place for the AI coding tools you already use. Usage, plan windows, workspaces, and live sessions, on the computers you work on and on this device.",
     ),
     OnboardingPage(
         OnboardingArtKind.Heatmap,
@@ -52,7 +52,7 @@ private val onboardingPages = listOf(
     OnboardingPage(
         OnboardingArtKind.Devices,
         "All your devices",
-        "Laptops and phones share one account. Open the phone while every computer is asleep, and the numbers are still there.",
+        "Laptops, phones and tablets share one account. Open the one in your hand while every computer is asleep, and the numbers are still there.",
     ),
     OnboardingPage(
         OnboardingArtKind.Spend,
@@ -72,12 +72,12 @@ private val onboardingPages = listOf(
     OnboardingPage(
         OnboardingArtKind.Sessions,
         "Sessions",
-        "Live terminals on the host, from the desktop or from this phone. Spawn an agent, watch it work, type when you need to.",
+        "Live terminals on the host, from the desktop or from this device. Spawn an agent, watch it work, type when you need to.",
     ),
     OnboardingPage(
         OnboardingArtKind.OnTheGo,
         "On the go",
-        "This phone is a client of a Mac that is on. Folders and sessions travel over an encrypted tunnel. Usage is already on the account, so the heatmap does not need the laptop open.",
+        "This device is a client of a Mac that is on. Folders and sessions travel over an encrypted tunnel. Usage is already on the account, so the heatmap does not need the laptop open.",
     ),
     OnboardingPage(
         OnboardingArtKind.Privacy,

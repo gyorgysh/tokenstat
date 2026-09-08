@@ -97,7 +97,7 @@ struct ClientWorkspacesView: View {
                         ClientEmptyState(
                             kind: .needsAccount,
                             title: "Remote is on Patron",
-                            message: "This phone already shares the account and sees the usage "
+                            message: "This device already shares the account and sees the usage "
                                 + "from every device on it. Opening folders and terminals on "
                                 + "the computer is a paid feature.",
                             actionTitle: "See plans",
@@ -678,7 +678,7 @@ final class ClientWorkspacesModel {
             } catch {
                 let text = error.localizedDescription
                 if Self.isApprovalNeeded(text) {
-                    infoMessage = "Approve this phone on \(host.name): open Machines "
+                    infoMessage = "Approve this device on \(host.name): open Machines "
                         + "and tap Approve next to this device. Then Connect again."
                     errorMessage = nil
                     if !recovering {
