@@ -388,6 +388,8 @@ struct FriendlyError {
         // offline Mac produces the same strings, so do not assert it.
         if lower.contains("no_such_peer") || lower.contains("no direct address")
             || lower.contains("peer_not_found") || lower.contains("no such peer")
+            || lower.contains("could not reach") && (lower.contains("tunnel")
+                || lower.contains("direct candidates") || lower.contains("relay"))
         {
             return FriendlyError(
                 title: "That computer is not reachable",

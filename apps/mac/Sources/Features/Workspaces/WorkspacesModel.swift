@@ -1031,6 +1031,13 @@ final class WorkspacesModel {
         Task { await loadRemote() }
     }
 
+    /// A folder was registered or cloned on this peer. Fetch now rather than
+    /// on the next minute sweep, so the sidebar shows what was just made.
+    func refreshRemotePeer(_ key: String) {
+        remotePeerNextDial.removeValue(forKey: key)
+        Task { await loadRemote() }
+    }
+
     /// Put local and remote folders together and keep the selection valid.
     private func publishFolders() {
         let merged = localFolders + remoteFolders.values.flatMap { $0 }

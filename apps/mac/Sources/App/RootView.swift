@@ -348,7 +348,7 @@ struct RootView: View {
             )
         }
         .sheet(isPresented: $workspaces.isAddSheetPresented) {
-            AddWorkspaceSheet(model: workspaces)
+            AddWorkspaceSheet(model: workspaces, machines: account.account?.machines ?? [])
         }
         #if os(macOS)
         // Connecting starts from four places: the list, the inspector, the

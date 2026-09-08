@@ -18,10 +18,24 @@ import SwiftUI
 /// panel still does the picking.
 struct AddWorkspaceSheet: View {
     @Bindable var model: WorkspacesModel
+    /// Account machines, so the remote flow can tell computers from phones.
+    /// Empty when unknown; the sheet then lists every peer as before.
+    var machines: [Machine] = []
     @Environment(\.dismiss) private var dismiss
     @State private var picking = false
+    @State private var remote = false
 
     var body: some View {
+        if remote {
+            RemoteWorkspaceSheet(model: model, machines: machines) {
+                remote = false
+            }
+        } else {
+            localSheet
+        }
+    }
+
+    private var localSheet: some View {
         ThemedSheet(
             title: "Add a workspace",
             subtitle: "Choose the project folder your agents should work in.",
@@ -51,6 +65,8 @@ struct AddWorkspaceSheet: View {
             Button("Not now", .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
+            Button("On another machine…", .device) { remote = true }
+                .buttonStyle(SecondaryButtonStyle())
             Spacer()
             Button {
                 picking = true
