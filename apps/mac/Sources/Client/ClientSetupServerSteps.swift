@@ -73,10 +73,8 @@ struct StepScaffold<Content: View, Footer: View>: View {
                             .frame(maxWidth: .infinity)
                             .padding(.top, Theme.Space.xs)
                     }
-                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Step \(number) of \(total)")
-                            .font(ClientType.caption.weight(.semibold))
-                            .foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        SetupRail(number: number, total: total)
                         Text(title).font(Theme.title.weight(.semibold))
                         Text(subtitle)
                             .font(ClientType.body)
@@ -89,15 +87,84 @@ struct StepScaffold<Content: View, Footer: View>: View {
                     content()
                 }
                 .padding(Theme.Space.m)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .setupColumn()
             }
             .scrollBounceBehavior(.basedOnSize)
             VStack(spacing: Theme.Space.s) { footer() }
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.bottom, Theme.Space.m)
                 .padding(.top, Theme.Space.s)
+                .setupColumn()
         }
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// One readable column, wherever the window happens to be.
+///
+/// An iPad in landscape gives this sheet a thousand points of width, and a
+/// paragraph that wide is measured in head movements rather than in words. The
+/// column stops growing and centres instead. On a phone the limit is never
+/// reached, so nothing there changes.
+extension View {
+    func setupColumn() -> some View {
+        frame(maxWidth: 620, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+/// Where somebody is, in four words rather than eight numbers.
+///
+/// "Step 3 of 8" says how much is left and nothing about what any of it is
+/// for. The five connection screens are one thing happening, so they are one
+/// milestone, and the three that follow are the three real decisions: the
+/// machine, the agent, the project.
+///
+/// It is deliberately not a progress bar. Nothing here knows how long an
+/// install takes, and a bar that fills at a made-up rate is a claim.
+struct SetupRail: View {
+    let number: Int
+    let total: Int
+
+    private static let milestones: [(name: String, last: Int)] = [
+        ("Connect", 5), ("Machine", 6), ("Agent", 7), ("Project", 8),
+    ]
+
+    private var index: Int {
+        Self.milestones.firstIndex { number <= $0.last } ?? Self.milestones.count - 1
+    }
+
+    var body: some View {
+        HStack(spacing: Theme.Space.xs) {
+            ForEach(Array(Self.milestones.enumerated()), id: \.offset) { position, milestone in
+                if position > 0 {
+                    Rectangle()
+                        .fill(position <= index ? Theme.accent : Theme.border)
+                        .frame(width: 14, height: 1)
+                        .accessibilityHidden(true)
+                }
+                Text(milestone.name)
+                    .font(ClientType.caption.weight(position == index ? .semibold : .regular))
+                    .foregroundStyle(tint(for: position))
+                    .padding(.horizontal, position == index ? Theme.Space.s : 0)
+                    .padding(.vertical, position == index ? 3 : 0)
+                    .background {
+                        if position == index {
+                            Capsule().fill(Theme.accent.opacity(0.12))
+                        }
+                    }
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "Step \(number) of \(total), \(Self.milestones[index].name)"
+        )
+    }
+
+    private func tint(for position: Int) -> Color {
+        if position == index { return Theme.accent }
+        return position < index ? Color.secondary : Color.secondary.opacity(0.5)
     }
 }
 
