@@ -11,7 +11,7 @@
 # has no business existing before you log in or running as root.
 #
 # Usage:
-#   scripts/install-host-agent.sh [path-to-tokenstat-hostd]
+#   scripts/install-host-agent.sh [--always-on] [path-to-tokenstat-hostd]
 #   scripts/install-host-agent.sh --uninstall
 
 set -euo pipefail
@@ -27,6 +27,12 @@ if [ "${1:-}" = "--uninstall" ]; then
     exit 0
 fi
 
+FORCE_ALWAYS_ON=0
+if [ "${1:-}" = "--always-on" ]; then
+    FORCE_ALWAYS_ON=1
+    shift
+fi
+
 BIN="${1:-$HOME/.local/bin/tokenstat-hostd}"
 if [ ! -x "$BIN" ]; then
     echo "error: $BIN is not an executable" >&2
@@ -37,7 +43,9 @@ BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
 
 IDENTITY_DIR="${TOKENSTAT_IDENTITY_DIR:-$HOME/Library/Application Support/ai.tokenstat.tokenstat/identity}"
 HOST_JSON="$IDENTITY_DIR/host.json"
-if [ -f "$HOST_JSON" ] && grep -q '"alwaysOn"[[:space:]]*:[[:space:]]*true' "$HOST_JSON"; then
+if [ "$FORCE_ALWAYS_ON" -eq 1 ]; then
+    ALWAYS_ON=1
+elif [ -f "$HOST_JSON" ] && grep -q '"alwaysOn"[[:space:]]*:[[:space:]]*true' "$HOST_JSON"; then
     ALWAYS_ON=1
 elif [ -f "$HOST_JSON" ]; then
     ALWAYS_ON=0
@@ -51,7 +59,7 @@ if [ "$ALWAYS_ON" -eq 1 ]; then
 else
     KEEP_ALIVE=false
 fi
-if [ ! -f "$HOST_JSON" ]; then
+if [ "$FORCE_ALWAYS_ON" -eq 1 ] || [ ! -f "$HOST_JSON" ]; then
     mkdir -p "$IDENTITY_DIR"
     if [ "$ALWAYS_ON" -eq 1 ]; then
         printf '{\n  "alwaysOn": true\n}\n' > "$HOST_JSON"
@@ -63,6 +71,13 @@ fi
 
 mkdir -p "$(dirname "$PLIST")" "$LOG_DIR"
 
+# Paths are XML text, including when a home directory contains an ampersand.
+xml_text() {
+    printf '%s' "$1" | sed 's/\&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'
+}
+PLIST_BIN="$(xml_text "$BIN")"
+PLIST_LOG_DIR="$(xml_text "$LOG_DIR")"
+
 cat > "$PLIST" <<PLIST_END
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -72,7 +87,7 @@ cat > "$PLIST" <<PLIST_END
     <string>$LABEL</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$BIN</string>
+        <string>$PLIST_BIN</string>
     </array>
     <!-- KeepAlive and RunAtLoad follow Always-on host. Off on a battery
          Mac so the helper dies with the app. On for a mini, studio or pro.
@@ -85,12 +100,20 @@ cat > "$PLIST" <<PLIST_END
     <key>ProcessType</key>
     <string>Interactive</string>
     <key>StandardOutPath</key>
-    <string>$LOG_DIR/hostd.out.log</string>
+    <string>$PLIST_LOG_DIR/hostd.out.log</string>
     <key>StandardErrorPath</key>
-    <string>$LOG_DIR/hostd.err.log</string>
+    <string>$PLIST_LOG_DIR/hostd.err.log</string>
 </dict>
 </plist>
 PLIST_END
+
+# Older CLI installs used a second label. Retire only that known service so
+# both installers converge on one daemon and one socket owner.
+LEGACY_PLIST="$HOME/Library/LaunchAgents/ai.tokenstat.host.plist"
+if [ -f "$LEGACY_PLIST" ] && grep -q '<string>ai.tokenstat.host</string>' "$LEGACY_PLIST"; then
+    launchctl bootout "gui/$(id -u)/ai.tokenstat.host" 2>/dev/null || true
+    rm -f "$LEGACY_PLIST"
+fi
 
 # bootout first so re-running this picks up a changed binary path rather than
 # silently keeping the old one. RunAtLoad is off when Always-on is off, so

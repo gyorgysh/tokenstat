@@ -119,7 +119,13 @@ jobs:
           save-if: false
 
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-cli
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-cli
+          else
+            cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-cli -p tokenstat-host
+          fi
 
       # Signing happens only in publish (release environment secrets).
       - name: Package
@@ -134,13 +140,17 @@ jobs:
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp "target/${TARGET}/release/tokenstat.exe" "dist/${name}/"
           else
-            cp "target/${TARGET}/release/tokenstat" "dist/${name}/"
+            cp "target/${TARGET}/release/tokenstat" "target/${TARGET}/release/tokenstat-hostd" "dist/${name}/"
           fi
           cp README.md LICENSE "dist/${name}/" 2>/dev/null || cp README.md "dist/${name}/"
           # The permissive dependencies ask that their notices travel with the
           # binary. Generated here rather than tracked, see xtask/src/notices.rs.
           cargo run --release --locked -p xtask -- notices \
             "dist/${name}/THIRD-PARTY-NOTICES.md" tokenstat-cli
+          if [ "${{ runner.os }}" != "Windows" ]; then
+            cargo run --release --locked -p xtask -- notices \
+              "dist/${name}/HOST-THIRD-PARTY-NOTICES.md" tokenstat-host
+          fi
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
             7z a "${name}.zip" "${name}" > /dev/null
@@ -359,12 +369,16 @@ jobs:
               echo "no tokenstat binary in ${archive}" >&2
               exit 1
             fi
-            codesign --force --options runtime --timestamp \
-              --sign "${IDENTITY}" "${bin}"
-            codesign --verify --verbose=2 "${bin}"
+            local daemon="$(dirname "${bin}")/tokenstat-hostd"
+            test -f "${daemon}"
+            for executable in "${bin}" "${daemon}"; do
+              codesign --force --options runtime --timestamp \
+                --sign "${IDENTITY}" "${executable}"
+              codesign --verify --verbose=2 "${executable}"
+            done
             if [ -n "${NOTARY_KEY_PATH}" ]; then
               local zip="${RUNNER_TEMP}/tokenstat-notarize-${target}.zip"
-              ditto -c -k --keepParent "${bin}" "${zip}"
+              ditto -c -k --keepParent "$(dirname "${bin}")" "${zip}"
               xcrun notarytool submit "${zip}" \
                 --key "${NOTARY_KEY_PATH}" \
                 --key-id "${NOTARY_KEY_ID}" \

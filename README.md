@@ -162,6 +162,24 @@ From source:
 cargo install --path crates/tokenstat-cli
 ```
 
+### Always-on host on Linux and macOS
+
+The Unix release archive includes both `tokenstat` and `tokenstat-hostd`.
+The installer checks their versions before replacing either, and
+`tokenstat update` updates them together.
+
+To activate the host after installing:
+
+```sh
+tokenstat host --install
+```
+
+Linux installs a user service that stays running after logout. A root install
+uses a system service and agents run as root. A user install needs a systemd
+login session and permission to enable lingering. On macOS the command enables
+Always-on host using the same launchd service as the desktop app.
+
+
 ## Uninstalling
 
 ```bash

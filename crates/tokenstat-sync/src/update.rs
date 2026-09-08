@@ -531,6 +531,9 @@ pub fn apply_update() -> Result<ApplyReport, UpdateError> {
     // the candidate and make it prove itself before it replaces anything.
     verify_candidate(&extracted, &check.latest, &dest)?;
 
+    #[cfg(unix)]
+    replace_unix_release(&extracted, &dest, &check.latest)?;
+    #[cfg(not(unix))]
     replace_executable(&extracted, &dest)?;
     #[cfg(target_os = "macos")]
     {
@@ -543,6 +546,56 @@ pub fn apply_update() -> Result<ApplyReport, UpdateError> {
         to: check.latest,
         path: dest,
     })
+}
+
+/// Keep the two Unix executables on the same release. Both candidates are
+/// checked before replacement, and the daemon is restored if the CLI fails.
+#[cfg(unix)]
+fn replace_unix_release(candidate: &Path, dest: &Path, version: &str) -> Result<(), UpdateError> {
+    let daemon = candidate.with_file_name("tokenstat-hostd");
+    let installed_daemon = dest.with_file_name("tokenstat-hostd");
+    if !daemon.is_file() {
+        // Older releases contained only the CLI. They remain installable only
+        // where doing so cannot strand an existing daemon on another version.
+        if installed_daemon.exists() {
+            return Err(UpdateError::Message("release is missing tokenstat-hostd. The installed CLI and host were kept unchanged".into()));
+        }
+        return replace_executable(candidate, dest);
+    }
+    make_runnable(&daemon)?;
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("xattr").arg("-cr").arg(&daemon).status();
+    verify_candidate(&daemon, version, dest)?;
+    if installed_daemon.exists() {
+        verify_signature(&daemon, &installed_daemon)?;
+    }
+    let backup = installed_daemon.with_extension("pair-backup");
+    let had_daemon = installed_daemon.exists();
+    if had_daemon {
+        fs::copy(&installed_daemon, &backup)?;
+    }
+    if let Err(error) = replace_executable(&daemon, &installed_daemon) {
+        if !had_daemon {
+            let _ = fs::remove_file(&installed_daemon);
+        }
+        let _ = fs::remove_file(&backup);
+        return Err(error);
+    }
+    if let Err(error) = replace_executable(candidate, dest) {
+        let restored = if had_daemon {
+            fs::rename(&backup, &installed_daemon)
+        } else {
+            fs::remove_file(&installed_daemon)
+        };
+        if let Err(restore_error) = restored {
+            return Err(UpdateError::Message(format!(
+                "{error}. Could not restore the previous host: {restore_error}. Reinstall the release before restarting the host."
+            )));
+        }
+        return Err(error);
+    }
+    let _ = fs::remove_file(&backup);
+    Ok(())
 }
 
 /// How long a probe of the candidate binary may take before we call it broken.
@@ -1306,6 +1359,43 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn unix_pair_refuses_missing_or_mismatched_daemon_before_replacing() {
+        let dir = scratch("pair-preflight");
+        let download = dir.join("download");
+        fs::create_dir(&download).unwrap();
+        let dest = fake_binary(&dir, "tokenstat", "echo tokenstat 0.1.0");
+        let old_host = fake_binary(&dir, "tokenstat-hostd", "echo tokenstat-hostd 0.1.0");
+        let candidate = fake_binary(&download, "tokenstat", "echo tokenstat 0.2.0");
+        assert!(replace_unix_release(&candidate, &dest, "0.2.0").is_err());
+        fake_binary(&download, "tokenstat-hostd", "echo tokenstat-hostd 0.1.0");
+        assert!(replace_unix_release(&candidate, &dest, "0.2.0").is_err());
+        assert!(fs::read_to_string(&dest).unwrap().contains("0.1.0"));
+        assert!(fs::read_to_string(&old_host).unwrap().contains("0.1.0"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn unix_pair_restores_daemon_when_cli_fails_at_final_path() {
+        let dir = scratch("pair-rollback");
+        let download = dir.join("download");
+        fs::create_dir(&download).unwrap();
+        let dest = fake_binary(&dir, "tokenstat", "echo tokenstat 0.1.0");
+        let old_host = fake_binary(&dir, "tokenstat-hostd", "echo tokenstat-hostd 0.1.0");
+        let candidate = fake_binary(&download, "tokenstat", "exit 1");
+        fake_binary(&download, "tokenstat-hostd", "echo tokenstat-hostd 0.2.0");
+        assert!(replace_unix_release(&candidate, &dest, "0.2.0").is_err());
+        assert!(fs::read_to_string(&dest).unwrap().contains("0.1.0"));
+        assert!(fs::read_to_string(&old_host).unwrap().contains("0.1.0"));
+        fake_binary(&download, "tokenstat", "echo tokenstat 0.2.0");
+        replace_unix_release(&candidate, &dest, "0.2.0").unwrap();
+        assert!(fs::read_to_string(&dest).unwrap().contains("0.2.0"));
+        assert!(fs::read_to_string(&old_host).unwrap().contains("0.2.0"));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -21,6 +21,7 @@
 #   --no-schedule             same as TOKENSTAT_NO_SCHEDULE=1
 #   --bin-dir DIR             same as TOKENSTAT_BIN_DIR
 #   --version VER             same as TOKENSTAT_VERSION
+#   --host [FLAGS]            install the always-on host (remaining flags go to host install)
 
 # Piped into dash (/bin/sh on many Linux distros): re-exec under bash so the
 # rest of the script (pipefail, etc.) is valid. macOS /bin/sh is already bash.
@@ -43,9 +44,11 @@ BIN_DIR="${TOKENSTAT_BIN_DIR:-$HOME/.local/bin}"
 VERSION="${TOKENSTAT_VERSION:-}"
 NO_SCHEDULE="${TOKENSTAT_NO_SCHEDULE:-0}"
 YES="${TOKENSTAT_YES:-0}"
+HOST_INSTALL=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --host) HOST_INSTALL=1; shift; break ;;
     --no-schedule) NO_SCHEDULE=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --bin-dir)
@@ -270,14 +273,26 @@ main() {
   ok "checksum ok"
 
   tar -xzf "${TOKENSTAT_INSTALL_TMP}/${asset}" -C "${TOKENSTAT_INSTALL_TMP}"
-  local extracted
+  local extracted daemon cli_version daemon_version
   extracted="$(find "${TOKENSTAT_INSTALL_TMP}" -type f -name tokenstat | head -n1)"
   [ -n "$extracted" ] || die "archive did not contain tokenstat"
-  chmod +x "$extracted"
+  daemon="$(dirname "$extracted")/tokenstat-hostd"
+  [ -f "$daemon" ] || die "archive did not contain tokenstat-hostd beside tokenstat"
+  chmod +x "$extracted" "$daemon"
+  if [ "$(uname -s)" = "Darwin" ]; then
+    xattr -cr "$extracted" "$daemon" 2>/dev/null || true
+  fi
+  cli_version="$("$extracted" --version)" || die "downloaded tokenstat could not run"
+  daemon_version="$("$daemon" --version)" || die "downloaded tokenstat-hostd could not run"
+  [ "$cli_version" = "tokenstat $version" ] || die "tokenstat version does not match release $version"
+  [ "$daemon_version" = "tokenstat-hostd $version" ] || die "tokenstat-hostd version does not match tokenstat $version"
 
   mkdir -p "$BIN_DIR"
   dest="$BIN_DIR/tokenstat"
+  # Stage both before replacing either, so a failed copy keeps the installed pair.
   cp -f "$extracted" "$dest.new"
+  cp -f "$daemon" "$BIN_DIR/tokenstat-hostd.new"
+  mv -f "$BIN_DIR/tokenstat-hostd.new" "$BIN_DIR/tokenstat-hostd"
   mv -f "$dest.new" "$dest"
   if [ "$(uname -s)" = "Darwin" ]; then
     # Clear quarantine only. Do not ad-hoc re-sign (strips Developer ID).
@@ -294,6 +309,15 @@ main() {
 
   ensure_path "$BIN_DIR"
   export PATH="${BIN_DIR}:$PATH"
+
+  if [ "$HOST_INSTALL" = "1" ]; then
+    say "installing the always-on host"
+    "$dest" host --install "$@"
+    ok "tokenstat host installed"
+    cleanup_install_tmp
+    trap - EXIT
+    return
+  fi
 
   say "running setup (scan, schedule, optional account link)"
   # No bash arrays: macOS /bin/sh is bash 3.2, and `set -u` treats an empty
@@ -320,4 +344,4 @@ main() {
   trap - EXIT
 }
 
-main
+main "$@"
