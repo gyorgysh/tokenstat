@@ -327,6 +327,45 @@ struct FriendlyError {
                 raw: raw
             )
         }
+        // The server's own edge answering instead of the server: a reboot or
+        // a restart leaves the tunnel origin down, and the edge says 530 with
+        // its Argo code 1033 where the account would be. Gateway 502/503/504
+        // are the same family. None of it is anything on this device, and the
+        // raw text ("unknown status code", bare numbers) explains nothing, so
+        // it never leads.
+        if lower.contains("error code: 1033")
+            || lower.contains("1033") && lower.contains("tunnel")
+        {
+            return FriendlyError(
+                title: "The server is restarting",
+                message: "tokenstat.ai went away for a moment and is coming back. Check back "
+                    + "soon. Nothing on your side needs fixing.",
+                symbol: "arrow.triangle.2.circlepath",
+                actionTitle: "Try again",
+                raw: raw
+            )
+        }
+        // Bare codes only count inside a failure sentence ("status request
+        // failed (503)"), never on their own: a number alone could be a port
+        // or a count in some other sentence.
+        let readsAsFailure = lower.contains("status") || lower.contains("gateway")
+            || lower.contains("error") || lower.contains("failed")
+        if lower.contains("bad gateway") || lower.contains("service unavailable")
+            || lower.contains("gateway timeout") || lower.contains("gateway error")
+            || lower.contains("unknown status code")
+            || readsAsFailure
+            && (lower.contains("502") || lower.contains("503") || lower.contains("504")
+                || lower.contains("530"))
+        {
+            return FriendlyError(
+                title: "The server is down for a moment",
+                message: "Your account is temporarily unreachable while the server restarts or "
+                    + "is maintained. Check back soon.",
+                symbol: "arrow.triangle.2.circlepath",
+                actionTitle: "Try again",
+                raw: raw
+            )
+        }
         if lower.contains("device limit") || lower.contains("machine_limit") {
             return FriendlyError(
                 title: "Device limit reached",

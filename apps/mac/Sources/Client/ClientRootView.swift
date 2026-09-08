@@ -425,15 +425,19 @@ private struct ClientAuthRetryView: View {
     let isLoading: Bool
     let onRetry: () -> Void
 
+    /// The failure in the app's own words. Raw transport text ("unknown
+    /// status code", edge numbers) never leads on this screen.
+    private var friendly: FriendlyError? { message.map(FriendlyError.from) }
+
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: Theme.Space.m) {
                 LogoMark(size: 46)
-                Text("Could not reach your account")
+                Text(friendly?.title ?? "Could not reach your account")
                     .font(Theme.title.weight(.semibold))
                     .multilineTextAlignment(.center)
-                Text(message ?? "Check the connection and try again.")
+                Text(friendly?.message ?? message ?? "Check the connection and try again.")
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
