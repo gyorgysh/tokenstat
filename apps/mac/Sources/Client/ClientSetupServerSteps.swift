@@ -52,6 +52,9 @@ private struct StepScaffold<Content: View, Footer: View>: View {
     let title: String
     let subtitle: String
     var number: Int
+    /// The step's own picture. Nil on the two steps that draw their own: the
+    /// install shows a terminal, and the last one shows the machine.
+    var art: SetupArtKind?
     var error: String?
     var onDismissError: (() -> Void)?
     @ViewBuilder var content: () -> Content
@@ -61,6 +64,11 @@ private struct StepScaffold<Content: View, Footer: View>: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let art {
+                        ClientSetupArt(kind: art)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, Theme.Space.xs)
+                    }
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         Text("Step \(number) of 6")
                             .font(ClientType.caption.weight(.semibold))
@@ -126,6 +134,7 @@ private struct WhereStep: View {
             subtitle: "A machine you can already reach over SSH. tokenstat connects as you, "
                 + "with your own key, and nothing about it goes through our servers.",
             number: 1,
+            art: .find,
             error: model.error,
             onDismissError: { model.error = nil }
         ) {
@@ -215,6 +224,7 @@ private struct CredentialStep: View {
             subtitle: "A key from your vault, or a password used once for this connection "
                 + "and never written down.",
             number: 2,
+            art: .unlock,
             error: model.error,
             onDismissError: { model.error = nil }
         ) {
@@ -287,6 +297,7 @@ private struct FingerprintStep: View {
             subtitle: "Every server has a fingerprint. Trusting the wrong one is the one "
                 + "mistake here that cannot be taken back, so it gets its own screen.",
             number: 3,
+            art: .identify,
             error: model.error,
             onDismissError: { model.error = nil }
         ) {
@@ -367,6 +378,7 @@ private struct CheckStep: View {
             subtitle: "Read before anything is written. Nothing on the server changes on "
                 + "this screen.",
             number: 4,
+            art: .inspect,
             error: model.error,
             onDismissError: { model.error = nil }
         ) {
@@ -495,6 +507,7 @@ private struct InstallStep: View {
                     subtitle: "tokenstat mints a one-time pairing code, writes it to a private "
                         + "file on the server, and runs the installer. You watch the whole thing.",
                     number: 5,
+                    art: .install,
                     error: model.error,
                     onDismissError: { model.error = nil }
                 ) {

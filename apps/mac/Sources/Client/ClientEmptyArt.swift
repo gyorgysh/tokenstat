@@ -101,7 +101,12 @@ struct ClientEmptyArt: View {
 
 /// The stroke every scene draws with. One weight, round joins, so the
 /// pictures read as one hand.
-private enum Ink {
+/// The palette and the stroke every drawn scene in the client shares.
+///
+/// Internal rather than private to this file, because the setup wizard draws
+/// its own scenes and a second copy of these three values is a copy that
+/// disagrees the first time the accent moves.
+enum Ink {
     static let width: CGFloat = 1.7
     static var style: StrokeStyle {
         StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
@@ -113,7 +118,7 @@ private enum Ink {
 }
 
 /// A card outline, the shape most of these are built from.
-private struct Frame: View {
+struct ArtFrame: View {
     var radius: CGFloat = 8
     var color: Color = Ink.quiet
 
@@ -124,7 +129,7 @@ private struct Frame: View {
 }
 
 /// A line of text that is not there yet.
-private struct Ghost: View {
+struct Ghost: View {
     var width: CGFloat
     var color: Color = Ink.quiet
 
@@ -240,7 +245,7 @@ private struct SessionsScene: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Frame()
+            ArtFrame()
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 5) {
                     Circle().fill(Ink.quiet).frame(width: 5, height: 5)
@@ -298,7 +303,7 @@ private struct TasksScene: View {
         VStack(spacing: 6) {
             Ghost(width: 18, color: filled ? Ink.lead : Ink.quiet)
             ZStack {
-                Frame(radius: 6, color: filled ? Ink.lead.opacity(0.55) : Ink.quiet)
+                ArtFrame(radius: 6, color: filled ? Ink.lead.opacity(0.55) : Ink.quiet)
                 if filled {
                     VStack(alignment: .leading, spacing: 5) {
                         Ghost(width: 18, color: Ink.lead.opacity(0.7))
@@ -472,7 +477,7 @@ private struct ChangesScene: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Frame()
+            ArtFrame()
             VStack(alignment: .leading, spacing: 9) {
                 ForEach(0..<3, id: \.self) { _ in
                     HStack(spacing: 8) {
@@ -818,7 +823,7 @@ private struct VaultScene: View {
     }
 
     private func deviceFrame(width: CGFloat, height: CGFloat) -> some View {
-        Frame(radius: 6)
+        ArtFrame(radius: 6)
             .frame(width: width, height: height)
             .overlay {
                 VStack(spacing: 5) {
@@ -918,7 +923,7 @@ private struct WorkspaceAccessScene: View {
 
     var body: some View {
         ZStack {
-            Frame(radius: 10)
+            ArtFrame(radius: 10)
                 .frame(width: 74, height: 54)
                 .offset(x: -14, y: 6)
             // The folder's tab, so the shape reads as a folder and not a card.
