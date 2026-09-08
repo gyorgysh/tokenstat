@@ -23,6 +23,7 @@ struct ClientSetupWizard: View {
     @State private var model = ClientSetupModel()
     @State private var library = SSHLibraryModel()
     @State private var path: [SetupStep] = []
+    @State private var showingSample = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -56,6 +57,7 @@ struct ClientSetupWizard: View {
             Task { await model.prepare(library: library) }
         }
         .onDisappear { model.cancelWork() }
+        .sheet(isPresented: $showingSample) { ClientSampleWorkspace() }
         .environment(account)
     }
 
@@ -111,6 +113,9 @@ struct ClientSetupWizard: View {
                 ) {
                     dismiss()
                 }
+                Button("See a sample first", .preview) { showingSample = true }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("setup.sample")
                 Text(
                     "Nothing here is permanent. Every door can be left, and leaving lands on "
                     + "your numbers, which keep arriving whatever you choose."
