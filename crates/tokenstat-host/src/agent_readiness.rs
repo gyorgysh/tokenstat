@@ -126,9 +126,10 @@ fn now_ms() -> i64 {
 /// a machine with no browser.
 ///
 /// A sign-in that needs a browser callback landing on *this* server is not one
-/// of these. The person's browser is on the iPad, the callback would arrive on
-/// the server's own loopback, and offering the flow anyway would end in a page
-/// that never loads. Only flows that print something to copy are here.
+/// of these. The person's browser is on the device in their hand, the callback
+/// would arrive on the server's own loopback, and offering the flow anyway would
+/// end in a page that never loads. Only flows that print something to copy are
+/// here.
 pub(crate) struct SignIn {
     id: &'static str,
     /// Arguments appended to the agent's own command. The command itself comes
@@ -149,7 +150,7 @@ const SIGN_INS: &[SignIn] = &[
         kind: "browserCode",
     },
     // Codex's own answer for a machine with no browser. It prints a URL and a
-    // one-time code; the browser can be anywhere, including the iPad running
+    // one-time code; the browser can be anywhere, including the device running
     // this app.
     SignIn {
         id: "codex",
@@ -164,22 +165,30 @@ pub(crate) fn sign_in(id: &str) -> Option<&'static SignIn> {
 
 /// The readiness of one agent id, given whether the launcher found its command.
 pub(crate) fn readiness(id: &str, installed: bool) -> (Readiness, Option<i64>) {
+    match home_dir() {
+        Some(home) => readiness_in(id, installed, &home, now_ms()),
+        // No home to look in is not evidence either way.
+        None if installed => (Readiness::Unknown, None),
+        None => (Readiness::NotInstalled, None),
+    }
+}
+
+/// The same decision against a given home and a given clock, so it can be
+/// tested without touching the machine running the tests.
+fn readiness_in(id: &str, installed: bool, home: &Path, now: i64) -> (Readiness, Option<i64>) {
     if !installed {
         return (Readiness::NotInstalled, None);
     }
     let Some(store) = STORES.iter().find(|store| store.id == id) else {
         return (Readiness::Unknown, None);
     };
-    let Some(home) = home_dir() else {
-        return (Readiness::Unknown, None);
-    };
-    let Some(path) = existing_store(store, &home) else {
+    let Some(path) = existing_store(store, home) else {
         if store.keychain_on_macos && cfg!(target_os = "macos") {
             return (Readiness::Unknown, None);
         }
         // Codex can be configured to keep its login in the system keyring
         // instead of a file. Then a missing file says nothing at all.
-        if id == "codex" && codex_uses_keyring(&home) {
+        if id == "codex" && codex_uses_keyring(home) {
             return (Readiness::Unknown, None);
         }
         return (Readiness::NeedsSignIn, None);
@@ -194,7 +203,7 @@ pub(crate) fn readiness(id: &str, installed: bool) -> (Readiness, Option<i64>) {
         return (Readiness::Unknown, None);
     }
     match store.expiry.and_then(|read| read(&raw)) {
-        Some(expires) if expires <= now_ms() => (Readiness::Expired, Some(expires)),
+        Some(expires) if expires <= now => (Readiness::Expired, Some(expires)),
         Some(expires) => (Readiness::SignedIn, Some(expires)),
         None => (Readiness::SignedIn, None),
     }
@@ -295,7 +304,7 @@ mod tests {
         assert!(sign_in("claude_code").is_some());
         assert!(sign_in("codex").is_some());
         // No verified browserless flow. Offering one would end in a callback
-        // that lands on the server rather than on the person's iPad.
+        // that lands on the server rather than on the person's own device.
         assert!(sign_in("cursor").is_none());
         assert_eq!(
             describe("cursor", true)["signIn"]["supported"],
@@ -349,5 +358,85 @@ mod tests {
                 .contains(&state.id())
             );
         }
+    }
+
+    fn home_with(file: &str, body: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_machine_nobody_has_signed_in_on_says_exactly_that() {
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(
+            readiness_in("claude_code", true, empty.path(), 0).0,
+            // A Mac keeps this one in the keychain, so a missing file there
+            // proves nothing. Everywhere else it is the plain answer.
+            if cfg!(target_os = "macos") {
+                Readiness::Unknown
+            } else {
+                Readiness::NeedsSignIn
+            }
+        );
+        assert_eq!(
+            readiness_in("codex", true, empty.path(), 0).0,
+            Readiness::NeedsSignIn
+        );
+    }
+
+    #[test]
+    fn a_login_is_signed_in_until_its_own_expiry_passes() {
+        let home = home_with(
+            ".claude/.credentials.json",
+            r#"{"claudeAiOauth":{"accessToken":"x","expiresAt":1000}}"#,
+        );
+        assert_eq!(
+            readiness_in("claude_code", true, home.path(), 999),
+            (Readiness::SignedIn, Some(1000))
+        );
+        assert_eq!(
+            readiness_in("claude_code", true, home.path(), 1000),
+            (Readiness::Expired, Some(1000))
+        );
+        assert_eq!(
+            readiness_in("claude_code", true, home.path(), 5000),
+            (Readiness::Expired, Some(1000))
+        );
+    }
+
+    /// A store with no expiry in it is a login, and saying when it runs out is
+    /// not something to invent.
+    #[test]
+    fn a_store_that_states_no_expiry_reports_none() {
+        let home = home_with(".codex/auth.json", r#"{"tokens":{"id_token":"x"}}"#);
+        assert_eq!(
+            readiness_in("codex", true, home.path(), 0),
+            (Readiness::SignedIn, None)
+        );
+    }
+
+    /// Half a file is not half a login. It is a state to be told about.
+    #[test]
+    fn an_empty_store_is_not_read_as_signed_out() {
+        let home = home_with(".codex/auth.json", "   \n");
+        assert_eq!(
+            readiness_in("codex", true, home.path(), 0).0,
+            Readiness::Unknown
+        );
+    }
+
+    #[test]
+    fn an_uninstalled_agent_is_never_looked_up_on_disk() {
+        let home = home_with(
+            ".claude/.credentials.json",
+            r#"{"claudeAiOauth":{"expiresAt":1}}"#,
+        );
+        assert_eq!(
+            readiness_in("claude_code", false, home.path(), 0),
+            (Readiness::NotInstalled, None)
+        );
     }
 }

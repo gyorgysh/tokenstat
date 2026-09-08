@@ -1155,9 +1155,48 @@ fn nvm_bin_paths(home: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    /// A client picks a row. It never supplies a command, an argument or a
+    /// path, so `launcher.signIn` cannot become a way to run something.
+    #[test]
+    fn signing_in_refuses_anything_that_is_not_a_known_agent() {
+        for id in [
+            "",
+            "shell",
+            "definitely-not-an-agent",
+            "claude_code; rm -rf /",
+        ] {
+            let refused = sign_in(id, 40, 100, None).expect_err("must refuse");
+            assert!(
+                refused.contains("no such agent") || refused.contains("no sign-in"),
+                "{id}: {refused}"
+            );
+        }
+    }
+
+    /// The shell is in the catalog and is not an agent. Offering it a sign-in
+    /// would be offering to log in to a terminal.
+    #[test]
+    fn the_shell_has_no_sign_in() {
+        assert!(crate::agent_readiness::sign_in("shell").is_none());
+    }
+
+    /// Every agent with a sign-in flow is a profile that exists, or the button
+    /// would be offered for something the catalog cannot start.
+    #[test]
+    fn every_sign_in_flow_names_a_profile_in_the_catalog() {
+        for id in ["claude_code", "codex"] {
+            assert!(
+                PROFILES.iter().any(|profile| profile.id == id),
+                "{id} has a sign-in flow but no profile"
+            );
+            assert!(crate::agent_readiness::sign_in(id).is_some());
+        }
+    }
+
     use super::{
         PROFILES, Profile, catalog, command_names, hide_in, install, load_prefs_in,
-        model_arguments, model_environment, resolve_profile, show_in, split_path_var, strip_ansi,
+        model_arguments, model_environment, resolve_profile, show_in, sign_in, split_path_var,
+        strip_ansi,
     };
     use std::path::Path;
     #[cfg(unix)]
