@@ -64,6 +64,9 @@ struct ClientEmptyState: View {
     /// A drawn scene instead of the mark, for the screens where "nothing here"
     /// is worth a picture of the thing that is missing. See `ClientEmptyArt`.
     var art: EmptyArtKind?
+    var secondaryActionTitle: String?
+    var secondaryActionIcon: ActionIcon = .preview
+    var secondaryAction: (() -> Void)?
 
     var body: some View {
         VStack(spacing: Theme.Space.s) {
@@ -97,6 +100,12 @@ struct ClientEmptyState: View {
                     .controlSize(.large)
                     .tint(Theme.accent)
                     .padding(.top, Theme.Space.s)
+            }
+            if let secondaryActionTitle, let secondaryAction {
+                Button(secondaryActionTitle, secondaryActionIcon, action: secondaryAction)
+                    .labelStyle(ActionLabelStyle())
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
             }
         }
         .frame(maxWidth: .infinity)

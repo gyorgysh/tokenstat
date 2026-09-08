@@ -70,6 +70,7 @@ private enum ClientAccountPane: String, CaseIterable, Hashable {
 private struct ClientAccountContent: View {
     @Environment(AccountModel.self) private var model
 
+    @State private var showSample = false
     @State private var showLicenses = false
     @State private var showPaywall = false
     @State private var showDeletionWeb = false
@@ -116,6 +117,7 @@ private struct ClientAccountContent: View {
             .id(pane)
         }
         .background(Theme.background)
+        .sheet(isPresented: $showSample) { ClientSampleWorkspace() }
         .sheet(isPresented: $showLicenses) {
             ClientLicensesSheet()
         }
@@ -167,7 +169,34 @@ private struct ClientAccountContent: View {
                 .frame(maxWidth: .infinity)
                 .padding(Theme.Space.xl)
         }
+        sampleHelp
         dangerZone
+    }
+
+    private var sampleHelp: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Help").font(ClientType.sectionTitle)
+            Button { showSample = true } label: {
+                HStack(spacing: Theme.Space.m) {
+                    Image(systemName: ActionIcon.preview.symbol).foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text("See a sample").font(ClientType.label.weight(.semibold))
+                        Text("Explore a workspace with invented data, right on this device.")
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+                .frame(minHeight: 44)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("account.sample")
+        }
+        .padding(Theme.Space.m)
+        .cardSurface()
     }
 
     /// Ending the account, kept apart from everything above it.

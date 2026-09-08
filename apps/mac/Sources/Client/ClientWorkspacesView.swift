@@ -25,6 +25,7 @@ struct ClientWorkspacesView: View {
     @State private var pendingClose: PtySessionInfo?
     @State private var notificationOpen = NotificationOpen.shared
     @State private var showSetup = false
+    @State private var showSample = false
     // Per-host, not global: each host card owns its row. A global key would
     // make every toggle move together, which is the extra card in the
     // screenshot. The rule itself lives on the model, because the iPad's
@@ -104,7 +105,9 @@ struct ClientWorkspacesView: View {
                             actionIcon: .plans,
                             action: {
                                 store.showPaywall = true
-                            }
+                            },
+                            secondaryActionTitle: "See a sample",
+                            secondaryAction: { showSample = true }
                         )
                     } else if model.hosts.isEmpty {
                         // Not "no hosts". The hole is a machine, and the thing
@@ -118,7 +121,9 @@ struct ClientWorkspacesView: View {
                             actionTitle: "Set up a machine",
                             actionIcon: .connect,
                             action: { showSetup = true },
-                            art: .noMachine
+                            art: .noMachine,
+                            secondaryActionTitle: "See a sample",
+                            secondaryAction: { showSample = true }
                         )
                     } else {
                         ClientSectionTitle(title: "Hosts on your account", mark: "mark_host")
@@ -208,6 +213,7 @@ struct ClientWorkspacesView: View {
                 .padding(.bottom, 96)
             }
             .background(Theme.background)
+            .sheet(isPresented: $showSample) { ClientSampleWorkspace() }
             .fullScreenCover(isPresented: $showSetup) {
                 ClientSetupWizard()
             }
