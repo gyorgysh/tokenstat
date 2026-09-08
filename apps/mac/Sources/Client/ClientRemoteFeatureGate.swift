@@ -13,23 +13,34 @@ enum RemoteHostFeature {
     case chat
     case pulls
     case modelRefresh
+    case folderPicker
+    case provisioning
+    case inviteCode
 
     var title: String {
         switch self {
         case .chat: "Chat"
         case .pulls: "Pull requests"
         case .modelRefresh: "Model list refresh"
+        case .folderPicker: "Choosing a folder"
+        case .provisioning: "Setup"
+        case .inviteCode: "Adding this device"
         }
     }
 
     /// Version 3 introduced the pull-request host methods. Version 4 added
     /// `chat.eventPage`, which the mobile transcript needs for older pages.
-    /// Version 6 added the `refresh` parameter on `chat.backends`.
+    /// Version 6 added the `refresh` parameter on `chat.backends`. Version 7
+    /// added `fs.browse` and `fs.mkdir`, `host.provisionStatus` and
+    /// `host.logs`, and the invite half of workspace access.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
         case .pulls: 3
         case .modelRefresh: 6
+        case .folderPicker: 7
+        case .provisioning: 7
+        case .inviteCode: 7
         }
     }
 
@@ -38,6 +49,9 @@ enum RemoteHostFeature {
         case .chat: "bubble.left.and.bubble.right.fill"
         case .pulls: "arrow.triangle.merge"
         case .modelRefresh: "arrow.clockwise"
+        case .folderPicker: "folder.badge.plus"
+        case .provisioning: "sparkles"
+        case .inviteCode: "key.horizontal.fill"
         }
     }
 

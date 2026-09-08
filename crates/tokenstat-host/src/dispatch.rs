@@ -2789,6 +2789,13 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     if let Some(answer) = crate::workspace_policy::call(method, params) {
         return Some(answer);
     }
+    if let Some(answer) = crate::provision::call(method, params) {
+        return Some(answer);
+    }
+    #[cfg(feature = "local-host")]
+    if let Some(answer) = crate::fs_browse::call(method, params) {
+        return Some(answer);
+    }
     if let Some(answer) = crate::screen_policy::call(method, params) {
         return Some(answer);
     }
@@ -4075,6 +4082,7 @@ mod tests {
             // never be behind a session.
             "host.socketPath",
             "host.policy",
+            "host.provisionStatus",
             "host.stats",
             // The Machines screen has to answer on a machine whose archive
             // will not open, because that is when somebody goes looking at it.

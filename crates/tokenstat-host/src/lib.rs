@@ -66,6 +66,9 @@ pub mod cloud_import;
 pub mod dispatch;
 pub mod dto;
 pub mod error;
+/// Descriptor headroom. See the module for why 256 is not enough.
+#[cfg(feature = "local-host")]
+pub(crate) mod fs_browse;
 #[cfg(feature = "local-host")]
 pub(crate) mod harness_config;
 pub(crate) mod host_policy;
@@ -76,11 +79,11 @@ pub(crate) mod launcher;
 #[cfg(feature = "local-host")]
 pub(crate) mod local_models;
 mod machine;
-/// Descriptor headroom. See the module for why 256 is not enough.
 pub mod open_files;
 pub mod ownership;
 pub(crate) mod presence;
 pub mod pricing;
+pub(crate) mod provision;
 mod proxy_http;
 #[cfg(feature = "local-host")]
 pub(crate) mod pulls;
@@ -149,7 +152,12 @@ pub use tokenstat_pty::warm_shell_pool;
 /// public methods. 4 adds `ssh.session.suggest` and `chat.eventPage`. 5 covers
 /// the automation backend and Codex model-list work in the 0.8.3 cycle. 6 adds
 /// the `refresh` parameter on `chat.backends` and `automation.backends`, and
-/// `app.watching` / `app.stoppedWatching`.
+/// `app.watching` / `app.stoppedWatching`. 7 is the machine somebody sets up
+/// from a phone: `fs.browse` and `fs.mkdir` so a folder can be picked on a
+/// machine with no file panel, `host.provisionStatus` so the wizard and the
+/// empty states read the same answer, `host.logs` so a headless machine can
+/// say why it is unhappy, and `workspace.access.invite` / `.redeem` /
+/// `.log` for letting a second device in from the console.
 ///
 /// That last one is a parameter, not a method, which is the weaker case: an
 /// older host deserializes the call, ignores the field it does not
@@ -162,4 +170,4 @@ pub use tokenstat_pty::warm_shell_pool;
 /// new method answers `unknown method`, and the feature is simply absent with
 /// nothing on screen to say why. `Bridge.connect` replaces a helper whose
 /// number does not match, and that check is the only thing that notices.
-pub const PROTOCOL_VERSION: &str = "6";
+pub const PROTOCOL_VERSION: &str = "7";

@@ -1,0 +1,248 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
+//! Is this machine finished being set up, and why is it unhappy.
+//!
+//! One call rather than eight, because the setup wizard, the machine's page in
+//! the app and `tokenstat host status` all ask the same question and must not
+//! answer it differently. And one call for the log, so a person can see why a
+//! machine is refusing to work without opening an SSH session to read it.
+
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
+    Some(match method {
+        "host.provisionStatus" => status(),
+        "host.logs" => logs(params),
+        _ => return None,
+    })
+}
+
+fn status() -> Result<Value, String> {
+    let identity =
+        tokenstat_identity::MachineIdentity::load_or_create().map_err(|error| error.to_string())?;
+    let policy = crate::host_policy::call("host.policy", "{}")
+        .transpose()?
+        .unwrap_or(Value::Null);
+    let remote = crate::remote::call("remote.status", "{}")
+        .transpose()?
+        .unwrap_or(Value::Null);
+    let account = match tokenstat_sync::sync_status(None) {
+        Ok(status) => json!({
+            "signedIn": true,
+            "handle": status.handle,
+            "tier": status.tier,
+        }),
+        // Signed out is an answer. Anything else is the account server having
+        // a minute, and reporting that as signed out would send somebody to
+        // sign in again for no reason.
+        Err(error) if error.is_unauthenticated() => json!({"signedIn": false}),
+        Err(error) => json!({"signedIn": null, "error": error.to_string()}),
+    };
+    let (allowed, pending) = crate::workspace_policy::counts()?;
+    Ok(json!({
+        // No desktop app exists for this platform, so the console is the only
+        // thing at this machine. It is what the wizard branches on, and it is
+        // not a guess about whether a screen is plugged in.
+        "headless": cfg!(not(any(target_os = "macos", windows))),
+        "serviceScope": service_scope(),
+        "runsAs": runs_as(),
+        "alwaysOn": policy.get("alwaysOn").cloned().unwrap_or(Value::Null),
+        "account": account,
+        "machineName": tokenstat_identity::machine_label(),
+        "machineKey": identity.public_key_hex(),
+        "keyFingerprint": identity.fingerprint(),
+        "protocolVersion": crate::PROTOCOL_VERSION,
+        "hostVersion": env!("CARGO_PKG_VERSION"),
+        "allowedDevices": allowed,
+        "pendingRequests": pending,
+        "agents": agents(),
+        "folders": folders(),
+        "tunnel": {
+            "enabled": remote.get("tunnel").cloned().unwrap_or(Value::Null),
+            "online": remote.get("tunnelOnline").cloned().unwrap_or(Value::Null),
+            "error": remote.get("tunnelError").cloned().unwrap_or(Value::Null),
+        },
+    }))
+}
+
+#[cfg(feature = "local-host")]
+fn folders() -> usize {
+    crate::workspaces::read().workspaces.len()
+}
+
+#[cfg(not(feature = "local-host"))]
+fn folders() -> usize {
+    0
+}
+
+/// What this machine can run, and whether it is signed in to it.
+///
+/// `signedIn` is null on purpose. A fresh server has no agent login, and the
+/// first run failing with somebody else's auth error is the step everybody
+/// forgets, so the field exists. No harness we ship exposes a way to ask, and
+/// reporting `false` for something that cannot be checked would be worse than
+/// saying nothing. See the rule in CLAUDE.md.
+#[cfg(feature = "local-host")]
+fn agents() -> Value {
+    let catalog = crate::launcher::catalog();
+    Value::Array(
+        catalog
+            .as_array()
+            .map(|profiles| {
+                profiles
+                    .iter()
+                    .filter(|profile| profile["id"].as_str() != Some("shell"))
+                    .map(|profile| {
+                        json!({
+                            "id": profile["id"],
+                            "name": profile["name"],
+                            "installed": profile["installed"],
+                            "signedIn": Value::Null,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+#[cfg(not(feature = "local-host"))]
+fn agents() -> Value {
+    Value::Array(Vec::new())
+}
+
+/// Which service file is actually on disk, or none.
+fn service_scope() -> Value {
+    #[cfg(target_os = "linux")]
+    {
+        if std::path::Path::new("/etc/systemd/system/tokenstat-host.service").is_file() {
+            return json!("system");
+        }
+        if home()
+            .map(|home| home.join(".config/systemd/user/tokenstat-host.service"))
+            .is_some_and(|path| path.is_file())
+        {
+            return json!("user");
+        }
+        json!(null)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        match home().map(|home| home.join("Library/LaunchAgents/ai.tokenstat.hostd.plist")) {
+            Some(path) if path.is_file() => json!("user"),
+            _ => json!(null),
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        json!(null)
+    }
+}
+
+/// The account this host, and therefore every agent it launches, runs as.
+///
+/// Said out loud because a root install gives every agent root, and that is a
+/// fact to put next to the operating system version rather than to discover.
+fn runs_as() -> Value {
+    #[cfg(unix)]
+    {
+        let uid = unsafe { libc::getuid() };
+        let name = std::env::var("USER")
+            .or_else(|_| std::env::var("LOGNAME"))
+            .ok()
+            .filter(|name| !name.is_empty());
+        json!({
+            "uid": uid,
+            "name": name,
+            "root": uid == 0,
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        json!(null)
+    }
+}
+
+fn home() -> Option<std::path::PathBuf> {
+    directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
+}
+
+#[derive(Deserialize)]
+struct LogParams {
+    #[serde(default)]
+    lines: Option<u32>,
+}
+
+/// The tail of this host's own log, so somebody can see why it is unhappy
+/// without opening a shell on the machine.
+fn logs(params: &str) -> Result<Value, String> {
+    let p: LogParams = serde_json::from_str(params.trim()).unwrap_or(LogParams { lines: None });
+    let lines = p.lines.unwrap_or(200).clamp(1, 5000);
+    let text = read_logs(lines)?;
+    Ok(json!({"lines": lines, "text": text}))
+}
+
+#[cfg(target_os = "linux")]
+fn read_logs(lines: u32) -> Result<String, String> {
+    let scope = service_scope();
+    let mut command = std::process::Command::new("journalctl");
+    if scope.as_str() != Some("system") {
+        command.arg("--user");
+    }
+    let output = command
+        .args([
+            "--unit",
+            "tokenstat-host.service",
+            "--no-pager",
+            "--output",
+            "cat",
+            "--lines",
+        ])
+        .arg(lines.to_string())
+        .output()
+        .map_err(|error| format!("Could not read the journal: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Could not read the journal: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn read_logs(lines: u32) -> Result<String, String> {
+    let dir = home()
+        .map(|home| home.join("Library/Logs/tokenstat"))
+        .ok_or("No home directory")?;
+    let mut collected = String::new();
+    for name in ["hostd.out.log", "hostd.err.log"] {
+        let path = dir.join(name);
+        if !path.is_file() {
+            continue;
+        }
+        let body = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let tail: Vec<&str> = body
+            .lines()
+            .rev()
+            .take(lines as usize)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        if tail.is_empty() {
+            continue;
+        }
+        collected.push_str(&format!("--- {name}\n{}\n", tail.join("\n")));
+    }
+    if collected.is_empty() {
+        return Err("This host has not written a log yet.".into());
+    }
+    Ok(collected)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_logs(_: u32) -> Result<String, String> {
+    Err("This platform keeps the host's log somewhere this cannot read.".into())
+}

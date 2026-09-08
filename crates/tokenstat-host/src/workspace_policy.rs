@@ -257,6 +257,16 @@ pub(crate) fn set_allowed_by(peer_id: &str, allow: bool, by: Authority) -> Resul
     Ok(())
 }
 
+/// Read the counts without the local-only guard, for `host.provisionStatus`.
+///
+/// The numbers, never the keys: a device that is allowed here may see that two
+/// devices are, and answering a pending request stays a thing done at the
+/// machine.
+pub(crate) fn counts() -> Result<(usize, usize), String> {
+    let store = load()?;
+    Ok((store.allowed.len(), store.pending.len()))
+}
+
 /// Whether a method reaches the work on this machine.
 ///
 /// Pure, and tested, because the whole guarantee is this list. Reporting is
@@ -270,6 +280,12 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
     }
     match method {
         m if m.starts_with("workspace.") => true,
+        // Browsing a machine's directories and making a folder on it are the
+        // work, exactly like opening a file in one.
+        m if m.starts_with("fs.") => true,
+        // What is set up here, and why it is unhappy. Both name this machine's
+        // own folders and log lines, so both need the grant.
+        "host.provisionStatus" | "host.logs" => true,
         m if m.starts_with("pulls.") => true,
         m if m.starts_with("pty.") => true,
         m if m.starts_with("workflow.") => true,
@@ -789,6 +805,10 @@ mod tests {
             "launcher.install",
             "harness.config.set",
             "proxy.listen",
+            "fs.browse",
+            "fs.mkdir",
+            "host.provisionStatus",
+            "host.logs",
         ] {
             assert!(needs_access(method, None), "{method} must be gated");
         }
@@ -805,6 +825,7 @@ mod tests {
             "usage.limits",
             "blocks.active",
             "host.stats",
+            "host.policy",
             "info",
             "highlight.syntax",
             "screen.capability.issue",
