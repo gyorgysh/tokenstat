@@ -155,6 +155,7 @@ struct ClientSetupByHand: View {
         do {
             try await model.chooseAvailableMachineName()
             let key = try await Bridge.machineIdentity().key
+            try model.prepareManualInstall()
             let minted = try await Bridge.mintPairingCode()
             code = minted
             line = try await Bridge.installLine(

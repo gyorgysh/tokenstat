@@ -278,7 +278,9 @@ private struct CredentialStep: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
         } footer: {
-            Button("Continue", .next) { path.append(.fingerprint) }
+            Button("Continue", .next) {
+                path.append(model.resumingInstallation ? .finish : .fingerprint)
+            }
                 .clientProminentStyle()
                 .disabled(!ready)
         }
@@ -649,6 +651,7 @@ private struct FinishStep: View {
                 .disabled(model.working || !model.canCheckMachine)
             } else {
                 Button("Open Workspaces", .next) {
+                    guard model.completeSetup() else { return }
                     navigation.destination = .workspaces
                     onFinish()
                 }

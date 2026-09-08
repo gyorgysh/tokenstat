@@ -43,6 +43,13 @@ struct ClientSetupWizard: View {
             await model.prepare(library: library)
             await account.load()
         }
+        .onChange(of: account.account) { _, now in
+            // A different account is a different setup. Land back on the doors
+            // and load that account's own draft, if it has one.
+            guard model.accountChanged(now) else { return }
+            path = []
+            Task { await model.prepare(library: library) }
+        }
         .onDisappear { model.cancelWork() }
         .environment(account)
     }
@@ -53,6 +60,7 @@ struct ClientSetupWizard: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 header
+                if let draft = model.savedDraft { resumeCard(draft) }
                 door(
                     title: "On a server I have",
                     body: "Connect over SSH and set it up. tokenstat installs itself, "
@@ -101,6 +109,56 @@ struct ClientSetupWizard: View {
             .padding(Theme.Space.m)
         }
         .background(Theme.background)
+    }
+
+    /// Setup left half-finished is the normal case on a phone, not an error.
+    ///
+    /// Continuing never repeats a remote step: it reopens where the draft
+    /// stopped and asks the server what is actually true. Starting over is
+    /// offered beside it, and says plainly that it changes nothing on the
+    /// server, because that is the fear that makes people leave this screen.
+    private func resumeCard(_ draft: ClientSetupDraft) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: "arrow.trianglehead.clockwise")
+                    .font(Theme.fixed(15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
+                Text("Setup in progress")
+                    .font(ClientType.caption.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                    .textCase(.uppercase)
+                    .kerning(0.6)
+            }
+            Text(draft.machineName)
+                .font(Theme.headline)
+            Text(draft.milestone.summary)
+                .font(ClientType.label)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: Theme.Space.s) {
+                Button("Continue setup", .next) {
+                    if let step = model.resume(library: library) { path = [step] }
+                }
+                .clientProminentStyle()
+                Button("Start over", .restore) {
+                    if model.startNewSetup() { path = [.where] }
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.top, Theme.Space.xs)
+            Text("Starting over forgets this progress on your phone. Nothing on the server is removed.")
+                .font(ClientType.caption)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: .rect(cornerRadius: Theme.cardRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.accent.opacity(0.4), lineWidth: 1)
+        }
     }
 
     private var header: some View {

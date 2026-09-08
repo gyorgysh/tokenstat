@@ -64,8 +64,17 @@ final class ClientSetupModel {
         !manualInstall || expectedPeer != nil || ClientSetupIdentity.normalize(manualMachineKey) != nil
     }
 
-    var working = false
-    var error: String?
+    private let coordinator = ClientSetupCoordinator()
+    var working: Bool { coordinator.working }
+    var error: String? {
+        get { coordinator.error }
+        set { coordinator.error = newValue }
+    }
+    var savedDraft: ClientSetupDraft? { coordinator.savedDraft }
+    private(set) var prepared = false
+    private(set) var resumingInstallation = false
+    @ObservationIgnored private var scope: ClientSetupScope?
+    @ObservationIgnored private var draftID = UUID()
 
     /// This device's public key, which is what `--allow` grants.
     private(set) var myKey: String?
@@ -73,9 +82,105 @@ final class ClientSetupModel {
     // MARK: - Loading
 
     func prepare(library: SSHLibraryModel) async {
-        myKey = try? await Bridge.machineIdentity().key
-        if machineName.isEmpty { machineName = "server" }
-        if !library.loaded { await library.load() }
+        prepared = false
+        do {
+            let key = try await Bridge.machineIdentity().key
+            let account = try await Bridge.account()
+            if !library.loaded { await library.load() }
+            try Task.checkCancellation()
+            guard account.signedIn, let handle = account.handle, !handle.isEmpty else {
+                throw BridgeError.core(code: "signed_out", message: "Sign in before setting up a machine.")
+            }
+            myKey = key
+            let scope = ClientSetupScope(origin: account.host, account: handle, deviceKey: key)
+            self.scope = scope
+            coordinator.load(scope: scope)
+            if machineName.isEmpty { machineName = "server" }
+            prepared = true
+        } catch {
+            guard !Task.isCancelled else { return }
+            self.error = Self.readable(error)
+        }
+    }
+
+    /// True when this is a different account and everything held for the old
+    /// one has been dropped. One account can never see another's draft, and a
+    /// password typed for one server never survives the switch.
+    @discardableResult
+    func accountChanged(_ account: Account?) -> Bool {
+        guard prepared, let scope else { return false }
+        if let account, account.signedIn,
+           account.host == scope.origin, account.handle == scope.account { return false }
+        coordinator.clearAccount()
+        self.scope = nil
+        prepared = false
+        password = ""
+        credential = .none
+        expectedPeer = nil
+        finished = nil
+        resetServer()
+        return true
+    }
+
+    /// Start a different draft without changing anything on a remote server.
+    func startNewSetup() -> Bool {
+        guard prepared else { return false }
+        do { try coordinator.discard() }
+        catch { self.error = Self.readable(error); return false }
+        resetServer()
+        draftID = UUID()
+        pickedHostID = nil
+        password = ""
+        credential = .none
+        return true
+    }
+
+    func resume(library: SSHLibraryModel) -> SetupStep? {
+        guard let draft = savedDraft else { return nil }
+        if !draft.manualInstall {
+            guard let saved = library.hosts.first(where: { $0.id == draft.hostID }),
+                  let pin = draft.fingerprint, saved.hostKeys.contains(pin) else {
+                error = "The saved server or its trusted fingerprint changed. Start a new setup and verify it again."
+                return nil
+            }
+            host = saved
+            pickedHostID = saved.id
+            fingerprint = pin
+            trusted = true
+            if let id = saved.credentialID, library.keys.contains(where: { $0.id == id }) {
+                credential = .key(id)
+            } else { credential = .none }
+        }
+        draftID = draft.id
+        machineName = draft.machineName
+        agents = draft.agents
+        manualInstall = draft.manualInstall
+        expectedPeer = draft.machineKey
+        manualMachineKey = draft.machineKey ?? ""
+        resumingInstallation = draft.milestone.needsReconciliation
+        if resumingInstallation, expectedPeer != nil || manualInstall { return .finish }
+        return .credential
+    }
+
+    func checkpoint(_ milestone: ClientSetupMilestone) throws {
+        guard let scope else { throw ClientSetupDraftError.invalid }
+        try coordinator.save(ClientSetupDraft(
+            id: draftID, scope: scope, hostID: pickedHostID, fingerprint: fingerprint,
+            machineName: machineName, agents: agents, manualInstall: manualInstall,
+            machineKey: expectedPeer, milestone: milestone
+        ))
+        resumingInstallation = milestone.needsReconciliation
+    }
+
+    func prepareManualInstall() throws {
+        manualInstall = true
+        expectedPeer = nil
+        try checkpoint(.installRequested)
+    }
+
+    func completeSetup() -> Bool {
+        do { try coordinator.discard(); return true }
+        catch { self.error = Self.readable(error); return false }
     }
 
     /// The host record as it stands, whether picked or typed.
@@ -137,6 +242,7 @@ final class ClientSetupModel {
         finished = nil
         expectedPeer = nil
         manualInstall = false
+        resumingInstallation = false
         manualMachineKey = ""
         line = nil
         terminal?.stop()
@@ -147,6 +253,10 @@ final class ClientSetupModel {
     /// Offer a distinct name when this account already has a server with it.
     func chooseAvailableMachineName() async throws {
         let account = try await Bridge.account()
+        try Task.checkCancellation()
+        guard account.signedIn, account.host == scope?.origin, account.handle == scope?.account else {
+            throw BridgeError.core(code: "account_changed", message: "Your account changed. Close setup and open it again.")
+        }
         let labels = Set(account.machines.compactMap(\.label))
         let base = machineName.trimmingCharacters(in: .whitespacesAndNewlines)
         let stem = base.isEmpty ? "server" : base
@@ -197,6 +307,7 @@ final class ClientSetupModel {
             self.pickedHostID = saved.id
             self.host = saved
             self.trusted = true
+            try self.checkpoint(.trusted)
         }
     }
 
@@ -207,6 +318,7 @@ final class ClientSetupModel {
             let check = try await Bridge.probeServerForSetup(host, auth: auth)
             try Task.checkCancellation()
             self.check = check
+            try self.checkpoint(.checked)
             if self.machineName == "server", let distro = check.distro {
                 // A name somebody would recognise, offered rather than imposed.
                 self.machineName = distro.split(separator: " ").first.map(String.init)?
@@ -230,6 +342,9 @@ final class ClientSetupModel {
             }
             try await self.chooseAvailableMachineName()
             try Task.checkCancellation()
+            // Save before starting any remote mutation. Resume checks what
+            // happened; it never assumes an interrupted install should rerun.
+            try self.checkpoint(.installRequested)
             let code = try await Bridge.mintPairingCode().code
             try Task.checkCancellation()
             try await Bridge.stagePairingCode(host, code: code, auth: auth)
@@ -242,11 +357,13 @@ final class ClientSetupModel {
                     printInvite: self.printInvite,
                     codeFile: true
                 )
+                try Task.checkCancellation()
                 self.line = line
                 let handle = try await Bridge.openSSHWithResolvedAuth(
                     host, auth: auth, rows: 24, cols: 100
                 )
                 let terminal = SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id)
+                guard !Task.isCancelled else { terminal.stop(); throw CancellationError() }
                 self.terminal = terminal
                 // A moment for the shell to draw its prompt. Typing into a shell
                 // that has not started echoing yet loses the first characters.
@@ -284,12 +401,16 @@ final class ClientSetupModel {
                 }
             }
             guard let peer = self.expectedPeer else { return }
+            try self.checkpoint(.verifying)
             let deadline = Date().addingTimeInterval(180)
             while Date() < deadline {
                 try Task.checkCancellation()
                 // Use a fresh response, not AccountModel's retained offline snapshot.
                 let fresh = try await Bridge.account()
                 try Task.checkCancellation()
+                guard fresh.signedIn, fresh.host == self.scope?.origin, fresh.handle == self.scope?.account else {
+                    throw BridgeError.core(code: "account_changed", message: "Your account changed. Close setup and open it again.")
+                }
                 if fresh.machines.contains(where: {
                     $0.isHost && ClientSetupIdentity.matches($0.publicIdentity ?? "", expected: peer)
                 }) {
@@ -303,6 +424,7 @@ final class ClientSetupModel {
                         throw BridgeError.core(code: "identity_mismatch",
                             message: "The machine answered with a different identity. Reconnect and verify the server.")
                     }
+                    try self.checkpoint(.hostReady)
                     self.finished = status
                     await account.load()
                     return
@@ -314,18 +436,7 @@ final class ClientSetupModel {
         }
     }
 
-    /// The step that is running, so it can be stopped.
-    ///
-    /// A wrong address is a TCP connection to nowhere, and nowhere takes a
-    /// full minute to answer. A screen that says "asking" for a minute with no
-    /// way out is a screen somebody force-quits.
-    @ObservationIgnored private var step: Task<Void, Never>?
-
-    func cancelWork() {
-        step?.cancel()
-        step = nil
-        working = false
-    }
+    func cancelWork() { coordinator.cancel() }
 
     /// A message about this machine, rather than about the protocol.
     ///
@@ -351,20 +462,11 @@ final class ClientSetupModel {
     }
 
     private func run(_ body: @escaping () async throws -> Void) async {
-        guard !working else { return }
-        error = nil
-        working = true
-        step = Task { [weak self] in
-            do {
-                try await body()
-            } catch {
-                guard !Task.isCancelled else { return }
-                self?.error = ClientSetupModel.readable(error)
-            }
-            guard !Task.isCancelled else { return }
-            self?.working = false
+        await coordinator.run {
+            do { try await body() }
+            catch is CancellationError { throw CancellationError() }
+            catch { throw BridgeError.core(code: "setup_failed", message: Self.readable(error)) }
         }
-        await step?.value
     }
 }
 
