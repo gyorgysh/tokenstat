@@ -134,6 +134,36 @@ struct ClientSetupFailure: Equatable {
             }
         }
 
+        /// Where this action goes inside the wizard, when it is a place.
+        ///
+        /// A failure whose answer is a screen navigates to it. The two that
+        /// are not a place at all, signing in to the account and updating the
+        /// machine, both happen outside this wizard, and a button that cannot
+        /// take somebody there would be a button that does nothing.
+        var destination: SetupStep? {
+            switch self {
+            case .checkAddress: .where
+            case .reviewFingerprint: .where
+            case .checkCredential: .credential
+            case .checkServer: .finish
+            case .newCode: .install
+            case .signInToAgent: .agents
+            case .signInToAccount, .updateMachine, .retry: nil
+            }
+        }
+
+        /// Whether a button for this is worth drawing.
+        ///
+        /// `.retry` is not: every screen's own primary button already is the
+        /// retry, and a second one beside it would be the same action twice.
+        /// The two that happen elsewhere say so in words instead.
+        var isActionable: Bool {
+            switch self {
+            case .signInToAccount, .updateMachine, .retry: false
+            default: true
+            }
+        }
+
         var icon: ActionIcon {
             switch self {
             case .checkAddress, .checkServer: .search

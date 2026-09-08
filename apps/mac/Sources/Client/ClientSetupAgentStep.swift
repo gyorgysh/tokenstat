@@ -47,7 +47,8 @@ struct ClientSetupAgentStep: View {
                 + "account, on the machine, once.",
             number: 7,
             failure: failure,
-            onDismissError: { failure = nil }
+            onDismissError: { failure = nil },
+            onRecover: { recover($0, model: model, path: $path) }
         ) {
             if loading {
                 HStack(spacing: Theme.Space.s) {
@@ -124,8 +125,19 @@ struct ClientSetupAgentStep: View {
         }
         loading = true
         defer { loading = false }
-        if supported == nil {
-            supported = await RemoteHostFeature.agentSignIn.isSupported(peer: peer)
+        // Asked every time, and only a definite answer is remembered. A peer
+        // that cannot be reached is not an old peer: this step is entered
+        // seconds after a server came up, which is exactly when the tunnel is
+        // least settled, and caching that first stumble as "older machine"
+        // would leave somebody stuck in front of a host this app just built.
+        if supported != true {
+            do {
+                let version = try await Bridge.peerProtocolVersion(peer)
+                supported = version >= RemoteHostFeature.agentSignIn.minimumProtocol
+            } catch {
+                failure = ClientSetupFailure.from(error)
+                return
+            }
         }
         guard supported == true else { return }
         do { profiles = try await ClientRemote.launcherCatalog(peer: peer) }

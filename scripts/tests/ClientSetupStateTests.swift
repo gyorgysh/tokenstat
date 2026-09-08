@@ -9,6 +9,12 @@ enum ActionIcon {
     case search, security, token, pair, signIn, docs, refresh
 }
 
+/// The wizard's steps, as far as `ClientSetupFailure.Action` names them.
+enum SetupStep: Hashable {
+    case `where`, credential, fingerprint, check, install, finish, agents, project
+    case byHand, cloud, mac, needServer
+}
+
 enum BridgeError: LocalizedError {
     case core(code: String, message: String)
     case decoding(method: String, underlying: String)
@@ -172,5 +178,22 @@ struct ClientSetupStateTests {
         // Anything that is not a bridge failure still says something.
         struct Plain: Error {}
         precondition(ClientSetupFailure.from(Plain()).action == .retry)
+
+        // A drawn button has to lead somewhere. The three that lead nowhere
+        // are the three that happen outside the wizard, or are the screen's
+        // own primary button repeated.
+        for action: ClientSetupFailure.Action in [
+            .checkAddress, .reviewFingerprint, .checkCredential,
+            .checkServer, .newCode, .signInToAgent,
+        ] {
+            precondition(action.isActionable, "\(action.title) is offered")
+            precondition(action.destination != nil, "\(action.title) must go somewhere")
+        }
+        for action: ClientSetupFailure.Action in [.signInToAccount, .updateMachine, .retry] {
+            precondition(!action.isActionable, "\(action.title) must not draw a dead button")
+        }
+        for action: ClientSetupFailure.Action in [.signInToAccount, .updateMachine, .retry] {
+            precondition(action.destination == nil)
+        }
     }
 }

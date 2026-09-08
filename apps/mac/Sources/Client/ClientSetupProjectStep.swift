@@ -26,6 +26,7 @@ struct ClientSetupProjectStep: View {
 
     @State private var route: ProjectRoute?
     @State private var opened: String?
+    @State private var failure: ClientSetupFailure?
 
     private enum ProjectRoute: String, Hashable, Identifiable {
         case clone, existing
@@ -39,7 +40,9 @@ struct ClientSetupProjectStep: View {
             title: "Choose a project",
             subtitle: "The agent works inside one folder at a time. Bring a repository "
                 + "down onto the machine, or point at a folder it already has.",
-            number: 8
+            number: 8,
+            failure: failure,
+            onDismissError: { failure = nil }
         ) {
             route(
                 .clone,
@@ -94,7 +97,19 @@ struct ClientSetupProjectStep: View {
     /// The draft is forgotten here and nowhere earlier: this is the first
     /// moment when nothing is left half done.
     private func finish(folderID: String?) {
-        guard model.completeSetup() else { return }
+        guard model.completeSetup() else {
+            // Forgetting the draft is the only thing that can fail here, and
+            // it is worth saying: leaving now would offer to continue a setup
+            // that is finished.
+            failure = model.failure ?? ClientSetupFailure(
+                explanation: "The saved setup could not be cleared, so leaving now would "
+                    + "offer to continue this again.",
+                action: .retry,
+                details: nil
+            )
+            opened = nil
+            return
+        }
         if let folderID {
             navigation.suggestedPrompt = Self.firstTask
             navigation.open(folderID: folderID, section: .chat)

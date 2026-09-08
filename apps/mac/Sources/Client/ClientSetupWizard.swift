@@ -67,6 +67,15 @@ struct ClientSetupWizard: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 header
+                // The doors had nowhere to say anything, so a refused resume
+                // or a failed prepare was a button that did nothing.
+                if let failure = model.failure {
+                    SetupFailureBanner(
+                        failure: failure,
+                        onDismiss: { model.failure = nil },
+                        onRecover: { recover($0, model: model, path: $path) }
+                    )
+                }
                 if let draft = model.savedDraft { resumeCard(draft) }
                 door(
                     title: "On a server I have",

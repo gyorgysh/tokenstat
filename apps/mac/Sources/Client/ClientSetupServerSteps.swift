@@ -141,21 +141,24 @@ func recover(
     model: ClientSetupModel,
     path: Binding<[SetupStep]>
 ) {
-    switch action {
-    case .checkAddress:
-        model.failure = nil
-        path.wrappedValue = [.where]
-    case .reviewFingerprint:
-        // Trust is re-established from scratch: a key that changed must be
-        // looked at, not carried forward from the record that no longer fits.
-        model.resetServer()
-        model.failure = nil
-        path.wrappedValue = [.where]
-    case .checkCredential:
-        model.failure = nil
-        path.wrappedValue = [.where, .credential]
-    case .checkServer, .newCode, .signInToAgent, .signInToAccount, .updateMachine, .retry:
-        break
+    guard let destination = action.destination else { return }
+    // A changed key is re-established from scratch: it has to be looked at,
+    // not carried forward from a record that no longer fits the server.
+    if action == .reviewFingerprint { model.resetServer() }
+    model.failure = nil
+    // Already here. Rebuilding the stack onto the screen somebody is standing
+    // on would animate a journey to where they already are.
+    guard path.wrappedValue.last != destination else { return }
+    // Every destination is reached through the address, so the stack is built
+    // rather than pushed onto: arriving at the credential screen with no way
+    // back to the address would be a dead end of its own.
+    switch destination {
+    case .where: path.wrappedValue = [.where]
+    case .credential: path.wrappedValue = [.where, .credential]
+    case .install: path.wrappedValue = [.where, .credential, .check, .install]
+    case .finish: path.wrappedValue = [.where, .credential, .check, .install, .finish]
+    case .agents: path.wrappedValue = [.where, .credential, .check, .install, .finish, .agents]
+    default: path.wrappedValue = [destination]
     }
 }
 
@@ -203,7 +206,11 @@ struct SetupFailureBanner: View {
                 }
             }
             HStack(spacing: Theme.Space.s) {
-                if let onRecover {
+                // Only an action that leads somewhere gets a button. Signing
+                // in to the account and updating the machine both happen
+                // outside this wizard, and the explanation says so; retrying
+                // is the screen's own primary button, already on screen.
+                if let onRecover, failure.action.isActionable {
                     Button(failure.action.title, failure.action.icon) {
                         onRecover(failure.action)
                     }

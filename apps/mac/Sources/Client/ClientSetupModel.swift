@@ -171,20 +171,28 @@ final class ClientSetupModel {
         return .credential
     }
 
-    func checkpoint(_ milestone: ClientSetupMilestone) throws {
-        guard let scope else { throw ClientSetupDraftError.invalid }
-        try coordinator.save(ClientSetupDraft(
+    /// Record how far setup got, and never fail a step for it.
+    ///
+    /// Every call is the last line of a step that has already happened: the
+    /// host key is in the library, the installer is running on the server.
+    /// Throwing here would report a step that worked as a step that failed,
+    /// and would do it with a message about a saved file, which is not what
+    /// the person was doing. The draft is a convenience for coming back. Not
+    /// being able to write it costs the resume, and nothing else.
+    func checkpoint(_ milestone: ClientSetupMilestone) {
+        resumingInstallation = milestone.needsReconciliation
+        guard let scope else { return }
+        try? coordinator.save(ClientSetupDraft(
             id: draftID, scope: scope, hostID: pickedHostID, fingerprint: fingerprint,
             machineName: machineName, agents: agents, manualInstall: manualInstall,
             machineKey: expectedPeer, milestone: milestone
         ))
-        resumingInstallation = milestone.needsReconciliation
     }
 
-    func prepareManualInstall() throws {
+    func prepareManualInstall() {
         manualInstall = true
         expectedPeer = nil
-        try checkpoint(.installRequested)
+        checkpoint(.installRequested)
     }
 
     func completeSetup() -> Bool {
@@ -316,7 +324,7 @@ final class ClientSetupModel {
             self.pickedHostID = saved.id
             self.host = saved
             self.trusted = true
-            try self.checkpoint(.trusted)
+            self.checkpoint(.trusted)
         }
     }
 
@@ -327,7 +335,7 @@ final class ClientSetupModel {
             let check = try await Bridge.probeServerForSetup(host, auth: auth)
             try Task.checkCancellation()
             self.check = check
-            try self.checkpoint(.checked)
+            self.checkpoint(.checked)
             if self.machineName == "server", let distro = check.distro {
                 // A name somebody would recognise, offered rather than imposed.
                 self.machineName = distro.split(separator: " ").first.map(String.init)?
@@ -353,7 +361,7 @@ final class ClientSetupModel {
             try Task.checkCancellation()
             // Save before starting any remote mutation. Resume checks what
             // happened; it never assumes an interrupted install should rerun.
-            try self.checkpoint(.installRequested)
+            self.checkpoint(.installRequested)
             let code = try await Bridge.mintPairingCode().code
             try Task.checkCancellation()
             try await Bridge.stagePairingCode(host, code: code, auth: auth)
@@ -410,7 +418,7 @@ final class ClientSetupModel {
                 }
             }
             guard let peer = self.expectedPeer else { return }
-            try self.checkpoint(.verifying)
+            self.checkpoint(.verifying)
             let deadline = Date().addingTimeInterval(180)
             while Date() < deadline {
                 try Task.checkCancellation()
@@ -433,7 +441,7 @@ final class ClientSetupModel {
                         throw BridgeError.core(code: "identity_mismatch",
                             message: "The machine answered with a different identity. Reconnect and verify the server.")
                     }
-                    try self.checkpoint(.hostReady)
+                    self.checkpoint(.hostReady)
                     self.finished = status
                     await account.load()
                     return

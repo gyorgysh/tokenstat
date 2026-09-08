@@ -166,29 +166,45 @@ pub(crate) fn sign_in(id: &str) -> Option<&'static SignIn> {
 /// The readiness of one agent id, given whether the launcher found its command.
 pub(crate) fn readiness(id: &str, installed: bool) -> (Readiness, Option<i64>) {
     match home_dir() {
-        Some(home) => readiness_in(id, installed, &home, now_ms()),
+        Some(home) => readiness_in(id, installed, &home, now_ms(), &from_environment),
         // No home to look in is not evidence either way.
         None if installed => (Readiness::Unknown, None),
         None => (Readiness::NotInstalled, None),
     }
 }
 
-/// The same decision against a given home and a given clock, so it can be
+/// A tool's own relocation variable, as this daemon sees it.
+///
+/// Passed in rather than read where it is used, because a test that supplies a
+/// home directory has to be able to supply the whole answer. Reading the
+/// process environment half way down made the result depend on whether the
+/// machine running the tests happened to export `CLAUDE_CONFIG_DIR`.
+fn from_environment(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var).map(PathBuf::from)
+}
+
+/// The same decision against a given home, clock and environment, so it can be
 /// tested without touching the machine running the tests.
-fn readiness_in(id: &str, installed: bool, home: &Path, now: i64) -> (Readiness, Option<i64>) {
+fn readiness_in(
+    id: &str,
+    installed: bool,
+    home: &Path,
+    now: i64,
+    env: &dyn Fn(&str) -> Option<PathBuf>,
+) -> (Readiness, Option<i64>) {
     if !installed {
         return (Readiness::NotInstalled, None);
     }
     let Some(store) = STORES.iter().find(|store| store.id == id) else {
         return (Readiness::Unknown, None);
     };
-    let Some(path) = existing_store(store, home) else {
+    let Some(path) = existing_store(store, home, env) else {
         if store.keychain_on_macos && cfg!(target_os = "macos") {
             return (Readiness::Unknown, None);
         }
         // Codex can be configured to keep its login in the system keyring
         // instead of a file. Then a missing file says nothing at all.
-        if id == "codex" && codex_uses_keyring(home) {
+        if id == "codex" && codex_uses_keyring(home, env) {
             return (Readiness::Unknown, None);
         }
         return (Readiness::NeedsSignIn, None);
@@ -211,9 +227,9 @@ fn readiness_in(id: &str, installed: bool, home: &Path, now: i64) -> (Readiness,
 
 /// Codex's `cli_auth_credentials_store` decides where its login lives. Only
 /// `file` guarantees the file this module looks for.
-fn codex_uses_keyring(home: &Path) -> bool {
-    let config = match std::env::var_os("CODEX_HOME") {
-        Some(dir) => PathBuf::from(dir).join("config.toml"),
+fn codex_uses_keyring(home: &Path, env: &dyn Fn(&str) -> Option<PathBuf>) -> bool {
+    let config = match env("CODEX_HOME") {
+        Some(dir) => dir.join("config.toml"),
         None => home.join(".codex/config.toml"),
     };
     let Ok(raw) = std::fs::read_to_string(config) else {
@@ -225,11 +241,15 @@ fn codex_uses_keyring(home: &Path) -> bool {
         .any(|line| line.contains("keyring") || line.contains("auto"))
 }
 
-fn existing_store(store: &Store, home: &Path) -> Option<PathBuf> {
+fn existing_store(
+    store: &Store,
+    home: &Path,
+    env: &dyn Fn(&str) -> Option<PathBuf>,
+) -> Option<PathBuf> {
     if let Some((var, file)) = store.home_var
-        && let Some(dir) = std::env::var_os(var)
+        && let Some(dir) = env(var)
     {
-        let candidate = PathBuf::from(dir).join(file);
+        let candidate = dir.join(file);
         return candidate.is_file().then_some(candidate);
     }
     store
@@ -329,13 +349,13 @@ mod tests {
             "cli_auth_credentials_store = \"keyring\"\n",
         )
         .unwrap();
-        assert!(codex_uses_keyring(dir.path()));
+        assert!(codex_uses_keyring(dir.path(), &no_env));
         std::fs::write(
             dir.path().join(".codex/config.toml"),
             "cli_auth_credentials_store = \"file\"\n",
         )
         .unwrap();
-        assert!(!codex_uses_keyring(dir.path()));
+        assert!(!codex_uses_keyring(dir.path(), &no_env));
     }
 
     #[test]
@@ -360,6 +380,13 @@ mod tests {
         }
     }
 
+    /// A machine with none of the relocation variables set, which is what the
+    /// cases below are about. Nothing here may depend on the environment of
+    /// whatever machine is running the tests.
+    fn no_env(_: &str) -> Option<PathBuf> {
+        None
+    }
+
     fn home_with(file: &str, body: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(file);
@@ -372,7 +399,7 @@ mod tests {
     fn a_machine_nobody_has_signed_in_on_says_exactly_that() {
         let empty = tempfile::tempdir().unwrap();
         assert_eq!(
-            readiness_in("claude_code", true, empty.path(), 0).0,
+            readiness_in("claude_code", true, empty.path(), 0, &no_env).0,
             // A Mac keeps this one in the keychain, so a missing file there
             // proves nothing. Everywhere else it is the plain answer.
             if cfg!(target_os = "macos") {
@@ -382,7 +409,7 @@ mod tests {
             }
         );
         assert_eq!(
-            readiness_in("codex", true, empty.path(), 0).0,
+            readiness_in("codex", true, empty.path(), 0, &no_env).0,
             Readiness::NeedsSignIn
         );
     }
@@ -394,15 +421,15 @@ mod tests {
             r#"{"claudeAiOauth":{"accessToken":"x","expiresAt":1000}}"#,
         );
         assert_eq!(
-            readiness_in("claude_code", true, home.path(), 999),
+            readiness_in("claude_code", true, home.path(), 999, &no_env),
             (Readiness::SignedIn, Some(1000))
         );
         assert_eq!(
-            readiness_in("claude_code", true, home.path(), 1000),
+            readiness_in("claude_code", true, home.path(), 1000, &no_env),
             (Readiness::Expired, Some(1000))
         );
         assert_eq!(
-            readiness_in("claude_code", true, home.path(), 5000),
+            readiness_in("claude_code", true, home.path(), 5000, &no_env),
             (Readiness::Expired, Some(1000))
         );
     }
@@ -413,7 +440,7 @@ mod tests {
     fn a_store_that_states_no_expiry_reports_none() {
         let home = home_with(".codex/auth.json", r#"{"tokens":{"id_token":"x"}}"#);
         assert_eq!(
-            readiness_in("codex", true, home.path(), 0),
+            readiness_in("codex", true, home.path(), 0, &no_env),
             (Readiness::SignedIn, None)
         );
     }
@@ -423,7 +450,7 @@ mod tests {
     fn an_empty_store_is_not_read_as_signed_out() {
         let home = home_with(".codex/auth.json", "   \n");
         assert_eq!(
-            readiness_in("codex", true, home.path(), 0).0,
+            readiness_in("codex", true, home.path(), 0, &no_env).0,
             Readiness::Unknown
         );
     }
@@ -435,8 +462,41 @@ mod tests {
             r#"{"claudeAiOauth":{"expiresAt":1}}"#,
         );
         assert_eq!(
-            readiness_in("claude_code", false, home.path(), 0),
+            readiness_in("claude_code", false, home.path(), 0, &no_env),
             (Readiness::NotInstalled, None)
+        );
+    }
+
+    /// The relocation variable is part of the answer, so a test that supplies
+    /// a home has to supply it too. This is the case that used to read the
+    /// machine running the tests.
+    #[test]
+    fn a_relocated_config_directory_is_where_the_login_is_looked_for() {
+        let home = home_with(
+            ".claude/.credentials.json",
+            r#"{"claudeAiOauth":{"expiresAt":9}}"#,
+        );
+        let elsewhere = tempfile::tempdir().unwrap();
+        let moved = elsewhere.path().to_path_buf();
+        let env = move |var: &str| (var == "CLAUDE_CONFIG_DIR").then(|| moved.clone());
+        // The home's own file is not consulted once the variable names another
+        // directory, and that directory has no login in it.
+        assert_eq!(
+            readiness_in("claude_code", true, home.path(), 0, &env).0,
+            if cfg!(target_os = "macos") {
+                Readiness::Unknown
+            } else {
+                Readiness::NeedsSignIn
+            }
+        );
+        std::fs::write(
+            elsewhere.path().join(".credentials.json"),
+            r#"{"claudeAiOauth":{"expiresAt":50}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            readiness_in("claude_code", true, home.path(), 0, &env),
+            (Readiness::SignedIn, Some(50))
         );
     }
 }
