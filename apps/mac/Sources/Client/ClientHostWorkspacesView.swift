@@ -19,7 +19,21 @@ import SwiftUI
 struct ClientHostWorkspacesView: View {
     let peerKey: String
     let hostName: String
+    @Environment(AccountModel.self) private var account
     @State private var model = ClientHostWorkspacesModel()
+
+    /// A machine with no desktop app, which changes what "it is not answering"
+    /// means and what somebody can do about it. Read from what the machine
+    /// said about itself at login rather than guessed from its name.
+    private var isHeadless: Bool {
+        let platform = (account.account?.machines ?? [])
+            .first { $0.publicIdentity?.caseInsensitiveCompare(peerKey) == .orderedSame }?
+            .platform?
+            .lowercased() ?? ""
+        return platform.contains("linux")
+            || ["ubuntu", "debian", "fedora", "alpine", "arch", "centos", "rocky", "almalinux"]
+                .contains { platform.contains($0) }
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -76,6 +90,28 @@ struct ClientHostWorkspacesView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity)
                         }
+                        // On a server there is nobody at the machine to answer
+                        // a request, so asking would wait forever. A code
+                        // minted at its console is the way in, and this is the
+                        // screen where somebody finds that out.
+                        NavigationLink {
+                            ClientAddThisDevice(peer: peerKey, hostName: hostName) {
+                                Task { await model.connect(peerKey: peerKey, name: hostName) }
+                            }
+                        } label: {
+                            Label("I have a code", systemImage: ActionIcon.pair.symbol)
+                                .font(ClientType.label)
+                        }
+                        .tint(Theme.accent)
+                        Text(
+                            "On a machine with no screen, run `tokenstat host access invite` "
+                            + "on it and use the code it prints."
+                        )
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
                     }
                 } else if model.folders.isEmpty, model.sessions.isEmpty {
                     if let message = model.errorMessage {
@@ -86,8 +122,14 @@ struct ClientHostWorkspacesView: View {
                         let lower = message.lowercased()
                         if lower.contains("no_such_peer") || lower.contains("no direct address")
                             || lower.contains("peer_not_found") || lower.contains("no such peer") {
-                            RemoteReachRecoveryCard(name: hostName) {
-                                Task { await model.connect(peerKey: peerKey, name: hostName) }
+                            if isHeadless {
+                                HeadlessReachRecoveryCard(name: hostName) {
+                                    Task { await model.connect(peerKey: peerKey, name: hostName) }
+                                }
+                            } else {
+                                RemoteReachRecoveryCard(name: hostName) {
+                                    Task { await model.connect(peerKey: peerKey, name: hostName) }
+                                }
                             }
                         } else {
                             ClientErrorCard(message: message) {
@@ -95,11 +137,36 @@ struct ClientHostWorkspacesView: View {
                             }
                         }
                     } else {
-                        ClientEmptyState(
-                            kind: .nothingYet,
-                            title: "No folders on \(hostName) yet",
-                            message: "Folders added on that computer show up here."
-                        )
+                        // Not "no folders". A machine with none is a machine
+                        // waiting to be given one, and both ways to do that
+                        // are here rather than described.
+                        VStack(spacing: Theme.Space.s) {
+                            ClientEmptyState(
+                                kind: .nothingYet,
+                                title: "Nothing to work on yet",
+                                message: "Give \(hostName) a folder. Choose one it already "
+                                    + "has, or clone a repository onto it.",
+                                art: .noMachine
+                            )
+                            NavigationLink {
+                                ClientFolderPicker(peer: peerKey, hostName: hostName) { _ in
+                                    Task { await model.connect(peerKey: peerKey, name: hostName) }
+                                }
+                            } label: {
+                                Label("Choose a folder", systemImage: ActionIcon.reveal.symbol)
+                                    .font(ClientType.label)
+                            }
+                            .tint(Theme.accent)
+                            NavigationLink {
+                                ClientCloneRepository(peer: peerKey, hostName: hostName) { _ in
+                                    Task { await model.connect(peerKey: peerKey, name: hostName) }
+                                }
+                            } label: {
+                                Label("Clone a repository", systemImage: ActionIcon.download.symbol)
+                                    .font(ClientType.label)
+                            }
+                            .tint(Theme.accent)
+                        }
                     }
                 }
 

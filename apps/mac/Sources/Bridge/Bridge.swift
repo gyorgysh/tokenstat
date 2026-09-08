@@ -2653,6 +2653,20 @@ extension Bridge {
     }
 
     /// Devices this machine has let into its work.
+    /// Redeem a code minted at a machine's own console, so a device that has
+    /// never been there can be let in.
+    ///
+    /// The only method a device which is not yet allowed can call to change
+    /// anything. Everything protecting it is on the machine: single use,
+    /// fifteen minutes, five wrong guesses retire the code, and the device has
+    /// to be on the same account. tokenstat.ai never sees it.
+    static func redeemWorkspaceAccess(peer: String, code: String) async throws -> Bool {
+        struct Granted: Codable, Sendable { var granted: Bool }
+        return try await onPeer(
+            peer, "workspace.access.redeem", ["code": code], as: Granted.self
+        ).granted
+    }
+
     static func workspaceAccessList() async throws -> [String] {
         try await background("workspace.access.list", as: [String].self)
     }
@@ -2901,6 +2915,46 @@ extension Bridge {
             "codeFile": codeFile,
             "code": code as Any,
         ], as: InstallLine.self)
+    }
+
+    // MARK: - Folders on a machine with no file panel
+
+    /// One directory on a peer. `nil` starts at that machine's home.
+    static func browse(peer: String, path: String?) async throws -> RemoteListing {
+        try await onPeer(peer, "fs.browse", ["path": path as Any], as: RemoteListing.self)
+    }
+
+    /// Register a folder that is already on a peer.
+    static func addWorkspace(peer: String, path: String) async throws -> WorkspaceFolder {
+        try await onPeer(peer, "workspace.add", ["path": path], as: WorkspaceFolder.self)
+    }
+
+    /// One new directory on a peer, so a clone has somewhere to land.
+    static func makeDirectory(peer: String, path: String) async throws -> String {
+        struct Made: Codable, Sendable { var path: String }
+        return try await onPeer(peer, "fs.mkdir", ["path": path], as: Made.self).path
+    }
+
+    /// Clone a repository onto a peer, in a terminal somebody can watch.
+    ///
+    /// Answers with the session, because that is what the caller does next:
+    /// the progress arrives on the ordinary terminal stream. Where the folder
+    /// landed comes back from `cloneStatus`, which is also what says whether
+    /// it finished.
+    static func clone(
+        peer: String, url: String, parent: String, name: String?
+    ) async throws -> PtySessionInfo {
+        try await onPeer(
+            peer, "workspace.clone",
+            ["url": url, "parent": parent, "name": name as Any],
+            as: PtySessionInfo.self
+        )
+    }
+
+    static func cloneStatus(peer: String, sessionID: String) async throws -> RemoteCloneStatus {
+        try await onPeer(
+            peer, "workspace.cloneStatus", ["sessionId": sessionID], as: RemoteCloneStatus.self
+        )
     }
 
     /// A pairing code for a machine this device is setting up.

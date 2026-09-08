@@ -62,14 +62,22 @@ struct ClientSetupWizard: View {
                     path = [.where]
                 }
                 door(
+                    title: "On a cloud machine",
+                    body: "Bring DigitalOcean or AWS, pick a server you already have, and "
+                        + "set it up the same way.",
+                    requirement: paywalled ? "Reaching it needs patron" : nil,
+                    icon: .download
+                ) {
+                    path = [.cloud]
+                }
+                door(
                     title: "On my Mac",
                     body: "Install the desktop app on the computer you work on, sign in "
                         + "to this account, and let this phone in.",
                     requirement: nil,
                     icon: .device
                 ) {
-                    navigation.destination = .machines
-                    dismiss()
+                    path = [.mac]
                 }
                 door(
                     title: "Just my numbers",
@@ -81,11 +89,12 @@ struct ClientSetupWizard: View {
                     dismiss()
                 }
                 Text(
-                    "Cloud providers arrive next. Until then, import a machine into your "
-                    + "SSH library and use the first door."
+                    "Nothing here is permanent. Every door can be left, and leaving lands on "
+                    + "your numbers, which keep arriving whatever you choose."
                 )
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, Theme.Space.xs)
             }
             .padding(Theme.Space.m)
@@ -173,6 +182,11 @@ enum SetupStep: Hashable {
     case finish
     /// The install line, for somebody who would rather run it themselves.
     case byHand
+    /// Door three, which ends by handing over to `where` with the addresses
+    /// already known.
+    case cloud
+    /// Door one, which is a screen that watches rather than one that acts.
+    case mac
 }
 
 #endif

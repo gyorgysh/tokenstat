@@ -325,6 +325,52 @@ struct ServerCheck: Codable, Sendable, Hashable {
     var ready: Bool = false
 }
 
+/// One directory on a machine, as a picker sees it.
+///
+/// Names, kinds and a few stat fields. Never a byte of a file: the host
+/// answers what a folder holds, not what is in it.
+struct RemoteListing: Codable, Sendable, Hashable {
+    struct Root: Codable, Sendable, Hashable, Identifiable {
+        var path: String
+        var label: String
+        var kind: String
+        var id: String { path }
+    }
+
+    struct Entry: Codable, Sendable, Hashable, Identifiable {
+        var name: String
+        var path: String?
+        var kind: String
+        var symlink: Bool = false
+        var hidden: Bool = false
+        var isRepo: Bool = false
+        var isRegistered: Bool = false
+        var size: UInt64?
+        var modified: UInt64?
+
+        var id: String { path ?? name }
+        var isDirectory: Bool { kind == "directory" }
+    }
+
+    var path: String
+    /// Nil at the top of a root, so "up" stops there instead of walking out.
+    var parent: String?
+    var roots: [Root] = []
+    var entries: [Entry] = []
+    /// The listing stopped early. A home directory with a dependency tree in
+    /// it holds more names than any picker can draw.
+    var truncated: Bool = false
+}
+
+/// What became of a clone somebody started.
+struct RemoteCloneStatus: Codable, Sendable, Hashable {
+    /// `running`, `done` or `failed`.
+    var state: String
+    var path: String
+    var workspaceId: String?
+    var error: String?
+}
+
 /// The install command, in the two shapes it is needed in: the one the app
 /// types into a session, and the one a person reads before running it.
 struct InstallLine: Codable, Sendable, Hashable {

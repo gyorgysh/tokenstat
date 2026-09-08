@@ -185,6 +185,96 @@ struct RemoteReachRecoveryCard: View {
     }
 }
 
+/// The same state, on a machine nobody can walk over to.
+///
+/// `RemoteReachRecoveryCard` tells somebody to wake a Mac and flip a switch on
+/// it. Neither instruction exists on a server: there is no window, the host is
+/// a service, and the person can genuinely go and look. So this names the two
+/// commands that answer it and offers the shell rather than a switch.
+struct HeadlessReachRecoveryCard: View {
+    let name: String
+    let retry: () -> Void
+    /// Opens an SSH session on that machine, when one can be opened from here.
+    var openShell: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: Theme.Space.m) {
+            ClientEmptyArt(kind: .noMachine)
+                .frame(width: 128, height: 84)
+                .background(Theme.accentSoft.opacity(0.58), in: RoundedRectangle(cornerRadius: 18))
+
+            VStack(spacing: 5) {
+                Text("\(name) is not answering")
+                    .font(ClientType.screenTitle)
+                    .multilineTextAlignment(.center)
+                Text("It is a server, so nothing there is asleep and no window has to be open.")
+                    .font(ClientType.label)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                headlessStep(
+                    symbol: "terminal",
+                    title: "Ask the machine how it is",
+                    detail: "`tokenstat host` says whether the service is running, which "
+                        + "account it is on, and what the tunnel is doing."
+                )
+                headlessStep(
+                    symbol: "text.alignleft",
+                    title: "Read its log",
+                    detail: "`tokenstat host logs` is the rest of the answer when the status "
+                        + "line is not enough."
+                )
+            }
+
+            VStack(spacing: Theme.Space.s) {
+                Button("Check connection", .refresh, action: retry)
+                    .labelStyle(ActionLabelStyle())
+                    .clientProminentStyle()
+                    .controlSize(.large)
+                    .tint(Theme.accent)
+                    .frame(maxWidth: .infinity)
+                if let openShell {
+                    Button("Open a shell there", .connect, action: openShell)
+                        .font(ClientType.label)
+                        .tint(Theme.accent)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(Theme.Space.l)
+        .cardSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            "\(name) is not answering. On the machine, run tokenstat host for its status, "
+            + "and tokenstat host logs to read its log."
+        )
+    }
+
+    private func headlessStep(symbol: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            Image(systemName: symbol)
+                .font(Theme.font(15, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 34, height: 34)
+                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(ClientType.label.weight(.semibold))
+                Text(detail)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
 /// A failure, drawn like part of the app rather than like a crash log.
 ///
 /// One component for every error surface in the client, so a device that is

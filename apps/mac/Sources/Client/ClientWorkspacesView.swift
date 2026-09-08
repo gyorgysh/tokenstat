@@ -24,6 +24,7 @@ struct ClientWorkspacesView: View {
     @State private var model: ClientWorkspacesModel
     @State private var pendingClose: PtySessionInfo?
     @State private var notificationOpen = NotificationOpen.shared
+    @State private var showSetup = false
     // Per-host, not global: each host card owns its row. A global key would
     // make every toggle move together, which is the extra card in the
     // screenshot. The rule itself lives on the model, because the iPad's
@@ -106,13 +107,18 @@ struct ClientWorkspacesView: View {
                             }
                         )
                     } else if model.hosts.isEmpty {
+                        // Not "no hosts". The hole is a machine, and the thing
+                        // that fills it is one button away rather than three
+                        // sentences of instructions about another computer.
                         ClientEmptyState(
                             kind: .nothingYet,
-                            title: "No host devices yet",
-                            message: "Install tokenstat on a computer, turn on Reach devices "
-                                + "from anywhere, and sign in. Hosts appear here so this phone "
-                                + "can open their folders and sessions.",
-                            mark: "mark_host"
+                            title: "No machine yet",
+                            message: "tokenstat runs agents on a machine that stays on. Connect "
+                                + "a computer you own, or give it a server and it sets one up.",
+                            actionTitle: "Set up a machine",
+                            actionIcon: .connect,
+                            action: { showSetup = true },
+                            art: .noMachine
                         )
                     } else {
                         ClientSectionTitle(title: "Hosts on your account", mark: "mark_host")
@@ -202,6 +208,9 @@ struct ClientWorkspacesView: View {
                 .padding(.bottom, 96)
             }
             .background(Theme.background)
+            .fullScreenCover(isPresented: $showSetup) {
+                ClientSetupWizard()
+            }
             .navigationTitle("Workspaces")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
