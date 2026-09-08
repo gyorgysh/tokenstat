@@ -32,6 +32,20 @@ pub const CALL_FAILED: &str = "call_failed";
 /// retrying or showing a fault.
 pub const NO_LOCAL_ARCHIVE: &str = "no_local_archive";
 
+/// A server that could not be reached at all: wrong address, wrong port, no
+/// route, nothing listening. Nothing was tried on it, so nothing changed.
+pub const SSH_UNREACHABLE: &str = "ssh_unreachable";
+
+/// The server answered with a host key that is not the one this account
+/// trusted for it. Never a retry: somebody has to look at the fingerprint.
+pub const SSH_HOST_KEY_CHANGED: &str = "ssh_host_key_changed";
+
+/// No fingerprint has been confirmed for this server yet.
+pub const SSH_HOST_KEY_UNVERIFIED: &str = "ssh_host_key_unverified";
+
+/// The server is there and refused the key or the password.
+pub const SSH_AUTH_REFUSED: &str = "ssh_auth_refused";
+
 /// A failed call, and the code the envelope will carry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DispatchError {

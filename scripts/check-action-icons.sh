@@ -185,9 +185,12 @@ ALLOWED = [
     ("Features/Workspaces/Chat/PersonaEditor.swift", "draft = persona"),
 ]
 
+# `, .save)` is the usual shape. `.icon` covers a button whose glyph is chosen
+# at runtime from the same vocabulary (`failure.action.icon`): the type is still
+# `ActionIcon`, so the compiler guarantees what this script is checking for.
 GLYPH = re.compile(
     r"systemImage|ActionIcon|Image\(\s*systemName|, \.\w+[,)]|\.label\("
-    r"|actionIcon"
+    r"|actionIcon|\.icon[,)]"
 )
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 

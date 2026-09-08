@@ -60,7 +60,11 @@ struct StepScaffold<Content: View, Footer: View>: View {
     /// install shows a terminal, and the last one shows the machine.
     var art: SetupArtKind?
     var error: String?
+    /// The typed form, when the screen has somewhere for its action to go.
+    /// `error` stays for the places that only print a sentence.
+    var failure: ClientSetupFailure?
     var onDismissError: (() -> Void)?
+    var onRecover: ((ClientSetupFailure.Action) -> Void)?
     @ViewBuilder var content: () -> Content
     @ViewBuilder var footer: () -> Footer
 
@@ -81,7 +85,13 @@ struct StepScaffold<Content: View, Footer: View>: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    if let error {
+                    if let failure {
+                        SetupFailureBanner(
+                            failure: failure,
+                            onDismiss: { onDismissError?() },
+                            onRecover: onRecover
+                        )
+                    } else if let error {
                         InlineBanner(text: error, kind: .danger) { onDismissError?() }
                     }
                     content()
@@ -97,6 +107,114 @@ struct StepScaffold<Content: View, Footer: View>: View {
                 .setupColumn()
         }
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Where a recovery action goes.
+///
+/// One table for the whole wizard rather than a closure per screen: the answer
+/// to "the fingerprint changed" is the fingerprint screen wherever somebody was
+/// standing when it happened, and six copies of that would drift.
+///
+/// Actions that are not a place stay where they are. Retrying is the screen's
+/// own button, and updating a machine is something that happens on the machine,
+/// so both leave the failure on screen with its explanation.
+@MainActor
+func recover(
+    _ action: ClientSetupFailure.Action,
+    model: ClientSetupModel,
+    path: Binding<[SetupStep]>
+) {
+    switch action {
+    case .checkAddress:
+        model.failure = nil
+        path.wrappedValue = [.where]
+    case .reviewFingerprint:
+        // Trust is re-established from scratch: a key that changed must be
+        // looked at, not carried forward from the record that no longer fits.
+        model.resetServer()
+        model.failure = nil
+        path.wrappedValue = [.where]
+    case .checkCredential:
+        model.failure = nil
+        path.wrappedValue = [.where, .credential]
+    case .checkServer, .newCode, .signInToAgent, .signInToAccount, .updateMachine, .retry:
+        break
+    }
+}
+
+/// What failed, what it changed, and the one thing to do next.
+///
+/// The three parts are the contract. "What changed" is the half people ask for
+/// first and the half an error message never has: knowing that a failed
+/// connection touched nothing is what makes it safe to try again.
+///
+/// The technical detail is there and closed. It is selectable, because the
+/// person who wants it wants to paste it somewhere.
+struct SetupFailureBanner: View {
+    let failure: ClientSetupFailure
+    var onDismiss: (() -> Void)?
+    var onRecover: ((ClientSetupFailure.Action) -> Void)?
+
+    @State private var showingDetails = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Theme.danger)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text(failure.explanation)
+                        .font(Theme.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let changed = failure.changed {
+                        Text(changed)
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+                if let onDismiss {
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark").font(Theme.font(10))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss")
+                }
+            }
+            HStack(spacing: Theme.Space.s) {
+                if let onRecover {
+                    Button(failure.action.title, failure.action.icon) {
+                        onRecover(failure.action)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if failure.details != nil {
+                    Button(showingDetails ? "Hide details" : "Details", .more) {
+                        showingDetails.toggle()
+                    }
+                    .buttonStyle(.plain)
+                    .font(ClientType.caption)
+                }
+                Spacer(minLength: 0)
+            }
+            if showingDetails, let details = failure.details {
+                Text(details)
+                    .font(Theme.monoText(11))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -206,8 +324,9 @@ private struct WhereStep: View {
                 + "with your own key, and nothing about it goes through our servers.",
             number: 1,
             art: .find,
-            error: model.error,
-            onDismissError: { model.error = nil }
+            failure: model.failure,
+            onDismissError: { model.failure = nil },
+            onRecover: { recover($0, model: model, path: $path) }
         ) {
             if !library.hosts.isEmpty {
                 StepSection(title: "Saved servers") {
@@ -297,8 +416,9 @@ private struct CredentialStep: View {
                 + "and never written down.",
             number: 2,
             art: .unlock,
-            error: model.error,
-            onDismissError: { model.error = nil }
+            failure: model.failure,
+            onDismissError: { model.failure = nil },
+            onRecover: { recover($0, model: model, path: $path) }
         ) {
             if library.keys.isEmpty {
                 Text(
@@ -372,8 +492,9 @@ private struct FingerprintStep: View {
                 + "It identifies the machine that will receive your credentials.",
             number: 3,
             art: .identify,
-            error: model.error,
-            onDismissError: { model.error = nil }
+            failure: model.failure,
+            onDismissError: { model.failure = nil },
+            onRecover: { recover($0, model: model, path: $path) }
         ) {
             StepSection(title: "Fingerprint") {
                 if let fingerprint = model.fingerprint {
@@ -453,8 +574,9 @@ private struct CheckStep: View {
                 + "this screen.",
             number: 4,
             art: .inspect,
-            error: model.error,
-            onDismissError: { model.error = nil }
+            failure: model.failure,
+            onDismissError: { model.failure = nil },
+            onRecover: { recover($0, model: model, path: $path) }
         ) {
             if let check = model.check {
                 StepSection(title: "The machine") {
@@ -582,8 +704,9 @@ private struct InstallStep: View {
                         + "file on the server, and runs the installer. You watch the whole thing.",
                     number: 5,
                     art: .install,
-                    error: model.error,
-                    onDismissError: { model.error = nil }
+                    failure: model.failure,
+                    onDismissError: { model.failure = nil },
+                    onRecover: { recover($0, model: model, path: $path) }
                 ) {
                     StepSection(title: "What will happen") {
                         bullet("The CLI and the always-on host are installed.")
@@ -671,8 +794,9 @@ private struct FinishStep: View {
                 ? "The server signs in, joins the tunnel and answers. This takes a few seconds."
                 : "\(model.machineName) is on your account and this phone can reach it.",
             number: 6,
-            error: model.error,
-            onDismissError: { model.error = nil }
+            failure: model.failure,
+            onDismissError: { model.failure = nil },
+            onRecover: { recover($0, model: model, path: $path) }
         ) {
             if model.manualInstall, model.finished == nil {
                 StepSection(title: "Confirm the installed machine") {

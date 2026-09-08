@@ -27,7 +27,7 @@ struct ClientSetupAgentStep: View {
     @State private var profiles: [RemoteLaunchProfile] = []
     @State private var loading = true
     @State private var busyID: String?
-    @State private var error: String?
+    @State private var failure: ClientSetupFailure?
     @State private var supported: Bool?
     @State private var session: ClientTerminalSession?
 
@@ -46,8 +46,8 @@ struct ClientSetupAgentStep: View {
             subtitle: "The machine is yours now. The coding agent signs in to its own "
                 + "account, on the machine, once.",
             number: 7,
-            error: error,
-            onDismissError: { error = nil }
+            failure: failure,
+            onDismissError: { failure = nil }
         ) {
             if loading {
                 HStack(spacing: Theme.Space.s) {
@@ -113,7 +113,11 @@ struct ClientSetupAgentStep: View {
 
     private func load() async {
         guard let peer else {
-            error = "This machine's identity is missing. Close setup and open it again."
+            failure = ClientSetupFailure(
+                explanation: "This machine's identity is missing. Close setup and open it again.",
+                action: .retry,
+                details: nil
+            )
             loading = false
             return
         }
@@ -124,25 +128,25 @@ struct ClientSetupAgentStep: View {
         }
         guard supported == true else { return }
         do { profiles = try await ClientRemote.launcherCatalog(peer: peer) }
-        catch { self.error = error.localizedDescription }
+        catch { failure = ClientSetupFailure.from(error) }
     }
 
     private func install(_ profile: RemoteLaunchProfile) async {
         guard let peer, busyID == nil else { return }
         busyID = profile.id
         defer { busyID = nil }
-        error = nil
+        failure = nil
         do {
             _ = try await ClientRemote.launcherInstall(peer: peer, id: profile.id)
             profiles = try await ClientRemote.launcherCatalog(peer: peer)
-        } catch { self.error = error.localizedDescription }
+        } catch { failure = ClientSetupFailure.from(error) }
     }
 
     private func signIn(_ profile: RemoteLaunchProfile) async {
         guard let peer, busyID == nil else { return }
         busyID = profile.id
         defer { busyID = nil }
-        error = nil
+        failure = nil
         let dark = UITraitCollection.current.userInterfaceStyle == .dark
         let pending = ClientTerminalSession(
             peer: peer,
@@ -160,7 +164,7 @@ struct ClientSetupAgentStep: View {
         } catch {
             pending.stop()
             session = nil
-            self.error = error.localizedDescription
+            failure = ClientSetupFailure.from(error)
         }
     }
 }

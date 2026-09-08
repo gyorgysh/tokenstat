@@ -1776,7 +1776,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         other => match local_jobs(other, params) {
             Some(result) => result,
             None => match sessionless(other, params) {
-                Some(result) => result.map_err(DispatchError::from),
+                Some(result) => result,
                 None => Err(DispatchError::new(
                     "unknown_method",
                     format!("unknown method: {other}"),
@@ -2731,11 +2731,11 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
 /// keystroke debounce, and it is a pure function of the text the caller already
 /// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
 /// file colours correctly and so highlighting never reads the disk.
-fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
+fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
     if owner_only_method(method)
         && let Err(e) = crate::request_context::refuse_remote("account and update methods")
     {
-        return Some(Err(e));
+        return Some(Err(e.into()));
     }
     // Who is answering, without opening an archive to say it.
     //
@@ -2775,63 +2775,63 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         return Some(Ok(json!({ "ok": true })));
     }
     if let Some(answer) = crate::cloud_import::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     if let Some(answer) = crate::screen_viewer::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     #[cfg(feature = "local-host")]
     if let Some(answer) = crate::screen_runtime::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     if let Some(answer) = crate::screen_transfer::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     if let Some(answer) = crate::workspace_policy::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     if let Some(answer) = crate::provision::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     #[cfg(feature = "local-host")]
     if let Some(answer) = crate::fs_browse::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     #[cfg(feature = "local-host")]
     if let Some(answer) = crate::workspace_clone::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     if let Some(answer) = crate::screen_policy::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     if let Some(answer) = crate::ssh_client::call(method, params) {
         return Some(answer);
     }
     if let Some(answer) = crate::ssh_records::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     if let Some(answer) = crate::vault::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     // Identity and the peer list. Sessionless because the Machines screen is
     // where somebody goes when something is wrong, and an archive that will not
     // open must not take it away from them.
     if let Some(answer) = crate::machine::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
 
     if let Some(answer) = crate::host_policy::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     if let Some(answer) = crate::host_stats::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
 
     // Serving and reaching other machines. None of these read the archive, and
     // a call being forwarded to an idle machine must not queue behind a scan
     // running on this one.
     if let Some(answer) = crate::remote::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
 
     // The tasks board. Its own store behind its own lock, and it never touches
@@ -2842,189 +2842,193 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     // arrived.
     #[cfg(feature = "local-host")]
     if method.starts_with("todo.") {
-        return Some(local_job_call(method, params).map_err(|e| e.message));
+        return Some(local_job_call(method, params));
     }
 
     #[cfg(feature = "local-host")]
     if method.starts_with("chat.") {
-        return Some(chat_call(method, params).map_err(|e| e.message));
+        return Some(chat_call(method, params));
     }
 
     // Folders and terminals. Same reasoning: none of it reads the archive.
     #[cfg(feature = "local-host")]
     if let Some(answer) = folders(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     #[cfg(feature = "local-host")]
     if let Some(answer) = crate::pulls::call(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
     if let Some(answer) = terminals(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
 
     #[cfg(feature = "local-host")]
     if let Some(answer) = workflows(method, params) {
-        return Some(answer);
+        return Some(answer.map_err(DispatchError::from));
     }
 
     #[cfg(feature = "local-host")]
     if method == "local.models" {
         return Some(
             crate::local_models::discover()
-                .and_then(|providers| serde_json::to_value(providers).map_err(|e| e.to_string())),
+                .and_then(|providers| serde_json::to_value(providers).map_err(|e| e.to_string()))
+                .map_err(DispatchError::from),
         );
     }
 
-    Some(match method {
-        // Where a daemon on this machine would be listening.
-        //
-        // A client needs this before it has a connection, so it is answered by
-        // the in-process transport and is sessionless by necessity. It exists
-        // so no front end reimplements the data directory rules: a client that
-        // computed the path itself would silently look in the wrong place on
-        // the day those rules change, and report "no daemon" rather than a
-        // mismatch.
-        "host.socketPath" => crate::server::default_socket_path()
-            .map(|path| json!({"path": path.display().to_string()})),
+    Some(
+        (match method {
+            // Where a daemon on this machine would be listening.
+            //
+            // A client needs this before it has a connection, so it is answered by
+            // the in-process transport and is sessionless by necessity. It exists
+            // so no front end reimplements the data directory rules: a client that
+            // computed the path itself would silently look in the wrong place on
+            // the day those rules change, and report "no daemon" rather than a
+            // mismatch.
+            "host.socketPath" => crate::server::default_socket_path()
+                .map(|path| json!({"path": path.display().to_string()})),
 
-        "highlight" => highlight(params),
+            "highlight" => highlight(params),
 
-        "highlight.syntax" => serde_json::from_str::<HighlightParams>(params.trim())
-            .map_err(|e| e.to_string())
-            .and_then(|p| {
-                let Some(language) = p.language() else {
-                    return Ok(json!({"language": Value::Null}));
-                };
-                serde_json::to_value(json!({
-                    "language": language.id(),
-                    "syntax": language.syntax(),
-                }))
+            "highlight.syntax" => serde_json::from_str::<HighlightParams>(params.trim())
                 .map_err(|e| e.to_string())
-            }),
+                .and_then(|p| {
+                    let Some(language) = p.language() else {
+                        return Ok(json!({"language": Value::Null}));
+                    };
+                    serde_json::to_value(json!({
+                        "language": language.id(),
+                        "syntax": language.syntax(),
+                    }))
+                    .map_err(|e| e.to_string())
+                }),
 
-        // The app only asks whether a release exists. Applying an update to an
-        // installed application needs its signed installer and is deliberately
-        // left to the release updater, not the daemon process.
-        "app.updateCheck" => tokenstat_sync::check_latest()
-            .map(|check| {
-                json!({
-                    "current": check.current,
-                    "latest": check.latest,
-                    "newer": check.newer,
-                    "htmlUrl": check.html_url,
-                    // The disk image itself, so the app can offer the download
-                    // rather than the release page it is one click inside.
-                    "dmgUrl": check.app_dmg_url,
-                    // Windows desktop zip. Distinct from the CLI's
-                    // target-triple zip. Unsigned preview builds skip
-                    // Authenticode in the app, the way a local Mac build
-                    // skips Developer ID.
-                    "winZipUrl": check.app_win_url,
-                    "winZipName": check.app_win_name,
+            // The app only asks whether a release exists. Applying an update to an
+            // installed application needs its signed installer and is deliberately
+            // left to the release updater, not the daemon process.
+            "app.updateCheck" => tokenstat_sync::check_latest()
+                .map(|check| {
+                    json!({
+                        "current": check.current,
+                        "latest": check.latest,
+                        "newer": check.newer,
+                        "htmlUrl": check.html_url,
+                        // The disk image itself, so the app can offer the download
+                        // rather than the release page it is one click inside.
+                        "dmgUrl": check.app_dmg_url,
+                        // Windows desktop zip. Distinct from the CLI's
+                        // target-triple zip. Unsigned preview builds skip
+                        // Authenticode in the app, the way a local Mac build
+                        // skips Developer ID.
+                        "winZipUrl": check.app_win_url,
+                        "winZipName": check.app_win_name,
+                    })
                 })
-            })
-            .map_err(|e| e.to_string()),
+                .map_err(|e| e.to_string()),
 
-        // Fetch the disk image and prove it is the one the release published.
-        //
-        // Stops at a verified file on disk. Mounting it, checking who signed it
-        // and replacing the application are the app's, because those need
-        // Apple's own tools and knowledge of where the running bundle lives,
-        // neither of which a daemon should be guessing at.
-        "app.updateDownload" => tokenstat_sync::download_app_image()
-            .map(|path| json!({"path": path.display().to_string()}))
-            .map_err(|e| e.to_string()),
+            // Fetch the disk image and prove it is the one the release published.
+            //
+            // Stops at a verified file on disk. Mounting it, checking who signed it
+            // and replacing the application are the app's, because those need
+            // Apple's own tools and knowledge of where the running bundle lives,
+            // neither of which a daemon should be guessing at.
+            "app.updateDownload" => tokenstat_sync::download_app_image()
+                .map(|path| json!({"path": path.display().to_string()}))
+                .map_err(|e| e.to_string()),
 
-        // Same contract as `app.updateDownload`, for the Windows zip.
-        "app.updateDownloadWin" => tokenstat_sync::download_windows_app_archive()
-            .map(|path| json!({"path": path.display().to_string()}))
-            .map_err(|e| e.to_string()),
+            // Same contract as `app.updateDownload`, for the Windows zip.
+            "app.updateDownloadWin" => tokenstat_sync::download_windows_app_archive()
+                .map(|path| json!({"path": path.display().to_string()}))
+                .map_err(|e| e.to_string()),
 
-        "sync.scheduleStatus" => sync_schedule_status(),
+            "sync.scheduleStatus" => sync_schedule_status(),
 
-        // What each vendor says is left of its plan. Not derived from the
-        // archive: these are the vendor's own numbers about a quota, and a
-        // percentage we worked out ourselves would be a guess wearing a
-        // number's clothes.
-        //
-        // Codex reads off the disk and is instant. The other providers make a
-        // request, so this is a refresh rather than something to poll.
-        //
-        // Sessionless, and that is the important part. Five vendor requests
-        // with timeouts measured in tens of seconds used to run while holding
-        // the session, so one unreachable vendor froze reports, the workspace
-        // list and every other screen for as long as it took to give up. None
-        // of this reads the archive.
-        "usage.limits" => Ok(usage_limits()),
+            // What each vendor says is left of its plan. Not derived from the
+            // archive: these are the vendor's own numbers about a quota, and a
+            // percentage we worked out ourselves would be a guess wearing a
+            // number's clothes.
+            //
+            // Codex reads off the disk and is instant. The other providers make a
+            // request, so this is a refresh rather than something to poll.
+            //
+            // Sessionless, and that is the important part. Five vendor requests
+            // with timeouts measured in tens of seconds used to run while holding
+            // the session, so one unreachable vendor froze reports, the workspace
+            // list and every other screen for as long as it took to give up. None
+            // of this reads the archive.
+            "usage.limits" => Ok(usage_limits()),
 
-        // Call a device on this account something, from any front end. The
-        // label lives on the account row rather than on the machine, which is
-        // what lets this app name a headless server it will never log into.
-        // A code for a machine that is being set up, minted by the device
-        // doing the setting up.
-        //
-        // Owner-only, like every other account method: a peer must never be
-        // able to make this device mint a credential for a machine it chose.
-        // The code is returned once and never stored, because until it is
-        // redeemed it is the whole credential.
-        "account.pairingCode" => match tokenstat_sync::mint_pairing_code(None) {
-            Ok(minted) => Ok(json!({"code": minted.code, "expiresIn": minted.expires_in})),
-            Err(error) => Err(error.to_string()),
-        },
+            // Call a device on this account something, from any front end. The
+            // label lives on the account row rather than on the machine, which is
+            // what lets this app name a headless server it will never log into.
+            // A code for a machine that is being set up, minted by the device
+            // doing the setting up.
+            //
+            // Owner-only, like every other account method: a peer must never be
+            // able to make this device mint a credential for a machine it chose.
+            // The code is returned once and never stored, because until it is
+            // redeemed it is the whole credential.
+            "account.pairingCode" => match tokenstat_sync::mint_pairing_code(None) {
+                Ok(minted) => Ok(json!({"code": minted.code, "expiresIn": minted.expires_in})),
+                Err(error) => Err(error.to_string()),
+            },
 
-        "account.renameMachine" => {
-            #[derive(Deserialize)]
-            struct RenameParams {
-                id: String,
-                #[serde(default)]
-                name: String,
+            "account.renameMachine" => {
+                #[derive(Deserialize)]
+                struct RenameParams {
+                    id: String,
+                    #[serde(default)]
+                    name: String,
+                }
+                let p: RenameParams = match serde_json::from_str(params.trim()) {
+                    Ok(p) => p,
+                    Err(e) => return Some(Err(e.to_string().into())),
+                };
+                if let Err(e) = tokenstat_sync::profile::rename_machine(None, &p.id, &p.name) {
+                    return Some(Err(e.to_string().into()));
+                }
+                crate::account_activity::invalidate();
+                Ok(json!({"renamed": true, "id": p.id, "name": p.name.trim()}))
             }
-            let p: RenameParams = match serde_json::from_str(params.trim()) {
-                Ok(p) => p,
-                Err(e) => return Some(Err(e.to_string())),
-            };
-            if let Err(e) = tokenstat_sync::profile::rename_machine(None, &p.id, &p.name) {
-                return Some(Err(e.to_string()));
-            }
-            crate::account_activity::invalidate();
-            Ok(json!({"renamed": true, "id": p.id, "name": p.name.trim()}))
-        }
 
-        // Say what this computer is, again.
-        //
-        // The record is published at login and never retried, so one failed
-        // call there left the machine unknown to the account and every call
-        // that needs a device (the vault, above all) refused from then on. The
-        // vault heals this by itself now; this is the button for a person who
-        // has been told their computer is not on their account and wants to do
-        // something about it.
-        "account.registerMachine" => {
-            if let Err(e) = tokenstat_sync::profile::publish_machine_profile(None) {
-                return Some(Err(e.to_string()));
+            // Say what this computer is, again.
+            //
+            // The record is published at login and never retried, so one failed
+            // call there left the machine unknown to the account and every call
+            // that needs a device (the vault, above all) refused from then on. The
+            // vault heals this by itself now; this is the button for a person who
+            // has been told their computer is not on their account and wants to do
+            // something about it.
+            "account.registerMachine" => {
+                if let Err(e) = tokenstat_sync::profile::publish_machine_profile(None) {
+                    return Some(Err(e.to_string().into()));
+                }
+                crate::account_activity::invalidate();
+                Ok(json!({"registered": true}))
             }
-            crate::account_activity::invalidate();
-            Ok(json!({"registered": true}))
-        }
 
-        "account.unlinkMachine" => {
-            #[derive(Deserialize)]
-            struct UnlinkParams {
-                id: String,
+            "account.unlinkMachine" => {
+                #[derive(Deserialize)]
+                struct UnlinkParams {
+                    id: String,
+                }
+                let p: UnlinkParams = match serde_json::from_str(params.trim()) {
+                    Ok(p) => p,
+                    Err(e) => return Some(Err(e.to_string().into())),
+                };
+                if let Err(e) = tokenstat_sync::profile::unlink_machine(None, &p.id) {
+                    return Some(Err(e.to_string().into()));
+                }
+                crate::account_activity::invalidate();
+                Ok(json!({"removed": true}))
             }
-            let p: UnlinkParams = match serde_json::from_str(params.trim()) {
-                Ok(p) => p,
-                Err(e) => return Some(Err(e.to_string())),
-            };
-            if let Err(e) = tokenstat_sync::profile::unlink_machine(None, &p.id) {
-                return Some(Err(e.to_string()));
-            }
-            crate::account_activity::invalidate();
-            Ok(json!({"removed": true}))
-        }
 
-        _ => return None,
-    })
+            _ => return None,
+        })
+        .map_err(DispatchError::from),
+    )
 }
 
 /// Terminals, agent launches, and the streams and proxies that carry them.
@@ -3907,7 +3911,7 @@ fn highlight(params: &str) -> Result<Value, String> {
 pub fn call_sessionless(method: &str, params: &str) -> Option<String> {
     sessionless(method, params).map(|result| match result {
         Ok(v) => ok(v),
-        Err(e) => err("call_failed", e),
+        Err(e) => err(&e.code, e.message),
     })
 }
 

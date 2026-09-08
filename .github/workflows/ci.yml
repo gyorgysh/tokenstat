@@ -150,6 +150,20 @@ jobs:
       - name: Every bridge model spells its ids the way the host does
         run: bash scripts/check-bridge-keys.sh
 
+  # The client's state, without a simulator. These are plain executables that
+  # compile a handful of real sources with their own stubs, so they run in
+  # seconds and catch the class of bug an Xcode build cannot see: a draft that
+  # would resume into the wrong account, or a failure that sends somebody to
+  # the wrong screen. macOS because they need swiftc.
+  swift-tests:
+    name: swift state tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run the standalone client tests
+        run: bash scripts/run-swift-tests.sh
+
   test:
     name: test ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

@@ -66,9 +66,18 @@ final class ClientSetupModel {
 
     private let coordinator = ClientSetupCoordinator()
     var working: Bool { coordinator.working }
+    var failure: ClientSetupFailure? {
+        get { coordinator.failure }
+        set { coordinator.failure = newValue }
+    }
+    /// The explanation alone, for the screens that only print one.
     var error: String? {
-        get { coordinator.error }
-        set { coordinator.error = newValue }
+        get { coordinator.failure?.explanation }
+        set {
+            coordinator.failure = newValue.map {
+                ClientSetupFailure(explanation: $0, action: .retry, details: nil)
+            }
+        }
     }
     var savedDraft: ClientSetupDraft? { coordinator.savedDraft }
     private(set) var prepared = false
@@ -99,7 +108,7 @@ final class ClientSetupModel {
             prepared = true
         } catch {
             guard !Task.isCancelled else { return }
-            self.error = Self.readable(error)
+            self.failure = ClientSetupFailure.from(error)
         }
     }
 
@@ -440,33 +449,15 @@ final class ClientSetupModel {
 
     /// A message about this machine, rather than about the protocol.
     ///
-    /// The helper this app talks to is replaced whenever the app is, so an
-    /// `unknown method` here means a development build against an older
-    /// library. Saying so beats repeating a method name at somebody, which is
-    /// the rule the whole feature gate exists for.
+    /// One classification, shared with the screens that show a recovery
+    /// action: see `ClientSetupFailure`. This is the shape for the places that
+    /// have room for a sentence and nothing else.
     static func readable(_ error: Error) -> String {
-        let message = error.localizedDescription
-        let lower = message.lowercased()
-        if lower.contains("unknown method") {
-            return "This app is running against an older helper, which does not know how to "
-                + "do that yet. Reinstall tokenstat and try again."
-        }
-        if lower.contains("not logged in") {
-            // The wizard is behind the sign-in, so this is only reachable when
-            // a token was revoked mid-flow. Telling a phone to run a CLI
-            // command, which is what the shared message says, is not an answer
-            // anybody holding a phone can act on.
-            return "This phone is signed out. Sign in again, then set the machine up."
-        }
-        return message
+        ClientSetupFailure.from(error).explanation
     }
 
     private func run(_ body: @escaping () async throws -> Void) async {
-        await coordinator.run {
-            do { try await body() }
-            catch is CancellationError { throw CancellationError() }
-            catch { throw BridgeError.core(code: "setup_failed", message: Self.readable(error)) }
-        }
+        await coordinator.run { try await body() }
     }
 }
 

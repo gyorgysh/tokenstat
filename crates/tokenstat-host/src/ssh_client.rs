@@ -11,6 +11,8 @@ use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{ChannelMsg, Disconnect};
 use serde::Deserialize;
 use serde_json::{Value, json};
+
+use crate::error::DispatchError;
 use tokio::sync::mpsc;
 
 const MAX_BUFFER: usize = 4 * 1024 * 1024;
@@ -254,7 +256,7 @@ fn default_cols() -> u32 {
     80
 }
 
-pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
+pub fn call(method: &str, params: &str) -> Option<Result<Value, crate::error::DispatchError>> {
     if !method.starts_with("ssh.session.")
         && !method.starts_with("ssh.provision.")
         && method != "ssh.host.probe"
@@ -267,7 +269,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     })())
 }
 
-fn call_inner(method: &str, params: &str) -> Result<Value, String> {
+fn call_inner(method: &str, params: &str) -> Result<Value, crate::error::DispatchError> {
     match method {
         "ssh.host.probe" => {
             let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
@@ -277,7 +279,10 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         "ssh.session.open" => {
             let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
             if p.host_keys.is_empty() {
-                return Err("Confirm this server's fingerprint before connecting.".into());
+                return Err(DispatchError::new(
+                    crate::error::SSH_HOST_KEY_UNVERIFIED,
+                    "Confirm this server's fingerprint before connecting.",
+                ));
             }
             crate::ssh_records::validate_initial_directory(&p.initial_directory)?;
             let id = new_id()?;
@@ -324,7 +329,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             // Oldest first, so a list does not reshuffle itself between two
             // calls the way a hash map's order does.
             rows.sort_by_key(|row| row["openedMs"].as_i64().unwrap_or_default());
-            serde_json::to_value(rows).map_err(|e| e.to_string())
+            serde_json::to_value(rows).map_err(|e| e.to_string().into())
         }
         "ssh.session.read" => {
             let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
@@ -343,8 +348,10 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
                 "dropped": p.offset < output.base, "closed": output.closed, "error": output.error}),
             )
         }
-        "ssh.session.write" => command(params, |p| Command::Write(p.data)),
-        "ssh.session.resize" => command(params, |p| Command::Resize(p.cols.max(1), p.rows.max(1))),
+        "ssh.session.write" => command(params, |p| Command::Write(p.data)).map_err(Into::into),
+        "ssh.session.resize" => {
+            command(params, |p| Command::Resize(p.cols.max(1), p.rows.max(1))).map_err(Into::into)
+        }
         // What to offer somebody part-way through a command. Two sources,
         // both of them things the person already has: commands they saved,
         // and the names the server itself reports in one directory.
@@ -447,7 +454,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
                 .await
                 .map_err(|_| "The server took too long to return its identity.".to_string())?
             })?;
-            crate::ssh_provision::parse_identity(&output)
+            crate::ssh_provision::parse_identity(&output).map_err(Into::into)
         }
         "ssh.provision.check" => {
             let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
@@ -494,7 +501,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         "ssh.provision.line" => {
             let p: crate::ssh_provision::LineParams =
                 serde_json::from_str(params).map_err(|e| e.to_string())?;
-            crate::ssh_provision::install_line(&p)
+            crate::ssh_provision::install_line(&p).map_err(Into::into)
         }
         "ssh.session.close" => {
             let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
@@ -505,7 +512,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
                 Ok(json!({"closed": false}))
             }
         }
-        _ => Err(format!("unknown method: {method}")),
+        _ => Err(format!("unknown method: {method}").into()),
     }
 }
 
@@ -633,10 +640,36 @@ async fn list_directory(
     ))
 }
 
+/// Why a dial failed, decided from what actually happened rather than from the
+/// words the transport chose.
+///
+/// A front end has to tell "check the address" from "look at the fingerprint",
+/// and matching on a library's English is a contract nobody agreed to. The two
+/// facts here are structural: whether the server ever offered a key, and
+/// whether that key is one this account already trusts.
+fn dial_failure(
+    offered: &Arc<Mutex<Option<String>>>,
+    allowed: &[String],
+    message: String,
+) -> DispatchError {
+    let seen = offered.lock().ok().and_then(|held| held.clone());
+    match seen {
+        // It spoke, and what it said is not what we trusted. The address is
+        // fine and the connection is the problem.
+        Some(fingerprint) if !allowed.is_empty() && !allowed.iter().any(|k| k == &fingerprint) => {
+            DispatchError::new(
+                crate::error::SSH_HOST_KEY_CHANGED,
+                "This server's identity has changed since it was trusted.                  Verify its fingerprint before connecting again.",
+            )
+        }
+        _ => DispatchError::new(crate::error::SSH_UNREACHABLE, message),
+    }
+}
+
 async fn connect(
     p: &OpenParams,
     probe: bool,
-) -> Result<(client::Handle<HostKeyCheck>, Arc<Mutex<Option<String>>>), String> {
+) -> Result<(client::Handle<HostKeyCheck>, Arc<Mutex<Option<String>>>), DispatchError> {
     if p.hostname.trim().is_empty() || p.username.trim().is_empty() {
         return Err("hostname and username are required".into());
     }
@@ -663,7 +696,7 @@ async fn connect(
     let Some(jump) = p.jump.as_deref() else {
         let handle = client::connect(config, (p.hostname.as_str(), p.port), handler)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| dial_failure(&offered, &p.host_keys, e.to_string()))?;
         return Ok((handle, offered));
     };
     // Through a jump host: authenticate there, ask it to open a TCP channel to
@@ -678,17 +711,22 @@ async fn connect(
         .into_stream();
     let handle = client::connect_stream(config, stream, handler)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| dial_failure(&offered, &p.host_keys, e.to_string()))?;
     Ok((handle, offered))
 }
 
 /// Connect to one host and authenticate it. Used for the jump host, where the
 /// session exists only to carry somebody else's.
-async fn authenticated_handle(p: &OpenParams) -> Result<client::Handle<HostKeyCheck>, String> {
+async fn authenticated_handle(
+    p: &OpenParams,
+) -> Result<client::Handle<HostKeyCheck>, DispatchError> {
     if p.host_keys.is_empty() {
-        return Err(format!(
-            "Confirm the fingerprint of {} before connecting through it.",
-            p.hostname
+        return Err(DispatchError::new(
+            crate::error::SSH_HOST_KEY_UNVERIFIED,
+            format!(
+                "Confirm the fingerprint of {} before connecting through it.",
+                p.hostname
+            ),
         ));
     }
     let (mut handle, _) = Box::pin(connect(p, false)).await?;
@@ -700,7 +738,10 @@ async fn authenticated_handle(p: &OpenParams) -> Result<client::Handle<HostKeyCh
         .await?
         .success()
     {
-        return Err(format!("{} refused the credential", p.hostname));
+        return Err(DispatchError::new(
+            crate::error::SSH_AUTH_REFUSED,
+            format!("{} refused the credential.", p.hostname),
+        ));
     }
     Ok(handle)
 }
@@ -710,12 +751,12 @@ async fn authenticate(
     handle: &mut client::Handle<HostKeyCheck>,
     username: &str,
     auth: &Auth,
-) -> Result<client::AuthResult, String> {
+) -> Result<client::AuthResult, DispatchError> {
     match auth {
         Auth::Password { password } => handle
             .authenticate_password(username, password.clone())
             .await
-            .map_err(|e| e.to_string()),
+            .map_err(|e| e.to_string().into()),
         Auth::PrivateKey { pem, passphrase } => {
             let key = russh::keys::decode_secret_key(pem, passphrase.as_deref())
                 .map_err(|e| e.to_string())?;
@@ -727,7 +768,7 @@ async fn authenticate(
             handle
                 .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string().into())
         }
         Auth::Agent { fingerprint } => authenticate_agent(handle, username, fingerprint).await,
     }
@@ -742,9 +783,12 @@ async fn provision_exec(
     p: OpenParams,
     command: String,
     stdin: Option<String>,
-) -> Result<String, String> {
+) -> Result<String, DispatchError> {
     if p.host_keys.is_empty() {
-        return Err("Confirm this server's fingerprint before connecting.".into());
+        return Err(DispatchError::new(
+            crate::error::SSH_HOST_KEY_UNVERIFIED,
+            "Confirm this server's fingerprint before connecting.",
+        ));
     }
     let (mut handle, _) = connect(&p, false).await?;
     let auth = p.auth.as_ref().ok_or("SSH authentication is required")?;
@@ -752,7 +796,10 @@ async fn provision_exec(
         .await?
         .success()
     {
-        return Err("SSH authentication was refused".into());
+        return Err(DispatchError::new(
+            crate::error::SSH_AUTH_REFUSED,
+            "This server refused the key or password. Check the credential and the user name.",
+        ));
     }
     let mut channel = handle
         .channel_open_session()
@@ -797,11 +844,12 @@ async fn provision_exec(
         Some(code) => Err(format!(
             "The machine refused that step (exit {code}). {}",
             text.trim()
-        )),
+        )
+        .into()),
     }
 }
 
-async fn probe(p: &OpenParams) -> Result<String, String> {
+async fn probe(p: &OpenParams) -> Result<String, DispatchError> {
     let (handle, offered) = connect(p, true).await?;
     let _ = handle
         .disconnect(Disconnect::ByApplication, "fingerprint checked", "en")
@@ -813,12 +861,15 @@ async fn probe(p: &OpenParams) -> Result<String, String> {
         .ok_or_else(|| "server offered no host key".into())
 }
 
-async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSession, String> {
+async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSession, DispatchError> {
     let (mut handle, _) = connect(&p, false).await?;
     let auth = p.auth.as_ref().ok_or("SSH authentication is required")?;
     let authenticated = authenticate(&mut handle, &p.username, auth).await?;
     if !authenticated.success() {
-        return Err("SSH authentication was refused".into());
+        return Err(DispatchError::new(
+            crate::error::SSH_AUTH_REFUSED,
+            "This server refused the key or password. Check the credential and the user name.",
+        ));
     }
     let mut channel = handle
         .channel_open_session()
@@ -910,7 +961,7 @@ async fn authenticate_agent(
     handle: &mut client::Handle<HostKeyCheck>,
     username: &str,
     fingerprint: &str,
-) -> Result<client::AuthResult, String> {
+) -> Result<client::AuthResult, DispatchError> {
     use russh::keys::agent::client::AgentClient;
     let mut agent = AgentClient::connect_env()
         .await
@@ -938,7 +989,7 @@ async fn authenticate_agent(
     handle
         .authenticate_publickey_with(username, key, hash, &mut agent)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string().into())
 }
 
 #[cfg(not(unix))]
@@ -946,7 +997,7 @@ async fn authenticate_agent(
     _handle: &mut client::Handle<HostKeyCheck>,
     _username: &str,
     _fingerprint: &str,
-) -> Result<client::AuthResult, String> {
+) -> Result<client::AuthResult, DispatchError> {
     Err("SSH agent authentication is not available on this platform".into())
 }
 
@@ -1043,7 +1094,7 @@ mod tests {
         )
         .expect("handled here")
         .expect_err("no such session");
-        assert!(refused.contains("no longer exists"), "{refused}");
+        assert!(refused.message.contains("no longer exists"), "{refused}");
     }
 
     #[test]
@@ -1052,7 +1103,7 @@ mod tests {
             let refused = call("ssh.session.suggest", r#"{"id":"ssh_x","fragment":"cd /"}"#)
                 .unwrap()
                 .expect_err("must refuse");
-            assert!(refused.contains("local-only"), "{refused}");
+            assert!(refused.message.contains("local-only"), "{refused}");
         });
     }
 
@@ -1065,7 +1116,7 @@ mod tests {
             )
             .unwrap()
             .expect_err("must refuse");
-            assert!(refused.contains("local-only"), "{refused}");
+            assert!(refused.message.contains("local-only"), "{refused}");
         });
     }
 
@@ -1091,7 +1142,10 @@ mod tests {
                 ("ssh.provision.identity", "{}"),
             ] {
                 let refused = call(method, params).unwrap().expect_err("must refuse");
-                assert!(refused.contains("local-only"), "{method}: {refused}");
+                assert!(
+                    refused.message.contains("local-only"),
+                    "{method}: {refused}"
+                );
             }
         });
     }
@@ -1109,6 +1163,42 @@ mod tests {
         )
         .unwrap()
         .expect_err("must refuse");
-        assert!(refused.contains("eight letters"), "{refused}");
+        assert!(refused.message.contains("eight letters"), "{refused}");
+    }
+
+    /// The recovery a person is offered comes from what happened, not from
+    /// how a library worded it. These two failures need opposite answers:
+    /// check the address, or look at the fingerprint.
+    #[test]
+    fn a_dial_that_never_saw_a_key_is_unreachable_and_one_that_did_is_not() {
+        let key = "SHA256:aaaa";
+        let nothing: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let unreachable = dial_failure(&nothing, &[key.to_string()], "timed out".into());
+        assert_eq!(unreachable.code, crate::error::SSH_UNREACHABLE);
+        assert!(unreachable.message.contains("timed out"));
+
+        let other = Arc::new(Mutex::new(Some("SHA256:bbbb".to_string())));
+        let changed = dial_failure(&other, &[key.to_string()], "rejected".into());
+        assert_eq!(changed.code, crate::error::SSH_HOST_KEY_CHANGED);
+        // The transport's own words are dropped here on purpose: "rejected"
+        // is not what a person needs to read about a changed identity.
+        assert!(changed.message.contains("fingerprint"));
+
+        let same = Arc::new(Mutex::new(Some(key.to_string())));
+        assert_eq!(
+            dial_failure(&same, &[key.to_string()], "dropped".into()).code,
+            crate::error::SSH_UNREACHABLE
+        );
+    }
+
+    /// A first connection has nothing to compare against, so a key it has
+    /// never seen is not a changed key.
+    #[test]
+    fn an_untrusted_server_is_not_reported_as_a_changed_identity() {
+        let offered = Arc::new(Mutex::new(Some("SHA256:cccc".to_string())));
+        assert_eq!(
+            dial_failure(&offered, &[], "refused".into()).code,
+            crate::error::SSH_UNREACHABLE
+        );
     }
 }

@@ -96,3 +96,181 @@ enum ClientSetupDraftError: Error, LocalizedError {
         }
     }
 }
+
+/// A failure somebody can act on, rather than a sentence they can only read.
+///
+/// Three things, every time: what failed, what changed if anything, and one
+/// concrete next action. The action is chosen from the host's error code, never
+/// from the words in the message: those are free to be reworded and one day
+/// translated, and a screen that branches on English breaks silently when
+/// either happens.
+///
+/// The raw message is kept beside the explanation rather than instead of it.
+/// Somebody debugging a server wants the transport's own words, and somebody
+/// setting one up does not.
+struct ClientSetupFailure: Equatable {
+    enum Action: Equatable {
+        case checkAddress
+        case reviewFingerprint
+        case checkCredential
+        case checkServer
+        case newCode
+        case signInToAgent
+        case signInToAccount
+        case updateMachine
+        case retry
+
+        var title: String {
+            switch self {
+            case .checkAddress: "Check the address"
+            case .reviewFingerprint: "Review the fingerprint"
+            case .checkCredential: "Check the credential"
+            case .checkServer: "Check the server"
+            case .newCode: "Get a new code"
+            case .signInToAgent: "Sign in"
+            case .signInToAccount: "Sign in"
+            case .updateMachine: "How to update"
+            case .retry: "Try again"
+            }
+        }
+
+        var icon: ActionIcon {
+            switch self {
+            case .checkAddress, .checkServer: .search
+            case .reviewFingerprint: .security
+            case .checkCredential: .token
+            case .newCode: .pair
+            case .signInToAgent, .signInToAccount: .signIn
+            case .updateMachine: .docs
+            case .retry: .refresh
+            }
+        }
+    }
+
+    var explanation: String
+    /// What happened to the server, when anything did. Silence here means
+    /// nothing on it was touched, which is the answer people want first.
+    var changed: String?
+    var action: Action
+    /// The words the machine used, kept for somebody who wants them.
+    var details: String?
+
+    /// Read a failure from whatever was thrown.
+    ///
+    /// Codes come from `tokenstat-host::error`. Anything unrecognised keeps
+    /// its own message and offers a retry, which is honest: an unknown failure
+    /// is not evidence that nothing can be done.
+    static func from(_ error: Error) -> ClientSetupFailure {
+        guard case let BridgeError.core(code, message) = error else {
+            return ClientSetupFailure(
+                explanation: error.localizedDescription, action: .retry, details: nil
+            )
+        }
+        switch code {
+        case "ssh_unreachable":
+            return ClientSetupFailure(
+                explanation: "We couldn't reach this server. Check its address, and that "
+                    + "it is running and accepting connections.",
+                action: .checkAddress,
+                details: message
+            )
+        case "ssh_host_key_changed":
+            return ClientSetupFailure(
+                explanation: "This server's identity has changed since it was trusted. "
+                    + "That can be a reinstall, or it can be the wrong machine answering. "
+                    + "Verify the fingerprint before connecting again.",
+                changed: "Nothing was sent to it.",
+                action: .reviewFingerprint,
+                details: message
+            )
+        case "ssh_host_key_unverified":
+            return ClientSetupFailure(
+                explanation: "This server's fingerprint has not been confirmed yet.",
+                action: .reviewFingerprint,
+                details: message
+            )
+        case "ssh_auth_refused":
+            return ClientSetupFailure(
+                explanation: "The server refused the key or password. Check the credential "
+                    + "and the user name you are connecting as.",
+                action: .checkCredential,
+                details: message
+            )
+        case "setup_pending":
+            return ClientSetupFailure(
+                explanation: "This machine has not appeared on your account yet.",
+                changed: "The installer may still be running on the server.",
+                action: .checkServer,
+                details: message
+            )
+        case "identity_mismatch":
+            return ClientSetupFailure(
+                explanation: "The machine answered with a different identity than the one "
+                    + "this setup installed. Reconnect and verify the server.",
+                action: .reviewFingerprint,
+                details: message
+            )
+        case "access_required":
+            return ClientSetupFailure(
+                explanation: "This machine is on your account, but this device is not "
+                    + "allowed on it yet.",
+                changed: "The server is installed and signed in.",
+                action: .checkServer,
+                details: message
+            )
+        case "pairing_expired", "code_expired":
+            return ClientSetupFailure(
+                explanation: "This pairing code has expired.",
+                action: .newCode,
+                details: message
+            )
+        case "identity_required":
+            return ClientSetupFailure(
+                explanation: "Paste the full machine key the installer printed, so setup "
+                    + "finishes on the machine you installed rather than one with the "
+                    + "same name.",
+                action: .retry,
+                details: message
+            )
+        case "account_changed", "signed_out", "auth":
+            return ClientSetupFailure(
+                explanation: "This device is signed out of the account that started this "
+                    + "setup. Sign in again, then continue.",
+                action: .signInToAccount,
+                details: message
+            )
+        case "unknown_method":
+            return ClientSetupFailure(
+                explanation: "This machine is running an older tokenstat, which does not "
+                    + "know how to finish setup. Update it there to continue.",
+                action: .updateMachine,
+                details: message
+            )
+        default:
+            // No code this app knows. Two shapes are still worth naming,
+            // because both used to arrive as a sentence nobody could act on.
+            let lower = message.lowercased()
+            if lower.contains("unknown method") {
+                return ClientSetupFailure(
+                    explanation: "This app is running against an older helper, which does not "
+                        + "know how to do that yet. Reinstall tokenstat and try again.",
+                    action: .updateMachine,
+                    details: message
+                )
+            }
+            if lower.contains("not logged in") {
+                // The wizard is behind the sign-in, so this is only reachable
+                // when a token was revoked mid-flow. The shared message tells
+                // somebody to run a CLI command, which is not an answer a
+                // person holding a phone can act on.
+                return ClientSetupFailure(
+                    explanation: "This phone is signed out. Sign in again, then set the "
+                        + "machine up.",
+                    action: .signInToAccount,
+                    details: message
+                )
+            }
+            return ClientSetupFailure(explanation: message, action: .retry, details: nil)
+        }
+    }
+}

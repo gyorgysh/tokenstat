@@ -35,6 +35,10 @@ ALLOWED = {
     # Set by the app after the daemon answers, to record which peer a folder
     # came from. The daemon has no such field and never sends one.
     ("WorkspaceFolder", "machineID"),
+    # The setup draft is written and read by this app alone. It never crosses
+    # the bridge, and its host id is a row in the local SSH library rather than
+    # anything a daemon knows about.
+    ("ClientSetupDraft", "hostID"),
 }
 
 DECL = re.compile(

@@ -9,7 +9,8 @@ import Observation
 final class ClientSetupCoordinator {
     private(set) var savedDraft: ClientSetupDraft?
     private(set) var working = false
-    var error: String?
+    /// What went wrong, and the one thing to do about it.
+    var failure: ClientSetupFailure?
 
     @ObservationIgnored private let store: ClientSetupStore
     @ObservationIgnored private var scope: ClientSetupScope?
@@ -22,9 +23,16 @@ final class ClientSetupCoordinator {
         cancel()
         self.scope = scope
         savedDraft = nil
-        error = nil
+        failure = nil
         do { savedDraft = try store.load(scope: scope) }
-        catch { self.error = "Saved setup could not be opened. You can start a new setup; nothing on the server will be removed." }
+        catch {
+            failure = ClientSetupFailure(
+                explanation: "The saved setup could not be opened.",
+                changed: "Nothing on the server was removed, and nothing will be.",
+                action: .retry,
+                details: error.localizedDescription
+            )
+        }
     }
 
     func save(_ draft: ClientSetupDraft) throws {
@@ -38,14 +46,14 @@ final class ClientSetupCoordinator {
         cancel()
         if let scope { try store.remove(scope: scope) }
         savedDraft = nil
-        error = nil
+        failure = nil
     }
 
     func clearAccount() {
         cancel()
         scope = nil
         savedDraft = nil
-        error = nil
+        failure = nil
     }
 
     func cancel() {
@@ -59,7 +67,7 @@ final class ClientSetupCoordinator {
         guard !working else { return }
         let id = UUID()
         generation = id
-        error = nil
+        failure = nil
         working = true
         let current = Task { [weak self] in
             do {
@@ -67,7 +75,11 @@ final class ClientSetupCoordinator {
                 try await operation()
             } catch {
                 guard let self, !Task.isCancelled, self.generation == id else { return }
-                self.error = error.localizedDescription
+                // A cancelled step is not a failure and has nothing to say.
+                // It still falls through, so the screen stops saying "working".
+                if !(error is CancellationError) {
+                    self.failure = ClientSetupFailure.from(error)
+                }
             }
             guard let self, !Task.isCancelled, self.generation == id else { return }
             self.working = false
