@@ -653,7 +653,10 @@ struct TerminalPane: View {
         // file out of the way.
         workspaces.showTerminal(in: folder.id)
         let grid = spawnGrid
-        let args = workspaces.bypassPermissions(for: folder.id)
+        // Bypass is a shell-terminal switch. An agent harness launched with
+        // its bypass flags stops asking for permission, which a remembered
+        // toggle must never do on its own.
+        let args = workspaces.bypassPermissions(for: folder.id) && profile.harnessID == nil
             ? profile.args + profile.bypassArgs
             : profile.args
         // The strip's own menu honours the model selection too. It used to
@@ -1531,7 +1534,7 @@ private struct LaunchSurface: View {
             onBegin: {
                 guard launching == nil else { return }
                 launching = profile.id
-                let args = workspaces.bypassPermissions(for: folder.id)
+                let args = workspaces.bypassPermissions(for: folder.id) && profile.harnessID == nil
                     ? profile.args + profile.bypassArgs
                     : profile.args
                 let session = terminals.begin(

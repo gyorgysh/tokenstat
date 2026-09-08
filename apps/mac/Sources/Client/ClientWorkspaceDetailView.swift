@@ -45,9 +45,6 @@ struct ClientWorkspaceSessionsView: View {
     /// False until the first `pty.list` and catalog answer land. An empty list
     /// and an unasked question look identical and mean opposite things.
     @State private var loaded = false
-    /// Fresh git state for the branch chip. The folder this screen was
-    /// pushed with is a seed, and a checkout on this surface has to show.
-    @State private var liveFolder: WorkspaceFolder?
     /// Whether the next launch from this phone skips permission prompts.
     /// Remembered per folder on this device, same key the Mac uses.
     @State private var bypassOn = false
@@ -90,7 +87,7 @@ struct ClientWorkspaceSessionsView: View {
                     }
                 }
 
-                sessionChrome
+                bypassCard
                 openCard
                 launchCard
                 sessionsCard
@@ -111,7 +108,6 @@ struct ClientWorkspaceSessionsView: View {
         }
         .onChange(of: folder.id, initial: true) {
             bypassOn = WorkspacePreference.bypassPermissions(for: folder.id)
-            liveFolder = nil
         }
         .task(id: workspaceID) {
             // Keyed on the folder: the sidebar can swap folders under this
@@ -218,27 +214,8 @@ struct ClientWorkspaceSessionsView: View {
         .sheet(isPresented: $showPort) { browserPortSheet }
     }
 
-    private var git: GitStatus? { (liveFolder ?? folder).git }
-
-    /// Branch and bypass, the two controls the Mac keeps next to Launch.
-    /// A launch from this phone has to see the same switches or the next
-    /// agent starts on the wrong branch, or stops to ask for permission
-    /// the Mac would have skipped.
-    @ViewBuilder
-    private var sessionChrome: some View {
-        VStack(spacing: Theme.Space.s) {
-            if let git, git.isRepo {
-                ClientBranchCard(
-                    peer: peer,
-                    workspaceID: workspaceID,
-                    git: git,
-                    onChanged: { await reload() }
-                )
-            }
-            bypassCard
-        }
-    }
-
+    /// Bypass, the switch the Mac keeps next to Launch. Branch lives on the
+    /// folder now, one selector per folder instead of one per section.
     private var bypassCard: some View {
         HStack(spacing: Theme.Space.s) {
             ZStack {
@@ -276,8 +253,8 @@ struct ClientWorkspaceSessionsView: View {
         .accessibilityValue(bypassOn ? "On" : "Off")
         .accessibilityHint(
             bypassOn
-                ? "Agents launched here run without asking for permission. Remembered for this folder."
-                : "Agents launched here ask before acting. Turn on to skip permission prompts."
+                ? "Shell terminals launched here run without asking for permission. Agents still ask. Remembered for this folder."
+                : "Launches here ask before acting. Turn on to skip permission prompts on shell terminals."
         )
     }
 
@@ -596,9 +573,6 @@ struct ClientWorkspaceSessionsView: View {
             }
             catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
             adoptHostHidden()
-            if let status = try? await ClientRemote.status(peer: peer, workspace: workspaceID) {
-                liveFolder = status
-            }
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
@@ -681,7 +655,10 @@ struct ClientWorkspaceSessionsView: View {
         )
         openSession = pending
         do {
-            let args = bypassOn
+            // Bypass is a shell-terminal switch. An agent harness launched
+            // with its bypass flags stops asking for permission, which a
+            // remembered toggle must never do on its own.
+            let args = (bypassOn && profile.harnessId == nil)
                 ? profile.args + profile.bypassArgs
                 : profile.args
             let info = try await ClientRemote.ptySpawn(

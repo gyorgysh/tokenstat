@@ -247,8 +247,8 @@ struct BypassPermissionsControl: View {
         .buttonStyle(.plain)
         .help(
             isOn
-                ? "Agents launched here run without asking for permission. Remembered for this workspace. Only agents with a bypass flag are affected."
-                : "Agents launched here ask before acting. Turn on to run them without permission prompts."
+                ? "Shell terminals launched here run without asking for permission. Agents still ask. Remembered for this workspace."
+                : "Launches here ask before acting. Turn on to skip permission prompts on shell terminals."
         )
     }
 }

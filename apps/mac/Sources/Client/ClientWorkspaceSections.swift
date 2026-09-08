@@ -121,11 +121,12 @@ struct ClientWorkspaceDetailView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .truncationMode(.middle)
-            if let subtitle = current.subtitle {
-                Text(subtitle)
-                    .font(ClientType.caption)
-                    .foregroundStyle(Theme.accent)
-            }
+            ClientFolderBranchRow(
+                peer: peer,
+                workspaceID: workspaceID,
+                folder: current,
+                onChanged: { await reload() }
+            )
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -435,14 +436,6 @@ struct ClientWorkspaceChangesView: View {
                         Task { await load() }
                     }
                 }
-                if let git = current.git, git.isRepo {
-                    ClientBranchCard(
-                        peer: peer,
-                        workspaceID: workspaceID,
-                        git: git,
-                        onChanged: { await load() }
-                    )
-                }
                 if files.isEmpty {
                     ClientSectionEmpty(
                         text: "Nothing to commit",
@@ -489,49 +482,38 @@ struct ClientWorkspaceChangesView: View {
 
 /// The branch this folder is on, and the way to switch it.
 ///
-/// Same control the Mac workspace header carries. The phone has no header
-/// chip, so Sessions and Changes both draw this card.
-struct ClientBranchCard: View {
+/// One selector per folder, drawn in the folder header: the same line that
+/// used to show the branch as plain text. A plain folder keeps its plain
+/// line. Same control the Mac workspace header carries.
+struct ClientFolderBranchRow: View {
     let peer: String
     let workspaceID: String
-    let git: GitStatus
+    let folder: WorkspaceFolder
     let onChanged: () async -> Void
 
     var body: some View {
-        BranchPickerPresentation(
-            workspaceID: "remote:\(peer):\(workspaceID)",
-            currentBranch: git.branch,
-            onChanged: onChanged
-        ) {
-            HStack(spacing: Theme.Space.s) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: Theme.Space.xs)
-                        .fill(Theme.accent.opacity(0.12))
-                        .frame(width: 32, height: 32)
+        if let git = folder.git, git.isRepo {
+            BranchPickerPresentation(
+                workspaceID: "remote:\(peer):\(workspaceID)",
+                currentBranch: git.branch,
+                onChanged: onChanged
+            ) {
+                HStack(spacing: Theme.Space.xs) {
                     Image(systemName: "arrow.triangle.branch")
-                        .foregroundStyle(Theme.accent)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Branch").font(ClientType.caption).foregroundStyle(.secondary)
-                    Text(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")
-                        .font(ClientType.label.weight(.medium))
+                    Text(folder.subtitle ?? "detached")
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer(minLength: 0)
-                if git.ahead > 0 {
-                    Text("⇡\(git.ahead)").font(ClientType.rowFigure).foregroundStyle(Theme.accent)
-                }
-                if git.behind > 0 {
-                    Text("⇣\(git.behind)").font(ClientType.rowFigure).foregroundStyle(Theme.warning)
-                }
-                Image(systemName: "chevron.right")
-                    .font(ClientType.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                .font(ClientType.caption)
+                .foregroundStyle(Theme.accent)
             }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .cardSurface()
+        } else if let subtitle = folder.subtitle {
+            Text(subtitle)
+                .font(ClientType.caption)
+                .foregroundStyle(Theme.accent)
         }
     }
 }
