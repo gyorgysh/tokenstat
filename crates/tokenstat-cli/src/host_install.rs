@@ -8,45 +8,173 @@ use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command;
 
+use crate::host_service::Service;
 use anyhow::{Context, Result, bail};
-use serde_json::json;
+use serde_json::{Value, json};
 
-pub fn run(
-    install: bool,
-    binary: Option<&Path>,
-    name: Option<&str>,
-    json_output: bool,
-) -> Result<()> {
+pub struct Request<'a> {
+    pub binary: Option<&'a Path>,
+    pub name: Option<&'a str>,
+    pub code: Option<&'a crate::host_enroll::PairingCode>,
+    pub agents: &'a [String],
+}
+
+pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Result<()> {
+    let Request {
+        binary,
+        name,
+        code,
+        agents,
+    } = *request;
     let binary = resolve_binary(binary)?;
-    let service = service_file(&binary)?;
-    if !install {
-        if json_output {
-            println!("{}", json!({"binary": binary, "service": service}));
-        } else {
-            println!(
-                "Remote host preview\n  binary: {}\n  service: {}\n\nRun `tokenstat host --install` to activate it.",
-                binary.display(),
-                service.display()
-            );
-        }
-        return Ok(());
-    }
     if let Some(name) = name {
-        crate::render::device(None, Some(name), false, json_output)?;
+        tokenstat_identity::set_machine_label(name).map_err(anyhow::Error::msg)?;
     }
-    install_service(&binary, &service)?;
-    let identity =
-        tokenstat_identity::MachineIdentity::load_or_create().map_err(anyhow::Error::msg)?;
-    let result = json!({"installed": true, "service": service, "machineKey": identity.public_key_hex(), "next": "Open Devices and pair this host"});
-    if json_output {
-        println!("{result}");
-    } else {
-        println!(
-            "Remote host installed.\n\nMachine key: {}\nOpen Devices on your other computer and add this host.",
-            identity.public_key_hex()
+    let account = code
+        .map(crate::host_enroll::PairingCode::redeem)
+        .transpose()?;
+    install_service(&binary, service)?;
+    let socket = tokenstat_paths::data_dir()
+        .context("No data directory is available")?
+        .join("host.sock");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let protocol = loop {
+        match crate::host_rpc::call(&socket, "protocol", json!({})) {
+            Ok(value) => break value,
+            Err(error) if std::time::Instant::now() >= deadline => return Err(error).context("The service was installed but has not become ready. Check `tokenstat host logs`, then run the installer again."),
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(200)),
+        }
+    };
+    if protocol["coreVersion"].as_str() != Some(env!("CARGO_PKG_VERSION")) {
+        bail!(
+            "The service started a different host version. Check `tokenstat host status` and the service binary path before pairing."
         );
     }
+    crate::host_rpc::call(&socket, "host.setPolicy", json!({"alwaysOn":true}))?;
+    crate::host_rpc::call(&socket, "remote.serve", json!({"tunnel":true}))?;
+    if let Some(name) = name {
+        crate::host_rpc::call(&socket, "machine.rename", json!({"name":name}))?;
+    }
+    let identity = crate::host_rpc::call(&socket, "machine.identity", json!({}))?;
+    let installed_agents = install_agents(&socket, agents, json_output)?;
+    let result = json!({
+        "installed": true,
+        "service": service.description(),
+        "account": account,
+        "machineKey": identity["key"],
+        "protocolVersion": protocol["protocolVersion"],
+        "hostVersion": protocol["coreVersion"],
+        "alwaysOn": true,
+        "tunnelEnabled": true,
+        "agents": installed_agents,
+    });
+    if json_output {
+        println!("{result}");
+        return Ok(());
+    }
+    println!(
+        "Host installed and running.\n  service: {}\n  runs as: {}\n  always-on: on\n  remote reach: enabled\n  machine key: {}",
+        service.path.display(),
+        service.run_as,
+        identity["key"].as_str().unwrap_or("unavailable")
+    );
+    if service.run_as == "root" {
+        println!("  Agents on this machine will run as root.");
+    }
+    match account {
+        Some(account) => println!("  signed in: {account}"),
+        None => println!(
+            "\nUse `tokenstat login --code` to sign in if this machine is not already linked."
+        ),
+    }
+    for agent in installed_agents.iter().filter_map(Value::as_object) {
+        let name = agent["name"].as_str().unwrap_or("agent");
+        match agent["state"].as_str() {
+            Some("installed") => println!("  installed {name}"),
+            Some("present") => println!("  {name} was already installed"),
+            _ => println!(
+                "  could not install {name}: {}",
+                agent["error"].as_str().unwrap_or("unknown reason")
+            ),
+        }
+    }
+    println!("\nRun `tokenstat host status` to check the tunnel and allowed devices.");
     Ok(())
+}
+
+/// Install the agents the wizard asked for, on the machine that will run them.
+///
+/// A failure here is reported and not fatal: the host is up, signed in and
+/// reachable, and an agent that would not install is something a person can
+/// retry from the app rather than a reason to leave a machine half set up.
+fn install_agents(socket: &Path, agents: &[String], json_output: bool) -> Result<Vec<Value>> {
+    if agents.is_empty() {
+        return Ok(Vec::new());
+    }
+    let catalog = crate::host_rpc::call(socket, "launcher.catalog", json!({}))?;
+    let mut report = Vec::new();
+    for agent in agent_plan(&catalog, agents)? {
+        if agent.present {
+            report.push(json!({"id": agent.id, "name": agent.name, "state": "present"}));
+            continue;
+        }
+        if !json_output {
+            println!(
+                "Installing {} on this machine. This can take a minute.",
+                agent.name
+            );
+        }
+        report.push(
+            match crate::host_rpc::call(socket, "launcher.install", json!({"id": agent.id})) {
+                Ok(_) => json!({"id": agent.id, "name": agent.name, "state": "installed"}),
+                Err(error) => json!({
+                    "id": agent.id,
+                    "name": agent.name,
+                    "state": "failed",
+                    "error": error.to_string(),
+                }),
+            },
+        );
+    }
+    Ok(report)
+}
+
+struct PlannedAgent {
+    id: String,
+    name: String,
+    present: bool,
+}
+
+/// Resolve the ids somebody typed against the catalog of the machine that
+/// would run them, so an unknown id fails before anything is installed.
+fn agent_plan(catalog: &Value, agents: &[String]) -> Result<Vec<PlannedAgent>> {
+    let catalog = catalog
+        .as_array()
+        .context("The host returned an invalid agent catalog")?;
+    agents
+        .iter()
+        .map(|id| {
+            let profile = catalog
+                .iter()
+                .find(|profile| profile["id"].as_str() == Some(id.as_str()))
+                .with_context(|| {
+                    let known: Vec<&str> = catalog
+                        .iter()
+                        .filter_map(|profile| profile["id"].as_str())
+                        .filter(|known| *known != "shell")
+                        .collect();
+                    format!(
+                        "{id} is not an agent this machine knows. It has: {}",
+                        known.join(", ")
+                    )
+                })?;
+            Ok(PlannedAgent {
+                id: id.clone(),
+                name: profile["name"].as_str().unwrap_or(id).to_owned(),
+                present: profile["installed"].as_bool() == Some(true),
+            })
+        })
+        .collect()
 }
 
 fn resolve_binary(given: Option<&Path>) -> Result<PathBuf> {
@@ -64,28 +192,24 @@ fn resolve_binary(given: Option<&Path>) -> Result<PathBuf> {
             path.display()
         );
     }
-    Ok(path.canonicalize()?)
-}
-
-#[cfg(target_os = "macos")]
-fn service_file(_: &Path) -> Result<PathBuf> {
-    Ok(home_dir()?.join("Library/LaunchAgents/ai.tokenstat.hostd.plist"))
-}
-#[cfg(target_os = "linux")]
-fn service_file(_: &Path) -> Result<PathBuf> {
-    if user_id()? == 0 {
-        Ok(PathBuf::from("/etc/systemd/system/tokenstat-host.service"))
-    } else {
-        Ok(home_dir()?.join(".config/systemd/user/tokenstat-host.service"))
+    let path = path.canonicalize()?;
+    let output = Command::new(&path)
+        .arg("--version")
+        .output()
+        .context("Could not run tokenstat-hostd")?;
+    if !output.status.success()
+        || String::from_utf8_lossy(&output.stdout).trim()
+            != format!("tokenstat-hostd {}", env!("CARGO_PKG_VERSION"))
+    {
+        bail!(
+            "The host binary does not match this CLI version. Install both binaries from the same release."
+        );
     }
-}
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn service_file(_: &Path) -> Result<PathBuf> {
-    bail!("remote host installation supports macOS and Linux")
+    Ok(path)
 }
 
 #[cfg(target_os = "macos")]
-fn install_service(binary: &Path, _: &Path) -> Result<()> {
+fn install_service(binary: &Path, _: &Service) -> Result<()> {
     // Embed the app's installer so a standalone CLI uses the same launchd
     // identity, logs and lifetime policy even without a source checkout.
     let status = Command::new("bash")
@@ -94,6 +218,7 @@ fn install_service(binary: &Path, _: &Path) -> Result<()> {
         .arg("tokenstat-host-install")
         .arg("--always-on")
         .arg(binary)
+        .stdout(std::process::Stdio::from(std::io::stderr()))
         .status()?;
     if !status.success() {
         bail!(
@@ -109,8 +234,10 @@ fn install_service(_: &Path, _: &Path) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn install_service(binary: &Path, service: &Path) -> Result<()> {
-    let system = user_id()? == 0;
+fn install_service(binary: &Path, service: &Service) -> Result<()> {
+    let system = service.scope == "system";
+    let run_as = (system && service.run_as != "root").then_some(service.run_as.as_str());
+    let service = &service.path;
     if !system {
         let _runtime = std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
@@ -131,7 +258,7 @@ fn install_service(binary: &Path, service: &Path) -> Result<()> {
             );
         }
     }
-    let body = linux_unit(binary, system)?;
+    let body = linux_unit(binary, system, run_as)?;
     fs::create_dir_all(service.parent().context("service path has no parent")?)?;
     atomic_write(service, body.as_bytes())?;
     for arguments in [
@@ -154,7 +281,7 @@ fn install_service(binary: &Path, service: &Path) -> Result<()> {
 }
 
 #[cfg(any(target_os = "linux", test))]
-fn linux_unit(binary: &Path, system: bool) -> Result<String> {
+fn linux_unit(binary: &Path, system: bool, run_as: Option<&str>) -> Result<String> {
     let path = binary
         .to_str()
         .context("host binary path must be valid UTF-8")?;
@@ -172,8 +299,15 @@ fn linux_unit(binary: &Path, system: bool) -> Result<String> {
     } else {
         "default.target"
     };
+    let account = match run_as {
+        Some(name) => {
+            crate::host_service::validate_user_name(name)?;
+            format!("User={name}\n")
+        }
+        None => String::new(),
+    };
     Ok(format!(
-        "[Unit]\nDescription=tokenstat remote host\nAfter=network-online.target\n\n[Service]\nExecStart=\"{path}\"\nRestart=always\nRestartSec=2\nSyslogIdentifier=tokenstat-hostd\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectKernelTunables=yes\nProtectControlGroups=yes\nRestrictSUIDSGID=yes\n\n[Install]\nWantedBy={target}\n"
+        "[Unit]\nDescription=tokenstat remote host\nAfter=network-online.target\n\n[Service]\nExecStart=\"{path}\"\n{account}Restart=always\nRestartSec=2\nSyslogIdentifier=tokenstat-hostd\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectKernelTunables=yes\nProtectControlGroups=yes\nRestrictSUIDSGID=yes\n\n[Install]\nWantedBy={target}\n"
     ))
 }
 
@@ -185,31 +319,12 @@ fn atomic_write(path: &Path, body: &[u8]) -> Result<()> {
     Ok(())
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-fn home_dir() -> Result<PathBuf> {
-    Ok(directories::BaseDirs::new()
-        .context("home directory unavailable")?
-        .home_dir()
-        .to_path_buf())
-}
-#[cfg(target_os = "linux")]
-fn user_id() -> Result<u32> {
-    let output = Command::new("id").arg("-u").output()?;
-    if !output.status.success() {
-        bail!("could not determine the current user");
-    }
-    String::from_utf8(output.stdout)?
-        .trim()
-        .parse()
-        .context("invalid user id")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn linux_service_survives_logout_without_blocking_workspace_writes() {
-        let unit = linux_unit(Path::new("/opt/tokenstat tools/host%$\"d"), false).unwrap();
+        let unit = linux_unit(Path::new("/opt/tokenstat tools/host%$\"d"), false, None).unwrap();
         assert!(unit.contains("Restart=always\nRestartSec=2"));
         assert!(unit.contains("WantedBy=default.target"));
         assert!(unit.contains("host%%$$\\\"d"));
@@ -224,10 +339,46 @@ mod tests {
         }
         assert!(!unit.contains("ProtectHome"));
         assert!(!unit.contains("ProtectSystem"));
-        let system = linux_unit(Path::new("/opt/tokenstat-hostd"), true).unwrap();
+        let system = linux_unit(Path::new("/opt/tokenstat-hostd"), true, None).unwrap();
         assert!(system.contains("WantedBy=multi-user.target"));
         assert!(!system.contains("User="));
-        assert!(linux_unit(Path::new("/opt/host\nExecStart=other"), true).is_err());
+        assert!(linux_unit(Path::new("/opt/host\nExecStart=other"), true, None).is_err());
+    }
+
+    #[test]
+    fn a_run_as_unit_names_one_account_and_nothing_else() {
+        let unit = linux_unit(Path::new("/opt/tokenstat-hostd"), true, Some("deploy")).unwrap();
+        assert!(unit.contains("\nUser=deploy\nRestart=always"));
+        assert_eq!(unit.matches("User=").count(), 1);
+        assert!(linux_unit(Path::new("/opt/tokenstat-hostd"), true, Some("a b")).is_err());
+        assert!(
+            linux_unit(
+                Path::new("/opt/tokenstat-hostd"),
+                true,
+                Some("deploy\nExecStart=/x")
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn an_unknown_agent_id_fails_before_anything_is_installed() {
+        let catalog = serde_json::json!([
+            {"id": "shell", "name": "Shell", "installed": true},
+            {"id": "claude_code", "name": "Claude Code", "installed": false},
+            {"id": "codex", "name": "Codex", "installed": true},
+        ]);
+        let plan = agent_plan(&catalog, &["claude_code".into(), "codex".into()]).unwrap();
+        assert_eq!(plan.len(), 2);
+        assert!(!plan[0].present && plan[0].name == "Claude Code");
+        assert!(plan[1].present);
+        let error = agent_plan(&catalog, &["claude".into()])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("claude_code, codex"), "{error}");
+        assert!(!error.contains("shell"), "{error}");
+        assert!(agent_plan(&serde_json::json!({}), &["codex".into()]).is_err());
     }
 
     #[test]

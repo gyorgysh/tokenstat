@@ -1,0 +1,662 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
+//! Console controls use the same host methods as the native clients.
+
+use std::path::PathBuf;
+
+use anyhow::{Context, Result, bail};
+use clap::{Args, Subcommand};
+use serde_json::{Value, json};
+
+use crate::{host_install, host_rpc, host_service::Service};
+
+#[derive(Args)]
+pub struct HostArgs {
+    #[command(subcommand)]
+    command: Option<HostCommand>,
+    /// Local daemon socket, for a separately installed host
+    #[arg(long, global = true, value_name = "PATH")]
+    socket: Option<PathBuf>,
+    /// Use this account's login service
+    #[arg(long, global = true, conflicts_with = "system")]
+    user: bool,
+    /// Use the system service (Linux, from a root console)
+    #[arg(long, global = true, conflicts_with = "user")]
+    system: bool,
+    /// Compatibility with the original installer
+    #[arg(long, hide = true)]
+    install: bool,
+    #[arg(long, hide = true, value_name = "PATH")]
+    binary: Option<PathBuf>,
+    #[arg(long, hide = true, value_name = "NAME")]
+    name: Option<String>,
+}
+
+#[derive(Args)]
+struct InstallArgs {
+    /// Path to tokenstat-hostd, defaults to a sibling of this CLI
+    #[arg(long, value_name = "PATH")]
+    binary: Option<PathBuf>,
+    /// Friendly machine name for this machine on your account
+    #[arg(long, value_name = "NAME")]
+    name: Option<String>,
+    /// Pairing code from your signed-in device
+    #[arg(long, conflicts_with = "code_file")]
+    code: Option<String>,
+    /// Private file holding a pairing code, or - to read standard input
+    #[arg(long, value_name = "PATH", conflicts_with = "code")]
+    code_file: Option<PathBuf>,
+    /// Account the host and its agents run as (Linux, from a root console)
+    #[arg(long, value_name = "USER")]
+    run_as: Option<String>,
+    /// Agents to install on this machine, by id, separated by commas
+    #[arg(long, value_name = "IDS", value_delimiter = ',')]
+    agents: Vec<String>,
+}
+
+impl InstallArgs {
+    fn legacy(args: &HostArgs) -> Self {
+        Self {
+            binary: args.binary.clone(),
+            name: args.name.clone(),
+            code: None,
+            code_file: None,
+            run_as: None,
+            agents: Vec::new(),
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum HostCommand {
+    /// Show the service and the running host's state
+    Status,
+    /// Install and activate the always-on service
+    Install(InstallArgs),
+    /// Stop the host and remove the service, leaving every folder alone
+    Uninstall {
+        /// Also delete tokenstat's own data on this machine
+        #[arg(long)]
+        purge: bool,
+        /// Do not ask for confirmation
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+    /// Start the installed host service
+    Start,
+    /// Stop the host service, keeping its configuration and data
+    Stop,
+    /// Restart the installed service to load an updated daemon
+    Restart,
+    /// Read the host's log
+    Logs {
+        #[arg(long)]
+        follow: bool,
+        #[arg(short = 'n', long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=10000))]
+        lines: u32,
+    },
+    /// List or change which devices may work on this machine
+    Access {
+        #[command(subcommand)]
+        command: Option<AccessCommand>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AccessCommand {
+    /// Allow an exact device public key to reach the work here
+    Allow {
+        #[arg(value_parser = peer_key)]
+        device: String,
+    },
+    /// Revoke an exact device public key's access to the work here
+    Deny {
+        #[arg(value_parser = peer_key)]
+        device: String,
+    },
+}
+
+fn peer_key(value: &str) -> std::result::Result<String, String> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(
+            "Use the full 64-character device key shown by `tokenstat host access`.".into(),
+        );
+    }
+    Ok(value.to_ascii_lowercase())
+}
+
+pub fn run(args: &HostArgs, json_output: bool) -> Result<()> {
+    if args.install && args.command.is_some() {
+        bail!("Use `tokenstat host install` without the legacy --install flag");
+    }
+    let legacy = args.install.then(|| InstallArgs::legacy(args));
+    if !args.install && (args.binary.is_some() || args.name.is_some()) {
+        bail!("--binary and --name apply to `tokenstat host install`");
+    }
+    let install = match &args.command {
+        Some(HostCommand::Install(install)) => Some(install),
+        _ => legacy.as_ref(),
+    };
+    let service = Service::select(
+        args.user,
+        args.system,
+        install.and_then(|install| install.run_as.as_deref()),
+    )?;
+    if let Some(install) = install {
+        if args.socket.is_some() {
+            bail!("--socket selects a running daemon and cannot configure an installation");
+        }
+        let code = crate::host_enroll::PairingCode::read(
+            install.code.as_deref(),
+            install.code_file.as_deref(),
+        )?;
+        return host_install::run(
+            &service,
+            &host_install::Request {
+                binary: install.binary.as_deref(),
+                name: install.name.as_deref(),
+                code: code.as_ref(),
+                agents: &install.agents,
+            },
+            json_output,
+        );
+    }
+    match &args.command {
+        Some(HostCommand::Uninstall { purge, yes }) => {
+            if args.socket.is_some() {
+                bail!("--socket selects a running daemon and cannot remove an installation");
+            }
+            return uninstall(&service, *purge, *yes, json_output);
+        }
+        Some(HostCommand::Start | HostCommand::Stop | HostCommand::Restart) => {
+            if args.socket.is_some() {
+                bail!("Service controls use the installed service. Omit --socket.");
+            }
+            let action = match args.command {
+                Some(HostCommand::Start) => "start",
+                Some(HostCommand::Stop) => "stop",
+                _ => "restart",
+            };
+            service.control(action)?;
+            if json_output {
+                println!("{}", json!({"action": action, "completed": true}));
+            } else {
+                println!("Host service {action} completed.");
+            }
+            return Ok(());
+        }
+        Some(HostCommand::Logs { follow, lines }) => {
+            if args.socket.is_some() {
+                bail!("Logs come from the installed service. Omit --socket.");
+            }
+            if json_output {
+                bail!("Host logs are text. Omit --json.");
+            }
+            return service.logs(*lines, *follow);
+        }
+        _ => {}
+    }
+    let socket = match &args.socket {
+        Some(path) => path.clone(),
+        None => tokenstat_paths::data_dir()
+            .context("No data directory is available")?
+            .join("host.sock"),
+    };
+    match &args.command {
+        Some(HostCommand::Access { command }) => access(&socket, command.as_ref(), json_output),
+        None | Some(HostCommand::Status) => status(
+            &socket,
+            json_output,
+            args.socket.is_none().then_some(&service),
+        ),
+        Some(
+            HostCommand::Install(_)
+            | HostCommand::Uninstall { .. }
+            | HostCommand::Start
+            | HostCommand::Stop
+            | HostCommand::Restart
+            | HostCommand::Logs { .. },
+        ) => unreachable!("service command handled above"),
+    }
+}
+
+/// Remove the service, and only ever tokenstat's own files with it.
+///
+/// A registered folder is somebody's work. It is never touched here, not even
+/// with `--purge`, which drops this machine's identity, settings and archive
+/// and nothing outside them.
+fn uninstall(service: &Service, purge: bool, assume_yes: bool, json_output: bool) -> Result<()> {
+    let folders = registered_folders();
+    let removable = if purge {
+        data_directories()?
+    } else {
+        Vec::new()
+    };
+    if !assume_yes {
+        if json_output {
+            bail!("Removing a host is not reversible. Pass --yes to confirm it without a prompt.");
+        }
+        println!(
+            "This removes the host service at {}.",
+            service.path.display()
+        );
+        if cfg!(target_os = "macos") {
+            // The app owns the same launchd label, so removing it here is not
+            // the last word on this Mac and saying otherwise would be a lie.
+            println!("The desktop app installs it again the next time it opens.");
+        }
+        if purge {
+            println!("--purge also deletes this machine's tokenstat data:");
+            for path in &removable {
+                println!("    {}", path.display());
+            }
+        }
+        match folders {
+            Some(0) => println!("No folders are registered."),
+            Some(count) => println!(
+                "{count} registered folder{} stay{} exactly where {} are. Nothing in them is touched.",
+                if count == 1 { "" } else { "s" },
+                if count == 1 { "s" } else { "" },
+                if count == 1 { "it" } else { "they" }
+            ),
+            None => println!("Your folders and their contents are never touched."),
+        }
+        if !confirm("Remove the host?")? {
+            println!("Nothing was changed.");
+            return Ok(());
+        }
+    }
+    service.uninstall()?;
+    let mut purged = Vec::new();
+    for path in removable {
+        std::fs::remove_dir_all(&path)
+            .with_context(|| format!("Could not remove {}", path.display()))?;
+        purged.push(path);
+    }
+    if json_output {
+        println!(
+            "{}",
+            json!({"removed": true, "service": service.path, "purged": purged})
+        );
+        return Ok(());
+    }
+    println!("Removed the host service at {}.", service.path.display());
+    for path in &purged {
+        println!("  deleted {}", path.display());
+    }
+    if purged.is_empty() {
+        println!("Its data is still here, so installing again picks up where this left off.");
+    }
+    if service.scope == "user" && cfg!(target_os = "linux") {
+        println!(
+            "Lingering is left enabled for this account. Turn it off with `loginctl disable-linger` if nothing else needs it."
+        );
+    }
+    Ok(())
+}
+
+/// How many folders this machine has registered, when the host can be asked.
+///
+/// Best effort on purpose: a stopped host still has to be removable, and the
+/// count is reassurance rather than a precondition.
+fn registered_folders() -> Option<usize> {
+    let socket = tokenstat_paths::data_dir()?.join("host.sock");
+    host_rpc::call(&socket, "workspace.list", json!({}))
+        .ok()?
+        .as_array()
+        .map(Vec::len)
+}
+
+/// The directories this product owns on this machine, and no others.
+fn data_directories() -> Result<Vec<PathBuf>> {
+    let mut paths: Vec<PathBuf> = [
+        tokenstat_paths::data_dir(),
+        tokenstat_paths::data_local_dir(),
+        tokenstat_paths::config_dir(),
+        tokenstat_paths::cache_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|path| path.is_dir())
+    .collect();
+    paths.sort();
+    paths.dedup();
+    for path in &paths {
+        // A recursive delete gets one guard that does not depend on the
+        // directory lookup being right.
+        let ours = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.contains("tokenstat"));
+        if !ours {
+            bail!(
+                "Refusing to delete {}, which is not a tokenstat directory.",
+                path.display()
+            );
+        }
+    }
+    Ok(paths)
+}
+
+fn confirm(question: &str) -> Result<bool> {
+    use std::io::Write;
+    print!("{question} [y/N] ");
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
+fn access(
+    socket: &std::path::Path,
+    command: Option<&AccessCommand>,
+    json_output: bool,
+) -> Result<()> {
+    if let Some(command) = command {
+        let (device, allow) = match command {
+            AccessCommand::Allow { device } => (device, true),
+            AccessCommand::Deny { device } => (device, false),
+        };
+        let result = host_rpc::call(
+            socket,
+            "workspace.access.set",
+            json!({"peerId":device,"allow":allow}),
+        )?;
+        if json_output {
+            println!("{result}");
+        } else {
+            println!(
+                "{} access for {device}.",
+                if allow { "Allowed" } else { "Revoked" }
+            );
+        }
+        return Ok(());
+    }
+    let allowed = host_rpc::call(socket, "workspace.access.list", json!({}))?;
+    let pending = host_rpc::call(socket, "workspace.access.pending", json!({}))?;
+    if json_output {
+        println!("{}", json!({"allowed":allowed,"pending":pending}));
+    } else {
+        println!("Allowed devices");
+        for key in allowed
+            .as_array()
+            .context("The host returned an invalid device list")?
+        {
+            println!(
+                "  {}",
+                key.as_str()
+                    .context("The host returned an invalid device key")?
+            );
+        }
+        if allowed.as_array().is_some_and(Vec::is_empty) {
+            println!("  None yet");
+        }
+        println!("\nPending requests");
+        for request in pending
+            .as_array()
+            .context("The host returned an invalid request list")?
+        {
+            println!(
+                "  {}  {}",
+                text(&request["peerId"]),
+                text(&request["label"])
+            );
+        }
+        if pending.as_array().is_some_and(Vec::is_empty) {
+            println!("  None");
+        }
+    }
+    Ok(())
+}
+
+fn status(
+    socket: &std::path::Path,
+    json_output: bool,
+    installed_service: Option<&Service>,
+) -> Result<()> {
+    let service = installed_service
+        .map(Service::description)
+        .unwrap_or(Value::Null);
+    let mut report = json!({
+        "socket": socket,
+        "cliVersion": env!("CARGO_PKG_VERSION"),
+        "service": service,
+    });
+    match host_rpc::call(socket, "protocol", json!({})) {
+        Ok(protocol) => {
+            report["running"] = json!(true);
+            report["reachable"] = json!(true);
+            report["protocol"] = protocol;
+        }
+        Err(error) => {
+            // Unreachable is not the same as stopped, and saying "stopped"
+            // about a host that is running behind a bad socket path sends
+            // somebody to fix the wrong thing.
+            report["running"] = Value::Null;
+            report["reachable"] = json!(false);
+            report["error"] = json!(error.to_string());
+            if json_output {
+                println!("{report}");
+            } else {
+                println!("Host unavailable");
+                print_service(installed_service);
+                println!("  socket: {}", socket.display());
+                println!("\n{error}");
+            }
+            return Ok(());
+        }
+    }
+    for (field, method) in [
+        ("identity", "machine.identity"),
+        ("policy", "host.policy"),
+        ("remote", "remote.status"),
+        ("allowed", "workspace.access.list"),
+        ("pending", "workspace.access.pending"),
+        ("folders", "workspace.list"),
+        ("agents", "launcher.catalog"),
+        ("account", "account.status"),
+    ] {
+        report[field] = match host_rpc::call(socket, method, json!({})) {
+            Ok(value) => value,
+            Err(error) => json!({"unavailable": error.to_string()}),
+        };
+    }
+    if json_output {
+        println!("{report}");
+        return Ok(());
+    }
+
+    // The order is the order somebody debugs in: is it up, what is it, who is
+    // it, and only then what it holds.
+    println!("Host running");
+    print_service(installed_service);
+    println!("  socket: {}", socket.display());
+    println!(
+        "  protocol: {}  (host {}, CLI {})",
+        text(&report["protocol"]["protocolVersion"]),
+        text(&report["protocol"]["coreVersion"]),
+        env!("CARGO_PKG_VERSION")
+    );
+    if report["protocol"]["coreVersion"].as_str() != Some(env!("CARGO_PKG_VERSION")) {
+        println!(
+            "    The running host and this CLI are different versions. Update both, then run `tokenstat host restart`."
+        );
+    }
+    let account = &report["account"];
+    println!(
+        "  account: {}",
+        match account["signedIn"].as_bool() {
+            Some(false) => "signed out",
+            Some(true) => account["handle"]
+                .as_str()
+                .or_else(|| account["displayName"].as_str())
+                .unwrap_or("signed in"),
+            None => "unavailable",
+        }
+    );
+    println!(
+        "  machine: {}\n  fingerprint: {}\n  always-on: {}",
+        text(&report["identity"]["label"]),
+        text(&report["identity"]["fingerprint"]),
+        match report["policy"]["alwaysOn"].as_bool() {
+            Some(true) => "on",
+            Some(false) => "off",
+            None => "unavailable",
+        }
+    );
+    let remote = &report["remote"];
+    println!(
+        "  tunnel: {}",
+        match remote["tunnelOnline"].as_bool() {
+            Some(true) => "connected",
+            Some(false) if remote["tunnel"].as_bool() == Some(false) => "off",
+            Some(false) => "disconnected",
+            None => "unavailable",
+        }
+    );
+    if let Some(error) = remote["tunnelError"].as_str() {
+        println!("    {error}");
+    }
+    for (field, label) in [
+        ("allowed", "allowed devices"),
+        ("pending", "pending requests"),
+        ("folders", "registered folders"),
+    ] {
+        match report[field].as_array() {
+            Some(items) => println!("  {label}: {}", items.len()),
+            None => println!("  {label}: unavailable"),
+        }
+    }
+    match report["agents"].as_array() {
+        Some(agents) => {
+            let installed: Vec<_> = agents
+                .iter()
+                .filter(|agent| agent["installed"].as_bool() == Some(true))
+                .filter_map(|agent| agent["name"].as_str())
+                .collect();
+            println!(
+                "  installed agents: {}",
+                if installed.is_empty() {
+                    "none".into()
+                } else {
+                    installed.join(", ")
+                }
+            );
+        }
+        None => println!("  installed agents: unavailable"),
+    }
+    for field in [
+        "identity", "policy", "account", "remote", "allowed", "pending", "folders", "agents",
+    ] {
+        if let Some(error) = report[field]["unavailable"].as_str() {
+            println!("\n{field}: {error}");
+        }
+    }
+    Ok(())
+}
+
+/// Who the host runs as comes first, because a root install gives every agent
+/// on this machine root and that is not something to discover later.
+fn print_service(service: Option<&Service>) {
+    let Some(service) = service else {
+        return;
+    };
+    println!("  runs as: {}", service.run_as);
+    if service.run_as == "root" {
+        println!("    Agents on this machine run as root.");
+    }
+    println!(
+        "  service: {} scope, {}{}",
+        service.scope,
+        service.path.display(),
+        if service.path.is_file() {
+            ""
+        } else {
+            "  (not installed)"
+        }
+    );
+}
+
+fn text(value: &Value) -> &str {
+    value.as_str().unwrap_or("unavailable")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn the_host_command_tree_parses_real_console_commands() {
+        use clap::{CommandFactory, Parser};
+        crate::Cli::command().debug_assert();
+        for arguments in [
+            vec!["tokenstat", "host"],
+            vec!["tokenstat", "host", "status", "--json"],
+            vec!["tokenstat", "host", "install", "--name", "server"],
+            vec!["tokenstat", "host", "--install"],
+            vec!["tokenstat", "host", "access"],
+            vec!["tokenstat", "host", "start"],
+            vec!["tokenstat", "host", "stop"],
+            vec!["tokenstat", "host", "restart"],
+            vec!["tokenstat", "host", "logs", "--follow", "-n", "50"],
+            vec!["tokenstat", "host", "uninstall"],
+            vec!["tokenstat", "host", "uninstall", "--purge", "--yes"],
+            vec![
+                "tokenstat",
+                "host",
+                "install",
+                "--run-as",
+                "deploy",
+                "--agents",
+                "claude_code,codex",
+            ],
+        ] {
+            assert!(
+                crate::Cli::try_parse_from(&arguments).is_ok(),
+                "{arguments:?} did not parse"
+            );
+        }
+        assert!(
+            crate::Cli::try_parse_from(["tokenstat", "host", "access", "allow", "short"]).is_err()
+        );
+        assert!(crate::Cli::try_parse_from(["tokenstat", "host", "--binary", "/x"]).is_ok());
+    }
+
+    #[test]
+    fn agents_arrive_as_separate_ids() {
+        use clap::Parser;
+        let cli = crate::Cli::try_parse_from([
+            "tokenstat",
+            "host",
+            "install",
+            "--agents",
+            "claude_code,codex",
+        ])
+        .unwrap();
+        let Some(crate::Command::Host(args)) = &cli.command else {
+            panic!("not the host command");
+        };
+        let Some(HostCommand::Install(install)) = &args.command else {
+            panic!("not the install command");
+        };
+        assert_eq!(install.agents, ["claude_code", "codex"]);
+    }
+
+    #[test]
+    fn purge_never_reaches_outside_this_products_own_directories() {
+        for path in data_directories().unwrap() {
+            let name = path.file_name().unwrap().to_str().unwrap();
+            assert!(name.contains("tokenstat"), "{}", path.display());
+        }
+    }
+
+    #[test]
+    fn access_requires_an_exact_normalized_public_key() {
+        assert_eq!(peer_key(&"AB".repeat(32)).unwrap(), "ab".repeat(32));
+        for value in ["", "a-device", "abcd", &"g".repeat(64)] {
+            assert!(peer_key(value).is_err());
+        }
+    }
+}

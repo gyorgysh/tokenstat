@@ -171,13 +171,30 @@ The installer checks their versions before replacing either, and
 To activate the host after installing:
 
 ```sh
-tokenstat host --install
+tokenstat host install
 ```
 
 Linux installs a user service that stays running after logout. A root install
 uses a system service and agents run as root. A user install needs a systemd
 login session and permission to enable lingering. On macOS the command enables
 Always-on host using the same launchd service as the desktop app.
+
+Everything else about that host is answerable from the same command:
+
+```sh
+tokenstat host                       # state, in the order you would debug it
+tokenstat host start|stop|restart
+tokenstat host logs --follow
+tokenstat host access                # allowed devices and pending requests
+tokenstat host access allow <device>
+tokenstat host uninstall [--purge]   # folders are never touched
+```
+
+`install` takes `--code` or `--code-file` to sign the machine in while it is
+being set up, `--name` for what it is called on your account, `--agents` to
+install agents on it, and `--run-as <user>` to run the host and its agents as a
+specific account. `tokenstat host` says who it runs as at the top, because on a
+root install every agent on that machine has root.
 
 
 ## Uninstalling

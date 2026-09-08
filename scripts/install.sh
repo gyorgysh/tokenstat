@@ -312,7 +312,7 @@ main() {
 
   if [ "$HOST_INSTALL" = "1" ]; then
     say "installing the always-on host"
-    "$dest" host --install "$@"
+    "$dest" host install "$@"
     ok "tokenstat host installed"
     cleanup_install_tmp
     trap - EXIT

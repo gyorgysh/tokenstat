@@ -4,7 +4,8 @@
 #
 #   curl -fsSL https://tokenstat.ai/uninstall.sh | bash
 #
-# Removes the hourly scan schedule, then the binary. Leaves the local archive
+# Removes the hourly scan schedule and the always-on host, then both binaries.
+# Leaves the local archive
 # alone unless you pass --purge (your scanned history, including usage coding
 # tools have already deleted). Does not touch a hosted tokenstat.ai profile.
 #
@@ -153,15 +154,72 @@ remove_schedule() {
   done
 }
 
+# The always-on host, removed by hand rather than through the CLI: the binary
+# may already be gone, and a unit pointing at a deleted daemon is the worst
+# thing an uninstaller can leave behind. Registered folders are never touched.
+remove_host() {
+  case "$(uname -s)" in
+    Darwin)
+      local plist="$HOME/Library/LaunchAgents/ai.tokenstat.hostd.plist"
+      local domain="gui/$(id -u)"
+      if [ -f "$plist" ] || launchctl print "${domain}/ai.tokenstat.hostd" >/dev/null 2>&1; then
+        say "removing the always-on host"
+        launchctl bootout "${domain}/ai.tokenstat.hostd" 2>/dev/null || true
+        rm -f "$plist"
+        rm -f "$HOME/Library/Logs/tokenstat/hostd.out.log" \
+              "$HOME/Library/Logs/tokenstat/hostd.err.log"
+        ok "host service removed"
+      else
+        say "no always-on host found"
+      fi
+      ;;
+    Linux)
+      if ! command -v systemctl >/dev/null 2>&1; then
+        return 0
+      fi
+      local user_unit="$HOME/.config/systemd/user/tokenstat-host.service"
+      local system_unit="/etc/systemd/system/tokenstat-host.service"
+      local found=0
+      if [ -f "$user_unit" ]; then
+        say "removing the always-on host"
+        systemctl --user disable --now tokenstat-host.service 2>/dev/null || true
+        rm -f "$user_unit"
+        systemctl --user daemon-reload 2>/dev/null || true
+        systemctl --user reset-failed tokenstat-host.service 2>/dev/null || true
+        found=1
+      fi
+      if [ -f "$system_unit" ]; then
+        if [ "$(id -u)" = "0" ]; then
+          say "removing the always-on system host"
+          systemctl disable --now tokenstat-host.service 2>/dev/null || true
+          rm -f "$system_unit"
+          systemctl daemon-reload 2>/dev/null || true
+          systemctl reset-failed tokenstat-host.service 2>/dev/null || true
+          found=1
+        else
+          warn "a system host is installed at $system_unit; remove it as root"
+        fi
+      fi
+      if [ "$found" = "1" ]; then
+        ok "host service removed"
+      else
+        say "no always-on host found"
+      fi
+      ;;
+  esac
+}
+
 remove_binary() {
-  local dest="$BIN_DIR/tokenstat"
-  if [ -e "$dest" ] || [ -L "$dest" ]; then
-    say "removing $dest"
-    rm -f "$dest"
-    ok "binary removed"
-  else
-    say "no binary at $dest"
-  fi
+  local dest
+  for dest in "$BIN_DIR/tokenstat-hostd" "$BIN_DIR/tokenstat"; do
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+      say "removing $dest"
+      rm -f "$dest"
+      ok "$(basename "$dest") removed"
+    else
+      say "no binary at $dest"
+    fi
+  done
 }
 
 remove_data() {
@@ -207,6 +265,7 @@ main() {
   echo
 
   remove_schedule
+  remove_host
   remove_binary
 
   if [ "$PURGE" = "1" ]; then

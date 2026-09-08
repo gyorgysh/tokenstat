@@ -13,7 +13,16 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod host_command;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod host_enroll;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod host_install;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod host_rpc;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod host_service;
 mod interactive;
 mod render;
 mod schedule;
@@ -300,17 +309,8 @@ enum Command {
         host: Option<String>,
     },
     /// Install and manage the always-on backend for remote workspaces
-    Host {
-        /// Write and activate the launchd or systemd user service
-        #[arg(long)]
-        install: bool,
-        /// Path to tokenstat-hostd (defaults to a sibling of this CLI)
-        #[arg(long, value_name = "PATH")]
-        binary: Option<std::path::PathBuf>,
-        /// Friendly device name shown during enrollment
-        #[arg(long, value_name = "NAME")]
-        name: Option<String>,
-    },
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    Host(host_command::HostArgs),
     /// Forget the tokenstat.ai sync token for a host (no server call)
     Logout {
         #[arg(long, value_name = "URL|sandbox|prod")]
@@ -602,13 +602,9 @@ fn main() -> Result<()> {
         return render::schedule(*install, *every, *sync_every, *no_sync);
     }
 
-    if let Command::Host {
-        install,
-        binary,
-        name,
-    } = &command
-    {
-        return host_install::run(*install, binary.as_deref(), name.as_deref(), cli.json);
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    if let Command::Host(args) = &command {
+        return host_command::run(args, cli.json);
     }
 
     if let Command::Interactive = command {
@@ -641,6 +637,8 @@ fn main() -> Result<()> {
     }
 
     match command {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Command::Host(_) => unreachable!("handled above"),
         Command::Setup { .. }
         | Command::Scan { .. }
         | Command::Interactive
@@ -655,7 +653,6 @@ fn main() -> Result<()> {
         | Command::Login { .. }
         | Command::Logout { .. }
         | Command::Device { .. }
-        | Command::Host { .. }
         | Command::Sync { .. }
         | Command::Mcp => unreachable!("handled above"),
         Command::Daily(w) => {
