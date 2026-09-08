@@ -1057,6 +1057,21 @@ fn account_machines(force: bool) -> Vec<Value> {
     status.machines
 }
 
+/// Put a directory in place without a network round trip.
+///
+/// Test-only, and the only way to exercise the account-membership check that
+/// guards `workspace.access.redeem`: without it every test device looks like a
+/// stranger and the paths past that check are unreachable.
+#[cfg(test)]
+pub(crate) fn seed_account_directory(machines: Vec<Value>) {
+    if let Ok(mut guard) = account_directory().lock() {
+        *guard = Some(Directory {
+            fetched_at_ms: jiff::Timestamp::now().as_millisecond(),
+            machines,
+        });
+    }
+}
+
 /// Forget the cached directory. Called when remote reach stops, because the
 /// next start may be a different account.
 fn clear_account_directory() {

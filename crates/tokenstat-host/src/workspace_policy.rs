@@ -30,7 +30,26 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::access_audit::{self, Authority};
 use crate::screen_policy::{PENDING_TTL, PendingRequest, now_secs, prune_pending};
+
+/// Pending requests this machine will hold at once.
+///
+/// A compromised account device can call `workspace.access.ask` on every host
+/// the account owns. Without a cap that is a way to fill somebody's disk and
+/// their notification list from a device that has no grant at all.
+const MAX_PENDING: usize = 32;
+/// Asks one device may make in an hour before it is told to wait.
+const MAX_ASKS_PER_HOUR: u32 = 5;
+/// Codes one device may try in an hour, whatever it does to a single code.
+const MAX_REDEEMS_PER_HOUR: u32 = 10;
+/// Wrong guesses that retire the live code.
+///
+/// Eight characters from a 32-symbol alphabet is 40 bits, which is plenty
+/// against five guesses and nothing at all against a million. The lockout is
+/// what carries the security here, not the length.
+const MAX_INVITE_ATTEMPTS: u32 = 5;
+const HOUR: u64 = 60 * 60;
 
 #[derive(Default, Deserialize, Serialize)]
 struct Store {
@@ -39,6 +58,31 @@ struct Store {
     allowed: Vec<String>,
     #[serde(default)]
     pending: Vec<PendingRequest>,
+    /// The one live invite, or none. Minting a second retires the first, so a
+    /// code left on a screen an hour ago cannot be the one that works.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invite: Option<Invite>,
+    /// Recent asks and redemption attempts, per device, for the rate limits.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    attempts: Vec<Attempt>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Invite {
+    /// SHA-256 of the code, hex. The code itself is shown once, at the console
+    /// that minted it, and is never written down anywhere.
+    hash: String,
+    expires_at: u64,
+    #[serde(default)]
+    tries: u32,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Attempt {
+    peer_id: String,
+    kind: String,
+    at: u64,
 }
 
 fn path() -> Result<PathBuf, String> {
@@ -53,8 +97,86 @@ fn load() -> Result<Store, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Store::default(),
         Err(e) => return Err(e.to_string()),
     };
-    prune_pending(&mut store.pending, now_secs());
+    let now = now_secs();
+    prune_pending(&mut store.pending, now);
+    if store
+        .invite
+        .as_ref()
+        .is_some_and(|invite| invite.expires_at <= now)
+    {
+        store.invite = None;
+    }
+    store.attempts.retain(|attempt| attempt.at + HOUR > now);
     Ok(store)
+}
+
+impl Store {
+    fn recent(&self, peer_id: &str, kind: &str) -> u32 {
+        self.attempts
+            .iter()
+            .filter(|attempt| attempt.peer_id == peer_id && attempt.kind == kind)
+            .count() as u32
+    }
+
+    fn note(&mut self, peer_id: &str, kind: &str, now: u64) {
+        self.attempts.push(Attempt {
+            peer_id: peer_id.to_owned(),
+            kind: kind.to_owned(),
+            at: now,
+        });
+    }
+}
+
+/// Crockford's alphabet: no I, L, O or U, so nothing in a code can be misread
+/// as something else when it is copied off one screen and typed into another.
+const CODE_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+fn mint_code() -> Result<String, String> {
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
+    // 32 divides 256, so the mask is uniform and there is nothing to reject.
+    let code: String = bytes
+        .iter()
+        .map(|byte| CODE_ALPHABET[(byte & 0x1f) as usize] as char)
+        .collect();
+    Ok(format!("{}-{}", &code[..4], &code[4..]))
+}
+
+/// Accept the code as a person would type it, and no more than that.
+fn normalize_code(value: &str) -> Result<String, String> {
+    let code: String = value
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .map(|c| match c.to_ascii_uppercase() {
+            // The four letters the alphabet leaves out, folded back onto the
+            // symbols they are mistaken for.
+            'I' | 'L' => '1',
+            'O' => '0',
+            'U' => 'V',
+            other => other,
+        })
+        .collect();
+    if code.len() != 8 || !code.bytes().all(|byte| CODE_ALPHABET.contains(&byte)) {
+        return Err("That is not a code from this machine. It is eight letters and digits.".into());
+    }
+    Ok(code)
+}
+
+fn hash_code(code: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(code.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Equal without telling a caller how far it got.
+fn same_hash(left: &str, right: &str) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.bytes()
+        .zip(right.bytes())
+        .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+        == 0
 }
 
 fn save(store: &Store) -> Result<(), String> {
@@ -110,7 +232,12 @@ fn allowed_now() -> Option<std::sync::Arc<HashSet<String>>> {
 /// device with a pairing code, which is the one place approval and this grant
 /// are the same act.
 pub(crate) fn set_allowed(peer_id: &str, allow: bool) -> Result<(), String> {
+    set_allowed_by(peer_id, allow, Authority::Console)
+}
+
+pub(crate) fn set_allowed_by(peer_id: &str, allow: bool, by: Authority) -> Result<(), String> {
     let mut store = load()?;
+    let already = store.allowed.iter().any(|held| held == peer_id);
     store.allowed.retain(|held| held != peer_id);
     if allow {
         store.allowed.push(peer_id.to_string());
@@ -118,7 +245,16 @@ pub(crate) fn set_allowed(peer_id: &str, allow: bool) -> Result<(), String> {
     // Answered either way. A device told no does not keep standing in the
     // queue, and one told yes has nothing left to ask.
     store.pending.retain(|request| request.peer_id != peer_id);
-    save(&store)
+    save(&store)?;
+    if already != allow {
+        access_audit::record(
+            if allow { "granted" } else { "revoked" },
+            Some(peer_id),
+            crate::remote::account_peer_label_hex(peer_id).as_deref(),
+            by,
+        );
+    }
+    Ok(())
 }
 
 /// Whether a method reaches the work on this machine.
@@ -184,6 +320,20 @@ pub(crate) fn refuse_unpermitted(line: &str, peer: &str) -> Option<String> {
 struct SetParams {
     peer_id: String,
     allow: bool,
+    /// Which door a local caller used, for the record. See `Authority`.
+    #[serde(default)]
+    via: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RedeemParams {
+    code: String,
+}
+
+#[derive(Default, Deserialize)]
+struct LogParams {
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
@@ -205,7 +355,23 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 return Ok(json!({"pending": false, "granted": true}));
             }
             let asked_at = now_secs();
+            // A device that has already asked five times this hour is told to
+            // wait. It keeps whatever request it has standing, so this costs
+            // it nothing it had not already got.
+            if store.recent(&peer, "ask") >= MAX_ASKS_PER_HOUR {
+                return Err(
+                    "This device has asked several times already. Wait an hour, or let it in from the machine."
+                        .into(),
+                );
+            }
             store.pending.retain(|request| request.peer_id != peer);
+            if store.pending.len() >= MAX_PENDING {
+                return Err(
+                    "This machine is already holding as many requests as it will keep. Answer some of them first."
+                        .into(),
+                );
+            }
+            store.note(&peer, "ask", asked_at);
             store.pending.push(PendingRequest {
                 label: crate::remote::account_peer_label_hex(&peer),
                 peer_id: peer.clone(),
@@ -217,6 +383,12 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 expires_at: asked_at + PENDING_TTL,
             });
             save(&store)?;
+            access_audit::record(
+                "requested",
+                Some(&peer),
+                crate::remote::account_peer_label_hex(&peer).as_deref(),
+                Authority::Console,
+            );
 
             // The same exception the screen carries, and for the same reason:
             // App Review signs into the website's demo account on a fresh
@@ -264,8 +436,118 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         "workspace.access.set" => {
             crate::request_context::refuse_remote("workspace access settings")?;
             let p: SetParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            set_allowed(&p.peer_id, p.allow)?;
+            set_allowed_by(&p.peer_id, p.allow, Authority::parse(p.via.as_deref())?)?;
             Ok(json!({"saved": true}))
+        }
+
+        // Mint the code that lets a device this machine has never seen in.
+        //
+        // Local only, because the code *is* the authority: whoever can run
+        // this could read the folders with `cat` regardless. It never touches
+        // tokenstat.ai, which is what keeps the server unable to let itself
+        // in: only the hash is stored, and the redemption is checked here.
+        "workspace.access.invite" => {
+            crate::request_context::refuse_remote("workspace access invites")?;
+            let code = mint_code()?;
+            let mut store = load()?;
+            let replaced = store.invite.is_some();
+            let expires_at = now_secs() + PENDING_TTL;
+            store.invite = Some(Invite {
+                hash: hash_code(&code.replace('-', "")),
+                expires_at,
+                tries: 0,
+            });
+            save(&store)?;
+            if replaced {
+                access_audit::record("invite retired", None, None, Authority::Console);
+            }
+            access_audit::record("invite minted", None, None, Authority::Console);
+            Ok(json!({"code": code, "expiresAt": expires_at, "expiresIn": PENDING_TTL}))
+        }
+
+        // The other end of that code, and the only method a device which is
+        // not allowed can call to change anything. Everything protecting it is
+        // here: it must arrive from a device, that device must already be on
+        // the account, the code is single use, five wrong guesses retire it,
+        // and a device may only try so many in an hour.
+        "workspace.access.redeem" => {
+            let peer = crate::request_context::remote_peer()
+                .ok_or("a code is redeemed by the device being let in")?;
+            let now = now_secs();
+            let mut store = load()?;
+            if store.recent(&peer, "redeem") >= MAX_REDEEMS_PER_HOUR {
+                return Err(
+                    "Too many codes have been tried from this device. Wait an hour.".into(),
+                );
+            }
+            store.note(&peer, "redeem", now);
+            let p: RedeemParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let code = match normalize_code(&p.code) {
+                Ok(code) => code,
+                Err(message) => {
+                    save(&store)?;
+                    return Err(message);
+                }
+            };
+            // The code lets a device you own in. It does not let a stranger
+            // in, so the redeeming device has to be one the account knows.
+            let label = crate::remote::account_peer_label_hex(&peer);
+            if label.is_none() {
+                save(&store)?;
+                access_audit::record("refused", Some(&peer), None, Authority::Invite);
+                return Err(
+                    "This device is not on the account this machine belongs to. Sign in with the same account first."
+                        .into(),
+                );
+            }
+            let Some(invite) = store.invite.as_mut() else {
+                save(&store)?;
+                // Expired and wrong have to read differently, or somebody
+                // retypes a code that was right until a moment ago, forever.
+                return Err(
+                    "There is no code waiting on this machine. Run `tokenstat host access invite` on it for a new one."
+                        .into(),
+                );
+            };
+            if !same_hash(&invite.hash, &hash_code(&code)) {
+                invite.tries += 1;
+                let retired = invite.tries >= MAX_INVITE_ATTEMPTS;
+                if retired {
+                    store.invite = None;
+                }
+                save(&store)?;
+                access_audit::record("refused", Some(&peer), label.as_deref(), Authority::Invite);
+                if retired {
+                    access_audit::record("invite retired", None, None, Authority::Invite);
+                    return Err(
+                        "That code is not right, and it has now been retired. Mint a new one on the machine."
+                            .into(),
+                    );
+                }
+                return Err("That code is not right. Check it and try again.".into());
+            }
+            // Consumed on the first success, whether or not this device was
+            // already allowed, so a code cannot be used twice.
+            store.invite = None;
+            save(&store)?;
+            access_audit::record(
+                "invite redeemed",
+                Some(&peer),
+                label.as_deref(),
+                Authority::Invite,
+            );
+            set_allowed_by(&peer, true, Authority::Invite)?;
+            Ok(json!({"granted": true}))
+        }
+
+        // The record, for the console and for the machine's page in the app.
+        // Local only: it names every device that was ever let in here.
+        "workspace.access.log" => {
+            crate::request_context::refuse_remote("the workspace access log")?;
+            let p: LogParams = serde_json::from_str(params).unwrap_or_default();
+            Ok(Value::Array(access_audit::read(
+                p.limit.unwrap_or(100).min(1000),
+            )?))
         }
         _ => Err(format!("unknown workspace access method: {method}")),
     })())
@@ -274,6 +556,224 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn peer_key(byte: &str) -> String {
+        byte.repeat(32)
+    }
+
+    fn invite_code() -> String {
+        call("workspace.access.invite", "{}")
+            .unwrap()
+            .expect("the console may always mint a code")["code"]
+            .as_str()
+            .expect("a code")
+            .to_owned()
+    }
+
+    /// Seed the directory before every redemption that has to reach the code.
+    ///
+    /// A lookup that misses refetches once, and on a machine that is really
+    /// signed in that fetch replaces the seeded directory with the real one.
+    fn account_holds(peer: &str, label: &str) {
+        crate::remote::seed_account_directory(vec![
+            json!({"public_identity": peer, "label": label}),
+        ]);
+    }
+
+    fn redeem(peer: &str, code: &str) -> Result<Value, String> {
+        crate::request_context::with_remote_peer(peer, || {
+            call(
+                "workspace.access.redeem",
+                &serde_json::to_string(&json!({"code": code})).unwrap(),
+            )
+            .unwrap()
+        })
+    }
+
+    #[test]
+    fn a_code_reads_the_way_it_was_typed() {
+        let code = mint_code().unwrap();
+        assert_eq!(code.len(), 9, "{code}");
+        assert_eq!(&code[4..5], "-");
+        let plain = code.replace('-', "");
+        assert_eq!(normalize_code(&code).unwrap(), plain);
+        // Lower case, spaces and the four letters the alphabet leaves out.
+        assert_eq!(
+            normalize_code("io1l 23-45").unwrap(),
+            normalize_code("101123 45").unwrap()
+        );
+        assert_eq!(normalize_code("uvwx-yz23").unwrap(), "VVWXYZ23");
+        for bad in ["", "WXYZ-123", "WXYZ-12345", "WXYZ-12!4"] {
+            assert!(normalize_code(bad).is_err(), "{bad} was accepted");
+        }
+        assert!(same_hash(&hash_code("ABCD2345"), &hash_code("ABCD2345")));
+        assert!(!same_hash(&hash_code("ABCD2345"), &hash_code("ABCD2346")));
+        assert!(!same_hash("short", &hash_code("ABCD2345")));
+    }
+
+    #[test]
+    fn only_the_console_mints_and_only_a_device_redeems() {
+        crate::test_identity::isolated(|| {
+            let refused = crate::request_context::with_remote_peer(&peer_key("aa"), || {
+                call("workspace.access.invite", "{}").unwrap().unwrap_err()
+            });
+            assert!(refused.contains("local-only"), "{refused}");
+            let refused = call("workspace.access.redeem", r#"{"code":"ABCD2345"}"#)
+                .unwrap()
+                .unwrap_err();
+            assert!(refused.contains("device being let in"), "{refused}");
+            let refused = crate::request_context::with_remote_peer(&peer_key("aa"), || {
+                call("workspace.access.log", "{}").unwrap().unwrap_err()
+            });
+            assert!(refused.contains("local-only"), "{refused}");
+        });
+    }
+
+    #[test]
+    fn a_code_lets_a_device_you_own_in_and_never_a_stranger() {
+        crate::test_identity::isolated(|| {
+            let mine = peer_key("ab");
+            let stranger = peer_key("cd");
+            account_holds(&mine, "iPhone");
+            let code = invite_code();
+
+            // A device the account does not know never reaches the code, so it
+            // cannot burn somebody else's attempts either.
+            let refused = redeem(&stranger, &code).unwrap_err();
+            assert!(refused.contains("not on the account"), "{refused}");
+            assert!(load().unwrap().invite.is_some(), "the code must survive");
+
+            account_holds(&mine, "iPhone");
+            assert_eq!(redeem(&mine, &code).unwrap(), json!({"granted": true}));
+            let store = load().unwrap();
+            assert!(store.allowed.contains(&mine));
+            assert!(store.invite.is_none(), "a code is consumed on first use");
+
+            // Single use, and the copy on the screen is now worth nothing.
+            account_holds(&mine, "iPhone");
+            let refused = redeem(&mine, &code).unwrap_err();
+            assert!(refused.contains("no code waiting"), "{refused}");
+        });
+    }
+
+    #[test]
+    fn five_wrong_guesses_retire_the_code() {
+        crate::test_identity::isolated(|| {
+            let mine = peer_key("ef");
+            account_holds(&mine, "iPad");
+            let code = invite_code();
+            let wrong = if code.starts_with('2') {
+                "3333-3333"
+            } else {
+                "2222-2222"
+            };
+            for attempt in 1..MAX_INVITE_ATTEMPTS {
+                account_holds(&mine, "iPad");
+                let refused = redeem(&mine, wrong).unwrap_err();
+                assert!(
+                    refused.contains("not right"),
+                    "attempt {attempt}: {refused}"
+                );
+                assert!(
+                    refused.contains("try again"),
+                    "attempt {attempt}: {refused}"
+                );
+            }
+            account_holds(&mine, "iPad");
+            let refused = redeem(&mine, wrong).unwrap_err();
+            assert!(refused.contains("retired"), "{refused}");
+            assert!(load().unwrap().invite.is_none());
+            // The right code is worth nothing once the code is retired.
+            assert!(
+                redeem(&mine, &code)
+                    .unwrap_err()
+                    .contains("no code waiting")
+            );
+            assert!(!load().unwrap().allowed.contains(&mine));
+        });
+    }
+
+    #[test]
+    fn minting_a_second_code_retires_the_first() {
+        crate::test_identity::isolated(|| {
+            let mine = peer_key("12");
+            account_holds(&mine, "Mac");
+            let first = invite_code();
+            let second = invite_code();
+            assert_ne!(first, second);
+            account_holds(&mine, "Mac");
+            assert!(redeem(&mine, &first).unwrap_err().contains("not right"));
+            account_holds(&mine, "Mac");
+            assert!(redeem(&mine, &second).is_ok());
+        });
+    }
+
+    #[test]
+    fn a_device_cannot_grind_codes_or_fill_the_queue() {
+        crate::test_identity::isolated(|| {
+            let mine = peer_key("34");
+            account_holds(&mine, "Phone");
+            // Each mint gives it five more guesses, and the per-device ceiling
+            // is what stops it walking through code after code.
+            for _ in 0..MAX_REDEEMS_PER_HOUR {
+                let _ = invite_code();
+                account_holds(&mine, "Phone");
+                let _ = redeem(&mine, "2222-2222");
+            }
+            account_holds(&mine, "Phone");
+            let refused = redeem(&mine, "2222-2222").unwrap_err();
+            assert!(refused.contains("Too many codes"), "{refused}");
+
+            let asker = peer_key("56");
+            account_holds(&asker, "Phone");
+            for _ in 0..MAX_ASKS_PER_HOUR {
+                assert!(
+                    crate::request_context::with_remote_peer(&asker, || call(
+                        "workspace.access.ask",
+                        "{}"
+                    )
+                    .unwrap())
+                    .is_ok()
+                );
+            }
+            let refused = crate::request_context::with_remote_peer(&asker, || {
+                call("workspace.access.ask", "{}").unwrap().unwrap_err()
+            });
+            assert!(refused.contains("asked several times"), "{refused}");
+        });
+    }
+
+    #[test]
+    fn the_log_records_who_did_it_and_nothing_else() {
+        crate::test_identity::isolated(|| {
+            let mine = peer_key("78");
+            account_holds(&mine, "iPhone");
+            let code = invite_code();
+            redeem(&mine, &code).unwrap();
+            set_allowed_by(&mine, false, Authority::Console).unwrap();
+            let entries = call("workspace.access.log", "{}").unwrap().unwrap();
+            let events: Vec<&str> = entries
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|entry| entry["event"].as_str())
+                .collect();
+            // Newest first.
+            assert_eq!(events.first(), Some(&"revoked"));
+            assert!(events.contains(&"granted"));
+            assert!(events.contains(&"invite redeemed"));
+            assert!(events.contains(&"invite minted"));
+            let granted = entries
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["event"] == "granted")
+                .unwrap();
+            assert_eq!(granted["by"], "invite");
+            assert_eq!(granted["device"], mine);
+            assert_eq!(granted["label"], "iPhone");
+        });
+    }
 
     #[test]
     fn everything_that_touches_the_work_is_gated() {

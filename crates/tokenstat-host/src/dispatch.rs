@@ -3860,7 +3860,6 @@ pub fn call_sessionless(method: &str, params: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     #[cfg(feature = "local-host")]
@@ -3885,7 +3884,10 @@ mod tests {
     /// fold into one function for the same reason; these stay separate and
     /// take the lock instead. Poisoned by a panicking test, which must not
     /// take the rest of the suite down with it.
-    static IDENTITY_LOCK: Mutex<()> = Mutex::new(());
+    ///
+    /// One lock for the whole crate, in `test_identity`, so a policy test and
+    /// a dispatch test cannot each think they have the directory to themselves.
+    use crate::test_identity::IDENTITY_LOCK;
 
     #[test]
     fn device_poll_refusal_keeps_invalid_grant_structured() {

@@ -52,6 +52,12 @@ struct InstallArgs {
     /// Agents to install on this machine, by id, separated by commas
     #[arg(long, value_name = "IDS", value_delimiter = ',')]
     agents: Vec<String>,
+    /// Let this device key work here straight away, without a second step
+    #[arg(long, value_name = "DEVICE", value_parser = peer_key)]
+    allow: Option<String>,
+    /// Print a one-time code for a second device when the install finishes
+    #[arg(long)]
+    print_invite: bool,
 }
 
 impl InstallArgs {
@@ -63,6 +69,8 @@ impl InstallArgs {
             code_file: None,
             run_as: None,
             agents: Vec::new(),
+            allow: None,
+            print_invite: false,
         }
     }
 }
@@ -104,6 +112,13 @@ enum HostCommand {
 
 #[derive(Subcommand)]
 enum AccessCommand {
+    /// Print a one-time code that lets one more device work here
+    Invite,
+    /// Show what happened to the grants on this machine
+    Log {
+        #[arg(short = 'n', long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=1000))]
+        lines: u32,
+    },
     /// Allow an exact device public key to reach the work here
     Allow {
         #[arg(value_parser = peer_key)]
@@ -157,6 +172,8 @@ pub fn run(args: &HostArgs, json_output: bool) -> Result<()> {
                 name: install.name.as_deref(),
                 code: code.as_ref(),
                 agents: &install.agents,
+                allow: install.allow.as_deref(),
+                print_invite: install.print_invite,
             },
             json_output,
         );
@@ -355,15 +372,21 @@ fn access(
     command: Option<&AccessCommand>,
     json_output: bool,
 ) -> Result<()> {
+    match command {
+        Some(AccessCommand::Invite) => return invite(socket, json_output),
+        Some(AccessCommand::Log { lines }) => return log(socket, *lines, json_output),
+        _ => {}
+    }
     if let Some(command) = command {
         let (device, allow) = match command {
             AccessCommand::Allow { device } => (device, true),
             AccessCommand::Deny { device } => (device, false),
+            AccessCommand::Invite | AccessCommand::Log { .. } => unreachable!("handled above"),
         };
         let result = host_rpc::call(
             socket,
             "workspace.access.set",
-            json!({"peerId":device,"allow":allow}),
+            json!({"peerId": device, "allow": allow, "via": "console"}),
         )?;
         if json_output {
             println!("{result}");
@@ -410,6 +433,97 @@ fn access(
         }
     }
     Ok(())
+}
+
+/// Mint the code that lets one more device in.
+///
+/// The console is the authority here: somebody who can run this could read the
+/// folders with `cat` regardless. The code never reaches tokenstat.ai, which
+/// is what keeps the account server unable to let itself in.
+pub fn invite(socket: &std::path::Path, json_output: bool) -> Result<()> {
+    let result = host_rpc::call(socket, "workspace.access.invite", json!({}))
+        .map_err(|error| older_host("invites", error))?;
+    if json_output {
+        println!("{result}");
+        return Ok(());
+    }
+    let minutes = result["expiresIn"].as_u64().unwrap_or(900) / 60;
+    println!(
+        "Give this to the device you want to let in. It expires in {minutes} minutes.\n\n    {}\n",
+        text(&result["code"])
+    );
+    println!("Paste it in tokenstat under Devices, Add this device.");
+    // A code only lets in a device on the same account, so a machine that is
+    // signed out has nothing the code could ever match.
+    if host_rpc::call(socket, "account.status", json!({}))
+        .ok()
+        .is_some_and(|account| account["signedIn"].as_bool() == Some(false))
+    {
+        println!(
+            "\nThis machine is signed out, so no device can use the code yet. Sign it in with `tokenstat login --code`."
+        );
+    }
+    Ok(())
+}
+
+fn log(socket: &std::path::Path, lines: u32, json_output: bool) -> Result<()> {
+    let entries = host_rpc::call(socket, "workspace.access.log", json!({"limit": lines}))
+        .map_err(|error| older_host("an access log", error))?;
+    if json_output {
+        println!("{entries}");
+        return Ok(());
+    }
+    let entries = entries
+        .as_array()
+        .context("The host returned an invalid access log")?;
+    if entries.is_empty() {
+        println!("Nothing has been granted or revoked on this machine yet.");
+        return Ok(());
+    }
+    for entry in entries {
+        let device = entry["device"].as_str().unwrap_or("");
+        println!(
+            "{}  {:<16}  {:<8}  {}",
+            when(text(&entry["at"])),
+            text(&entry["event"]),
+            text(&entry["by"]),
+            match entry["label"].as_str() {
+                Some(label) => format!("{label} ({})", short(device)),
+                None if device.is_empty() => String::new(),
+                None => short(device),
+            }
+        );
+    }
+    Ok(())
+}
+
+/// A daemon that predates a method answers "unknown method", which is a
+/// sentence about our protocol rather than about this machine. Say what a
+/// person can do instead.
+fn older_host(feature: &str, error: anyhow::Error) -> anyhow::Error {
+    if error.to_string().contains("unknown") {
+        return anyhow::anyhow!(
+            "This machine is running an older host, which has no {feature}. Update both binaries, then run `tokenstat host restart`."
+        );
+    }
+    error
+}
+
+/// Seconds are enough. The record keeps the full stamp; a console does not
+/// need six decimal places to say when somebody let a phone in.
+fn when(at: &str) -> String {
+    match at.split_once('.') {
+        Some((head, _)) => format!("{head}Z").replace('T', " "),
+        None => at.replace('T', " "),
+    }
+}
+
+/// Enough of a device key to recognise, not enough to retype by mistake.
+fn short(device: &str) -> String {
+    if device.len() <= 16 {
+        return device.to_owned();
+    }
+    format!("{}…{}", &device[..8], &device[device.len() - 8..])
 }
 
 fn status(
@@ -603,6 +717,16 @@ mod tests {
             vec!["tokenstat", "host", "logs", "--follow", "-n", "50"],
             vec!["tokenstat", "host", "uninstall"],
             vec!["tokenstat", "host", "uninstall", "--purge", "--yes"],
+            vec!["tokenstat", "host", "access", "invite"],
+            vec!["tokenstat", "host", "access", "log", "-n", "10"],
+            vec![
+                "tokenstat",
+                "host",
+                "install",
+                "--allow",
+                "ab00000000000000000000000000000000000000000000000000000000000000",
+                "--print-invite",
+            ],
             vec![
                 "tokenstat",
                 "host",
@@ -622,6 +746,11 @@ mod tests {
             crate::Cli::try_parse_from(["tokenstat", "host", "access", "allow", "short"]).is_err()
         );
         assert!(crate::Cli::try_parse_from(["tokenstat", "host", "--binary", "/x"]).is_ok());
+        // A grant is an exact key. Half of one, or a label, is not a device.
+        assert!(
+            crate::Cli::try_parse_from(["tokenstat", "host", "install", "--allow", "my-phone"])
+                .is_err()
+        );
     }
 
     #[test]
@@ -642,6 +771,28 @@ mod tests {
             panic!("not the install command");
         };
         assert_eq!(install.agents, ["claude_code", "codex"]);
+    }
+
+    #[test]
+    fn an_older_host_is_named_rather_than_its_protocol_error() {
+        let error = older_host(
+            "invites",
+            anyhow::anyhow!("workspace.access.invite: unknown workspace access method"),
+        )
+        .to_string();
+        assert!(error.contains("older host"), "{error}");
+        assert!(!error.contains("unknown workspace"), "{error}");
+        // Anything else is passed through as it arrived.
+        let error = older_host("invites", anyhow::anyhow!("Cannot reach the host")).to_string();
+        assert_eq!(error, "Cannot reach the host");
+    }
+
+    #[test]
+    fn a_log_line_is_readable_at_a_glance() {
+        assert_eq!(when("2026-09-08T10:15:28.175141Z"), "2026-09-08 10:15:28Z");
+        assert_eq!(when("2026-09-08T10:15:28Z"), "2026-09-08 10:15:28Z");
+        assert_eq!(short(&"ab".repeat(32)), "abababab…abababab");
+        assert_eq!(short("short"), "short");
     }
 
     #[test]

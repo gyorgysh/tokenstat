@@ -45,6 +45,7 @@
 //! - [`remote`] serves other machines and reaches them, over the same dispatch.
 //! - [`server`] is the socket listener.
 
+pub(crate) mod access_audit;
 pub mod account_activity;
 #[cfg(feature = "local-host")]
 pub mod activity;
@@ -106,6 +107,8 @@ pub mod ssh_records;
 pub(crate) mod ssh_suggest;
 #[cfg(feature = "local-host")]
 mod sync_scheduler;
+#[cfg(test)]
+pub(crate) mod test_identity;
 pub mod workspace_policy;
 
 #[cfg(feature = "local-host")]

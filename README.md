@@ -187,14 +187,27 @@ tokenstat host start|stop|restart
 tokenstat host logs --follow
 tokenstat host access                # allowed devices and pending requests
 tokenstat host access allow <device>
+tokenstat host access invite         # a one-time code for one more device
+tokenstat host access log            # who was let in here, and by whom
 tokenstat host uninstall [--purge]   # folders are never touched
 ```
 
 `install` takes `--code` or `--code-file` to sign the machine in while it is
 being set up, `--name` for what it is called on your account, `--agents` to
-install agents on it, and `--run-as <user>` to run the host and its agents as a
-specific account. `tokenstat host` says who it runs as at the top, because on a
-root install every agent on that machine has root.
+install agents on it, `--allow <device>` to let the device that is installing it
+work here straight away, and `--run-as <user>` to run the host and its agents as
+a specific account. `tokenstat host` says who it runs as at the top, because on
+a root install every agent on that machine has root.
+
+Being on the account is not the same as being let in. A device that can reach a
+machine over the tunnel still needs an explicit grant before it can open a
+folder, spawn a shell or run anything, and that grant is only ever given at the
+machine: by `access allow`, by `--allow` travelling down the console the
+installer is already running on, or by a code from `access invite` that the
+device redeems. The code is minted on the machine, only its hash is stored, it
+is single use, it expires in fifteen minutes, and five wrong guesses retire it.
+tokenstat.ai never sees it and cannot let a device in. `access log` is the
+record: a time, an event, the device, and which of the three did it.
 
 
 ## Uninstalling

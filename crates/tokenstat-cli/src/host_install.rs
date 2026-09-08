@@ -17,6 +17,10 @@ pub struct Request<'a> {
     pub name: Option<&'a str>,
     pub code: Option<&'a crate::host_enroll::PairingCode>,
     pub agents: &'a [String],
+    /// The device that installed this host, granted over the console rather
+    /// than through the account server. See the plan's section 7.
+    pub allow: Option<&'a str>,
+    pub print_invite: bool,
 }
 
 pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Result<()> {
@@ -25,6 +29,8 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
         name,
         code,
         agents,
+        allow,
+        print_invite,
     } = *request;
     let binary = resolve_binary(binary)?;
     if let Some(name) = name {
@@ -56,6 +62,25 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
         crate::host_rpc::call(&socket, "machine.rename", json!({"name":name}))?;
     }
     let identity = crate::host_rpc::call(&socket, "machine.identity", json!({}))?;
+    // The grant travels down the console the installer is already running on,
+    // and never through tokenstat.ai. A server that could hand itself a grant
+    // for a key of its own choosing would undo the whole claim.
+    if let Some(device) = allow {
+        crate::host_rpc::call(
+            &socket,
+            "workspace.access.set",
+            json!({"peerId": device, "allow": true, "via": "install"}),
+        )?;
+    }
+    let invite = if print_invite {
+        Some(crate::host_rpc::call(
+            &socket,
+            "workspace.access.invite",
+            json!({}),
+        )?)
+    } else {
+        None
+    };
     let installed_agents = install_agents(&socket, agents, json_output)?;
     let result = json!({
         "installed": true,
@@ -67,6 +92,8 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
         "alwaysOn": true,
         "tunnelEnabled": true,
         "agents": installed_agents,
+        "allowed": allow,
+        "invite": invite,
     });
     if json_output {
         println!("{result}");
@@ -80,6 +107,9 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
     );
     if service.run_as == "root" {
         println!("  Agents on this machine will run as root.");
+    }
+    if let Some(device) = allow {
+        println!("  allowed: {device}");
     }
     match account {
         Some(account) => println!("  signed in: {account}"),
@@ -97,6 +127,14 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
                 agent["error"].as_str().unwrap_or("unknown reason")
             ),
         }
+    }
+    if let Some(invite) = &invite {
+        println!(
+            "\nOne more device can be let in with this code, for the next {} minutes:\n\n    {}\n",
+            invite["expiresIn"].as_u64().unwrap_or(900) / 60,
+            invite["code"].as_str().unwrap_or("unavailable")
+        );
+        println!("Paste it in tokenstat under Devices, Add this device.");
     }
     println!("\nRun `tokenstat host status` to check the tunnel and allowed devices.");
     Ok(())
