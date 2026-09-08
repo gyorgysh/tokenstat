@@ -23,7 +23,6 @@ struct ClientSetupWizard: View {
     @State private var model = ClientSetupModel()
     @State private var library = SSHLibraryModel()
     @State private var path: [SetupStep] = []
-    @State private var showingSample = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -57,7 +56,6 @@ struct ClientSetupWizard: View {
             Task { await model.prepare(library: library) }
         }
         .onDisappear { model.cancelWork() }
-        .sheet(isPresented: $showingSample) { ClientSampleWorkspace() }
         .environment(account)
     }
 
@@ -88,21 +86,12 @@ struct ClientSetupWizard: View {
                 }
                 door(
                     title: "On a cloud machine",
-                    body: "Import from DigitalOcean, or enter an AWS server’s address, and "
-                        + "set it up the same way.",
+                    body: "A VPS or a dedicated server. Import the ones you have, or find "
+                        + "out what to rent if you have none yet.",
                     requirement: paywalled ? "Reaching it needs patron" : nil,
                     symbol: "cloud.fill"
                 ) {
                     path = [.cloud]
-                }
-                door(
-                    title: "I need a server",
-                    body: "See what a machine has to be, who bills you for it, and where "
-                        + "people rent one. Nothing here spends money.",
-                    requirement: paywalled ? "Reaching it needs patron" : nil,
-                    symbol: "cart"
-                ) {
-                    path = [.needServer]
                 }
                 door(
                     title: "On my Mac",
@@ -114,17 +103,15 @@ struct ClientSetupWizard: View {
                     path = [.mac]
                 }
                 door(
-                    title: "Just my numbers",
-                    body: "See your usage and spending. Data from machines you already have "
-                        + "keeps arriving on its own.",
+                    title: "Skip for now",
+                    body: "Go to your account and your numbers. Usage from machines you "
+                        + "already have keeps arriving on its own, and a machine can be "
+                        + "connected later from Devices.",
                     requirement: nil,
                     symbol: "chart.bar.xaxis"
                 ) {
                     dismiss()
                 }
-                Button("See a sample first", .preview) { showingSample = true }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("setup.sample")
                 Text(
                     "Nothing here is permanent. Every door can be left, and leaving lands on "
                     + "your numbers, which keep arriving whatever you choose."

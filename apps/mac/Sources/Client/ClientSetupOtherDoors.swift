@@ -148,16 +148,21 @@ struct ClientSetupCloudDoor: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text("Bring your machines")
+                    Text("A cloud machine")
                         .font(Theme.title.weight(.semibold))
                     Text(
-                        "tokenstat reads the list of servers you already have and adds them "
-                        + "to your SSH library. It never creates one and never spends money."
+                        "A VPS or a dedicated server that stays on. tokenstat reads the list "
+                        + "of the ones you already have and adds them to your SSH library. It "
+                        + "never creates one and never spends money."
                     )
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
+                // First, because somebody with no server at all cannot use
+                // anything below this and would otherwise read a form asking
+                // for an account token they have no reason to have.
+                needOne
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
@@ -235,6 +240,46 @@ struct ClientSetupCloudDoor: View {
             .frame(maxWidth: .infinity)
             .background(.bar)
         }
+    }
+
+    /// The way out for somebody who has none yet.
+    ///
+    /// It lives here rather than as a door of its own: "I have a cloud server"
+    /// and "I need a cloud server" are the same question asked by people one
+    /// step apart, and splitting them across the first screen made somebody
+    /// choose between two doors that both said cloud.
+    private var needOne: some View {
+        NavigationLink(value: SetupStep.needServer) {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                Image(systemName: "cart")
+                    .font(Theme.fixed(19, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 42, height: 42)
+                    .background(Theme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text("I do not have one yet")
+                        .font(ClientType.body.weight(.medium))
+                    Text("What a machine has to be, who bills you for it, and where people "
+                        + "rent one. Nothing there spends money.")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(Theme.fixed(12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 4)
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardSurface()
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("setup.cloud.needServer")
     }
 
     private func load() async {

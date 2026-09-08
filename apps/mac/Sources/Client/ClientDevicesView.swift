@@ -40,10 +40,14 @@ struct ClientDevicesView: View {
                 // nothing on the account is exactly who is looking at it.
                 Button { showSetup = true } label: {
                     HStack(spacing: Theme.Space.m) {
-                        Image(systemName: ActionIcon.connect.symbol).foregroundStyle(Theme.accent)
+                        // The machine, not the act of connecting. Most people
+                        // arriving here are renting one rather than plugging in
+                        // something they can see, and a cloud says that where a
+                        // plug says something about cables.
+                        Image(systemName: "cloud.fill").foregroundStyle(Theme.accent)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Set up a machine").font(ClientType.label.weight(.semibold))
-                            Text("A Mac you own, or a server over SSH")
+                            Text("A cloud server, a Mac you own, or one over SSH")
                                 .font(ClientType.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
