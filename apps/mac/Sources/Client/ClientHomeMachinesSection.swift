@@ -18,14 +18,16 @@ struct ClientHomeMachinesSection: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
 
-    /// Hosts on this account, minus this phone. Old records predate the kind
+    /// Awake hosts on this account, minus this phone. Asleep ones stay off
+    /// this screen: the list is a jumping-off point, not an inventory, and
+    /// Devices already inventories everything. Old records predate the kind
     /// field and read as hosts, so the phone is excluded by id, the same way
     /// the Workspaces list does it. Rows without an id cannot be opened, so
     /// they are not rows.
     private var hosts: [Machine] {
         let thisID = account.account?.thisMachineID
         return (account.account?.machines ?? []).filter { machine in
-            guard machine.isHost else { return false }
+            guard machine.isHost, machine.online == true else { return false }
             guard let id = machine.machineID, !id.isEmpty else { return false }
             if let thisID, id == thisID { return false }
             return true
@@ -35,9 +37,22 @@ struct ClientHomeMachinesSection: View {
     var body: some View {
         if !hosts.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Machines", mark: "mark_host")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 2)
+                HStack(alignment: .center, spacing: Theme.Space.s) {
+                    ClientSectionTitle(title: "Machines", mark: "mark_host")
+                    Spacer(minLength: 0)
+                    Button {
+                        navigation.destination = .machines
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text("Devices")
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(ClientType.caption.weight(.semibold))
+                    }
+                    .tint(Theme.accent)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 2)
                 VStack(spacing: 0) {
                     ForEach(hosts) { machine in
                         Button {

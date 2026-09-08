@@ -147,10 +147,18 @@ struct WorkspacesOverviewView: View {
                             .font(Theme.callout.weight(.medium))
                             .foregroundStyle(Theme.warning)
                     } else if let gitLine = gitLine(for: folder) {
-                        Text(gitLine)
-                            .font(Theme.mono(12))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        HStack(spacing: 5) {
+                            // The same glyph the sidebar rows use, for the
+                            // same reason: a bare branch reads as a count.
+                            if hasBranch(folder) {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(Theme.mono(11, weight: .medium))
+                            }
+                            Text(gitLine)
+                                .lineLimit(1)
+                        }
+                        .font(Theme.mono(12))
+                        .foregroundStyle(.secondary)
                     }
                     if let activity = activityLine(for: folder) {
                         Text(activity)
@@ -172,6 +180,10 @@ struct WorkspacesOverviewView: View {
             return (label?.isEmpty == false) ? label : "Remote machine"
         }
         return "This Mac"
+    }
+
+    private func hasBranch(_ folder: WorkspaceFolder) -> Bool {
+        folder.git?.isRepo == true && folder.git?.branch?.isEmpty == false
     }
 
     private func gitLine(for folder: WorkspaceFolder) -> String? {

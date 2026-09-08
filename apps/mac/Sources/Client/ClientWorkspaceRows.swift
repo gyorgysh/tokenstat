@@ -34,9 +34,18 @@ struct ClientFolderRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if let subtitle = folder.subtitle {
-                    Text(subtitle)
-                        .font(ClientType.caption)
-                        .foregroundStyle(Theme.accent)
+                    HStack(spacing: 4) {
+                        // The same glyph the Mac sidebar uses. Without it the
+                        // branch is a bare word in a line of numbers.
+                        if folder.git?.isRepo == true,
+                           folder.git?.branch?.isEmpty == false {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(ClientType.caption.weight(.medium))
+                        }
+                        Text(subtitle)
+                    }
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.accent)
                 }
             }
             Spacer(minLength: 0)

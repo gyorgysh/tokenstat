@@ -232,12 +232,12 @@ private struct ClientAccountContent: View {
     @ViewBuilder
     private var thisDevicePane: some View {
         notificationsCard
+        tabsCard
         LocalTrafficCard(traffic: model.remoteStatus?.traffic) {
             await model.loadTraffic()
         }
         ChatCacheSettings()
         layoutCard
-        tabsCard
     }
 
     /// This device's tab bar and sidebar, arranged by the person holding it.
