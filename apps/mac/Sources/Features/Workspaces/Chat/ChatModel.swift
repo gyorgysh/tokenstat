@@ -100,6 +100,10 @@ final class ChatModel {
     /// The folder that reveal was asked for, so a load of a different one
     /// cannot answer for it. See the not-found branch in `load`.
     private var pendingRevealFolderID: String?
+    /// The open conversation per folder, so leaving a folder and coming back
+    /// reopens its chat instead of collapsing to the first row. Memory only:
+    /// a deleted conversation simply is not found and the first row wins.
+    private var lastSelectedByFolder: [String: String] = [:]
     private var attachmentCacheGeneration: UInt64 = 0
     private var attemptedResponseAttachments: Set<String> = []
     private(set) var loadingResponseAttachments: Set<String> = []
@@ -127,6 +131,12 @@ final class ChatModel {
             if generation == loadGeneration { isLoading = false }
         }
         if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
+            // The folder is changing. Remember which conversation was open
+            // before the clear below drops it, or coming back can only ever
+            // find the first row.
+            if let selected, let old = folderID {
+                lastSelectedByFolder[old] = selected.id
+            }
             chats = []
             selected = nil
             events = []
@@ -195,7 +205,15 @@ final class ChatModel {
                 if fresh != selected { self.selected = fresh }
                 await refreshOpen(id: fresh.id)
             } else if selectFirst {
-                await select(chats.first)
+                // No reveal named one and the old selection is gone with the
+                // folder change. Reopen this folder's own conversation when
+                // it is still here; the first row only when it is not.
+                if let remembered = lastSelectedByFolder[workspaceID],
+                   let found = chats.first(where: { $0.id == remembered }) {
+                    await select(found)
+                } else {
+                    await select(chats.first)
+                }
             } else {
                 await select(nil)
             }
@@ -231,6 +249,9 @@ final class ChatModel {
         selectionGeneration &+= 1
         let generation = selectionGeneration
         selected = chat
+        if let chat, let folderID {
+            lastSelectedByFolder[folderID] = chat.id
+        }
         attachments = []
         attachmentPreviews = [:]
         responseAttachmentData = [:]
