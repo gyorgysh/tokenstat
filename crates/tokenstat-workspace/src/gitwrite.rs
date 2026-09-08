@@ -466,6 +466,7 @@ pub fn clone_command(url: &str, name: &str) -> Result<Vec<String>, String> {
     // The scp-like form, `git@github.com:owner/repo.git`, which is what most
     // people paste. A colon after a host, and no scheme in front of it.
     let scp_like = !lower.contains("://")
+        && !lower.contains("::")
         && url.split_once(':').is_some_and(|(host, path)| {
             !host.is_empty() && !path.is_empty() && !host.contains('/')
         });
@@ -524,6 +525,8 @@ mod clone_tests {
             "ext::sh -c whoami",
             "EXT::sh -c whoami",
             "file:///etc",
+            "custom::payload",
+            "ext::whoami",
             "https://host/a b",
             "",
             "just-a-word",

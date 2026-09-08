@@ -242,6 +242,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(unix)]
     fn nothing_outside_a_root_is_reachable_however_it_is_spelled() {
         let temp = std::env::temp_dir()
             .canonicalize()

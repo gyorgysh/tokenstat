@@ -235,7 +235,16 @@ pub(crate) fn set_allowed(peer_id: &str, allow: bool) -> Result<(), String> {
     set_allowed_by(peer_id, allow, Authority::Console)
 }
 
+static MUTATION: Mutex<()> = Mutex::new(());
+
 pub(crate) fn set_allowed_by(peer_id: &str, allow: bool, by: Authority) -> Result<(), String> {
+    let _guard = MUTATION
+        .lock()
+        .map_err(|_| "Workspace access lock is unavailable")?;
+    set_allowed_locked(peer_id, allow, by)
+}
+
+fn set_allowed_locked(peer_id: &str, allow: bool, by: Authority) -> Result<(), String> {
     let mut store = load()?;
     let already = store.allowed.iter().any(|held| held == peer_id);
     store.allowed.retain(|held| held != peer_id);
@@ -356,6 +365,12 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("workspace.access.") {
         return None;
     }
+    // Hold the lock across read/modify/save, including consuming an invite
+    // and granting access. Two tunnels must never redeem the same code.
+    let _guard = match MUTATION.lock() {
+        Ok(guard) => guard,
+        Err(_) => return Some(Err("Workspace access lock is unavailable".into())),
+    };
     Some((|| match method {
         // Over the tunnel the device is already on, with the peer taken from
         // the connection rather than from the params. A device naming somebody
@@ -424,7 +439,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             // dispatch is reached; and the grant is an ordinary row, listed
             // and revocable in Devices and gone the moment the round closes.
             if crate::screen_policy::signed_into_review_demo() {
-                set_allowed(&peer, true)?;
+                set_allowed_locked(&peer, true, Authority::Console)?;
                 return Ok(json!({"pending": false, "granted": true, "reviewDemo": true}));
             }
             Ok(json!({"pending": true}))
@@ -452,7 +467,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         "workspace.access.set" => {
             crate::request_context::refuse_remote("workspace access settings")?;
             let p: SetParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            set_allowed_by(&p.peer_id, p.allow, Authority::parse(p.via.as_deref())?)?;
+            set_allowed_locked(&p.peer_id, p.allow, Authority::parse(p.via.as_deref())?)?;
             Ok(json!({"saved": true}))
         }
 
@@ -552,7 +567,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 label.as_deref(),
                 Authority::Invite,
             );
-            set_allowed_by(&peer, true, Authority::Invite)?;
+            set_allowed_locked(&peer, true, Authority::Invite)?;
             Ok(json!({"granted": true}))
         }
 
@@ -604,6 +619,33 @@ mod tests {
             )
             .unwrap()
         })
+    }
+
+    #[test]
+    fn concurrent_redemptions_consume_an_invite_once() {
+        crate::test_identity::isolated(|| {
+            let peer = peer_key("aa");
+            account_holds(&peer, "phone");
+            let code = invite_code();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let attempts: Vec<_> = (0..2)
+                .map(|_| {
+                    let peer = peer.clone();
+                    let code = code.clone();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        redeem(&peer, &code).is_ok()
+                    })
+                })
+                .collect();
+            let successes = attempts
+                .into_iter()
+                .map(|task| usize::from(task.join().unwrap()))
+                .sum::<usize>();
+            assert_eq!(successes, 1);
+            assert!(is_allowed(&peer));
+        });
     }
 
     #[test]
