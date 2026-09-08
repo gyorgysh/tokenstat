@@ -33,7 +33,8 @@ struct ClientSetupServerStep: View {
             case .check: CheckStep(model: model, library: library, path: $path)
             case .install: InstallStep(model: model, library: library, path: $path)
             case .finish: FinishStep(model: model, library: library, path: $path)
-            case .agents: ClientSetupAgentStep(model: model, path: $path, onFinish: onFinish)
+            case .agents: ClientSetupAgentStep(model: model, path: $path)
+            case .project: ClientSetupProjectStep(model: model, onFinish: onFinish)
             case .byHand: ClientSetupByHand(model: model, path: $path)
             case .cloud: ClientSetupCloudDoor(model: model, library: library, path: $path)
             case .mac: ClientSetupMacDoor()
@@ -54,7 +55,7 @@ struct StepScaffold<Content: View, Footer: View>: View {
     let title: String
     let subtitle: String
     var number: Int
-    var total = 7
+    var total = 8
     /// The step's own picture. Nil on the two steps that draw their own: the
     /// install shows a terminal, and the last one shows the machine.
     var art: SetupArtKind?

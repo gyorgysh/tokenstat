@@ -54,6 +54,20 @@ final class ClientNavigationModel {
         return presentedChat?.chatID == chatID || visibleChatID == chatID
     }
 
+    /// A first task, offered to the composer of the next chat that opens.
+    ///
+    /// Text, never a sent message. Setup ends by handing somebody a project and
+    /// something to type into it, and a prompt may cost money, so the send stays
+    /// theirs. Consumed once by the chat that picks it up: coming back to that
+    /// folder later must not refill an emptied composer.
+    var suggestedPrompt: String?
+
+    /// Take the offered first task, if there is one. Reading it clears it.
+    func takeSuggestedPrompt() -> String? {
+        defer { suggestedPrompt = nil }
+        return suggestedPrompt
+    }
+
     /// The machine Devices should be showing, when something outside that tab
     /// asked for it.
     ///

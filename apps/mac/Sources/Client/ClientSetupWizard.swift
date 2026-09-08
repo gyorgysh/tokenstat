@@ -243,6 +243,8 @@ enum SetupStep: Hashable {
     case finish
     /// The agent's own sign-in, which the machine's is not.
     case agents
+    /// The project, which is what all of it was for.
+    case project
     /// The install line, for somebody who would rather run it themselves.
     case byHand
     /// Door three, which ends by handing over to `where` with the addresses

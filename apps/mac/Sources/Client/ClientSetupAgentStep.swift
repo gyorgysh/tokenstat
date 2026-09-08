@@ -23,9 +23,6 @@ import SwiftUI
 struct ClientSetupAgentStep: View {
     @Bindable var model: ClientSetupModel
     @Binding var path: [SetupStep]
-    var onFinish: () -> Void
-
-    @Environment(ClientNavigationModel.self) private var navigation
 
     @State private var profiles: [RemoteLaunchProfile] = []
     @State private var loading = true
@@ -92,12 +89,8 @@ struct ClientSetupAgentStep: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         } footer: {
-            Button("Open Workspaces", .next) {
-                guard model.completeSetup() else { return }
-                navigation.destination = .workspaces
-                onFinish()
-            }
-            .clientProminentStyle()
+            Button("Continue", .next) { path.append(.project) }
+                .clientProminentStyle()
             Button("Check again", .refresh) { Task { await load() } }
                 .disabled(loading || busyID != nil)
         }

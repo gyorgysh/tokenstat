@@ -223,6 +223,7 @@ struct ClientChatThread: View {
     /// pushed on top of it. `PullDetailView` takes the same closure for the
     /// same reason.
     var onBack: (() -> Void)?
+    @Environment(ClientNavigationModel.self) private var navigation
     @State private var draft = ""
     /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
@@ -336,6 +337,11 @@ struct ClientChatThread: View {
             setupSheet
         }
         .task {
+            // A first task offered by setup, put in the composer rather than
+            // sent. Only into an empty one, and only once.
+            if draft.isEmpty, let offered = navigation.takeSuggestedPrompt() {
+                draft = offered
+            }
             guard let chat = model.chats.first(where: { $0.id == chatID }) else { return }
             // Already open, with rows on screen. Re-selecting would empty the
             // transcript and read it back, which is this screen blanking and
