@@ -23,6 +23,7 @@ struct ClientSidebarRoot: View {
 
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(ClientTabCustomization.self) private var tabCustomization
     /// A pointer means a person aiming, not a thumb landing. Rows tighten and
     /// grow hover states. See `ClientLayout`.
     @Environment(PointerKeyboardModel.self) private var input
@@ -201,7 +202,7 @@ struct ClientSidebarRoot: View {
     private var sidebar: some View {
         List {
             Section {
-                ForEach(ClientTab.allCases) { tab in
+                ForEach(tabCustomization.visibleTabs) { tab in
                     Button {
                         navigation.destination = tab
                         navigation.folderID = nil
@@ -308,8 +309,8 @@ struct ClientSidebarRoot: View {
     /// on this platform, and here the account is the settings.
     private var shortcuts: [ClientShortcut] {
         var commands: [ClientShortcut] = []
-        for (index, tab) in ClientTab.allCases.enumerated() {
-            guard let key = "1234".dropFirst(index).first else { continue }
+        for (index, tab) in tabCustomization.visibleTabs.enumerated() {
+            guard let key = "12345".dropFirst(index).first else { continue }
             commands.append(
                 ClientShortcut(id: tab.rawValue, title: tab.label, key: KeyEquivalent(key)) {
                     navigation.destination = tab
@@ -643,6 +644,7 @@ struct ClientSidebarRoot: View {
             case .insights: ClientInsightsView()
             case .machines: ClientDevicesView()
             case .workspaces: ClientWorkspacesView(model: workspaces)
+            case .ssh: ClientSSHTab()
             }
         }
     }

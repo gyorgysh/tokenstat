@@ -52,6 +52,8 @@ struct ClientRootView: View {
     /// Where the person is, held above both layouts so a keyboard being
     /// attached or detached does not land them somewhere else.
     @State private var navigation = ClientNavigationModel()
+    /// This device's tabs, shared with the editor in the account sheet.
+    @State private var tabCustomization = ClientTabCustomization.shared
     @State private var editors = ClientEditorStore(write: ClientRemote.writeFile)
     /// The account sheet, opened from the avatar rather than from a tab. See
     /// `AvatarButton`.
@@ -146,6 +148,14 @@ struct ClientRootView: View {
             } else {
                 tabs
                     .transition(.opacity)
+                    // Hiding the open tab lands on the first visible one
+                    // rather than on a blank bar. The editor refuses the last
+                    // tab, so this is a move, never a guess at nothing.
+                    .onChange(of: tabCustomization.visibleTabs) { _, visible in
+                        if !visible.contains(navigation.destination) {
+                            navigation.destination = visible.first ?? .home
+                        }
+                    }
             }
         }
         .animation(.easeInOut(duration: 0.28), value: account.signedIn)
@@ -281,6 +291,7 @@ struct ClientRootView: View {
         .environment(store)
         .environment(input)
         .environment(navigation)
+        .environment(tabCustomization)
         .environment(editors)
     }
 
@@ -289,7 +300,7 @@ struct ClientRootView: View {
         @Bindable var navigation = navigation
         if #available(iOS 18, *) {
             TabView(selection: $navigation.destination) {
-                ForEach(ClientTab.allCases) { tab in
+                ForEach(tabCustomization.visibleTabs) { tab in
                     Tab(tab.label, systemImage: tab.symbol, value: tab) {
                         NavigationStack {
                             tab.content
@@ -306,7 +317,7 @@ struct ClientRootView: View {
             .clientCompactTabBarOnPad()
         } else {
             TabView(selection: $navigation.destination) {
-                ForEach(ClientTab.allCases) { tab in
+                ForEach(tabCustomization.visibleTabs) { tab in
                     NavigationStack {
                         tab.content
                             .clientChrome(showAccount: $showAccount)
@@ -342,6 +353,10 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     case workspaces
     case insights
     case machines
+    /// Saved servers, for somebody who lives in them. Opt-in and off by
+    /// default: the bar stays the familiar four until it is switched on in
+    /// the tab editor.
+    case ssh
 
     var id: String { rawValue }
 
@@ -351,6 +366,7 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         case .workspaces: return "Workspaces"
         case .insights: return "Insights"
         case .machines: return "Devices"
+        case .ssh: return "SSH"
         }
     }
 
@@ -360,6 +376,18 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         case .workspaces: return "folder.fill"
         case .insights: return "chart.bar.xaxis"
         case .machines: return "laptopcomputer"
+        case .ssh: return "terminal"
+        }
+    }
+
+    /// One line in the tab editor, saying what the tab is for.
+    var editorDetail: String {
+        switch self {
+        case .home: return "Spend, activity and limits"
+        case .workspaces: return "Folders and sessions on your machines"
+        case .insights: return "Breakdowns by model and project"
+        case .machines: return "Computers on your account"
+        case .ssh: return "Saved servers and keys"
         }
     }
 
@@ -373,7 +401,18 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         case .workspaces: ClientWorkspacesView()
         case .insights: ClientInsightsView()
         case .machines: ClientDevicesView()
+        case .ssh: ClientSSHTab()
         }
+    }
+}
+
+/// SSH as a tab, with the account's vault tier like the Devices row passes.
+/// Shared with the sidebar layout, which draws the same destination.
+struct ClientSSHTab: View {
+    @Environment(AccountModel.self) private var account
+
+    var body: some View {
+        SSHLibraryView(vaultTier: account.account?.vaultTierForSsh)
     }
 }
 

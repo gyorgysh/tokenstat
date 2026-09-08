@@ -69,10 +69,12 @@ private enum ClientAccountPane: String, CaseIterable, Hashable {
 /// Phone-sized account settings: identity, plan, devices, sign out, legal.
 private struct ClientAccountContent: View {
     @Environment(AccountModel.self) private var model
+    @Environment(ClientTabCustomization.self) private var tabCustomization
 
     @State private var showSample = false
     @State private var showLicenses = false
     @State private var showPaywall = false
+    @State private var showTabs = false
     @State private var showDeletionWeb = false
     @State private var deletionURL: URL?
     @State private var webURL: URL?
@@ -118,6 +120,7 @@ private struct ClientAccountContent: View {
         }
         .background(Theme.background)
         .sheet(isPresented: $showSample) { ClientSampleWorkspace() }
+        .sheet(isPresented: $showTabs) { ClientTabEditor(customization: tabCustomization) }
         .sheet(isPresented: $showLicenses) {
             ClientLicensesSheet()
         }
@@ -234,6 +237,48 @@ private struct ClientAccountContent: View {
         }
         ChatCacheSettings()
         layoutCard
+        tabsCard
+    }
+
+    /// This device's tab bar and sidebar, arranged by the person holding it.
+    /// Tabs are device furniture like the layout above: an iPad with a
+    /// keyboard lives in different tabs than a phone in hand, and neither
+    /// arrangement follows the account.
+    private var tabsCard: some View {
+        Button { showTabs = true } label: {
+            HStack(spacing: Theme.Space.m) {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    ClientSectionTitle(title: "Tabs", mark: "mark_device")
+                    Text(tabSummary)
+                        .font(ClientType.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(Theme.font(12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(Theme.Space.m)
+        .cardSurface()
+        .accessibilityLabel("Arrange tabs")
+        .accessibilityValue(tabSummary)
+    }
+
+    private var tabSummary: String {
+        let visible = tabCustomization.visibleTabs
+        switch visible.count {
+        case 0: return "Home"
+        case 1...3: return visible.map(\.label).joined(separator: ", ")
+        default:
+            let rest = visible.count - 2
+            return visible.prefix(2).map(\.label).joined(separator: ", ")
+                + " and \(rest) more"
+        }
     }
 
     @ViewBuilder
