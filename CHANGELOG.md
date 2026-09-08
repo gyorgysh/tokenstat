@@ -11,6 +11,56 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
+## [1.0.0] - 2026-09-08
+
+A phone can now produce a working machine. Until this release tokenstat assumed
+a computer already existed: install the desktop app, register a folder, and the
+phone became a window onto it. Now somebody holding only an iPhone can end up
+with a server that runs agents.
+
+### Added
+
+- **Set up a machine, from the phone.** Four doors: a server you already have,
+  a machine at DigitalOcean or AWS, the Mac you work on, or none of them, which
+  keeps working and is not a failure state. The server door connects over SSH
+  with your own key, checks what is on the machine before writing anything,
+  installs the host, signs it in, and comes back paired. You watch the whole
+  install in a real terminal rather than behind a spinner.
+- **The same install, to run yourself.** Handing an app an SSH key is a
+  reasonable thing to decline for a server that matters. The command is on
+  screen with a comment per flag, and it is also what the app offers when SSH
+  cannot get through, which a bastion or a provider console will do.
+- **A machine nobody is sitting at can let a device in.** Being on the account
+  has never been the same as being allowed to open somebody's work, and on a
+  server there is nobody at the keyboard to answer. Three ways now, all of them
+  from the machine's own console: allow a device by name, grant the device that
+  is installing it, or print a one-time code and type it into the app. The code
+  never reaches tokenstat.ai, expires in fifteen minutes, works once, and is
+  retired after five wrong guesses.
+- **`tokenstat host` is a full console.** Status that reads in the order you
+  debug in, start, stop, restart, logs, the devices allowed here, invites, an
+  audit log of every grant, and an uninstall that never touches your folders.
+  It says who agents run as at the top, because a root install gives every
+  agent on that machine root.
+- **The always-on host ships with the CLI** on macOS and Linux, and survives a
+  logout on Linux instead of dying with the SSH session.
+- **Choose a folder on a machine with no screen.** The machine answers what a
+  directory holds, so a phone can pick a folder on a server the same way a Mac
+  picks one in a panel. It can make a folder, and it can clone a repository
+  onto a machine that has none, in a terminal that can be answered when git
+  asks for a passphrase.
+- **Empty screens now offer the thing that is missing** rather than describing
+  the hole: no machine offers to set one up, a machine with no folders offers
+  both ways to give it one, and a machine that is not answering says what to
+  run on it when it is a server rather than telling you to wake a Mac.
+
+### Changed
+
+- The getting-started card no longer says the product starts on a computer,
+  because it no longer does.
+- Devices leads with setting a machine up rather than listing the ones that
+  already exist.
+
 ## [0.9.2] - 2026-09-08
 
 Three ways a chat could stop working: a tool that never finished, a transcript
