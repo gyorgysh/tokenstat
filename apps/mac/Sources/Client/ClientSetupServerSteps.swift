@@ -32,7 +32,8 @@ struct ClientSetupServerStep: View {
             case .fingerprint: FingerprintStep(model: model, library: library, path: $path)
             case .check: CheckStep(model: model, library: library, path: $path)
             case .install: InstallStep(model: model, library: library, path: $path)
-            case .finish: FinishStep(model: model, library: library, path: $path, onFinish: onFinish)
+            case .finish: FinishStep(model: model, library: library, path: $path)
+            case .agents: ClientSetupAgentStep(model: model, path: $path, onFinish: onFinish)
             case .byHand: ClientSetupByHand(model: model, path: $path)
             case .cloud: ClientSetupCloudDoor(model: model, library: library, path: $path)
             case .mac: ClientSetupMacDoor()
@@ -49,10 +50,11 @@ struct ClientSetupServerStep: View {
 ///
 /// A container rather than six copies, so the wizard reads as one flow and a
 /// change to the rhythm happens once.
-private struct StepScaffold<Content: View, Footer: View>: View {
+struct StepScaffold<Content: View, Footer: View>: View {
     let title: String
     let subtitle: String
     var number: Int
+    var total = 7
     /// The step's own picture. Nil on the two steps that draw their own: the
     /// install shows a terminal, and the last one shows the machine.
     var art: SetupArtKind?
@@ -71,7 +73,7 @@ private struct StepScaffold<Content: View, Footer: View>: View {
                             .padding(.top, Theme.Space.xs)
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Step \(number) of 6")
+                        Text("Step \(number) of \(total)")
                             .font(ClientType.caption.weight(.semibold))
                             .foregroundStyle(Theme.accent)
                         Text(title).font(Theme.title.weight(.semibold))
@@ -99,7 +101,7 @@ private struct StepScaffold<Content: View, Footer: View>: View {
 }
 
 /// A titled block of rows, the shape the rest of the client uses for a form.
-private struct StepSection<Content: View>: View {
+struct StepSection<Content: View>: View {
     let title: String
     @ViewBuilder var content: () -> Content
 
@@ -591,11 +593,8 @@ private struct FinishStep: View {
     @Bindable var model: ClientSetupModel
     @Bindable var library: SSHLibraryModel
     @Binding var path: [SetupStep]
-    var onFinish: () -> Void
 
     @Environment(AccountModel.self) private var account
-    @Environment(ClientNavigationModel.self) private var navigation
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         StepScaffold(
@@ -633,10 +632,10 @@ private struct FinishStep: View {
                 StepSection(title: "What is next") {
                     Text(
                         status.agents.contains(where: \.installed)
-                        ? "An agent is installed. It still needs its own sign-in, which is a "
-                        + "terminal on this machine, and then a folder to work in."
-                        : "No agent is installed yet. Open this machine and install one from "
-                        + "the launcher, then give it a folder."
+                        ? "The agent is on the machine. It still needs its own sign-in, which "
+                        + "is the next step."
+                        : "No agent is on the machine yet. The next step installs one and "
+                        + "signs it in."
                     )
                     .font(ClientType.label)
                     .fixedSize(horizontal: false, vertical: true)
@@ -650,12 +649,8 @@ private struct FinishStep: View {
                 .clientProminentStyle()
                 .disabled(model.working || !model.canCheckMachine)
             } else {
-                Button("Open Workspaces", .next) {
-                    guard model.completeSetup() else { return }
-                    navigation.destination = .workspaces
-                    onFinish()
-                }
-                .clientProminentStyle()
+                Button("Continue", .next) { path.append(.agents) }
+                    .clientProminentStyle()
             }
         }
         .navigationTitle("Finish")

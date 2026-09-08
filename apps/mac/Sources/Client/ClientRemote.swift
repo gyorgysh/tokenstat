@@ -82,6 +82,25 @@ enum ClientRemote {
         )
     }
 
+    /// Start an agent's own sign-in in a terminal on the machine that runs it.
+    ///
+    /// The id is all that travels. The command and its arguments live in the
+    /// host's hardcoded table, so this cannot become a way to run something.
+    static func launcherSignIn(
+        peer: String,
+        id: String,
+        rows: Int,
+        cols: Int,
+        dark: Bool
+    ) async throws -> PtySessionInfo {
+        try await Bridge.onPeer(
+            peer,
+            "launcher.signIn",
+            ["id": id, "rows": rows, "cols": cols, "dark": dark],
+            as: PtySessionInfo.self
+        )
+    }
+
     static func ptyList(peer: String) async throws -> [PtySessionInfo] {
         try await Bridge.onPeer(peer, "pty.list", ["includeRemote": false], as: [PtySessionInfo].self)
     }

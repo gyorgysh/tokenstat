@@ -3292,6 +3292,36 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             crate::launcher::install(&p.id)
         }
 
+        // Start an agent's own sign-in in a terminal on this machine. Id
+        // only, same rule as install: the command and its arguments are both
+        // hardcoded, so a peer picks a row rather than running something.
+        // No workspace, because a machine is signed in to an agent before it
+        // has a project.
+        "launcher.signIn" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SignInParams {
+                id: String,
+                #[serde(default = "default_rows")]
+                rows: u16,
+                #[serde(default = "default_cols")]
+                cols: u16,
+                #[serde(default)]
+                dark: Option<bool>,
+            }
+            fn default_rows() -> u16 {
+                40
+            }
+            fn default_cols() -> u16 {
+                100
+            }
+            let p: SignInParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Err(e.to_string()),
+            };
+            crate::launcher::sign_in(&p.id, p.rows, p.cols, p.dark)
+        }
+
         // Take a profile off this machine's launcher, or put it back. The
         // set lives on the host so a phone that asks `launcher.catalog`
         // sees the same grid as the Mac. Id only, same rule as install.

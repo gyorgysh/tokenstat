@@ -17,6 +17,7 @@ enum RemoteHostFeature {
     case cloneRepository
     case provisioning
     case inviteCode
+    case agentSignIn
 
     var title: String {
         switch self {
@@ -27,6 +28,7 @@ enum RemoteHostFeature {
         case .cloneRepository: "Cloning a repository"
         case .provisioning: "Setup"
         case .inviteCode: "Adding this device"
+        case .agentSignIn: "Signing in to an agent"
         }
     }
 
@@ -35,6 +37,8 @@ enum RemoteHostFeature {
     /// Version 6 added the `refresh` parameter on `chat.backends`. Version 7
     /// added `fs.browse` and `fs.mkdir`, `host.provisionStatus` and
     /// `host.logs`, the invite half of workspace access, and `workspace.clone`.
+    /// Version 9 added agent readiness on `launcher.catalog` and the
+    /// `launcher.signIn` terminal handoff.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
@@ -44,6 +48,7 @@ enum RemoteHostFeature {
         case .cloneRepository: 7
         case .provisioning: 7
         case .inviteCode: 7
+        case .agentSignIn: 9
         }
     }
 
@@ -56,6 +61,7 @@ enum RemoteHostFeature {
         case .cloneRepository: "arrow.down.doc"
         case .provisioning: "sparkles"
         case .inviteCode: "key.horizontal.fill"
+        case .agentSignIn: "person.badge.key.fill"
         }
     }
 

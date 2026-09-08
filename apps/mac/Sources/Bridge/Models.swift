@@ -402,8 +402,12 @@ struct ProvisionStatus: Codable, Sendable, Hashable {
         var id: String
         var name: String
         var installed: Bool
-        /// Null where no harness exposes a way to ask. Never guessed.
+        /// Null where nothing on that machine can be asked. Never guessed.
         var signedIn: Bool?
+        /// Absent from a host before protocol 9, which reads as `unknown`.
+        var readiness: AgentReadiness?
+        var expiresAt: Double?
+        var signIn: AgentSignIn?
     }
 
     struct Tunnel: Codable, Sendable, Hashable {
@@ -1659,6 +1663,46 @@ struct RemoteLaunchProfile: Codable, Sendable, Hashable {
     /// not installed. Data to display, never a command this app runs: the
     /// host executes it and the app only sends the profile id.
     var installCommand: String?
+    /// Installed is not ready. A host from before protocol 9 omits these, and
+    /// a missing value means "not checked", never "signed out".
+    var readiness: AgentReadiness?
+    var expiresAt: Double?
+    var signIn: AgentSignIn?
+}
+
+/// Whether an agent on a machine can actually start work.
+///
+/// `unknown` is a real answer and the default for anything this app cannot
+/// establish, including every host too old to have been asked. Sending
+/// somebody to redo a sign-in that was fine is as bad as letting them send a
+/// prompt into an auth error.
+enum AgentReadiness: String, Codable, Sendable, Hashable {
+    case notInstalled, needsSignIn, signedIn, expired, unknown
+
+    /// A state this app has never heard of is one it cannot act on, so it
+    /// decodes as unknown rather than failing the whole machine's status.
+    init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AgentReadiness(rawValue: raw) ?? .unknown
+    }
+
+    var summary: String {
+        switch self {
+        case .notInstalled: "Not installed"
+        case .needsSignIn: "Not signed in"
+        case .signedIn: "Signed in"
+        case .expired: "Sign-in expired"
+        case .unknown: "Sign-in not checked"
+        }
+    }
+}
+
+/// How an agent signs in on a machine with no browser of its own.
+struct AgentSignIn: Codable, Sendable, Hashable {
+    var supported: Bool
+    /// `browserCode` shows a link and then asks for a code pasted back.
+    /// `deviceCode` prints a code to type into a page on another device.
+    var kind: String?
 }
 
 /// What running a profile's installer said. `output` is the captured tail of

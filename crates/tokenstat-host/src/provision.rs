@@ -78,11 +78,12 @@ fn folders() -> usize {
 
 /// What this machine can run, and whether it is signed in to it.
 ///
-/// `signedIn` is null on purpose. A fresh server has no agent login, and the
-/// first run failing with somebody else's auth error is the step everybody
-/// forgets, so the field exists. No harness we ship exposes a way to ask, and
-/// reporting `false` for something that cannot be checked would be worse than
-/// saying nothing. See the rule in CLAUDE.md.
+/// `signedIn` stays three-valued: a tool whose login this machine has no way
+/// to inspect answers null, and always did. What changed is that some of them
+/// can now be inspected, by looking for the credential store the tool itself
+/// wrote, so a fresh server no longer claims nothing is knowable when the
+/// plain fact is that nobody has signed in yet. `readiness` carries the states
+/// a screen needs; see `agent_readiness`. Guessing is still forbidden.
 #[cfg(feature = "local-host")]
 fn agents() -> Value {
     let catalog = crate::launcher::catalog();
@@ -94,12 +95,21 @@ fn agents() -> Value {
                     .iter()
                     .filter(|profile| profile["id"].as_str() != Some("shell"))
                     .map(|profile| {
-                        json!({
+                        let id = profile["id"].as_str().unwrap_or_default();
+                        let installed = profile["installed"].as_bool().unwrap_or(false);
+                        let mut entry = json!({
                             "id": profile["id"],
                             "name": profile["name"],
-                            "installed": profile["installed"],
-                            "signedIn": Value::Null,
-                        })
+                            "installed": installed,
+                        });
+                        if let Some(state) =
+                            crate::agent_readiness::describe(id, installed).as_object()
+                        {
+                            for (key, value) in state {
+                                entry[key] = value.clone();
+                            }
+                        }
+                        entry
                     })
                     .collect()
             })

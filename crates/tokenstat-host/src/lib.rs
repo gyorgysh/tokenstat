@@ -52,6 +52,8 @@ pub mod activity;
 #[cfg(feature = "local-host")]
 pub mod agent_models;
 #[cfg(feature = "local-host")]
+pub(crate) mod agent_readiness;
+#[cfg(feature = "local-host")]
 pub mod automations;
 pub mod base64;
 #[cfg(feature = "local-host")]
@@ -176,4 +178,8 @@ pub use tokenstat_pty::warm_shell_pool;
 /// number does not match, and that check is the only thing that notices.
 /// Version 8 adds the local-only `ssh.provision.identity` handoff. The
 /// remote workspace provisioning methods themselves remain available at 7.
-pub const PROTOCOL_VERSION: &str = "8";
+/// Version 9 adds agent readiness to `launcher.catalog` and
+/// `host.provisionStatus`: `readiness`, `expiresAt` and `checked` beside the
+/// `signedIn` that older clients read. An older host omits them, which a
+/// client must read as "not checked" rather than as signed out.
+pub const PROTOCOL_VERSION: &str = "9";

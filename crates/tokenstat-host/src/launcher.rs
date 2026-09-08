@@ -493,6 +493,7 @@ pub(crate) fn catalog() -> Value {
             let installed = profile.id == "shell"
                 || (absolute_command(profile.command) && is_executable(Path::new(profile.command)))
                 || resolve_profile(profile, &path, Path::new(&home)).is_some();
+            let ready = crate::agent_readiness::describe(profile.id, installed);
             let mut value = json!({
                 "id": profile.id,
                 "name": profile.name,
@@ -506,6 +507,16 @@ pub(crate) fn catalog() -> Value {
                 "hidden": hidden.contains(profile.id),
                 "installCommand": profile.installer(),
             });
+            // Installed is not ready. A tool with no login answers prompts
+            // with somebody else's auth error, and a grid that cannot say so
+            // sends every new server through that once.
+            if profile.id != "shell"
+                && let Some(state) = ready.as_object()
+            {
+                for (key, answer) in state {
+                    value[key] = answer.clone();
+                }
+            }
             if profile.id == "shell" {
                 #[cfg(windows)]
                 {
@@ -531,6 +542,53 @@ pub(crate) fn catalog() -> Value {
         })
         .collect();
     Value::Array(available)
+}
+
+/// Start one agent's own sign-in, in a terminal in the person's home.
+///
+/// The command is the catalog's, the arguments are `agent_readiness`'s, and
+/// the caller supplies neither: a client picks an id and nothing else, exactly
+/// as it does for [`install`]. There is no workspace yet when this runs, which
+/// is the whole point of it: signing an agent in is something you do to a
+/// machine, before it has a project on it.
+///
+/// Nothing about the login is read back. Whatever the agent prints, including
+/// a code the person has to carry to a browser, stays in the terminal they are
+/// looking at.
+pub(crate) fn sign_in(id: &str, rows: u16, cols: u16, dark: Option<bool>) -> Result<Value, String> {
+    let Some(profile) = PROFILES.iter().find(|profile| profile.id == id) else {
+        return Err(format!("no such agent: {id}"));
+    };
+    let Some(flow) = crate::agent_readiness::sign_in(id) else {
+        return Err(format!(
+            "{} has no sign-in that works in a terminal on this machine",
+            profile.name
+        ));
+    };
+    let path = search_path();
+    let home = user_home();
+    let command = if absolute_command(profile.command) && is_executable(Path::new(profile.command))
+    {
+        profile.command.to_string()
+    } else {
+        resolve_profile(profile, &path, Path::new(&home))
+            .ok_or_else(|| format!("{} is not installed on this machine", profile.name))?
+    };
+    let info = tokenstat_pty::manager()
+        .spawn(&tokenstat_pty::Spawn {
+            command,
+            args: flow.args.iter().map(|arg| (*arg).to_string()).collect(),
+            cwd: PathBuf::from(&home),
+            workspace_id: None,
+            hidden: false,
+            rows,
+            cols,
+            no_color: false,
+            dark,
+            environment: Vec::new(),
+        })
+        .map_err(|e| e.to_string())?;
+    serde_json::to_value(info).map_err(|e| e.to_string())
 }
 
 /// Run a catalog profile's official installer on this machine.
