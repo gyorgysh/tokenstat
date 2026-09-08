@@ -85,6 +85,15 @@ struct ClientSetupWizard: View {
                     path = [.cloud]
                 }
                 door(
+                    title: "I need a server",
+                    body: "See what a machine has to be, who bills you for it, and where "
+                        + "people rent one. Nothing here spends money.",
+                    requirement: paywalled ? "Reaching it needs patron" : nil,
+                    symbol: "cart"
+                ) {
+                    path = [.needServer]
+                }
+                door(
                     title: "On my Mac",
                     body: "Install the desktop app on the computer you work on, sign in "
                         + "to this account, and let this phone in.",
@@ -252,6 +261,8 @@ enum SetupStep: Hashable {
     case agents
     /// The project, which is what all of it was for.
     case project
+    /// For somebody who has no machine at all yet.
+    case needServer
     /// The install line, for somebody who would rather run it themselves.
     case byHand
     /// Door three, which ends by handing over to `where` with the addresses

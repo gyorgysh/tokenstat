@@ -38,6 +38,7 @@ struct ClientSetupServerStep: View {
             case .byHand: ClientSetupByHand(model: model, path: $path)
             case .cloud: ClientSetupCloudDoor(model: model, library: library, path: $path)
             case .mac: ClientSetupMacDoor()
+            case .needServer: ClientSetupServerGuide(path: $path)
             }
         }
         .background(Theme.background)
