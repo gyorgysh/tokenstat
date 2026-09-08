@@ -16,11 +16,11 @@ import SwiftUI
 /// four dead ends and no order. This is the one card that says which end to
 /// start at, and it leaves the moment the first numbers land.
 ///
-/// **No install step, and that is deliberate.** Nobody installs a Mac app from
-/// an iPhone, so a download link here would be a link out of the app to a page
-/// that cannot help the device reading it. This phone is a companion to a
-/// computer that is already counting, and the card says exactly that rather
-/// than implying the product starts here.
+/// **There is an install step now, and it is not a download link.** Nobody
+/// installs a Mac app from an iPhone, which is why this card used to say the
+/// product started somewhere else. It no longer has to: a phone can give
+/// tokenstat a server over SSH and get back a machine that runs agents. So
+/// step two is the wizard, and the Mac remains the first door inside it.
 ///
 /// Signing in is behind us by the time Home draws at all: `ClientRootView`
 /// shows `ClientLoginView` until it is done. So step one arrives struck
@@ -29,6 +29,7 @@ import SwiftUI
 struct ClientGettingStarted: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
+    @State private var showSetup = false
 
     /// The account's own name for this phone, when it has one. "Signed in" is
     /// true of somebody's account, and naming the device makes it true of the
@@ -45,6 +46,9 @@ struct ClientGettingStarted: View {
         }
         .padding(Theme.Space.m)
         .cardSurface()
+        .fullScreenCover(isPresented: $showSetup) {
+            ClientSetupWizard()
+        }
     }
 
     private var header: some View {
@@ -71,17 +75,14 @@ struct ClientGettingStarted: View {
             ),
             GettingStartedStep(
                 number: 2,
-                title: "Add a computer",
-                // No URL and no command: a phone can act on neither. What it
-                // can do is say which account to use and where the result
-                // shows up.
-                body: "On your Mac, open tokenstat and sign in to this same "
-                    + "account. In a terminal, run tokenstat login. Free "
-                    + "includes two devices, so a computer and this phone fit.",
+                title: "Connect a machine",
+                body: "A Mac you already work on, or a server tokenstat sets up "
+                    + "for you over SSH. Free includes two devices, so a machine "
+                    + "and this phone fit.",
                 state: .now,
-                actionTitle: "See devices",
-                actionIcon: .device,
-                action: { navigation.destination = .machines }
+                actionTitle: "Set up a machine",
+                actionIcon: .connect,
+                action: { showSetup = true }
             ),
         ]
     }

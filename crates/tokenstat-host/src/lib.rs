@@ -106,6 +106,7 @@ pub mod session;
 #[cfg(feature = "local-host")]
 mod session_meter;
 pub mod ssh_client;
+pub(crate) mod ssh_provision;
 pub mod ssh_records;
 pub(crate) mod ssh_suggest;
 #[cfg(feature = "local-host")]

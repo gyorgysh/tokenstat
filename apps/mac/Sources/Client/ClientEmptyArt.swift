@@ -42,6 +42,16 @@ enum EmptyArtKind {
     /// it will have, so the character on the empty screen is the one that
     /// actually turns up.
     case chat(seed: UInt64)
+    /// No machine has been connected yet, so there is nothing to work on. The
+    /// scene is a server waiting rather than an empty tray: the thing that is
+    /// missing is a machine, and the screen should look like the offer to get
+    /// one rather than like a shrug.
+    case noMachine
+    /// A machine being set up. The bar fills because something is happening,
+    /// and it is the same shape as the one that ends up on the finished card.
+    case provisioning
+    /// A machine that is set up, on, and reachable.
+    case serverReady
 }
 
 /// The picture over an empty state.
@@ -62,6 +72,9 @@ struct ClientEmptyArt: View {
     var body: some View {
         Group {
             switch kind {
+            case .noMachine: ServerScene(reduceMotion: reduceMotion, state: .waiting)
+            case .provisioning: ServerScene(reduceMotion: reduceMotion, state: .working)
+            case .serverReady: ServerScene(reduceMotion: reduceMotion, state: .ready)
             case .sessions: SessionsScene(reduceMotion: reduceMotion)
             case .tasks: TasksScene(reduceMotion: reduceMotion)
             case .notes: NotesScene(reduceMotion: reduceMotion)
@@ -117,6 +130,103 @@ private struct Ghost: View {
 
     var body: some View {
         Capsule().fill(color).frame(width: width, height: Ink.width)
+    }
+}
+
+// MARK: - A machine
+
+/// One drawing in three states, because they are three moments of the same
+/// thing: a server with nothing on it, a server being set up, and a server
+/// that answers. Three separate scenes would have drifted into three different
+/// machines, and somebody walking the wizard sees all three in a row.
+private struct ServerScene: View {
+    enum State { case waiting, working, ready }
+
+    var reduceMotion: Bool
+    var state: State
+
+    @SwiftUI.State private var phase: CGFloat = 0
+
+    var body: some View {
+        HStack(spacing: 16) {
+            phone
+            link
+            rack
+        }
+        .onAppear {
+            guard !reduceMotion, state != .waiting else { return }
+            withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
+                phase = 1
+            }
+        }
+    }
+
+    private var phone: some View {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .strokeBorder(Ink.quiet, style: Ink.style)
+            .frame(width: 22, height: 38)
+            .overlay { Ghost(width: 10, color: Ink.second) }
+    }
+
+    /// Nothing, a signal, or a settled line. The link is the whole story here.
+    private var link: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(dotColor(index))
+                    .frame(width: 4, height: 4)
+                    .opacity(dotOpacity(index))
+            }
+        }
+    }
+
+    private func dotColor(_ index: Int) -> Color {
+        switch state {
+        case .waiting: Ink.quiet
+        case .working: Ink.lead
+        case .ready: Ink.lead
+        }
+    }
+
+    private func dotOpacity(_ index: Int) -> CGFloat {
+        switch state {
+        case .waiting: 0.5
+        case .ready: 1
+        case .working:
+            // A wave rather than three blinking together, so it reads as
+            // something travelling rather than as three lights.
+            reduceMotion ? 0.7 : 0.35 + 0.65 * max(0, 1 - abs(phase * 3 - CGFloat(index)))
+        }
+    }
+
+    /// A rack: three units, and a light on the top one that only comes on when
+    /// the machine actually answers.
+    private var rack: some View {
+        VStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { unit in
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .strokeBorder(Ink.quiet, style: Ink.style)
+                    .frame(width: 44, height: 13)
+                    .overlay(alignment: .leading) {
+                        Circle()
+                            .fill(unit == 0 ? light : Ink.quiet)
+                            .frame(width: 4, height: 4)
+                            .padding(.leading, 5)
+                    }
+                    .overlay(alignment: .trailing) {
+                        Ghost(width: 16, color: Ink.second)
+                            .padding(.trailing, 6)
+                    }
+            }
+        }
+    }
+
+    private var light: Color {
+        switch state {
+        case .waiting: Ink.quiet
+        case .working: Ink.lead.opacity(reduceMotion ? 0.8 : 0.4 + 0.6 * phase)
+        case .ready: Ink.lead
+        }
     }
 }
 

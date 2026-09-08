@@ -963,7 +963,7 @@ private struct SSHNativeTerminal: NSViewRepresentable {
     }
 }
 #else
-private struct SSHNativeTerminal: UIViewRepresentable {
+struct SSHNativeTerminal: UIViewRepresentable {
     let session: SSHLiveTerminal
     @Environment(\.colorScheme) private var colorScheme
     func makeUIView(context: Context) -> TerminalView {

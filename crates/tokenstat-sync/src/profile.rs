@@ -862,6 +862,71 @@ pub fn rename_machine(
     Ok(())
 }
 
+/// A pairing code this account can hand to a machine that is being set up.
+///
+/// The mirror of [`login_with_code`]: this end mints, the machine being
+/// provisioned redeems. It exists because a phone setting up a server over SSH
+/// has to put a code in the install line, and the only other way to mint one
+/// is the form on the website, behind a session cookie an app holding a bearer
+/// token cannot use.
+///
+/// The code is the whole credential until it is redeemed, so it is never
+/// written down: it goes into a private file on the machine being set up, or
+/// onto a screen a person is reading, and nowhere else.
+#[derive(Debug, Clone)]
+pub struct PairingCode {
+    pub code: String,
+    pub expires_in: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PairingCodeResponse {
+    code: String,
+    #[serde(default)]
+    expires_in: u64,
+}
+
+pub fn mint_pairing_code(host_flag: Option<&str>) -> Result<PairingCode, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let client = http_client()?;
+    let resp = client
+        .post(format!("{host}/api/v1/device/pair"))
+        .header("authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({}))
+        .send()?;
+    let status = resp.status();
+    if status.as_u16() == 401 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if status.as_u16() == 404 {
+        return Err(ProfileError::Message(
+            "This account server is older than this app and cannot mint a pairing code. Mint one on the website instead.".into(),
+        ));
+    }
+    if !status.is_success() {
+        let text = limited_text(resp)?;
+        return Err(ProfileError::Message(format!(
+            "could not create a pairing code ({status}): {text}"
+        )));
+    }
+    let minted: PairingCodeResponse = resp.json()?;
+    if minted.code.trim().is_empty() {
+        return Err(ProfileError::Message(
+            "the account server returned an empty pairing code".into(),
+        ));
+    }
+    Ok(PairingCode {
+        code: minted.code,
+        expires_in: if minted.expires_in == 0 {
+            15 * 60
+        } else {
+            minted.expires_in
+        },
+    })
+}
+
 /// Short-lived tunnel HELLO credential for one machine.
 ///
 /// Minted with the long-lived login/sync bearer. The returned secret is

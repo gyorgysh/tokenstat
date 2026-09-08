@@ -28,12 +28,32 @@ struct ClientDevicesView: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(ClientNavigationModel.self) private var navigation
     @State private var model = ClientDevicesModel()
+    @State private var showSetup = false
 
     private var machines: [Machine] { account.account?.machines ?? [] }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
+                // The one place that makes a machine, rather than listing the
+                // ones that already exist. Above the list because somebody with
+                // nothing on the account is exactly who is looking at it.
+                Button { showSetup = true } label: {
+                    HStack(spacing: Theme.Space.m) {
+                        Image(systemName: ActionIcon.connect.symbol).foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Set up a machine").font(ClientType.label.weight(.semibold))
+                            Text("A Mac you own, or a server over SSH")
+                                .font(ClientType.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    }
+                    .padding(Theme.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardSurface()
+                }
+                .buttonStyle(.plain)
                 NavigationLink {
                     SSHLibraryView(vaultTier: account.account?.vaultTierForSsh)
                 } label: {
@@ -56,13 +76,13 @@ struct ClientDevicesView: View {
                     } else {
                         ClientEmptyState(
                             kind: .nothingYet,
-                            title: "No devices yet",
-                            message: "On your Mac, open tokenstat and sign in to this same account. "
-                                + "Free includes two devices, and this phone uses one of them.",
-                            actionTitle: "How to start",
-                            actionIcon: .home,
-                            action: { navigation.destination = .home },
-                            mark: "mark_device"
+                            title: "No machines yet",
+                            message: "Connect a computer you own, or give tokenstat a server "
+                                + "and it will set the machine up for you.",
+                            actionTitle: "Set up a machine",
+                            actionIcon: .connect,
+                            action: { showSetup = true },
+                            art: .noMachine
                         )
                     }
                 } else {
@@ -103,6 +123,9 @@ struct ClientDevicesView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
+        .fullScreenCover(isPresented: $showSetup) {
+            ClientSetupWizard()
+        }
         // One push, driven from outside this tab: Workspaces sends a machine
         // here rather than growing a device screen of its own. A binding
         // rather than a path because the stack belongs to `ClientRootView`,

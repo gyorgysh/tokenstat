@@ -1060,6 +1060,7 @@ fn owner_only_method(method: &str) -> bool {
                 | "account.renameMachine"
                 | "account.unlinkMachine"
                 | "account.registerMachine"
+                | "account.pairingCode"
         )
 }
 
@@ -2960,6 +2961,18 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         // Call a device on this account something, from any front end. The
         // label lives on the account row rather than on the machine, which is
         // what lets this app name a headless server it will never log into.
+        // A code for a machine that is being set up, minted by the device
+        // doing the setting up.
+        //
+        // Owner-only, like every other account method: a peer must never be
+        // able to make this device mint a credential for a machine it chose.
+        // The code is returned once and never stored, because until it is
+        // redeemed it is the whole credential.
+        "account.pairingCode" => match tokenstat_sync::mint_pairing_code(None) {
+            Ok(minted) => Ok(json!({"code": minted.code, "expiresIn": minted.expires_in})),
+            Err(error) => Err(error.to_string()),
+        },
+
         "account.renameMachine" => {
             #[derive(Deserialize)]
             struct RenameParams {

@@ -2835,6 +2835,89 @@ extension Bridge {
         ), as: SSHSessionHandle.self)
     }
 
+    /// Open a shell with an auth payload the caller already resolved.
+    ///
+    /// The setup wizard resolves the credential once and hands the same
+    /// payload to the check, the staged code and this. Branching on the kind
+    /// in three places is three places to get it wrong.
+    static func openSSHWithResolvedAuth(
+        _ host: SSHHost, auth: [String: Any], rows: Int, cols: Int, jump: [String: Any]? = nil
+    ) async throws -> SSHSessionHandle {
+        try await background("ssh.session.open", sessionParams(
+            host, rows: rows, cols: cols, auth: auth, jump: jump
+        ), as: SSHSessionHandle.self)
+    }
+
+    // MARK: - Setting a machine up over SSH
+
+    /// What a server is, before anything is written to it.
+    ///
+    /// Runs one fixed script on its own channel, so nothing appears in the
+    /// person's shell and nothing on the server changes. The command is chosen
+    /// by the host from a list it holds; this end sends only where to connect.
+    static func probeServerForSetup(
+        _ host: SSHHost, auth: [String: Any], jump: [String: Any]? = nil
+    ) async throws -> ServerCheck {
+        try await background("ssh.provision.check", sessionParams(
+            host, rows: 24, cols: 100, auth: auth, jump: jump
+        ), as: ServerCheck.self)
+    }
+
+    /// Put the pairing code on the server as a private file.
+    ///
+    /// Never on the command line: there it lands in the shell history and,
+    /// briefly, in `/proc`. Its own channel too, so the shell the person is
+    /// watching never sees it.
+    static func stagePairingCode(
+        _ host: SSHHost, code: String, auth: [String: Any], jump: [String: Any]? = nil
+    ) async throws {
+        struct Staged: Codable, Sendable { var staged: Bool }
+        var params = sessionParams(host, rows: 24, cols: 100, auth: auth, jump: jump)
+        params["code"] = code
+        _ = try await background("ssh.provision.stageCode", params, as: Staged.self)
+    }
+
+    /// And take it away again, because this app put it there.
+    static func clearPairingCode(
+        _ host: SSHHost, auth: [String: Any], jump: [String: Any]? = nil
+    ) async throws {
+        struct Cleared: Codable, Sendable { var cleared: Bool }
+        _ = try await background("ssh.provision.clearCode", sessionParams(
+            host, rows: 24, cols: 100, auth: auth, jump: jump
+        ), as: Cleared.self)
+    }
+
+    /// The install line, composed by the host so every surface that shows it
+    /// shows the same one.
+    static func installLine(
+        allow: String?, name: String?, agents: [String], printInvite: Bool,
+        codeFile: Bool, code: String? = nil
+    ) async throws -> InstallLine {
+        try await background("ssh.provision.line", [
+            "allow": allow as Any,
+            "name": name as Any,
+            "agents": agents,
+            "printInvite": printInvite,
+            "codeFile": codeFile,
+            "code": code as Any,
+        ], as: InstallLine.self)
+    }
+
+    /// A pairing code for a machine this device is setting up.
+    ///
+    /// Minted on the account, single use, fifteen minutes. Returned once and
+    /// never stored: until it is redeemed it is the whole credential.
+    static func mintPairingCode() async throws -> PairingCode {
+        try await background("account.pairingCode", as: PairingCode.self)
+    }
+
+    /// Is this machine finished being set up. Asked of a peer over the tunnel
+    /// once it is paired, so the wizard's last step reads the machine itself
+    /// rather than believing the installer's output.
+    static func provisionStatus(peer: String) async throws -> ProvisionStatus {
+        try await onPeer(peer, "host.provisionStatus", [:], as: ProvisionStatus.self)
+    }
+
     /// Describe a jump host, credentials included, for `ssh.session.open`.
     ///
     /// Built on the client because only the client can open the platform vault

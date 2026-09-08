@@ -255,7 +255,10 @@ fn default_cols() -> u32 {
 }
 
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
-    if !method.starts_with("ssh.session.") && method != "ssh.host.probe" {
+    if !method.starts_with("ssh.session.")
+        && !method.starts_with("ssh.provision.")
+        && method != "ssh.host.probe"
+    {
         return None;
     }
     Some((|| {
@@ -425,6 +428,61 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             }
             guard.ran(&p.fragment);
             Ok(json!({"recorded": true, "directory": guard.cwd}))
+        }
+        // Setting a machine up, over the connection a person just opened.
+        //
+        // Each of these runs on its own channel, so the interactive shell
+        // never sees the command and no line lands in anybody's history. The
+        // command is chosen by name from `ssh_provision`, never sent by the
+        // caller: this is the one place where an SSH session and a client that
+        // is not at the machine meet, and it must not become a way to run
+        // something arbitrary on somebody's server.
+        "ssh.provision.check" => {
+            let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let output = runtime()?.block_on(provision_exec(
+                p,
+                crate::ssh_provision::CHECK_SCRIPT.to_string(),
+                None,
+            ))?;
+            Ok(crate::ssh_provision::parse_check(&output))
+        }
+        // The pairing code, written to a private file rather than typed.
+        "ssh.provision.stageCode" => {
+            #[derive(Deserialize)]
+            struct Staged {
+                code: String,
+                #[serde(flatten)]
+                open: OpenParams,
+            }
+            let p: Staged = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let code = p.code.trim().to_ascii_uppercase();
+            let plain: String = code.chars().filter(|c| *c != '-').collect();
+            if plain.len() != 8 || !plain.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+                return Err("A pairing code is eight letters or digits.".into());
+            }
+            runtime()?.block_on(provision_exec(
+                p.open,
+                crate::ssh_provision::stage_code_command(),
+                Some(format!("{code}\n")),
+            ))?;
+            Ok(json!({"staged": true, "path": crate::ssh_provision::CODE_PATH}))
+        }
+        // And taken away again, because this product put it there.
+        "ssh.provision.clearCode" => {
+            let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            runtime()?.block_on(provision_exec(
+                p,
+                crate::ssh_provision::clear_code_command(),
+                None,
+            ))?;
+            Ok(json!({"cleared": true}))
+        }
+        // The install line itself, composed in one place so the app that types
+        // it and the screen that offers it to be pasted cannot disagree.
+        "ssh.provision.line" => {
+            let p: crate::ssh_provision::LineParams =
+                serde_json::from_str(params).map_err(|e| e.to_string())?;
+            crate::ssh_provision::install_line(&p)
         }
         "ssh.session.close" => {
             let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
@@ -660,6 +718,74 @@ async fn authenticate(
                 .map_err(|e| e.to_string())
         }
         Auth::Agent { fingerprint } => authenticate_agent(handle, username, fingerprint).await,
+    }
+}
+
+/// Run one named command on its own channel and read what it printed.
+///
+/// A fresh connection each time rather than borrowing a live session: the
+/// interactive shell belongs to the person, and a setup step must not appear
+/// in the middle of what they are typing.
+async fn provision_exec(
+    p: OpenParams,
+    command: String,
+    stdin: Option<String>,
+) -> Result<String, String> {
+    if p.host_keys.is_empty() {
+        return Err("Confirm this server's fingerprint before connecting.".into());
+    }
+    let (mut handle, _) = connect(&p, false).await?;
+    let auth = p.auth.as_ref().ok_or("SSH authentication is required")?;
+    if !authenticate(&mut handle, &p.username, auth)
+        .await?
+        .success()
+    {
+        return Err("SSH authentication was refused".into());
+    }
+    let mut channel = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| e.to_string())?;
+    channel
+        .exec(true, command.into_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some(stdin) = stdin {
+        channel
+            .data(stdin.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+        channel.eof().await.map_err(|e| e.to_string())?;
+    }
+    // Bounded, because this reads whatever the far end decides to send.
+    const MAX: usize = 16 * 1024;
+    let mut out: Vec<u8> = Vec::new();
+    let mut status: Option<u32> = None;
+    while let Some(message) = channel.wait().await {
+        match message {
+            ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
+                let room = MAX.saturating_sub(out.len());
+                out.extend_from_slice(&data[..room.min(data.len())]);
+                if out.len() >= MAX {
+                    break;
+                }
+            }
+            ChannelMsg::ExitStatus { exit_status } => status = Some(exit_status),
+            ChannelMsg::Eof | ChannelMsg::Close => break,
+            _ => {}
+        }
+    }
+    let _ = channel.close().await;
+    let _ = handle
+        .disconnect(Disconnect::ByApplication, "setup step finished", "en")
+        .await;
+    let text = String::from_utf8_lossy(&out).into_owned();
+    match status {
+        Some(0) | None => Ok(text),
+        Some(code) => Err(format!(
+            "The machine refused that step (exit {code}). {}",
+            text.trim()
+        )),
     }
 }
 
@@ -929,5 +1055,47 @@ mod tests {
             .expect_err("must refuse");
             assert!(refused.contains("local-only"), "{refused}");
         });
+    }
+
+    /// The provisioning plane is the device holding the SSH key, and nothing
+    /// else. A host must never be able to set up a machine on a peer's behalf.
+    #[test]
+    fn a_remote_peer_cannot_set_a_machine_up() {
+        crate::request_context::with_remote_peer("phone", || {
+            for (method, params) in [
+                (
+                    "ssh.provision.check",
+                    r#"{"hostname":"example.com","username":"root","hostKeys":["x"]}"#,
+                ),
+                (
+                    "ssh.provision.stageCode",
+                    r#"{"code":"WXYZ1234","hostname":"example.com","username":"root","hostKeys":["x"]}"#,
+                ),
+                (
+                    "ssh.provision.clearCode",
+                    r#"{"hostname":"example.com","username":"root","hostKeys":["x"]}"#,
+                ),
+                ("ssh.provision.line", "{}"),
+            ] {
+                let refused = call(method, params).unwrap().expect_err("must refuse");
+                assert!(refused.contains("local-only"), "{method}: {refused}");
+            }
+        });
+    }
+
+    #[test]
+    fn a_pairing_code_is_never_typed_into_the_shell() {
+        // The staged file, and the flag that reads it, name the same path, so
+        // an install line can never carry the code itself.
+        assert!(
+            crate::ssh_provision::stage_code_command().contains(crate::ssh_provision::CODE_PATH)
+        );
+        let refused = call(
+            "ssh.provision.stageCode",
+            r#"{"code":"not a code","hostname":"h","username":"u","hostKeys":["x"]}"#,
+        )
+        .unwrap()
+        .expect_err("must refuse");
+        assert!(refused.contains("eight letters"), "{refused}");
     }
 }

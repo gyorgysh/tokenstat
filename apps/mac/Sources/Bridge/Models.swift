@@ -301,6 +301,87 @@ struct SSHSessionSummary: Codable, Sendable, Hashable, Identifiable {
     }
 }
 struct SSHHostFingerprint: Codable, Sendable, Hashable { var fingerprint: String }
+
+/// What a server said about itself before anything was written to it.
+///
+/// `blockers` is the host's own verdict, in sentences, so the wizard and any
+/// other surface that asks agree on what "ready" means instead of each
+/// deciding from the raw facts.
+struct ServerCheck: Codable, Sendable, Hashable {
+    var os: String?
+    var arch: String?
+    var distro: String?
+    var user: String?
+    var home: String?
+    var uid: Int?
+    var root: Bool?
+    var systemd: Bool?
+    var curl: Bool?
+    var git: Bool?
+    var homeWritable: Bool?
+    var installed: Bool?
+    var diskFreeMb: UInt64?
+    var blockers: [String] = []
+    var ready: Bool = false
+}
+
+/// The install command, in the two shapes it is needed in: the one the app
+/// types into a session, and the one a person reads before running it.
+struct InstallLine: Codable, Sendable, Hashable {
+    var oneLine: String
+    var annotated: String
+}
+
+/// A code that signs one machine in. Held only until it is used.
+struct PairingCode: Codable, Sendable, Hashable {
+    var code: String
+    var expiresIn: UInt64
+}
+
+/// Whether a machine is finished being set up. See `host.provisionStatus`.
+struct ProvisionStatus: Codable, Sendable, Hashable {
+    struct Account: Codable, Sendable, Hashable {
+        var signedIn: Bool?
+        var handle: String?
+        var tier: String?
+    }
+
+    struct RunsAs: Codable, Sendable, Hashable {
+        var uid: Int?
+        var name: String?
+        var root: Bool?
+    }
+
+    struct Agent: Codable, Sendable, Hashable, Identifiable {
+        var id: String
+        var name: String
+        var installed: Bool
+        /// Null where no harness exposes a way to ask. Never guessed.
+        var signedIn: Bool?
+    }
+
+    struct Tunnel: Codable, Sendable, Hashable {
+        var enabled: Bool?
+        var online: Bool?
+        var error: String?
+    }
+
+    var headless: Bool
+    var serviceScope: String?
+    var runsAs: RunsAs?
+    var alwaysOn: Bool?
+    var account: Account
+    var machineName: String
+    var machineKey: String
+    var keyFingerprint: String
+    var protocolVersion: String
+    var hostVersion: String
+    var allowedDevices: Int
+    var pendingRequests: Int
+    var agents: [Agent] = []
+    var folders: Int
+    var tunnel: Tunnel
+}
 struct SSHSessionRead: Codable, Sendable, Hashable {
     var data: [UInt8]
     var nextOffset: UInt64
