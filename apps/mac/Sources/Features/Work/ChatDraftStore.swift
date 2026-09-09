@@ -72,12 +72,12 @@ final class ChatDraftStore {
     private let queue = DispatchQueue(label: "ai.tokenstat.drafts", qos: .utility)
     /// Enough for a long message with a few files named beside it, and small
     /// enough that a corrupt or hostile file cannot be read into memory.
-    private static let maxFileBytes = 8 * 1024 * 1024
+    private nonisolated static let maxFileBytes = 8 * 1024 * 1024
     private static let maxDraftCharacters = 200_000
     /// Old drafts are still somebody's writing, so the bound is generous and
     /// the oldest go first only once there are more than a person could have
     /// meant to keep.
-    private static let capacity = 400
+    private nonisolated static let capacity = 400
 
     init(directory: URL? = nil) {
         let base = directory ?? FileManager.default.urls(

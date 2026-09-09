@@ -167,6 +167,7 @@ final class ChatModel {
     private var draftConversationID: String?
     private var draftSaveTask: Task<Void, Never>?
     private var restoringDraft = false
+    private var heldSubmission: ChatDraftSubmission?
     /// Long enough that a save is not queued per keystroke, short enough that
     /// nothing meaningful is lost to a crash.
     private static let draftSaveDelay = Duration.milliseconds(300)
@@ -197,6 +198,10 @@ final class ChatModel {
         draftSaveTask?.cancel()
         draftSaveTask = nil
         guard let reference = draftReference else { return }
+        // The empty composer is only a presentation change while delivery is
+        // pending. Lifecycle saves must leave the durable recovery copy alone.
+        guard heldSubmission?.owns(reference: draftReference, conversationID: draftConversationID,
+                                   peer: peer, scope: continuityScope) != true else { return }
         ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference)
     }
 
@@ -230,13 +235,14 @@ final class ChatModel {
             break
         case let .swap(reference):
             setDraft("")
+            attachments = []
+            attachmentPreviews = [:]
+            unconfirmedSend = nil
             guard let reference, let stored = ChatDraftStore.shared.draft(for: reference) else {
                 return
             }
             setDraft(stored.text)
-            if !stored.attachments.isEmpty, attachments.isEmpty {
-                attachments = stored.attachments
-            }
+            attachments = stored.attachments
         }
     }
 
@@ -259,9 +265,21 @@ final class ChatModel {
 
     /// Clear the composer but keep the stored copy until the send resolves.
     /// Nothing is lost if the app stops between the two.
-    func holdDraftForSending() {
+    @discardableResult
+    func holdDraftForSending(_ text: String) -> Bool {
+        guard let selected, !sending else { return false }
         saveDraftNow()
+        heldSubmission = ChatDraftSubmission(
+            conversationID: selected.id, peer: peer, scope: continuityScope,
+            reference: draftReference, generation: selectionGeneration,
+            text: text, draftText: draft, attachments: attachments,
+            messageID: draftMessageID
+        )
+        // Reserve the send before the caller starts its Task or capability
+        // discovery suspends, so a second click cannot replace this snapshot.
+        sending = true
         setDraft("")
+        return true
     }
 
     /// The host took the words, or they moved to the queue.
@@ -303,9 +321,8 @@ final class ChatModel {
     /// Whether this conversation's machine keeps receipts. Asked once per
     /// machine: a host does not grow a method while a conversation is open.
     private var confirmedSendSupport: [String: Bool] = [:]
-    private var lastSendFailure: Error?
 
-    private func machineConfirmsSends() async -> Bool {
+    private func machineConfirmsSends(peer: String?) async -> Bool {
         guard let peer, !peer.isEmpty else { return true }
         if let known = confirmedSendSupport[peer] { return known }
         let supported = await RemoteHostFeature.confirmedSend.isSupported(peer: peer)
@@ -319,22 +336,61 @@ final class ChatModel {
     /// the words exist somewhere at every moment. They come back on a refusal,
     /// and on a machine that did not answer they come back with a note saying
     /// so rather than a claim in either direction.
-    func sendFromComposer(_ text: String) async {
-        let conversationID = selected?.id
-        let messageID = await machineConfirmsSends() ? draftMessageID : nil
-        unconfirmedSend = nil
-        if await send(text, clientMessageID: messageID) {
-            clearDraft()
+    func sendFromComposer() async {
+        guard let submission = heldSubmission else { return }
+        defer {
+            heldSubmission = nil
+            sending = false
+        }
+        let supported = await machineConfirmsSends(peer: submission.peer)
+        // Navigation during capability discovery cancels this attempt. Its
+        // draft is still stored under the original owner, ready to send there.
+        guard selectionMatches(id: submission.conversationID, generation: submission.generation),
+              submission.owns(reference: draftReference, conversationID: selected?.id,
+                              peer: peer, scope: WorkSessionContext.shared.scope) else {
+            restoreSubmission(submission)
             return
         }
-        returnDraft(text)
-        guard let conversationID, let messageID, let failure = lastSendFailure,
-              Bridge.isDeliveryUnknown(failure), selected?.id == conversationID
-        else { return }
-        error = nil
-        unconfirmedSend = UnconfirmedSend(conversationID: conversationID,
-                                          messageID: messageID, checking: false)
-        await checkUnconfirmedSend()
+        let messageID = supported ? submission.messageID : nil
+        unconfirmedSend = nil
+        let staged = stageOutgoing(submission.text)
+        do {
+            let updated = try await Bridge.sendChat(id: submission.conversationID,
+                text: submission.text, attachmentIDs: submission.attachments.map(\.id),
+                clientMessageID: messageID, peer: submission.peer)
+            // Acceptance belongs to the captured draft even when its screen
+            // has gone away. Never clear the newly selected conversation.
+            if let reference = submission.reference {
+                ChatDraftStore.shared.clear(for: reference)
+            }
+            if submission.owns(reference: draftReference, conversationID: selected?.id,
+                               peer: peer, scope: WorkSessionContext.shared.scope) {
+                setDraft("")
+                let sent = Set(submission.attachments.map(\.id))
+                attachments.removeAll { sent.contains($0.id) }
+                for id in sent { attachmentPreviews.removeValue(forKey: id) }
+            }
+            guard selectionMatches(id: updated.id, generation: submission.generation) else { return }
+            replace(updated)
+            await loadEvents(id: updated.id, reset: false, generation: submission.generation)
+        } catch {
+            dropOutgoing(staged)
+            restoreSubmission(submission)
+            guard selectionMatches(id: submission.conversationID, generation: submission.generation)
+            else { return }
+            self.error = error.localizedDescription
+            guard let messageID, Bridge.isDeliveryUnknown(error) else { return }
+            self.error = nil
+            unconfirmedSend = UnconfirmedSend(conversationID: submission.conversationID,
+                                              messageID: messageID, checking: false)
+            await checkUnconfirmedSend()
+        }
+    }
+
+    private func restoreSubmission(_ submission: ChatDraftSubmission) {
+        guard submission.owns(reference: draftReference, conversationID: selected?.id,
+                              peer: peer, scope: WorkSessionContext.shared.scope) else { return }
+        returnDraft(submission.draftText)
     }
 
     /// Ask the machine what became of a message it never answered for.
@@ -474,8 +530,6 @@ final class ChatModel {
                 outgoingWatermark = [:]
                 approvals = []
                 instructions = nil
-                attachments = []
-                attachmentPreviews = [:]
                 responseAttachmentData = [:]
                 attemptedResponseAttachments = []
                 loadingResponseAttachments = []
@@ -607,8 +661,6 @@ final class ChatModel {
         if let chat, let folderID {
             rememberLastSelected(chatID: chat.id, folderID: folderID)
         }
-        attachments = []
-        attachmentPreviews = [:]
         responseAttachmentData = [:]
         attemptedResponseAttachments = []
         loadingResponseAttachments = []
@@ -1057,7 +1109,6 @@ final class ChatModel {
         defer { sending = false }
         let generation = selectionGeneration
         let ids = attachmentIDs ?? attachments.map(\.id)
-        lastSendFailure = nil
         do {
             let updated = try await Bridge.sendChat(
                 id: selected.id,
@@ -1078,7 +1129,6 @@ final class ChatModel {
             return true
         } catch {
             dropOutgoing(staged)
-            lastSendFailure = error
             if selectionMatches(id: selected.id, generation: generation) {
                 self.error = error.localizedDescription
             }

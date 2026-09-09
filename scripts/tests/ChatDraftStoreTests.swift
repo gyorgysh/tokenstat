@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 // Compile with WorkReference.swift ChatDraftStore.swift
-// ChatDraftTransition.swift.
+// ChatDraftTransition.swift ChatDraftSubmission.swift.
 import Foundation
 
 /// The real one lives in Models.swift, which this test does not need.
@@ -140,6 +140,50 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         // A conversation that cannot be keyed still replaces one that could.
         assert(ChatDraftTransition.resolve(incoming: "one", reference: nil,
             current: "two", currentReference: two) == .swap(nil))
+
+        // A lifecycle save while a send is waiting must keep both the words
+        // and the original id, including after navigation away and back.
+        let sendingReference = reference(chat: "sending")
+        afterCorruption.save(text: "with a file", attachments: [file], for: sendingReference)
+        let sendingDraft = afterCorruption.draft(for: sendingReference)!
+        let submission = ChatDraftSubmission(conversationID: "sending", peer: "host-a",
+            scope: alice, reference: sendingReference, generation: 7,
+            text: sendingDraft.text, draftText: sendingDraft.text,
+            attachments: sendingDraft.attachments, messageID: sendingDraft.messageID)
+        func lifecycleSave(_ reference: WorkReference, chat: String, text: String) {
+            guard !submission.owns(reference: reference, conversationID: chat,
+                                   peer: "host-a", scope: alice) else { return }
+            afterCorruption.save(text: text, attachments: [], for: reference)
+        }
+        lifecycleSave(sendingReference, chat: "sending", text: "")
+        lifecycleSave(two, chat: "two", text: "another conversation")
+        lifecycleSave(sendingReference, chat: "sending", text: sendingDraft.text)
+        afterCorruption.settle()
+        let recovery = ChatDraftStore(directory: root).draft(for: sendingReference)
+        assert(recovery == sendingDraft)
+        assert(afterCorruption.draft(for: two)?.text == "another conversation")
+        // Completion can clear the original persisted copy without touching
+        // the conversation opened while the request was in flight.
+        afterCorruption.clear(for: submission.reference!)
+        assert(afterCorruption.draft(for: two)?.text == "another conversation")
+        assert(submission.attachments == [file])
+        assert(!submission.owns(reference: two, conversationID: "two", peer: "host-a", scope: alice))
+        assert(!submission.owns(reference: sendingReference, conversationID: "sending",
+                                peer: "host-b", scope: alice))
+        assert(!submission.owns(reference: sendingReference, conversationID: "sending",
+                                peer: "host-a", scope: bob))
+        // Even without resolved draft storage, the peer and account must
+        // match before a delayed response restores text to a composer.
+        let unresolved = ChatDraftSubmission(conversationID: "same-id", peer: "host-a",
+            scope: alice, reference: nil, generation: 8, text: "hello", draftText: "hello",
+            attachments: [], messageID: nil)
+        assert(!unresolved.owns(reference: nil, conversationID: "same-id", peer: "host-b", scope: alice))
+        // A conversation id is only unique within its full owner.
+        let otherHost = reference(host: "host-b", chat: "one")
+        assert(ChatDraftTransition.resolve(incoming: "one", reference: otherHost,
+            current: "one", currentReference: one) == .swap(otherHost))
+        assert(ChatDraftTransition.resolve(incoming: "one", reference: nil,
+            current: "one", currentReference: one) == .swap(nil))
 
         print("Chat drafts: ownership, relaunch, merge, removal, corruption, message names and composer transitions passed")
     }

@@ -23,7 +23,8 @@ enum ChatDraftTransition: Equatable {
         current: String?, currentReference: WorkReference?
     ) -> Self {
         guard incoming == current else { return .swap(reference) }
-        guard incoming != nil, currentReference == nil, let reference else { return .keep }
-        return .adopt(reference)
+        if incoming != nil, currentReference == nil, let reference { return .adopt(reference) }
+        guard reference == currentReference else { return .swap(reference) }
+        return .keep
     }
 }

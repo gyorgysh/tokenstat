@@ -739,11 +739,11 @@ struct ChatView: View {
         }
         // The composer empties, the stored copy does not: it is dropped when
         // the host has the words and put back when it refuses them.
-        model.holdDraftForSending()
+        guard model.holdDraftForSending(text) else { return }
         showNewest()
         follow.jump()
         followPulse += 1
-        Task { await model.sendFromComposer(text) }
+        Task { await model.sendFromComposer() }
     }
 
     private var dropExperienceVisible: Bool {
