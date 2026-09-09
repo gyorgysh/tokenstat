@@ -373,6 +373,23 @@ struct ClientChatThread: View {
         )
     }
 
+    private func checkSavedCopyUpdates() async {
+        guard let reference = model.currentReference else { return }
+        await model.checkSavedCopyForUpdates {
+            guard let peer = model.peer else { return }
+            await ClientDeviceName.publish()
+            guard reference.scope == WorkSessionContext.shared.scope else { throw CancellationError() }
+            _ = try await Bridge.pair(key: peer, label: hostName, address: "")
+            guard reference.scope == WorkSessionContext.shared.scope else { throw CancellationError() }
+            _ = try await Bridge.setTunnel(true)
+            let allowed = try await Bridge.workspaceAccessAllowed(peer: peer)
+            guard allowed else {
+                throw BridgeError.core(code: "workspace_access_denied",
+                    message: "Allow workspace access on \(hostName) to return to the live conversation.")
+            }
+        }
+    }
+
     /// One explicit round trip on return. The poll loop restarts on its own
     /// but sleeps first, so without this the transcript sits a full interval
     /// stale with no strip to say so. Never a re-select: that empties the
@@ -467,7 +484,9 @@ struct ClientChatThread: View {
                             label: chat?.title ?? "Chat",
                             folderName: folderName
                         )
-                        Button("Setup", .settings) { showingSetup = true }
+                        if model.savedCopy == nil {
+                            Button("Setup", .settings) { showingSetup = true }
+                        }
                     }
                 }
             }
@@ -488,7 +507,7 @@ struct ClientChatThread: View {
             // transcript and read it back, which is this screen blanking and
             // re-scrolling every time it is pushed, including straight after
             // the launcher picked the conversation for you.
-            if model.selected?.id != chat.id || model.displayItems.isEmpty {
+            if model.savedCopy == nil && (model.selected?.id != chat.id || model.displayItems.isEmpty) {
                 await model.select(chat)
             }
             guard !Task.isCancelled else { return }
@@ -560,7 +579,7 @@ struct ClientChatThread: View {
                 // rows are, when they were kept, and the way back to live.
                 if let copy = model.savedCopy {
                     ChatSavedCopyBanner(info: copy, checking: model.checkingSavedCopy) {
-                        Task { await model.checkSavedCopyForUpdates() }
+                        Task { await checkSavedCopyUpdates() }
                     }
                     .padding(.horizontal, Theme.Space.s)
                 }
@@ -602,7 +621,7 @@ struct ClientChatThread: View {
                     },
                     onAttach: { item in await model.attach(item) },
                     onRemove: { model.removeAttachment($0) },
-                    onOpenSetup: { showingSetup = true },
+                    onOpenSetup: { if model.savedCopy == nil { showingSetup = true } },
                     onDropURLs: { urls in
                         Task { await receive(ChatInbox.drops(from: urls)) }
                     },

@@ -2689,6 +2689,24 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var lastMessageAuthor: String?
     var running: Bool
 
+    /// A saved page has no live setup or permissions. These inert values are
+    /// replaced by the host's record before the reader can return to live work.
+    init(saved reference: WorkReference, title: String, backend: String?) {
+        id = reference.itemID ?? ""
+        workspaceID = reference.workspaceID
+        self.title = title
+        self.backend = backend ?? "agent"
+        systemPrompt = ""
+        mode = "plan"
+        autonomy = "standard"
+        allowedTools = []
+        allowedShellPrefixes = []
+        budgetSeconds = 0
+        createdAtMs = 0
+        updatedAtMs = 0
+        running = false
+    }
+
     enum CodingKeys: String, CodingKey {
         case id
         case workspaceID = "workspaceId"

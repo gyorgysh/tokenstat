@@ -63,8 +63,16 @@ struct ClientSavedPlaceView: View {
     }
 
     var body: some View {
-        ClientPlaceAvailability(peer: place.id.peer, hostName: hostName) {
-            destination.task { await load() }
+        Group {
+            if place.id.kind == .chat,
+               let workspace = place.id.workspaceID, let chat = place.id.itemID {
+                ClientRecentChatView(peer: place.id.peer, workspaceID: workspace,
+                                     folderName: place.workspaceName, hostName: hostName, chatID: chat)
+            } else {
+                ClientPlaceAvailability(peer: place.id.peer, hostName: hostName) {
+                    destination.task { await load() }
+                }
+            }
         }
         .navigationTitle(place.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -79,10 +87,6 @@ struct ClientSavedPlaceView: View {
                 .padding(Theme.Space.m)
         } else if needsAccess {
             ClientHostWorkspacesView(peerKey: place.id.peer, hostName: hostName)
-        } else if loaded, place.id.kind == .chat,
-                  let workspace = place.id.workspaceID, let chat = place.id.itemID {
-            ClientRecentChatView(peer: place.id.peer, workspaceID: workspace,
-                                 folderName: place.workspaceName, hostName: hostName, chatID: chat)
         } else if let folder {
             ClientWorkspaceDetailView(peer: place.id.peer, hostName: hostName, folder: folder)
         } else if loaded {

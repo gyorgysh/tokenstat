@@ -261,7 +261,11 @@ struct ChatComposerControls: View {
 
     @ViewBuilder
     private var layout: some View {
-        if compact {
+        if model.savedCopy != nil {
+            Label("Draft on this device", systemImage: ActionIcon.edit.symbol)
+                .font(Theme.caption)
+                .foregroundStyle(.secondary)
+        } else if compact {
             // Two rows, both of which fit. One row does not: the two pill
             // groups alone are most of a phone's width, so the agent field
             // was pushing them past the edge of the bar. The field takes the

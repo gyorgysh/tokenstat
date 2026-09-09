@@ -296,7 +296,7 @@ final class ChatModel {
     /// Nothing is lost if the app stops between the two.
     @discardableResult
     func holdDraftForSending(_ text: String) -> Bool {
-        guard let selected, !sending else { return false }
+        guard savedCopy == nil, let selected, !sending else { return false }
         saveDraftNow()
         heldSubmission = ChatDraftSubmission(
             conversationID: selected.id, peer: peer, scope: continuityScope,
@@ -686,6 +686,31 @@ final class ChatModel {
     }
 
     func select(_ chat: ChatConversation?) async {
+        await select(chat, savedPage: nil)
+    }
+
+    /// Cold opening of an existing copy. No pairing, peer request or queue
+    /// reconciliation runs here. Only a fresh model may adopt this owner.
+    func loadSavedConversation(_ reference: WorkReference) async -> Bool {
+        guard folderID == nil, selected == nil,
+              reference.scope == WorkSessionContext.shared.scope,
+              WorkReferenceKey.conversation(reference) != nil else { return false }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        guard let copy = await WorkCacheStore.shared.savedConversation(for: reference),
+              !Task.isCancelled, generation == loadGeneration,
+              reference.scope == WorkSessionContext.shared.scope else { return false }
+        continuityScope = reference.scope
+        peer = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity ? nil : reference.hostIdentity
+        workspaceID = reference.workspaceID
+        folderID = peer.map { "remote:\($0):\(reference.workspaceID)" } ?? reference.workspaceID
+        let chat = ChatConversation(saved: reference, title: copy.title, backend: copy.backend)
+        chats = [chat]
+        await select(chat, savedPage: copy)
+        return savedCopy != nil
+    }
+
+    private func select(_ chat: ChatConversation?, savedPage: CachedRecordPayload?) async {
         selectionGeneration &+= 1
         let generation = selectionGeneration
         selected = chat
@@ -716,8 +741,12 @@ final class ChatModel {
         defer {
             if selectionGeneration == generation { openingConversation = false }
         }
-        await openEvents(id: chat.id, generation: generation)
-        if events.isEmpty, selectionMatches(id: chat.id, generation: generation) {
+        if let savedPage {
+            applySavedCopy(savedPage)
+            return
+        }
+        let openedLive = await openEvents(id: chat.id, generation: generation)
+        if !openedLive, events.isEmpty, selectionMatches(id: chat.id, generation: generation) {
             // The live open failed with nothing on screen. A sealed copy
             // opens instead of an error, when one was kept.
             await openSavedCopy(id: chat.id, generation: generation)
@@ -755,8 +784,8 @@ final class ChatModel {
             defer {
                 if selectionGeneration == generation { openingConversation = false }
             }
-            await openEvents(id: id, generation: generation)
-            if events.isEmpty, selectionMatches(id: id, generation: generation) {
+            let openedLive = await openEvents(id: id, generation: generation)
+            if !openedLive, events.isEmpty, selectionMatches(id: id, generation: generation) {
                 await openSavedCopy(id: id, generation: generation)
             }
         } else {
@@ -893,7 +922,7 @@ final class ChatModel {
         allowedTools: [String]? = nil,
         allowedShellPrefixes: [String]? = nil
     ) async {
-        guard let selected else { return }
+        guard savedCopy == nil, let selected else { return }
         let generation = selectionGeneration
         do {
             let updated = try await Bridge.updateChat(
@@ -1158,7 +1187,7 @@ final class ChatModel {
     @discardableResult
     func send(_ text: String, attachmentIDs: [String]? = nil,
               clientMessageID: String? = nil) async -> Bool {
-        guard let selected, !sending else { return false }
+        guard savedCopy == nil, let selected, !sending else { return false }
         sending = true
         let staged = stageOutgoing(text)
         defer { sending = false }
@@ -1683,16 +1712,16 @@ final class ChatModel {
     /// a handful of rows, so a page that coalesces into almost nothing pulls
     /// the one before it, up to a small bound. Nobody should open a chat and
     /// find one paragraph in it.
-    private func openEvents(id: String, generation: UInt64) async {
+    @discardableResult
+    private func openEvents(id: String, generation: UInt64) async -> Bool {
         guard !pagingUnavailable else {
-            await loadEvents(id: id, reset: true, generation: generation)
-            return
+            return await loadEvents(id: id, reset: true, generation: generation)
         }
         do {
             let page = try await Bridge.chatEventPage(
                 id: id, cursor: nil, limit: Self.openPageEvents, peer: peer
             )
-            guard selectionMatches(id: id, generation: generation) else { return }
+            guard selectionMatches(id: id, generation: generation) else { return false }
             eventsEpoch &+= 1
             events = page.events
             // A live page is the conversation again, not a copy of it.
@@ -1716,15 +1745,16 @@ final class ChatModel {
                   pulled < Self.openExtraPages {
                 pulled += 1
                 await loadEarlier(id: id, generation: generation, quiet: true)
-                guard selectionMatches(id: id, generation: generation) else { return }
+                guard selectionMatches(id: id, generation: generation) else { return false }
             }
             await loadResponseAttachments(id: id, generation: generation)
+            return true
         } catch {
             if isUnknownMethod(error) { pagingUnavailable = true }
-            guard selectionMatches(id: id, generation: generation) else { return }
+            guard selectionMatches(id: id, generation: generation) else { return false }
             // Whatever went wrong, the conversation still has to appear. The
             // whole-timeline read is the behaviour every host has had.
-            await loadEvents(id: id, reset: true, generation: generation)
+            return await loadEvents(id: id, reset: true, generation: generation)
         }
     }
 
@@ -1829,18 +1859,19 @@ final class ChatModel {
     /// How many extra pages one opening may pull to reach that.
     private static let openExtraPages = 6
 
-    private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async {
+    @discardableResult
+    private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async -> Bool {
         let requestedOffset = reset ? 0 : offset
         do {
             let chunk = try await Bridge.chatEvents(id: id, offset: requestedOffset, peer: peer)
-            guard selectionMatches(id: id, generation: generation) else { return }
-            guard reset || requestedOffset == offset else { return }
+            guard selectionMatches(id: id, generation: generation) else { return false }
+            guard reset || requestedOffset == offset else { return false }
             // A poll that found nothing new must not write anything back. The
             // write is what redraws the transcript, and most polls of a
             // running turn arrive between records rather than on one.
             if !reset, chunk.events.isEmpty, chunk.nextOffset == offset {
                 await loadResponseAttachments(id: id, generation: generation)
-                return
+                return true
             }
             if reset {
                 eventsEpoch &+= 1
@@ -1863,12 +1894,14 @@ final class ChatModel {
             offset = chunk.nextOffset
             settleNotifications()
             await loadResponseAttachments(id: id, generation: generation)
+            return true
         } catch {
             // Background polls must not pop an error banner on an idle
             // screen; user-initiated loads still surface.
             if !quiet, selectionMatches(id: id, generation: generation) {
                 self.error = error.localizedDescription
             }
+            return false
         }
     }
 
@@ -1881,8 +1914,9 @@ final class ChatModel {
     private func keepOfflineCopy(id: String, title: String?, page: ChatEventPage) {
         guard let reference = currentReference, reference.itemID == id else { return }
         let title = title ?? "Conversation"
+        let backend = selected?.backend
         Task {
-            await WorkCacheStore.shared.saveConversation(reference: reference, title: title, page: page)
+            await WorkCacheStore.shared.saveConversation(reference: reference, title: title, page: page, backend: backend)
         }
     }
 
@@ -1897,6 +1931,10 @@ final class ChatModel {
               let copy = await WorkCacheStore.shared.savedConversation(for: reference),
               selectionMatches(id: id, generation: generation)
         else { return }
+        applySavedCopy(copy)
+    }
+
+    private func applySavedCopy(_ copy: CachedRecordPayload) {
         eventsEpoch &+= 1
         events = copy.page.events
         reconcileOutgoing()
@@ -1914,11 +1952,29 @@ final class ChatModel {
 
     /// Ask the machine again from the saved-copy banner. A live answer
     /// replaces the copy; another failure keeps it, with its saved time.
-    func checkSavedCopyForUpdates() async {
-        guard savedCopy != nil, let chat = selected else { return }
+    func checkSavedCopyForUpdates(prepareConnection: (() async throws -> Void)? = nil) async {
+        guard savedCopy != nil, !checkingSavedCopy, let chat = selected,
+              let workspaceID, let reference = currentReference else { return }
+        let generation = selectionGeneration
         checkingSavedCopy = true
         defer { checkingSavedCopy = false }
-        await select(chat)
+        do {
+            try await prepareConnection?()
+            guard selectionMatches(id: chat.id, generation: generation),
+                  currentReference == reference else { return }
+            let liveChats = try await Bridge.chats(workspaceID: workspaceID, peer: peer)
+            guard selectionMatches(id: chat.id, generation: generation),
+                  currentReference == reference else { return }
+            guard let live = liveChats.first(where: { $0.id == chat.id && $0.workspaceID == workspaceID }) else {
+                error = "This conversation is no longer on the machine. You can still read this saved copy."
+                return
+            }
+            replace(live)
+            await select(live)
+        } catch {
+            guard selectionMatches(id: chat.id, generation: generation) else { return }
+            self.error = error.localizedDescription
+        }
     }
 
     func clearCachedAttachmentMemory() {

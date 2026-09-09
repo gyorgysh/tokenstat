@@ -27,6 +27,7 @@ struct CachePutResult: Decodable, Sendable {
 }
 
 struct CachedRecordPayload: Decodable, Sendable {
+    var backend: String?
     var title: String
     var savedAt: Date
     var revision: String

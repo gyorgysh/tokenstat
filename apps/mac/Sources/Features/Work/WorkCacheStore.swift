@@ -29,7 +29,7 @@ final class WorkCacheStore {
     }
 
     /// Keep this conversation's newest page under the scope's key.
-    func saveConversation(reference: WorkReference, title: String, page: ChatEventPage) async {
+    func saveConversation(reference: WorkReference, title: String, page: ChatEventPage, backend: String? = nil) async {
         guard settings.enabled,
               let recordID = WorkCache.recordID(for: reference),
               let itemID = reference.itemID,
@@ -41,9 +41,10 @@ final class WorkCacheStore {
             maxSeq: page.events.compactMap(\.seq).max() ?? 0,
             count: page.events.count, nextOffset: page.nextOffset
         )
-        guard let payload = try? WorkCache.encode(title: title, revision: revision, page: pageObject),
+        guard var payload = try? WorkCache.encode(title: title, revision: revision, page: pageObject),
               (try? WorkCache.decode(payload)) != nil
         else { return }
+        if let backend { payload["backend"] = backend }
         _ = try? await Bridge.cachePut(
             key: WorkCacheKey.encoded(key), scope: WorkCache.scope(for: reference.scope),
             id: recordID, kind: "conversation", itemId: itemID,
@@ -51,10 +52,9 @@ final class WorkCacheStore {
         )
     }
 
-    /// The kept copy, if settings allow it and one was saved.
+    /// Disabling future saving does not hide copies that are already kept.
     func savedConversation(for reference: WorkReference) async -> CachedRecordPayload? {
-        guard settings.enabled,
-              let recordID = WorkCache.recordID(for: reference) else { return nil }
+        guard let recordID = WorkCache.recordID(for: reference) else { return nil }
         let scope = WorkCache.scope(for: reference.scope)
         guard let key = WorkCacheKey.existingKey(for: scope) else { return nil }
         guard let record = try? await Bridge.cacheGet(

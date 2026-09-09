@@ -268,12 +268,29 @@ struct ClientRecentChatView: View {
 
     @State private var model = ChatModel()
     @State private var loaded = false
+    @State private var savedUnavailable = false
+    @Environment(AccountModel.self) private var account
+    @Environment(ConnectivityModel.self) private var connectivity
+
+    private var machine: Machine? {
+        account.account?.machines.first { $0.publicIdentity == peer }
+    }
+    private var needsSavedCopy: Bool { connectivity.isOffline || machine?.online == false }
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        ClientPlaceAvailability(peer: peer, hostName: hostName) {
-            thread.task { await load() }
+        Group {
+            if needsSavedCopy, machine != nil {
+                thread.task { await loadSaved() }
+            } else if model.savedCopy != nil, machine != nil {
+                // Reconnecting does not replace the reader or send its draft.
+                thread
+            } else {
+                ClientPlaceAvailability(peer: peer, hostName: hostName) {
+                    thread.task { await load() }
+                }
+            }
         }
     }
 
@@ -288,8 +305,16 @@ struct ClientRecentChatView: View {
                 )
             } else if let error = model.error {
                 ClientErrorCard(message: ClientTunnelCopy.display(error, host: hostName)) {
-                    Task { await load() }
+                    Task {
+                        if needsSavedCopy { await loadSaved() } else { await load() }
+                    }
                 }
+                .padding(Theme.Space.m)
+            } else if savedUnavailable {
+                ClientEmptyState(
+                    kind: .unreachable, title: "Saved copy unavailable",
+                    message: "This conversation is not available to read offline on this device. Open it while \(hostName) is reachable to keep a copy for later."
+                )
                 .padding(Theme.Space.m)
             } else if loaded {
                 ClientEmptyState(
@@ -328,13 +353,38 @@ struct ClientRecentChatView: View {
         }
     }
 
+    private func loadSaved() async {
+        guard model.savedCopy == nil, !savedUnavailable,
+              let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
+        else { return }
+        savedUnavailable = !(await model.loadSavedConversation(reference))
+        loaded = true
+    }
+
     private func load() async {
         guard !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else {
             loaded = true
             return
         }
-        await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
-        loaded = true
+        guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
+        savedUnavailable = false
+        do {
+            await ClientDeviceName.publish()
+            _ = try await Bridge.pair(key: peer, label: hostName, address: "")
+            _ = try await Bridge.setTunnel(true)
+            let allowed = try await Bridge.workspaceAccessAllowed(peer: peer)
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            guard allowed else {
+                model.error = "Workspace access is required. Allow this device on \(hostName) to open the conversation."
+                return
+            }
+            await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            loaded = true
+        } catch {
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            model.error = error.localizedDescription
+        }
     }
 }
 
