@@ -121,7 +121,7 @@ struct ClientWorkspacesView: View {
                             actionTitle: "Set up a machine",
                             actionIcon: .connect,
                             action: { showSetup = true },
-                            art: .noMachine
+                            art: .connect
                         )
                     } else {
                         ClientSectionTitle(title: "Hosts on your account", mark: "mark_host")

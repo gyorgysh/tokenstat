@@ -86,7 +86,7 @@ struct ClientDevicesView: View {
                             actionTitle: "Set up a machine",
                             actionIcon: .connect,
                             action: { showSetup = true },
-                            art: .noMachine
+                            art: .connect
                         )
                     }
                 }

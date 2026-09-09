@@ -190,7 +190,7 @@ struct ClientSetupWizard: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientEmptyArt(kind: .noMachine)
+            ClientEmptyArt(kind: .connect)
                 .frame(maxWidth: .infinity)
             Text("How do you want to work?")
                 .font(Theme.title.weight(.semibold))
