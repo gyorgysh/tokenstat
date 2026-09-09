@@ -179,20 +179,21 @@ struct ClientSectionTitle: View {
 /// go grey. Disabled is the dimmed brand, never the platform grey: an action
 /// that cannot run yet is still ours.
 private struct ClientProminentButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
-        let enabled = configuration.isEnabled
-        return configuration.label
+        configuration.label
             .font(ClientType.label.weight(.semibold))
-            .foregroundStyle(enabled ? .white : Theme.accent)
+            .foregroundStyle(isEnabled ? .white : Theme.accent)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .background(
-                enabled
+                isEnabled
                     ? Theme.accent.opacity(configuration.isPressed ? 0.78 : 1)
                     : Theme.accentSoft,
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
-            .opacity(enabled ? (configuration.isPressed ? 0.92 : 1) : 0.8)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.92 : 1) : 0.8)
     }
 }
 
