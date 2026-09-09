@@ -96,11 +96,12 @@ struct ClientChatView: View {
             refreshKey: "workspace-chat-\(workspaceID)",
             reload: { await reload() }
         ) {
+            let unsent = model.conversationsWithDrafts(in: workspaceID)
             ForEach(model.chats) { chat in
                 Button {
                     opened = chat
                 } label: {
-                    row(chat)
+                    row(chat, hasDraft: unsent.contains(chat.id))
                 }
                 .buttonStyle(.plain)
                 .clientCardRow()
@@ -115,9 +116,15 @@ struct ClientChatView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            // Unsent words are written a third of a second after the last
+            // keystroke. Leaving the app can arrive sooner than that.
+            guard phase == .active else {
+                model.saveDraftNow()
+                return
+            }
             Task { await foregroundRefresh() }
         }
+        .onDisappear { model.saveDraftNow() }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await foregroundRefresh() }
         }
@@ -162,7 +169,7 @@ struct ClientChatView: View {
         }
     }
 
-    private func row(_ chat: ChatConversation) -> some View {
+    private func row(_ chat: ChatConversation, hasDraft: Bool) -> some View {
         HStack(spacing: Theme.Space.s) {
             HarnessMark(id: chat.backend, size: 28)
             VStack(alignment: .leading, spacing: 3) {
@@ -176,6 +183,14 @@ struct ClientChatView: View {
                         .font(ClientType.label.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+                    // Words waiting in this thread. The only way to find them
+                    // again from a list is to say which row holds them.
+                    if hasDraft {
+                        Image(systemName: "pencil")
+                            .font(Theme.font(10, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .accessibilityLabel("Unsent draft")
+                    }
                 }
                 Text(rowDetail(chat))
                     .font(ClientType.caption)
@@ -286,7 +301,6 @@ struct ClientChatThread: View {
     var onBack: (() -> Void)?
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
-    @State private var draft = ""
     /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
     @State private var follow = TranscriptFollowState()
@@ -431,9 +445,9 @@ struct ClientChatThread: View {
             // A first task offered by setup, put in the composer rather than
             // sent. Only into an empty one, only once, and only for the folder
             // setup opened: any other thread mounting first must not consume it.
-            if draft.isEmpty, let scope = navigation.folderID,
+            if model.draft.isEmpty, let scope = navigation.folderID,
                let offered = navigation.takeSuggestedPrompt(for: scope) {
-                draft = offered
+                model.draft = offered
             }
             guard let chat = model.chats.first(where: { $0.id == chatID }) else { return }
             // Already open, with rows on screen. Re-selecting would empty the
@@ -527,7 +541,7 @@ struct ClientChatThread: View {
                 ClientChatComposer(
                     model: model,
                     chat: chat,
-                    draft: $draft,
+                    draft: $model.draft,
                     attachments: model.attachments,
                     previews: model.attachmentPreviews,
                     running: model.busy,
@@ -1037,7 +1051,7 @@ struct ClientChatThread: View {
     }
 
     private func submit(from chat: ChatConversation, sendNow: Bool = false) {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
         guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
@@ -1045,7 +1059,7 @@ struct ClientChatThread: View {
         // the words must survive that path rather than being wiped.
         if sendNow {
             guard let item = model.enqueue(text, atFront: true) else { return }
-            draft = ""
+            model.clearDraft()
             // Sending is engaging: follow is the default, so a new turn resumes
             // it even if it was paused before. Pausing again is one tap. Hide the
             // keyboard and snap to the end so the next tokens are not off-screen
@@ -1058,17 +1072,25 @@ struct ClientChatThread: View {
         }
         if model.busy {
             guard model.enqueue(text) != nil else { return }
-            draft = ""
+            model.clearDraft()
             showNewest()
             follow.jump()
             followPulse += 1
             return
         }
-        draft = ""
+        // The composer empties, the stored copy does not: it is dropped when
+        // the host has the words and put back when it refuses them.
+        model.holdDraftForSending()
         showNewest()
         follow.jump()
         followPulse += 1
-        Task { await model.send(text) }
+        Task {
+            if await model.send(text) {
+                model.clearDraft()
+            } else {
+                model.returnDraft(text)
+            }
+        }
     }
 
     private var dropExperienceVisible: Bool {
@@ -1081,7 +1103,7 @@ struct ClientChatThread: View {
             case let .attachment(item):
                 await model.attach(item)
             case let .text(text):
-                draft.append(text)
+                model.draft.append(text)
             case .folder:
                 showDropNotice("Attach files, not folders")
             }

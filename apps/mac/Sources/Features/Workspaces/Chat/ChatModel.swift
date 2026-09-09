@@ -131,6 +131,153 @@ final class ChatModel {
             hostIdentity: owner.host, workspaceID: owner.workspace)
     }
 
+    /// A deleted conversation takes its unsent words with it. There is nothing
+    /// left to send them to.
+    private func forgetDraft(chatID: String, folderID: String) {
+        guard let owner = continuityOwner(folderID: folderID) else { return }
+        if draftConversationID == chatID {
+            draftReference = nil
+            draftConversationID = nil
+        }
+        ChatDraftStore.shared.clear(for: WorkReference(scope: owner.scope,
+            hostIdentity: owner.host, workspaceID: owner.workspace,
+            kind: .conversation, itemID: chatID))
+    }
+
+    // MARK: - Unsent words
+
+    /// What is in the composer.
+    ///
+    /// It lives here rather than in the view because it belongs to the
+    /// conversation, not to the pane it was typed in. Switching conversations
+    /// swaps it, leaving the folder keeps it, and it is on disk within a
+    /// third of a second of the last keystroke.
+    var draft = "" {
+        didSet {
+            guard !restoringDraft, draft != oldValue else { return }
+            scheduleDraftSave()
+        }
+    }
+    /// The conversation the words in `draft` belong to. Saves use this rather
+    /// than recomputing a reference, so a save that lands after the selection
+    /// moved still writes to the conversation the words were typed in.
+    private var draftReference: WorkReference?
+    /// The conversation the composer's words were typed into, known even
+    /// before the account and machine identity that key them have arrived.
+    private var draftConversationID: String?
+    private var draftSaveTask: Task<Void, Never>?
+    private var restoringDraft = false
+    /// Long enough that a save is not queued per keystroke, short enough that
+    /// nothing meaningful is lost to a crash.
+    private static let draftSaveDelay = Duration.milliseconds(300)
+
+    /// The last save did not reach the disk, so the composer is the only copy.
+    var draftSaveFailed: Bool { ChatDraftStore.shared.saveFailed }
+
+    /// Conversations in this folder with words waiting in them, so a list can
+    /// mark them.
+    func conversationsWithDrafts(in folderID: String) -> Set<String> {
+        guard let owner = continuityOwner(folderID: folderID) else { return [] }
+        return ChatDraftStore.shared.conversationsWithDrafts(scope: owner.scope,
+            hostIdentity: owner.host, workspaceID: owner.workspace)
+    }
+
+    private func scheduleDraftSave() {
+        draftSaveTask?.cancel()
+        draftSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: ChatModel.draftSaveDelay)
+            guard !Task.isCancelled else { return }
+            self?.saveDraftNow()
+        }
+    }
+
+    /// Write the composer out now: leaving the screen, going to the
+    /// background, or handing the words to a send.
+    func saveDraftNow() {
+        draftSaveTask?.cancel()
+        draftSaveTask = nil
+        guard let reference = draftReference else { return }
+        ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference)
+    }
+
+    /// Try the write again. The words never left the composer, so this is a
+    /// retry of the save and not a resend of anything.
+    func retryDraftSave() {
+        ChatDraftStore.shared.retryFailedSave()
+        saveDraftNow()
+    }
+
+    /// Point the composer at another conversation: the words on screen go to
+    /// the one being left, and the one being opened brings its own back.
+    private func loadDraft(for id: String?, scope: WorkReference.Scope?,
+                           hostIdentity: String?, workspaceID: String?) {
+        saveDraftNow()
+        var reference: WorkReference?
+        if let id, let scope, let hostIdentity, let workspaceID, !hostIdentity.isEmpty,
+           !workspaceID.isEmpty {
+            reference = WorkReference(scope: scope, hostIdentity: hostIdentity,
+                workspaceID: workspaceID, kind: .conversation, itemID: id)
+        }
+        let transition = ChatDraftTransition.resolve(incoming: id, reference: reference,
+            current: draftConversationID, currentReference: draftReference)
+        draftConversationID = id
+        draftReference = reference
+        switch transition {
+        case let .adopt(reference):
+            draftReference = reference
+            saveDraftNow()
+        case .keep:
+            break
+        case let .swap(reference):
+            setDraft("")
+            guard let reference, let stored = ChatDraftStore.shared.draft(for: reference) else {
+                return
+            }
+            setDraft(stored.text)
+            if !stored.attachments.isEmpty, attachments.isEmpty {
+                attachments = stored.attachments
+            }
+        }
+    }
+
+    private func loadDraft(for id: String?) {
+        guard let id, let folderID, let owner = continuityOwner(folderID: folderID) else {
+            loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
+            return
+        }
+        loadDraft(for: id, scope: owner.scope, hostIdentity: owner.host,
+                  workspaceID: owner.workspace)
+    }
+
+    /// Clear the composer without persisting the change: for restoring stored
+    /// words, and for a send that has not been answered yet.
+    private func setDraft(_ text: String) {
+        restoringDraft = true
+        draft = text
+        restoringDraft = false
+    }
+
+    /// Clear the composer but keep the stored copy until the send resolves.
+    /// Nothing is lost if the app stops between the two.
+    func holdDraftForSending() {
+        saveDraftNow()
+        setDraft("")
+    }
+
+    /// The host took the words, or they moved to the queue.
+    func clearDraft() {
+        draftSaveTask?.cancel()
+        draftSaveTask = nil
+        setDraft("")
+        if let reference = draftReference { ChatDraftStore.shared.clear(for: reference) }
+    }
+
+    /// The send did not happen. Put the words back where they were typed.
+    func returnDraft(_ text: String) {
+        guard draft.isEmpty else { return }
+        setDraft(text)
+    }
+
     /// Conversation lists read earlier this session, keyed by the folder id
     /// the sidebar knows (`remote:<peer>:<id>` for a folder on another
     /// machine). The model holds one folder's live list, while the cache lets
@@ -196,12 +343,18 @@ final class ChatModel {
             rememberedID = nil
         }
         if continuityScope != scope {
+            // A different account, rather than the first one arriving: these
+            // words belong to the account being left, where they were kept.
+            if let previous = continuityScope, let scope, previous != scope {
+                loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
+            }
             chatListCache = [:]
             chats = []
             selected = nil
             folderID = nil
             continuityScope = scope
         }
+        let draftHost = route.peer ?? WorkSessionContext.shared.localHostIdentity
         if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
             // The folder is changing. Remember which conversation was open
             // before the clear below drops it, or coming back can only ever
@@ -242,6 +395,8 @@ final class ChatModel {
                 responseAttachmentErrors = [:]
                 forgetWindow()
                 loadQueue(for: selected?.id)
+                loadDraft(for: selected?.id, scope: scope, hostIdentity: draftHost,
+                          workspaceID: route.workspaceID)
                 openingConversation = selected != nil
             } else {
                 chats = []
@@ -251,6 +406,7 @@ final class ChatModel {
                 outgoingWatermark = [:]
                 approvals = []
                 forgetWindow()
+                loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
             selectionGeneration &+= 1
         }
@@ -377,6 +533,7 @@ final class ChatModel {
         outgoingWatermark = [:]
         forgetWindow()
         loadQueue(for: chat?.id)
+        loadDraft(for: chat?.id)
         #if os(macOS)
         if let chat { RunNotifications.shared.chatAttentionHandled(id: chat.id) }
         #endif
@@ -626,6 +783,7 @@ final class ChatModel {
         do {
             try await Bridge.removeChat(id: chat.id, peer: targetPeer)
             guard context == loadGeneration else { return }
+            if let folderID { forgetDraft(chatID: chat.id, folderID: folderID) }
             if let folderID, folderID != self.folderID {
                 chatListCache[folderID]?.removeAll { $0.id == chat.id }
                 if rememberedChat(in: folderID) == chat.id { forgetLastSelected(folderID: folderID) }
@@ -865,6 +1023,8 @@ final class ChatModel {
             if let preview = ChatThumbnail.make(from: item.data) {
                 attachmentPreviews[attachment.id] = preview
             }
+            // A file staged for an unsent message is part of that draft.
+            saveDraftNow()
         } catch {
             if selectionMatches(id: selected.id, generation: generation) {
                 self.error = error.localizedDescription
@@ -875,6 +1035,7 @@ final class ChatModel {
     func removeAttachment(_ attachment: ChatAttachment) {
         attachments.removeAll { $0.id == attachment.id }
         attachmentPreviews.removeValue(forKey: attachment.id)
+        saveDraftNow()
     }
 
     func stop() async {

@@ -2620,9 +2620,11 @@ struct RootView: View {
         let visible = expandedChatHistories.contains(folder.id)
             ? conversations
             : Array(conversations.prefix(5))
+        let unsent = chat.conversationsWithDrafts(in: folder.id)
         ForEach(visible) { conversation in
             ChatSidebarConversationRow(
                 conversation: conversation,
+                hasDraft: unsent.contains(conversation.id),
                 // A chat is the lit row only while the chat screen is the one
                 // in front. The model keeps its selection when you leave, so
                 // without the route test a conversation stayed marked under
@@ -3664,6 +3666,9 @@ extension SidebarGroupHeader where Trailing == EmptyView {
 /// away cannot dismiss or retarget it.
 private struct ChatSidebarConversationRow: View {
     let conversation: ChatConversation
+    /// Words typed into this conversation and not sent. Worth a mark: it is
+    /// the only way to find them again from a list of thirty threads.
+    let hasDraft: Bool
     let isSelected: Bool
     let select: () -> Void
     let remove: () -> Void
@@ -3685,6 +3690,12 @@ private struct ChatSidebarConversationRow: View {
                         .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
+                    if hasDraft {
+                        Image(systemName: "pencil")
+                            .font(Theme.fit(9, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .accessibilityLabel("Unsent draft")
+                    }
                     if conversation.running {
                         Circle().fill(Theme.accent).frame(width: 5, height: 5)
                     }

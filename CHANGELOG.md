@@ -53,6 +53,13 @@ with a server that runs agents.
   the hole: no machine offers to set one up, a machine with no folders offers
   both ways to give it one, and a machine that is not answering says what to
   run on it when it is a server rather than telling you to wake a Mac.
+- **Half-written messages are kept.** What is in a chat's message field stays
+  with that conversation: leave it, open another thread, quit the app, and it
+  is there when you come back, with the files you attached to it. A list marks
+  the conversations holding words you have not sent. Sending a message keeps
+  the words until the machine has taken them, so a refusal puts them back
+  instead of losing them. They are kept on this device only, and if a write
+  ever fails the field says so rather than claiming it saved.
 
 ### Changed
 

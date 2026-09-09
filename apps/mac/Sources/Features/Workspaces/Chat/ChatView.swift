@@ -21,7 +21,9 @@ struct ChatView: View {
     /// nobody can see does not poll, and it does not hold the shared model to
     /// a folder that has since been left: it reloads when it comes forward.
     var isActive = true
-    @State private var draft = ""
+    /// The composer's words live on the model, keyed to the conversation
+    /// rather than to this pane, so leaving and coming back finds them and
+    /// switching conversations does not carry them across.
     @State private var draftSelection = NSRange(location: 0, length: 0)
     /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
@@ -57,6 +59,7 @@ struct ChatView: View {
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
@@ -111,7 +114,7 @@ struct ChatView: View {
                     ChatComposer(
                         model: model,
                         chat: chat,
-                        draft: $draft,
+                        draft: $model.draft,
                         selection: $draftSelection,
                         attachments: model.attachments,
                         previews: model.attachmentPreviews,
@@ -201,6 +204,12 @@ struct ChatView: View {
             UserPresence.shared.chatSurface(showing: nil)
         }
         #endif
+        // Unsent words are written a third of a second after the last
+        // keystroke. These two are the moments that can arrive sooner.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { model.saveDraftNow() }
+        }
+        .onDisappear { model.saveDraftNow() }
         // And the same fact to the host, which is the one deciding whether a
         // phone hears about this turn.
         .watching(conversationID: model.selected?.id, peer: model.peer, isActive: isActive)
@@ -702,7 +711,7 @@ struct ChatView: View {
     }
 
     private func submit(from chat: ChatConversation, sendNow: Bool = false) {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
         guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
@@ -710,7 +719,7 @@ struct ChatView: View {
         // the words must survive that path rather than being wiped.
         if sendNow {
             guard let item = model.enqueue(text, atFront: true) else { return }
-            draft = ""
+            model.clearDraft()
             // Sending is engaging: follow is the default, so a new turn resumes
             // it even if it was paused before. Pausing again is one tap. The
             // pulse scrolls now; the token pins take over as content arrives.
@@ -722,17 +731,25 @@ struct ChatView: View {
         }
         if model.busy {
             guard model.enqueue(text) != nil else { return }
-            draft = ""
+            model.clearDraft()
             showNewest()
             follow.jump()
             followPulse += 1
             return
         }
-        draft = ""
+        // The composer empties, the stored copy does not: it is dropped when
+        // the host has the words and put back when it refuses them.
+        model.holdDraftForSending()
         showNewest()
         follow.jump()
         followPulse += 1
-        Task { await model.send(text) }
+        Task {
+            if await model.send(text) {
+                model.clearDraft()
+            } else {
+                model.returnDraft(text)
+            }
+        }
     }
 
     private var dropExperienceVisible: Bool {
@@ -765,10 +782,11 @@ struct ChatView: View {
     }
 
     private func insertInDraft(_ text: String) {
-        let current = draft as NSString
+        let current = model.draft as NSString
         let location = min(max(0, draftSelection.location), current.length)
         let length = min(max(0, draftSelection.length), current.length - location)
-        draft = current.replacingCharacters(in: NSRange(location: location, length: length), with: text)
+        model.draft = current.replacingCharacters(
+            in: NSRange(location: location, length: length), with: text)
         draftSelection = NSRange(location: location + (text as NSString).length, length: 0)
     }
 

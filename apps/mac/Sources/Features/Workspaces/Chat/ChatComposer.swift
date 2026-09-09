@@ -54,6 +54,9 @@ struct ChatComposer: View {
 
     private var well: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
+            if model.draftSaveFailed {
+                ChatDraftNotice { model.retryDraftSave() }
+            }
             if !attachments.isEmpty {
                 strip
             }
