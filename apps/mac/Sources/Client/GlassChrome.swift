@@ -54,13 +54,14 @@ extension View {
     }
 
     /// Primary action. Liquid glass on iOS 26, brand capsule below.
+    ///
+    /// A disabled glass button is the platform's grey, which on a themed
+    /// screen reads as somebody else's palette. So glass is for enabled
+    /// only: disabled falls back to the brand capsule dimmed, and off is
+    /// still our color.
     @ViewBuilder
     func clientProminentStyle() -> some View {
-        if #available(iOS 26, *) {
-            buttonStyle(.glassProminent)
-        } else {
-            buttonStyle(ClientProminentButtonStyle())
-        }
+        modifier(ProminentGlassSwitch())
     }
 
     /// Secondary chrome action. Liquid glass on iOS 26, quiet capsule below.
@@ -174,19 +175,40 @@ struct ClientSectionTitle: View {
     }
 }
 
-/// Full-width primary button for phones that do not have glass chrome.
+/// Full-width primary button: below glass chrome, and wherever glass would
+/// go grey. Disabled is the dimmed brand, never the platform grey: an action
+/// that cannot run yet is still ours.
 private struct ClientProminentButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let enabled = configuration.isEnabled
+        return configuration.label
             .font(ClientType.label.weight(.semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(enabled ? .white : Theme.accent)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .background(
-                Theme.accent.opacity(configuration.isPressed ? 0.78 : 1),
+                enabled
+                    ? Theme.accent.opacity(configuration.isPressed ? 0.78 : 1)
+                    : Theme.accentSoft,
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
-            .opacity(configuration.isPressed ? 0.92 : 1)
+            .opacity(enabled ? (configuration.isPressed ? 0.92 : 1) : 0.8)
+    }
+}
+
+/// Glass while the action can run, brand the moment it cannot. Reads the
+/// room through the environment rather than at each call site, so no screen
+/// has to remember which style disabled means.
+private struct ProminentGlassSwitch: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *), isEnabled {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(ClientProminentButtonStyle())
+        }
     }
 }
 
