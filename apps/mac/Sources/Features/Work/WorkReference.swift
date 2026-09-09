@@ -48,3 +48,31 @@ struct WorkReference: Codable, Hashable, Sendable {
         case itemID = "itemId"
     }
 }
+
+/// One conversation on one machine under one account, as a storage key.
+///
+/// Shared by every device-local store that keeps something per conversation,
+/// so a draft and the place it was being read from are filed under the same
+/// name. Every part is an identifier, percent-encoded so the separator cannot
+/// occur inside one.
+enum WorkReferenceKey {
+    static func conversation(_ reference: WorkReference) -> String? {
+        guard reference.kind == .conversation, let item = reference.itemID, !item.isEmpty,
+              !reference.hostIdentity.isEmpty, !reference.workspaceID.isEmpty
+        else { return nil }
+        return folder(scope: reference.scope, hostIdentity: reference.hostIdentity,
+                      workspaceID: reference.workspaceID) + encode(item)
+    }
+
+    /// Everything above the conversation, ending in the separator, so one
+    /// folder's keys are exactly the keys carrying this prefix.
+    static func folder(scope: WorkReference.Scope, hostIdentity: String,
+                       workspaceID: String) -> String {
+        [scope.kind.rawValue, scope.origin, scope.identity, hostIdentity, workspaceID]
+            .map(encode).joined(separator: "|") + "|"
+    }
+
+    static func encode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+    }
+}

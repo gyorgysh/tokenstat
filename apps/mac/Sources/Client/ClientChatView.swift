@@ -630,7 +630,14 @@ struct ClientChatThread: View {
                         // transaction per frame that placement never drains.
                         // Readers return 0.35s after the last moved frame, via
                         // `scrolling`, before any paging decision needs them.
-                        .transcriptRowFrame(item.id, watched: model.hasEarlier && measuringRows && !follow.scrolling)
+                        // Also wherever the reader has stopped above the
+                        // latest turn: that place is worth keeping. Never
+                        // mid-scroll, which is a report per row per frame.
+                        .transcriptRowFrame(
+                            item.id,
+                            watched: !follow.scrolling
+                                && ((model.hasEarlier && measuringRows) || !follow.atEnd)
+                        )
                     }
                     if sliceOffset == 0 {
                         if let mood = liveMood {
@@ -721,6 +728,18 @@ struct ClientChatThread: View {
             .onChange(of: model.approvals.isEmpty) { _, empty in
                 follow.suppressed = !empty
             }
+            // A scroll that has come to rest is a reader who has stopped
+            // somewhere. Wait a beat for the rows to say where they are:
+            // they report on the update this change itself causes.
+            .onChange(of: follow.scrolling) { _, moving in
+                guard !moving else { return }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(140))
+                    guard !Task.isCancelled, !follow.scrolling else { return }
+                    TranscriptReading.record(follow: follow, window: window,
+                                             for: model.currentReference)
+                }
+            }
             // A request that arrives mid-stream would otherwise be pushed off
             // a short viewport before anybody saw it.
             .onChange(of: model.approvals.first?.id) { _, id in
@@ -758,6 +777,7 @@ struct ClientChatThread: View {
                 // Hold the end across the frames the real heights take to
                 // arrive: every one of those says the end is far below, and
                 // believing one is how a long chat opened in its middle.
+                if await restoreReadingPlace(proxy) { return }
                 showNewest()
                 follow.settle(true)
                 defer { follow.settle(false) }
@@ -1018,6 +1038,28 @@ struct ClientChatThread: View {
             lastSilentPinAt = now
         }
         scrollTo(TranscriptFollow.bottomID, proxy, animated: animated)
+    }
+
+    /// Open this conversation where it was left, when it was left above the
+    /// latest turn. Answers whether it did.
+    private func restoreReadingPlace(_ proxy: ScrollViewProxy) async -> Bool {
+        guard let reference = model.currentReference,
+              let mark = ChatReadingStore.shared.mark(for: reference) else { return false }
+        return await TranscriptReading.restore(mark, model: model, follow: follow) { id, point in
+            placeRow(id, proxy, at: point)
+        }
+    }
+
+    /// Put one row where the reader had it, with the rest of the conversation
+    /// below it and the earlier part one button above.
+    private func placeRow(_ id: String, _ proxy: ScrollViewProxy, at point: UnitPoint) {
+        applySlice(TranscriptSlice.holding(id, in: model.displayItems, current: 0))
+        follow.markDrivenInstant()
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            proxy.scrollTo(id, anchor: point)
+        }
     }
 
     private func scrollTo(_ id: String, _ proxy: ScrollViewProxy, animated: Bool) {

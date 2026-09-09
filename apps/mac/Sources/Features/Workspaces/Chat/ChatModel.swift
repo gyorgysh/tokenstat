@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import Observation
+import OSLog
 import SwiftUI
 
 @MainActor @Observable
@@ -139,9 +140,12 @@ final class ChatModel {
             draftReference = nil
             draftConversationID = nil
         }
-        ChatDraftStore.shared.clear(for: WorkReference(scope: owner.scope,
-            hostIdentity: owner.host, workspaceID: owner.workspace,
-            kind: .conversation, itemID: chatID))
+        let reference = WorkReference(scope: owner.scope, hostIdentity: owner.host,
+            workspaceID: owner.workspace, kind: .conversation, itemID: chatID)
+        ChatDraftStore.shared.clear(for: reference)
+        // And the place somebody had reached in it. There is nothing left to
+        // come back to.
+        ChatReadingStore.shared.forget(for: reference)
     }
 
     // MARK: - Unsent words
@@ -183,6 +187,15 @@ final class ChatModel {
         guard let owner = continuityOwner(folderID: folderID) else { return nil }
         return WorkReference(scope: owner.scope, hostIdentity: owner.host,
             workspaceID: owner.workspace, kind: .conversation, itemID: conversationID)
+    }
+
+    /// How to name the conversation on screen to a device-local store.
+    ///
+    /// The same reference the draft is filed under, so the words somebody
+    /// left and the place they were reading are kept together.
+    var currentReference: WorkReference? {
+        guard let selected, let folderID else { return nil }
+        return draftReference(for: selected.id, in: folderID)
     }
 
     private func scheduleDraftSave() {
@@ -470,6 +483,8 @@ final class ChatModel {
     func load(workspaceID: String, peer: String? = nil, selectFirst: Bool = true) async {
         loadGeneration &+= 1
         let generation = loadGeneration
+        let probe = Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
+        probe.error("load start ws=\(workspaceID) gen=\(generation) scope=\(String(describing: WorkSessionContext.shared.scope?.identity)) selectFirst=\(selectFirst)")
         let route = Bridge.chatRoute(workspaceID: workspaceID, peer: peer)
         isLoading = true
         defer {
@@ -561,6 +576,7 @@ final class ChatModel {
             async let loadedPersonas = Bridge.chatPersonas(workspaceID: route.workspaceID, peer: route.peer)
             async let loadedChats = Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
             let loaded = try await (loadedBackends, loadedPersonas, loadedChats)
+            probe.error("load answered gen=\(generation)/\(self.loadGeneration) scopeThen=\(String(describing: scope?.identity)) scopeNow=\(String(describing: WorkSessionContext.shared.scope?.identity)) chats=\(loaded.2.count)")
             guard generation == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
             backends = loaded.0
             personas = loaded.1.personas
@@ -613,6 +629,7 @@ final class ChatModel {
                 if fresh != selected { self.selected = fresh }
                 await refreshOpen(id: fresh.id)
             } else if selectFirst {
+                probe.error("selecting remembered=\(String(describing: rememberedID)) of \(self.chats.count)")
                 // No reveal named one and the old selection is gone with the
                 // folder change. Reopen this folder's own conversation when
                 // it is still here; the first row only when it is not.

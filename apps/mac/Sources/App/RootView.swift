@@ -5,6 +5,7 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
+import OSLog
 import SwiftUI
 
 // Everything below is the desktop shell: a resizable window with two sidebars,
@@ -2853,13 +2854,23 @@ struct RootView: View {
             return
         }
         await WorkSessionContext.shared.resolveLocalHostIdentity()
+        let deadline = ContinuousClock.now + Self.placeDeadline
+        // Wait for the account to say who is signed in before opening a
+        // folder. Everything inside one is scoped to that answer, and a
+        // screen mounted while it is still unknown asks for its contents
+        // under one owner and is handed them under another: the chat pane
+        // opened that way rejects its own answer and selects nothing.
+        while WorkSessionContext.shared.scope == nil {
+            guard ContinuousClock.now < deadline else { return }
+            try? await Task.sleep(for: .milliseconds(40))
+            guard !Task.isCancelled else { return }
+        }
         // A folder on another machine is not in the list yet: the peer sweep
         // is deliberately behind Home's first paint. Ask now, because the
         // place being on that machine is the reason to dial it at all.
         if stored.folder?.hostIdentity != WorkSessionContext.shared.localHostIdentity {
             Task { await workspaces.loadRemote() }
         }
-        let deadline = ContinuousClock.now + Self.placeDeadline
         while ContinuousClock.now < deadline {
             let destination = WorkPlaceRestoration.destination(
                 place: stored,
@@ -2869,6 +2880,8 @@ struct RootView: View {
             )
             if case let .workspace(folderID, name)? = destination,
                let section = WorkspaceSection(rawValue: name) {
+                Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
+                    .error("restoring section=\(name) folder=\(folderID)")
                 openSection(section, in: folderID)
                 return
             }

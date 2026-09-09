@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
+import OSLog
 import SwiftUI
 
 struct ChatView: View {
@@ -187,6 +188,8 @@ struct ChatView: View {
         }
         #endif
         .task(id: "\(workspaceID)-\(isActive)-\(String(describing: WorkSessionContext.shared.scope))") {
+            Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
+                .error("view task ws=\(workspaceID) active=\(isActive)")
             guard isActive else { return }
             await model.load(workspaceID: workspaceID)
         }
@@ -303,7 +306,16 @@ struct ChatView: View {
                         // transaction per frame that placement never drains.
                         // Readers return 0.35s after the last moved frame, via
                         // `scrolling`, before any paging decision needs them.
-                        .transcriptRowFrame(item.id, watched: model.hasEarlier && measuringRows && !follow.scrolling)
+                        // Near the top of a long conversation, where a page
+                        // may land and the reader's place has to be held; and
+                        // wherever the reader has stopped above the latest
+                        // turn, because that place is worth keeping. Never
+                        // mid-scroll: that is a report per row per frame.
+                        .transcriptRowFrame(
+                            item.id,
+                            watched: !follow.scrolling
+                                && ((model.hasEarlier && measuringRows) || !follow.atEnd)
+                        )
                     }
                     if sliceOffset == 0 {
                         if let mood = liveMood {
@@ -392,6 +404,18 @@ struct ChatView: View {
             .onChange(of: model.approvals.isEmpty) { _, empty in
                 follow.suppressed = !empty
             }
+            // A scroll that has come to rest is a reader who has stopped
+            // somewhere. Wait a beat for the rows to say where they are:
+            // they report on the update this change itself causes.
+            .onChange(of: follow.scrolling) { _, moving in
+                guard !moving, isActive else { return }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(140))
+                    guard !Task.isCancelled, !follow.scrolling else { return }
+                    TranscriptReading.record(follow: follow, window: window,
+                                             for: model.currentReference)
+                }
+            }
             .onChange(of: isActive, initial: true) { _, active in
                 follow.active = active
                 // This pane stays mounted behind other destinations. Coming
@@ -447,6 +471,7 @@ struct ChatView: View {
                 // destinations, and scrolling a zero-size proxy to estimated
                 // heights is how it came back painted off-origin.
                 guard isActive else { return }
+                if await restoreReadingPlace(proxy) { return }
                 showNewest()
                 follow.settle(true)
                 defer { follow.settle(false) }
@@ -700,6 +725,29 @@ struct ChatView: View {
             withAnimation(.easeOut(duration: TranscriptFollow.structureDuration)) {
                 proxy.scrollTo(id, anchor: .bottom)
             }
+        }
+    }
+
+    /// Open this conversation where it was left, when it was left above the
+    /// latest turn. Answers whether it did.
+    private func restoreReadingPlace(_ proxy: ScrollViewProxy) async -> Bool {
+        guard let reference = model.currentReference,
+              let mark = ChatReadingStore.shared.mark(for: reference) else { return false }
+        return await TranscriptReading.restore(mark, model: model, follow: follow) { id, point in
+            placeRow(id, proxy, at: point)
+        }
+    }
+
+    /// Put one row where the reader had it, with the rest of the conversation
+    /// below it and the earlier part one button above.
+    private func placeRow(_ id: String, _ proxy: ScrollViewProxy, at point: UnitPoint) {
+        guard isActive else { return }
+        applySlice(TranscriptSlice.holding(id, in: model.displayItems, current: 0))
+        follow.markDrivenInstant()
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            proxy.scrollTo(id, anchor: point)
         }
     }
 

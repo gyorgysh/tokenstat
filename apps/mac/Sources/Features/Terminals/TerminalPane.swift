@@ -1131,6 +1131,13 @@ private struct LaunchSurface: View {
     /// Open pull requests, for the tile's count. The same store the sidebar
     /// badge reads, so the launcher and the row cannot say different numbers.
     @State private var pullCounts = PullCountStore.shared
+    /// The Chat tile's own preview. Read-only: asking the shared chat model
+    /// for it steered the open transcript (a `selectFirst: false` load still
+    /// sets the folder and clears the selection), so a launcher showing
+    /// behind the chat pane won the generation race and left one-chat
+    /// folders on the opening state.
+    @State private var previewChats: [ChatConversation] = []
+    @State private var previewGeneration: UInt64 = 0
 
     private var visibility: LauncherVisibility { LauncherVisibility.shared }
     private var visibilityScope: String { modelPeer ?? "local" }
@@ -1164,12 +1171,11 @@ private struct LaunchSurface: View {
     }
 
     private var recentChat: ChatConversation? {
-        guard chat.folderID == folder.id else { return nil }
-        return chat.mostRecent
+        previewChats.max { $0.updatedAtMs < $1.updatedAtMs }
     }
 
     private var conversationCount: Int {
-        chat.folderID == folder.id ? chat.chats.count : 0
+        previewChats.count
     }
 
     var body: some View {
@@ -1266,7 +1272,11 @@ private struct LaunchSurface: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
         .task(id: folder.id) {
-            await chat.load(workspaceID: folder.id, selectFirst: false)
+            previewGeneration &+= 1
+            let generation = previewGeneration
+            guard let list = try? await Bridge.chats(workspaceID: folder.id) else { return }
+            guard generation == previewGeneration else { return }
+            previewChats = list
         }
         .confirmationDialog(
             pendingInstall.map { "Install \($0.name) on this machine?" } ?? "Install this tool?",
@@ -1320,12 +1330,26 @@ private struct LaunchSurface: View {
             openingChat = true
             Task {
                 if chat.folderID != folder.id {
-                    await chat.load(workspaceID: folder.id, selectFirst: false)
+                    // Default selection: the folder's remembered conversation,
+                    // not a preview pick. A `selectFirst: false` load here
+                    // set the shared folder and cleared the selection, which
+                    // is how reopening a one-chat folder landed on nothing.
+                    await chat.load(workspaceID: folder.id)
                 }
-                if let recent = chat.mostRecent {
-                    await chat.select(recent)
-                } else {
-                    await chat.create()
+                // A load above already selected the conversation to open.
+                // Only pick when there is nothing open: a fresh folder, or
+                // one whose selection went away with a delete.
+                if chat.folderID == folder.id, chat.selected == nil {
+                    if let recent = chat.mostRecent {
+                        await chat.select(recent)
+                    } else {
+                        await chat.create()
+                    }
+                }
+                // Keep the tile's count honest for the next visit without
+                // steering the transcript again.
+                if let list = try? await Bridge.chats(workspaceID: folder.id) {
+                    previewChats = list
                 }
                 openingChat = false
                 onOpenSection(.chat)

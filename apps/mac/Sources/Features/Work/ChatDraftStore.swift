@@ -236,26 +236,9 @@ final class ChatDraftStore {
         }
     }
 
-    /// One conversation on one machine under one account. Every part is an
-    /// identifier, percent-encoded so the separator cannot occur inside one.
+    /// One conversation on one machine under one account, in the name every
+    /// per-conversation store on this device files things under.
     private nonisolated static func key(_ reference: WorkReference) -> String? {
-        guard reference.kind == .conversation, let item = reference.itemID, !item.isEmpty,
-              !reference.hostIdentity.isEmpty, !reference.workspaceID.isEmpty
-        else { return nil }
-        return folderPrefix(scope: reference.scope, hostIdentity: reference.hostIdentity,
-                            workspaceID: reference.workspaceID) + encode(item)
-    }
-
-    /// Everything above the conversation, ending in the separator, so one
-    /// folder's keys are exactly the keys carrying this prefix.
-    private nonisolated static func folderPrefix(
-        scope: WorkReference.Scope, hostIdentity: String, workspaceID: String
-    ) -> String {
-        [scope.kind.rawValue, scope.origin, scope.identity, hostIdentity, workspaceID]
-            .map(encode).joined(separator: "|") + "|"
-    }
-
-    private nonisolated static func encode(_ value: String) -> String {
-        value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        WorkReferenceKey.conversation(reference)
     }
 }
