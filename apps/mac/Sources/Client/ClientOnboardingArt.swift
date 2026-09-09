@@ -13,6 +13,7 @@ import SwiftUI
 /// page can change its words without this file knowing the pitch.
 enum OnboardingArtKind {
     case intro
+    case agents
     case heatmap
     case devices
     case spend
@@ -37,6 +38,7 @@ struct ClientOnboardingArt: View {
             Group {
                 switch kind {
                 case .intro: IntroArt(reduceMotion: reduceMotion)
+                case .agents: AgentsArt(reduceMotion: reduceMotion)
                 case .heatmap: HeatmapArt(reduceMotion: reduceMotion)
                 case .devices: DevicesArt(reduceMotion: reduceMotion)
                 case .spend: SpendArt(reduceMotion: reduceMotion)
@@ -51,6 +53,8 @@ struct ClientOnboardingArt: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 200)
+        // The art is decorative; the page's accessible text scales separately.
+        .dynamicTypeSize(.medium)
         .accessibilityHidden(true)
     }
 }
@@ -59,15 +63,77 @@ struct ClientOnboardingArt: View {
 
 private struct IntroArt: View {
     var reduceMotion: Bool
+    @State private var shown = false
 
     var body: some View {
         VStack(spacing: Theme.Space.m) {
-            // One rise, not the launch splash's pulse: the page is a pitch and
-            // the mark lands and stays, so the bars hold their full height
-            // instead of drumming through the whole paragraph below.
-            LogoMark(size: 72, animated: !reduceMotion, loops: false)
-            Wordmark(size: 26, fills: false, showsMark: false)
+            HStack(spacing: Theme.Space.s) {
+                LogoMark(size: 32, animated: !reduceMotion, loops: false)
+                Text("Your work, together")
+                    .font(ClientType.label.weight(.semibold))
+            }
+            HStack(spacing: Theme.Space.s) {
+                tile("Agents", symbol: "bubble.left.and.bubble.right", delay: 0)
+                tile("Projects", symbol: "folder", delay: 0.08)
+                tile("Usage", symbol: "chart.bar", delay: 0.16)
+            }
         }
+        .frame(maxWidth: 320)
+        .onAppear { shown = true }
+    }
+
+    private func tile(_ title: String, symbol: String, delay: Double) -> some View {
+        VStack(spacing: Theme.Space.s) {
+            Image(systemName: symbol)
+                .font(Theme.font(25, weight: .medium))
+                .foregroundStyle(Theme.accent)
+            Text(title).font(ClientType.caption.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Space.m)
+        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .opacity(reduceMotion || shown ? 1 : 0)
+        .offset(y: reduceMotion || shown ? 0 : 12)
+        .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.82).delay(delay), value: shown)
+    }
+}
+
+/// An illustrative conversation, with the review step visible rather than a
+/// picture of an agent silently making changes.
+private struct AgentsArt: View {
+    var reduceMotion: Bool
+    @State private var shown = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: "folder").foregroundStyle(Theme.accent)
+                Text("Your project").font(ClientType.caption.weight(.semibold))
+                Spacer()
+                Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(Theme.accent)
+            }
+            Text("Let’s work on the next idea.")
+                .font(ClientType.label)
+                .padding(Theme.Space.s)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12))
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                Image(systemName: "sparkles").foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Ready for your review").font(ClientType.label.weight(.semibold))
+                    Text("Read the changes. Decide what comes next.")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .opacity(reduceMotion || shown ? 1 : 0)
+            .offset(y: reduceMotion || shown ? 0 : 8)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: 320)
+        .cardSurface()
+        .onAppear { shown = true }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.5).delay(0.2), value: shown)
     }
 }
 
@@ -362,7 +428,10 @@ private struct OnTheGoArt: View {
                     .offset(x: reduceMotion ? 0 : (pulse - 0.5) * 56)
             }
             .frame(width: 72)
-            tile(icon: "laptopcomputer", size: 40)
+            VStack(spacing: Theme.Space.s) {
+                tile(icon: "laptopcomputer", size: 40)
+                tile(icon: "cloud", size: 40)
+            }
         }
         .onAppear {
             guard !reduceMotion else { return }
