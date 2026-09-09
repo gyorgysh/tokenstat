@@ -183,7 +183,7 @@ struct ChatView: View {
             }
         }
         #endif
-        .task(id: "\(workspaceID)-\(isActive)") {
+        .task(id: "\(workspaceID)-\(isActive)-\(String(describing: WorkSessionContext.shared.scope))") {
             guard isActive else { return }
             await model.load(workspaceID: workspaceID)
         }

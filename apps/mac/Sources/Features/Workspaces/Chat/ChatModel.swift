@@ -100,41 +100,35 @@ final class ChatModel {
     /// The folder that reveal was asked for, so a load of a different one
     /// cannot answer for it. See the not-found branch in `load`.
     private var pendingRevealFolderID: String?
-    /// The open conversation per folder, so leaving a folder and coming back
-    /// reopens its chat instead of collapsing to the first row. Persisted, so
-    /// it survives a relaunch too. A deleted conversation simply is not found
-    /// and the first row wins. Bounded: a long-lived model otherwise keeps a
-    /// row for every folder ever opened.
-    private var lastSelectedByFolder: [String: String] = ChatModel.storedLastSelected()
-    private static let lastSelectedCap = 20
-    private static let lastSelectedKey = "chat.lastSelectedByFolder.v1"
+    // Old unscoped v1 ids cannot prove which account owned them. Leave them
+    // untouched rather than silently migrating them into the next account.
+    private var continuityScope: WorkReference.Scope?
 
-    private static func storedLastSelected() -> [String: String] {
-        guard let data = UserDefaults.standard.data(forKey: lastSelectedKey),
-              let map = try? JSONDecoder().decode([String: String].self, from: data)
-        else { return [:] }
-        return map
+    private func continuityOwner(folderID: String) -> (scope: WorkReference.Scope, host: String, workspace: String)? {
+        guard let scope = continuityScope, scope == WorkSessionContext.shared.scope else { return nil }
+        let route = WorkDestinationResolver.route(folderID: folderID,
+            explicitPeer: folderID == self.folderID ? peer : nil)
+        guard let host = route.peer ?? WorkSessionContext.shared.localHostIdentity else { return nil }
+        return (scope, host, route.workspaceID)
+    }
+
+    private func rememberedChat(in folderID: String) -> String? {
+        guard let owner = continuityOwner(folderID: folderID) else { return nil }
+        return WorkContinuityStore.shared.lastConversation(scope: owner.scope,
+            hostIdentity: owner.host, workspaceID: owner.workspace)?.itemID
     }
 
     private func rememberLastSelected(chatID: String, folderID: String) {
-        lastSelectedByFolder[folderID] = chatID
-        if lastSelectedByFolder.count > Self.lastSelectedCap,
-           let drop = lastSelectedByFolder.keys.first(where: { $0 != folderID }) {
-            lastSelectedByFolder.removeValue(forKey: drop)
-        }
-        if let data = try? JSONEncoder().encode(lastSelectedByFolder) {
-            UserDefaults.standard.set(data, forKey: Self.lastSelectedKey)
-        }
+        guard let owner = continuityOwner(folderID: folderID) else { return }
+        WorkContinuityStore.shared.remember(WorkReference(scope: owner.scope,
+            hostIdentity: owner.host, workspaceID: owner.workspace,
+            kind: .conversation, itemID: chatID))
     }
 
-    /// Drop the remembered conversation for a folder, for example after its
-    /// chat was deleted. The next open then falls back to the first row
-    /// rather than to an id that is never coming back.
     private func forgetLastSelected(folderID: String) {
-        guard lastSelectedByFolder.removeValue(forKey: folderID) != nil else { return }
-        if let data = try? JSONEncoder().encode(lastSelectedByFolder) {
-            UserDefaults.standard.set(data, forKey: Self.lastSelectedKey)
-        }
+        guard let owner = continuityOwner(folderID: folderID) else { return }
+        WorkContinuityStore.shared.forget(scope: owner.scope,
+            hostIdentity: owner.host, workspaceID: owner.workspace)
     }
 
     /// Conversation lists read earlier this session, keyed by the folder id
@@ -151,7 +145,8 @@ final class ChatModel {
     /// list for the folder on screen, otherwise what its last load read, or
     /// nothing when the folder has not been opened in this session.
     func sidebarChats(in folderID: String) -> [ChatConversation] {
-        if self.folderID == folderID || workspaceID == folderID { return chats }
+        guard continuityScope == WorkSessionContext.shared.scope else { return [] }
+        if self.folderID == folderID { return chats }
         return chatListCache[folderID] ?? []
     }
 
@@ -188,6 +183,25 @@ final class ChatModel {
         defer {
             if generation == loadGeneration { isLoading = false }
         }
+        let scope = WorkSessionContext.shared.scope
+        if route.peer == nil {
+            await WorkSessionContext.shared.resolveLocalHostIdentity()
+            guard generation == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
+        }
+        let rememberedID: String?
+        if let scope, let host = route.peer ?? WorkSessionContext.shared.localHostIdentity {
+            rememberedID = WorkContinuityStore.shared.lastConversation(scope: scope,
+                hostIdentity: host, workspaceID: route.workspaceID)?.itemID
+        } else {
+            rememberedID = nil
+        }
+        if continuityScope != scope {
+            chatListCache = [:]
+            chats = []
+            selected = nil
+            folderID = nil
+            continuityScope = scope
+        }
         if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
             // The folder is changing. Remember which conversation was open
             // before the clear below drops it, or coming back can only ever
@@ -208,7 +222,7 @@ final class ChatModel {
                    (pendingRevealFolderID == nil || pendingRevealFolderID == workspaceID),
                    let found = cached.first(where: { $0.id == pending }) {
                     selected = found
-                } else if let remembered = lastSelectedByFolder[workspaceID],
+                } else if let remembered = rememberedID,
                           let found = cached.first(where: { $0.id == remembered }) {
                     selected = found
                 } else {
@@ -248,7 +262,7 @@ final class ChatModel {
             async let loadedPersonas = Bridge.chatPersonas(workspaceID: route.workspaceID, peer: route.peer)
             async let loadedChats = Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
             let loaded = try await (loadedBackends, loadedPersonas, loadedChats)
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
             backends = loaded.0
             personas = loaded.1.personas
             // The host says "" for a workspace that has chosen no persona.
@@ -303,7 +317,7 @@ final class ChatModel {
                 // No reveal named one and the old selection is gone with the
                 // folder change. Reopen this folder's own conversation when
                 // it is still here; the first row only when it is not.
-                if let remembered = lastSelectedByFolder[workspaceID],
+                if let remembered = rememberedID,
                    let found = chats.first(where: { $0.id == remembered }) {
                     await select(found)
                 } else {
@@ -607,20 +621,23 @@ final class ChatModel {
     /// deletes from the owning host and drops the row from the cache, leaving
     /// the open transcript alone.
     func remove(_ chat: ChatConversation, in folderID: String?) async {
-        let route = folderID.map { Bridge.chatRoute(workspaceID: $0) }
+        let targetPeer = WorkDestinationResolver.deletionPeer(folderID: folderID, currentFolderID: self.folderID, currentPeer: peer)
         let context = loadGeneration
         do {
-            try await Bridge.removeChat(id: chat.id, peer: route?.peer ?? peer)
+            try await Bridge.removeChat(id: chat.id, peer: targetPeer)
             guard context == loadGeneration else { return }
             if let folderID, folderID != self.folderID {
                 chatListCache[folderID]?.removeAll { $0.id == chat.id }
-                if lastSelectedByFolder[folderID] == chat.id { forgetLastSelected(folderID: folderID) }
+                if rememberedChat(in: folderID) == chat.id { forgetLastSelected(folderID: folderID) }
                 if pendingRevealID == chat.id,
                    pendingRevealFolderID == nil || pendingRevealFolderID == folderID {
                     pendingRevealID = nil
                     pendingRevealFolderID = nil
                 }
             } else {
+                if let folderID, rememberedChat(in: folderID) == chat.id {
+                    forgetLastSelected(folderID: folderID)
+                }
                 chats.removeAll { $0.id == chat.id }
                 if let folderID { storeChatListCache(chats, folderID: folderID) }
                 if selected?.id == chat.id {
@@ -1615,6 +1632,7 @@ final class ChatModel {
 
     private func selectionMatches(id: String, generation: UInt64) -> Bool {
         selectionGeneration == generation && selected?.id == id
+            && continuityScope == WorkSessionContext.shared.scope
     }
 
     private func replace(_ chat: ChatConversation) {

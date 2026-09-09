@@ -63,6 +63,14 @@ with a server that runs agents.
 
 ### Fixed
 
+- Deleting a local conversation from the Mac sidebar while a remote folder is
+  open now uses the local machine. Host recovery notices also keep their order
+  when several calls finish together, so a healthy helper cannot leave a stale
+  reconnect warning behind.
+- Remembered conversations now belong to their account, machine and folder.
+  Separate windows preserve each other's recent selections; old unscoped
+  selections are not assigned to whichever account signs in next.
+
 - A chat that has been open for a while no longer stops responding. The local
   helper told the window it was healthy after every call it answered, several
   times a second, from whatever thread had just answered one. Sooner or later

@@ -21,7 +21,9 @@ final class AccountModel {
     /// Nil until the first load finishes, so the view can tell "unknown" from
     /// "signed out". Showing a sign-in button before we have checked would
     /// flash the wrong state on every launch.
-    var account: Account?
+    var account: Account? {
+        didSet { WorkSessionContext.shared.update(account: account) }
+    }
     /// Local host traffic. Independent of the signed-in account snapshot.
     var remoteStatus: RemoteStatus?
     var pendingLogin: DeviceLogin?

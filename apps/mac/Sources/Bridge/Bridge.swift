@@ -398,8 +398,7 @@ enum Bridge {
     /// succeed constantly: nine notifications a second for the life of the
     /// app, every one of them saying what the last one said. Only the call
     /// that actually clears a card has anything to say.
-    private static let hostStateLock = NSLock()
-    nonisolated(unsafe) private static var hostTroubled = false
+    private static let hostStateNotifier = HostStateNotifier()
 
     /// Tell the footer about the host, from the main thread.
     ///
@@ -414,18 +413,7 @@ enum Bridge {
     /// Nothing else may post these four names. A notification that drives a
     /// view is posted on the thread that view runs on.
     private static func postHostState(_ name: Notification.Name) {
-        hostStateLock.lock()
-        let troubled = name != .hostRecoveryFinished
-        let changed = hostTroubled != troubled
-        hostTroubled = troubled
-        hostStateLock.unlock()
-        // A repeated failure keeps reporting, because a card that arrived
-        // after the first one still has to be filled in. Only the healthy
-        // path, which is nearly every call, is silenced.
-        guard troubled || changed else { return }
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: name, object: nil)
-        }
+        hostStateNotifier.post(name, troubled: name != .hostRecoveryFinished)
     }
 
     private static func postHostRecoveryStarted() {
@@ -967,16 +955,8 @@ extension Bridge {
     /// passes the peer separately. Either way the host on the owning machine
     /// only ever sees its own workspace id.
     static func chatRoute(workspaceID: String, peer: String? = nil) -> (workspaceID: String, peer: String?) {
-        if let peer, !peer.isEmpty {
-            if let target = remoteWorkspace(workspaceID) {
-                return (target.workspace, peer)
-            }
-            return (workspaceID, peer)
-        }
-        if let target = remoteWorkspace(workspaceID) {
-            return (target.workspace, target.peer)
-        }
-        return (workspaceID, nil)
+        let route = WorkDestinationResolver.route(folderID: workspaceID, explicitPeer: peer)
+        return (route.workspaceID, route.peer)
     }
 
     /// Tell the host somebody has this conversation on screen, so it does not

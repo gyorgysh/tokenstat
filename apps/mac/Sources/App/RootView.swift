@@ -2616,7 +2616,7 @@ struct RootView: View {
         // folder open through a reveal, so their transcript is read from the
         // owning host: selecting directly would fetch it against the folder
         // on screen and its peer.
-        let isCurrent = chat.folderID == folder.id || chat.workspaceID == folder.id
+        let isCurrent = chat.folderID == folder.id
         let visible = expandedChatHistories.contains(folder.id)
             ? conversations
             : Array(conversations.prefix(5))
