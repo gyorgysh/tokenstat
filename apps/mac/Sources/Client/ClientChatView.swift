@@ -212,11 +212,14 @@ struct ClientChatView: View {
 
     /// Fresh on return, with the strip up while it happens. The list's own
     /// `.task` runs once on appear; minimizing and reopening never
-    /// re-appears, so without this the rows sit stale in silence.
+    /// re-appears, so without this the rows sit stale in silence. Stale
+    /// complaints die with the attempt: a failure now raises its own error,
+    /// so yesterday's modal can never pop for today's retry.
     private func foregroundRefresh() async {
         guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
+        model.error = nil
         await reload()
     }
 
@@ -332,11 +335,13 @@ struct ClientChatThread: View {
     /// One explicit round trip on return. The poll loop restarts on its own
     /// but sleeps first, so without this the transcript sits a full interval
     /// stale with no strip to say so. Never a re-select: that empties the
-    /// transcript and reads it back, which is the screen blanking.
+    /// transcript and reads it back, which is the screen blanking. Stale
+    /// complaints die with the attempt, like the list.
     private func foregroundRefresh() async {
         guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
+        model.error = nil
         await model.poll()
     }
 
@@ -480,8 +485,12 @@ struct ClientChatThread: View {
         // The host is on the other computer and cannot see this screen. Until
         // it is told, a turn finishing here pushed to this very phone.
         .watching(conversationID: chatID, peer: model.peer)
+        // Optimistic while offline. A modal for a failure the recovery pass
+        // is about to erase is a popup, not information: the strip says
+        // reconnecting, the foreground refresh retries, and anything still
+        // broken once back online raises its own error then.
         .alert("Chat unavailable", isPresented: Binding(
-            get: { model.error != nil },
+            get: { model.error != nil && connectivity.status != .offline },
             set: { if !$0 { model.error = nil } }
         )) {
             Button("OK", role: .cancel) { model.error = nil }
