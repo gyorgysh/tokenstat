@@ -19,76 +19,35 @@ struct ClientHomeView: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(AccountModel.self) private var account
     @State private var model = HomeModel()
+    @State private var layout = HomeLayout.shared
     /// The day whose detail sheet is open. A sheet rather than the Mac's hover
     /// popover, because a finger has no hover.
     @State private var selectedDay: HeatCell?
     /// A finger is holding the heatmap, so this page does not scroll.
     @State private var pickingADay = false
+    @State private var customizing = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 greeting
-                ClientContinueSection()
-                ClientHomeMachinesSection()
-                // A quiet, locked or cached grid still belongs to an existing
-                // account. Setup requires a successful empty response.
-                if let calendar = model.calendar {
-                    totals(calendar)
-                    heatmapCard(calendar)
-                } else if model.hasConfirmedEmptyActivity {
-                    ClientGettingStarted()
-                } else if model.isLoading {
-                    // Shaped like what is coming, so nothing moves when it
-                    // lands. See `ClientWireframe`.
-                    ClientWireframe.Totals()
-                    ClientWireframe.Heatmap()
-                } else if let message = model.errorMessage {
-                    // A failed load replaces the wireframe with the reason. A
-                    // skeleton that never resolves is a lie told slowly.
-                    //
-                    // Offline gets its own words. Every screen here is account
-                    // plane, so with no network there is nothing to fetch and
-                    // nothing anybody can do about it: the honest line is "you
-                    // are offline", not the transport error underneath it,
-                    // which reads like the product is broken.
-                    ClientEmptyState(
-                        kind: .unreachable,
-                        title: connectivity.isOffline ? "You are offline" : "Could not load your activity",
-                        message: connectivity.isOffline
-                            ? "This updates by itself when the connection is back."
-                            : FriendlyError.from(message).message,
-                        actionTitle: connectivity.isOffline ? nil : "Try again",
-                        actionIcon: .refresh,
-                        action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
-                    )
-                } else {
-                    // No authoritative empty answer yet. Recovery and stale
-                    // or fallback calendars must not send an account to setup.
-                    ClientEmptyState(
-                        kind: .unreachable,
-                        title: "Activity is unavailable",
-                        message: model.scopeNotice ?? "Waiting for your activity to load.",
-                        actionTitle: "Try again",
-                        actionIcon: .refresh,
-                        action: { Task { await model.refresh() } }
-                    )
+                // Outside the arrangement, deliberately. Whether the account
+                // could be read at all is the screen talking, not a card
+                // somebody chose to keep, and hiding Activity must not hide
+                // "you are offline".
+                status
+                // In the order this device was arranged in. A card with
+                // nothing to say draws nothing and keeps its place.
+                ForEach(layout.sections) { section in
+                    view(for: section)
                 }
-
-                // Below either branch. `model.calendar` being nil means the
-                // load failed or has not landed, and neither of these has
-                // anything to say then.
-                if model.calendar != nil {
-                    // What is left, on the screen that opens, next to what was
-                    // spent. See `ClientLimitsCard` for why this is not a tab.
-                    ClientLimitsCard(
-                        providers: model.planLimits,
-                        isLoading: model.isLoadingLimits
-                    )
-                    if let notice = model.scopeNotice {
-                        NoticeCard(text: notice, showSignIn: model.needsAccountSignIn)
-                    }
+                if layout.sections.isEmpty {
+                    clearHome
                 }
+                if model.calendar != nil, let notice = model.scopeNotice {
+                    NoticeCard(text: notice, showSignIn: model.needsAccountSignIn)
+                }
+                customizeButton
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
@@ -131,6 +90,113 @@ struct ClientHomeView: View {
         .sheet(item: $selectedDay) { day in
             DayDetailSheet(day: day)
         }
+        .sheet(isPresented: $customizing) {
+            ClientHomeEditor(layout: layout)
+        }
+    }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private func view(for section: HomeSection) -> some View {
+        switch section {
+        case .continueWork:
+            ClientContinueSection()
+        case .machines:
+            ClientHomeMachinesSection()
+        case .usage:
+            if let calendar = model.calendar {
+                totals(calendar)
+            } else if model.isLoading {
+                ClientWireframe.Totals()
+            }
+        case .activity:
+            if let calendar = model.calendar {
+                heatmapCard(calendar)
+            } else if model.isLoading {
+                ClientWireframe.Heatmap()
+            }
+        case .limits:
+            // Below the grid, and only once there is an account behind it.
+            // `model.calendar` being nil means the load failed or has not
+            // landed, and this has nothing to say then.
+            if model.calendar != nil {
+                ClientLimitsCard(
+                    providers: model.planLimits,
+                    isLoading: model.isLoadingLimits
+                )
+            }
+        }
+    }
+
+    /// What happened to the account read, when something did.
+    ///
+    /// A quiet, locked or cached grid still belongs to an existing account.
+    /// Setup requires a successful empty response.
+    @ViewBuilder
+    private var status: some View {
+        if model.calendar != nil || model.isLoading {
+            EmptyView()
+        } else if model.hasConfirmedEmptyActivity {
+            ClientGettingStarted()
+        } else if let message = model.errorMessage {
+            // A failed load replaces the wireframe with the reason. A
+            // skeleton that never resolves is a lie told slowly.
+            //
+            // Offline gets its own words. Every screen here is account
+            // plane, so with no network there is nothing to fetch and
+            // nothing anybody can do about it: the honest line is "you
+            // are offline", not the transport error underneath it,
+            // which reads like the product is broken.
+            ClientEmptyState(
+                kind: .unreachable,
+                title: connectivity.isOffline ? "You are offline" : "Could not load your activity",
+                message: connectivity.isOffline
+                    ? "This updates by itself when the connection is back."
+                    : FriendlyError.from(message).message,
+                actionTitle: connectivity.isOffline ? nil : "Try again",
+                actionIcon: .refresh,
+                action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
+            )
+        } else {
+            // No authoritative empty answer yet. Recovery and stale
+            // or fallback calendars must not send an account to setup.
+            ClientEmptyState(
+                kind: .unreachable,
+                title: "Activity is unavailable",
+                message: model.scopeNotice ?? "Waiting for your activity to load.",
+                actionTitle: "Try again",
+                actionIcon: .refresh,
+                action: { Task { await model.refresh() } }
+            )
+        }
+    }
+
+    /// Every card switched off. Not an error, and not empty space with
+    /// nothing to press: the way back is right here.
+    private var clearHome: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            Text("Your Home is clear")
+                .font(ClientType.label.weight(.medium))
+            Text("Every card is switched off. The tabs and your folders are where they were.")
+                .font(ClientType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Space.m)
+        .cardSurface()
+    }
+
+    /// At the bottom, under everything it arranges. A control for changing
+    /// the furniture does not belong above the furniture.
+    private var customizeButton: some View {
+        Button("Customize Home", .layout) { customizing = true }
+            .buttonStyle(.plain)
+            .font(ClientType.caption.weight(.medium))
+            .foregroundStyle(Theme.accent)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.top, Theme.Space.xs)
     }
 
     // MARK: - Pieces

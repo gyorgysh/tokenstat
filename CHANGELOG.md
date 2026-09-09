@@ -53,6 +53,16 @@ with a server that runs agents.
   the hole: no machine offers to set one up, a machine with no folders offers
   both ways to give it one, and a machine that is not answering says what to
   run on it when it is a server rather than telling you to wake a Mac.
+- **Home is yours to arrange, on iPhone and iPad.** Drag the cards into the
+  order you read them in, switch off the ones you never do, or start from one
+  of three arrangements: Balanced, Work first, Usage first. A small preview
+  shows what you are about to get. Every card can be off, and a clear Home is
+  a real answer rather than an empty screen. The arrangement belongs to the
+  device, so a phone and an iPad can be different, and Done applies it in one
+  go while Cancel really cancels. Reordering also works from VoiceOver, not
+  only by dragging. The greeting and anything about your account or your
+  connection stay where they are: hiding Activity must not hide "you are
+  offline".
 - **A message is sent once, even when the answer goes missing.** A machine
   that takes a message now keeps a receipt for it, so pressing Send again
   after a connection that went quiet gets you the conversation rather than a

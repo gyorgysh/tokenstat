@@ -27,6 +27,10 @@ SKIP_STARTERS = (
     "ToolbarItem",
     "CommandGroup",
     "CommandMenu",
+    # Never drawn. These are the rotor's entries for a row that can also be
+    # dragged, and VoiceOver reads their titles: a glyph inside one would be
+    # a symbol nobody sees.
+    ".accessibilityActions",
 )
 
 # Buttons whose whole surface is the label (rows, tiles, chips, links).
@@ -192,6 +196,11 @@ ALLOWED = [
     ("Features/Workspaces/Chat/ChatSetupHeader.swift", "selection = option.value"),
     # Whole-row persona pick. The ActionSeat already carries the glyph.
     ("Features/Workspaces/Chat/PersonaEditor.swift", "draft = persona"),
+    # The three arrangements above the section list. A segmented pill whose
+    # whole surface is its name, like the billing interval and the composer's
+    # mode pills: the chosen one is marked by its fill, and a glyph on each
+    # would be one symbol repeated across a row of three.
+    ("Client/ClientHomeEditor.swift", "preset = option"),
 ]
 
 # `, .save)` is the usual shape. `.icon` covers a button whose glyph is chosen
