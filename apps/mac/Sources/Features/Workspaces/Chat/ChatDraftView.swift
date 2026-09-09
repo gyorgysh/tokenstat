@@ -187,6 +187,46 @@ final class ChatDraftTextView: NSTextView {
     var draftStop: (() -> Void)?
     var pasteAttachments: (() -> Void)?
 
+    /// File and image drags belong to the composer well, which attaches them.
+    /// Left alone, NSTextView swallows a drop on the text itself and inserts
+    /// the path, while the same file dropped a few points above or below
+    /// attaches. Declining here lets the drop bubble to the well's `onDrop`,
+    /// so every point of the composer behaves the same way. Plain text drags
+    /// still go through, which is what makes moving words around work.
+    private static let attachmentImageTypes: [NSPasteboard.PasteboardType] = [
+        .png, .tiff,
+        NSPasteboard.PasteboardType("public.jpeg"),
+        NSPasteboard.PasteboardType("public.heic"),
+    ]
+
+    private static func isAttachmentDrag(_ pasteboard: NSPasteboard) -> Bool {
+        if let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL], !urls.isEmpty {
+            return true
+        }
+        if attachmentImageTypes.contains(where: { pasteboard.data(forType: $0) != nil }) {
+            return true
+        }
+        return NSImage(pasteboard: pasteboard) != nil
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if Self.isAttachmentDrag(sender.draggingPasteboard) { return [] }
+        return super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if Self.isAttachmentDrag(sender.draggingPasteboard) { return [] }
+        return super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if Self.isAttachmentDrag(sender.draggingPasteboard) { return false }
+        return super.performDragOperation(sender)
+    }
+
     override var intrinsicContentSize: NSSize {
         guard let manager = layoutManager, let container = textContainer else {
             return NSSize(width: NSView.noIntrinsicMetric, height: 28)
