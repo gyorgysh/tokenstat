@@ -190,8 +190,10 @@ settings:
     # 1.0.0 is the remote expansion: a phone can set up a server.
     # 90 went up as 1.0.1. Git stays 1.0.0.
     # 91 went up as 1.0.1. Git stays 1.0.0.
-    # 92 went up as 1.0.1. Git stays 1.0.0. 93 is next, unspent.
-    CURRENT_PROJECT_VERSION: "93"
+    # 92 went up as 1.0.1. Git stays 1.0.0.
+    # 93 went up as 1.0.1 with the history release tags. Git stays 1.0.0.
+    # 94 is next, unspent.
+    CURRENT_PROJECT_VERSION: "94"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
