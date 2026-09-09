@@ -12,8 +12,9 @@ import SwiftUI
 /// Which of your computers is awake right now, on the screen that opens.
 ///
 /// Account plane only: names, dots and last-seen words come from the account
-/// list, so this draws with every laptop shut. Tapping a row hands over to
-/// Devices, which owns the detail screen, rather than growing a second one.
+/// list, so this draws with every laptop shut. Tapping a row opens that
+/// machine's work a level beyond its device page, which stays one tap away
+/// under Devices for the readings and the rename.
 struct ClientHomeMachinesSection: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
@@ -55,12 +56,26 @@ struct ClientHomeMachinesSection: View {
                 .padding(.horizontal, 2)
                 VStack(spacing: 0) {
                     ForEach(hosts) { machine in
-                        Button {
-                            navigation.openDevice(machineID: machine.machineID)
-                        } label: {
-                            row(machine)
+                        // Past the device page, straight to the work. The key
+                        // is missing only on records from before it existed;
+                        // those still open the device page, which shows what
+                        // there is.
+                        if let key = machine.publicIdentity, !key.isEmpty {
+                            NavigationLink {
+                                ClientHostWorkspacesView(peerKey: key, hostName: machine.displayName)
+                            } label: {
+                                row(machine)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Opens this computer's work")
+                        } else {
+                            Button {
+                                navigation.openDevice(machineID: machine.machineID)
+                            } label: {
+                                row(machine)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                         if machine.id != hosts.last?.id {
                             ThemeRule().padding(.horizontal, Theme.Space.m)
                         }
