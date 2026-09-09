@@ -15,6 +15,8 @@
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -109,18 +111,34 @@ fn write(
     let mut line = serde_json::to_string(&entry).map_err(|error| error.to_string())?;
     line.push('\n');
     let path = path()?;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|error| error.to_string())?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    // Create with 0600 from the start: the default umask would leave device
+    // keys world-readable until the chmod below.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|error| error.to_string())?;
         let _ = file.set_permissions(fs::Permissions::from_mode(0o600));
+        file.write_all(line.as_bytes())
+            .map_err(|error| error.to_string())?;
     }
-    file.write_all(line.as_bytes())
-        .map_err(|error| error.to_string())?;
+    #[cfg(not(unix))]
+    {
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|error| error.to_string())?;
+        file.write_all(line.as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
     trim(&path)
 }
 
@@ -128,12 +146,39 @@ fn trim(path: &std::path::Path) -> Result<(), String> {
     let body = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let lines: Vec<&str> = body.lines().collect();
     if lines.len() <= MAX_LINES {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        }
         return Ok(());
     }
     let kept = lines[lines.len() - MAX_LINES / 2..].join("\n");
     let temp = path.with_extension("tmp");
-    fs::write(&temp, format!("{kept}\n")).map_err(|error| error.to_string())?;
-    fs::rename(temp, path).map_err(|error| error.to_string())
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&temp)
+            .map_err(|error| error.to_string())?;
+        file.write_all(format!("{kept}\n").as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(&temp, format!("{kept}\n")).map_err(|error| error.to_string())?;
+    }
+    fs::rename(&temp, path).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
 /// The newest entries first, because that is the order somebody reads them in.

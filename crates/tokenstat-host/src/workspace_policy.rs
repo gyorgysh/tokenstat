@@ -183,12 +183,45 @@ fn save(store: &Store) -> Result<(), String> {
     let path = path()?;
     fs::create_dir_all(path.parent().ok_or("invalid policy path")?).map_err(|e| e.to_string())?;
     let temp = path.with_extension("tmp");
-    fs::write(
-        &temp,
-        serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    fs::rename(temp, path).map_err(|e| e.to_string())
+    // The invite hash is a password-equivalent oracle (40 bits). The file must
+    // never be world-readable, even briefly: create with 0600 before writing.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&temp)
+            .map_err(|e| e.to_string())?;
+        use std::io::Write;
+        file.write_all(
+            &serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(
+            &temp,
+            serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o600));
+    }
+    fs::rename(&temp, &path).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    invalidate_allowed_cache();
+    Ok(())
 }
 
 /// Whether one device may reach the work here.
@@ -202,10 +235,24 @@ pub(crate) fn is_allowed(peer_id: &str) -> bool {
     allowed_now().is_some_and(|allowed| allowed.contains(peer_id))
 }
 
+type AllowedCached = Mutex<Option<(Option<SystemTime>, std::sync::Arc<HashSet<String>>)>>;
+
+fn allowed_cache() -> &'static AllowedCached {
+    static CACHE: OnceLock<AllowedCached> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// Drop the cached grant set, so a revocation in the same mtime tick is still
+/// seen. `save` calls this on every write; mtime granularity alone cannot be
+/// trusted on coarse filesystems.
+fn invalidate_allowed_cache() {
+    if let Ok(mut guard) = allowed_cache().lock() {
+        *guard = None;
+    }
+}
+
 fn allowed_now() -> Option<std::sync::Arc<HashSet<String>>> {
-    type Cached = Mutex<Option<(Option<SystemTime>, std::sync::Arc<HashSet<String>>)>>;
-    static CACHE: OnceLock<Cached> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    let cache = allowed_cache();
 
     let path = path().ok()?;
     // A file that is not there yet has no grants in it, and a clock that will
@@ -238,13 +285,32 @@ pub(crate) fn set_allowed(peer_id: &str, allow: bool) -> Result<(), String> {
 static MUTATION: Mutex<()> = Mutex::new(());
 
 pub(crate) fn set_allowed_by(peer_id: &str, allow: bool, by: Authority) -> Result<(), String> {
+    // Label resolved outside the lock; the locked helper falls back to the
+    // cache-only lookup if none was supplied.
+    let label = crate::remote::account_peer_label_hex(peer_id);
+    set_allowed_by_with_label(peer_id, allow, by, label)
+}
+
+fn set_allowed_by_with_label(
+    peer_id: &str,
+    allow: bool,
+    by: Authority,
+    label: Option<String>,
+) -> Result<(), String> {
     let _guard = MUTATION
         .lock()
         .map_err(|_| "Workspace access lock is unavailable")?;
-    set_allowed_locked(peer_id, allow, by)
+    set_allowed_locked_with_label(peer_id, allow, by, label)
 }
 
-fn set_allowed_locked(peer_id: &str, allow: bool, by: Authority) -> Result<(), String> {
+/// Same as below, but with a label resolved outside the
+/// mutation lock. Network I/O must never run while `MUTATION` is held.
+fn set_allowed_locked_with_label(
+    peer_id: &str,
+    allow: bool,
+    by: Authority,
+    label: Option<String>,
+) -> Result<(), String> {
     let mut store = load()?;
     let already = store.allowed.iter().any(|held| held == peer_id);
     store.allowed.retain(|held| held != peer_id);
@@ -256,10 +322,20 @@ fn set_allowed_locked(peer_id: &str, allow: bool, by: Authority) -> Result<(), S
     store.pending.retain(|request| request.peer_id != peer_id);
     save(&store)?;
     if already != allow {
+        // Best-effort label: fall back to the cache-only lookup if the caller
+        // did not resolve one outside the lock.
+        let owned;
+        let resolved = match label {
+            Some(label) => Some(label),
+            None => {
+                owned = crate::remote::account_peer_label_hex_cached(peer_id);
+                owned.clone()
+            }
+        };
         access_audit::record(
             if allow { "granted" } else { "revoked" },
             Some(peer_id),
-            crate::remote::account_peer_label_hex(peer_id).as_deref(),
+            resolved.as_deref(),
             by,
         );
     }
@@ -365,12 +441,47 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("workspace.access.") {
         return None;
     }
-    // Hold the lock across read/modify/save, including consuming an invite
-    // and granting access. Two tunnels must never redeem the same code.
-    let _guard = match MUTATION.lock() {
-        Ok(guard) => guard,
-        Err(_) => return Some(Err("Workspace access lock is unavailable".into())),
-    };
+    // Read-only methods never take the mutation lock. Holding it across a
+    // network fetch (account directory) stalled every other access call for
+    // the HTTP timeout, and reads do not mutate.
+    match method {
+        // Asked before anything is loaded, so a device that is not allowed can
+        // draw the screen that says so and offer to ask. The alternative was
+        // reading it off a failure, and `remote.call` flattens a peer's error
+        // to its message and drops the code, so that would have meant matching
+        // on a sentence.
+        "workspace.access.check" => {
+            let peer = match crate::request_context::remote_peer() {
+                Some(peer) => peer,
+                None => return Some(Err("only a device can ask whether it is allowed".into())),
+            };
+            return Some(Ok(json!({"allowed": is_allowed(&peer)})));
+        }
+        "workspace.access.pending" => {
+            return Some((|| {
+                crate::request_context::refuse_remote("workspace access requests")?;
+                Ok(serde_json::to_value(load()?.pending).map_err(|e| e.to_string())?)
+            })());
+        }
+        "workspace.access.list" => {
+            return Some((|| {
+                crate::request_context::refuse_remote("workspace access settings")?;
+                Ok(serde_json::to_value(load()?.allowed).map_err(|e| e.to_string())?)
+            })());
+        }
+        // The record, for the console and for the machine's page in the app.
+        // Local only: it names every device that was ever let in here.
+        "workspace.access.log" => {
+            return Some((|| {
+                crate::request_context::refuse_remote("the workspace access log")?;
+                let p: LogParams = serde_json::from_str(params).unwrap_or_default();
+                Ok(Value::Array(access_audit::read(
+                    p.limit.unwrap_or(100).min(1000),
+                )?))
+            })());
+        }
+        _ => {}
+    }
     Some((|| match method {
         // Over the tunnel the device is already on, with the peer taken from
         // the connection rather than from the params. A device naming somebody
@@ -378,6 +489,14 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         "workspace.access.ask" => {
             let peer = crate::request_context::remote_peer()
                 .ok_or("a request must arrive from the device asking")?;
+            // Resolve outside the mutation lock: this may fetch the account
+            // directory over HTTP, and holding MUTATION across that stalls
+            // every other access call for the timeout.
+            let label = crate::remote::account_peer_label_hex(&peer);
+            let review_demo = crate::screen_policy::signed_into_review_demo();
+            let _guard = MUTATION
+                .lock()
+                .map_err(|_| "Workspace access lock is unavailable")?;
             // Nothing to read. Workspace access is one grant with no half to
             // ask for, and the peer comes from the connection, so a device has
             // nothing it could usefully say here.
@@ -404,7 +523,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             store.note(&peer, "ask", asked_at);
             store.pending.push(PendingRequest {
-                label: crate::remote::account_peer_label_hex(&peer),
+                label: label.clone(),
                 peer_id: peer.clone(),
                 // Workspace access is one grant. There is no half of it to
                 // ask for, so the field the screen request uses for mouse and
@@ -414,10 +533,11 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 expires_at: asked_at + PENDING_TTL,
             });
             save(&store)?;
+            drop(_guard);
             access_audit::record(
                 "requested",
                 Some(&peer),
-                crate::remote::account_peer_label_hex(&peer).as_deref(),
+                label.as_deref(),
                 Authority::Console,
             );
 
@@ -427,10 +547,10 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             // is asking. A request that can never be answered is a feature
             // that cannot be tested.
             //
-            // Recorded first and upgraded after, because the check below asks
-            // the account server and that call can take a minute to fail. A
-            // device whose ask was lost to a hung lookup has no way to know it
-            // should ask again.
+            // Recorded first and upgraded after. The demo check above ran
+            // outside the lock because it can hit the network; a device whose
+            // ask was lost to a hung lookup has no way to know it should ask
+            // again, so the request is stored before this branch.
             //
             // Four things have to hold and a user can set none of them: the
             // account is `REVIEW_DEMO_ACCOUNT_ID`, compiled in rather than
@@ -438,36 +558,27 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             // device is already approved, which `serve_peer` checks before
             // dispatch is reached; and the grant is an ordinary row, listed
             // and revocable in Devices and gone the moment the round closes.
-            if crate::screen_policy::signed_into_review_demo() {
-                set_allowed_locked(&peer, true, Authority::Console)?;
+            if review_demo {
+                let _guard = MUTATION
+                    .lock()
+                    .map_err(|_| "Workspace access lock is unavailable")?;
+                set_allowed_locked_with_label(&peer, true, Authority::Console, label)?;
                 return Ok(json!({"pending": false, "granted": true, "reviewDemo": true}));
             }
             Ok(json!({"pending": true}))
-        }
-        // Asked before anything is loaded, so a device that is not allowed can
-        // draw the screen that says so and offer to ask. The alternative was
-        // reading it off a failure, and `remote.call` flattens a peer's error
-        // to its message and drops the code, so that would have meant matching
-        // on a sentence.
-        "workspace.access.check" => {
-            let peer = crate::request_context::remote_peer()
-                .ok_or("only a device can ask whether it is allowed")?;
-            Ok(json!({"allowed": is_allowed(&peer)}))
-        }
-        "workspace.access.pending" => {
-            crate::request_context::refuse_remote("workspace access requests")?;
-            Ok(serde_json::to_value(load()?.pending).map_err(|e| e.to_string())?)
-        }
-        "workspace.access.list" => {
-            crate::request_context::refuse_remote("workspace access settings")?;
-            Ok(serde_json::to_value(load()?.allowed).map_err(|e| e.to_string())?)
         }
         // Answering a request and moving the toggle in Devices are the same
         // act, so they are the same method.
         "workspace.access.set" => {
             crate::request_context::refuse_remote("workspace access settings")?;
             let p: SetParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            set_allowed_locked(&p.peer_id, p.allow, Authority::parse(p.via.as_deref())?)?;
+            let by = Authority::parse(p.via.as_deref())?;
+            // Resolve outside the lock; the audit label is best-effort.
+            let label = crate::remote::account_peer_label_hex(&p.peer_id);
+            let _guard = MUTATION
+                .lock()
+                .map_err(|_| "Workspace access lock is unavailable")?;
+            set_allowed_locked_with_label(&p.peer_id, p.allow, by, label)?;
             Ok(json!({"saved": true}))
         }
 
@@ -480,6 +591,9 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         "workspace.access.invite" => {
             crate::request_context::refuse_remote("workspace access invites")?;
             let code = mint_code()?;
+            let _guard = MUTATION
+                .lock()
+                .map_err(|_| "Workspace access lock is unavailable")?;
             let mut store = load()?;
             let replaced = store.invite.is_some();
             let expires_at = now_secs() + PENDING_TTL;
@@ -489,6 +603,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 tries: 0,
             });
             save(&store)?;
+            drop(_guard);
             if replaced {
                 access_audit::record("invite retired", None, None, Authority::Console);
             }
@@ -504,7 +619,17 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         "workspace.access.redeem" => {
             let peer = crate::request_context::remote_peer()
                 .ok_or("a code is redeemed by the device being let in")?;
+            let p: RedeemParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let code = normalize_code(&p.code);
+            // The code lets a device you own in. It does not let a stranger
+            // in, so the redeeming device has to be one the account knows.
+            // Resolved before the lock: this is the network fetch that must
+            // never run while MUTATION is held.
+            let label = crate::remote::account_peer_label_hex(&peer);
             let now = now_secs();
+            let _guard = MUTATION
+                .lock()
+                .map_err(|_| "Workspace access lock is unavailable")?;
             let mut store = load()?;
             if store.recent(&peer, "redeem") >= MAX_REDEEMS_PER_HOUR {
                 return Err(
@@ -512,19 +637,16 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 );
             }
             store.note(&peer, "redeem", now);
-            let p: RedeemParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            let code = match normalize_code(&p.code) {
+            let code = match code {
                 Ok(code) => code,
                 Err(message) => {
                     save(&store)?;
                     return Err(message);
                 }
             };
-            // The code lets a device you own in. It does not let a stranger
-            // in, so the redeeming device has to be one the account knows.
-            let label = crate::remote::account_peer_label_hex(&peer);
             if label.is_none() {
                 save(&store)?;
+                drop(_guard);
                 access_audit::record("refused", Some(&peer), None, Authority::Invite);
                 return Err(
                     "This device is not on the account this machine belongs to. Sign in with the same account first."
@@ -547,7 +669,9 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                     store.invite = None;
                 }
                 save(&store)?;
-                access_audit::record("refused", Some(&peer), label.as_deref(), Authority::Invite);
+                let label_clone = label.clone();
+                drop(_guard);
+                access_audit::record("refused", Some(&peer), label_clone.as_deref(), Authority::Invite);
                 if retired {
                     access_audit::record("invite retired", None, None, Authority::Invite);
                     return Err(
@@ -558,27 +682,21 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 return Err("That code is not right. Check it and try again.".into());
             }
             // Consumed on the first success, whether or not this device was
-            // already allowed, so a code cannot be used twice.
+            // already allowed, so a code cannot be used twice. Consuming under
+            // the lock is what makes concurrent redemptions single-use; the
+            // grant below takes the lock again and cannot double-consume.
             store.invite = None;
             save(&store)?;
+            let label_clone = label.clone();
+            drop(_guard);
             access_audit::record(
                 "invite redeemed",
                 Some(&peer),
-                label.as_deref(),
+                label_clone.as_deref(),
                 Authority::Invite,
             );
-            set_allowed_locked(&peer, true, Authority::Invite)?;
+            set_allowed_by_with_label(&peer, true, Authority::Invite, label)?;
             Ok(json!({"granted": true}))
-        }
-
-        // The record, for the console and for the machine's page in the app.
-        // Local only: it names every device that was ever let in here.
-        "workspace.access.log" => {
-            crate::request_context::refuse_remote("the workspace access log")?;
-            let p: LogParams = serde_json::from_str(params).unwrap_or_default();
-            Ok(Value::Array(access_audit::read(
-                p.limit.unwrap_or(100).min(1000),
-            )?))
         }
         _ => Err(format!("unknown workspace access method: {method}")),
     })())

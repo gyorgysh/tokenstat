@@ -29,5 +29,6 @@ anstyle.workspace = true
 serde_json.workspace = true
 jiff.workspace = true
 directories.workspace = true
+libc.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true

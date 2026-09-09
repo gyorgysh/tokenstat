@@ -565,10 +565,15 @@ fn replace_unix_release(candidate: &Path, dest: &Path, version: &str) -> Result<
     make_runnable(&daemon)?;
     #[cfg(target_os = "macos")]
     let _ = Command::new("xattr").arg("-cr").arg(&daemon).status();
-    verify_candidate(&daemon, version, dest)?;
-    if installed_daemon.exists() {
-        verify_signature(&daemon, &installed_daemon)?;
-    }
+    // Pin the daemon to the installed daemon's team when there is one, not to
+    // the CLI's: `verify_candidate` ends in `verify_signature(candidate,
+    // current)`, and the daemon replaces the daemon.
+    let baseline = if installed_daemon.exists() {
+        &installed_daemon
+    } else {
+        dest
+    };
+    verify_candidate(&daemon, version, baseline)?;
     let backup = installed_daemon.with_extension("pair-backup");
     let had_daemon = installed_daemon.exists();
     if had_daemon {

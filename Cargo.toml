@@ -91,6 +91,7 @@ hkdf = "0.13"
 
 # CLI
 clap = { version = "4", features = ["derive", "wrap_help"] }
+libc = "0.2"
 anstream = "1"
 anstyle = "1"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "crossterm_0_29"] }

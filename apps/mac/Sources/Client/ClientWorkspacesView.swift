@@ -493,13 +493,10 @@ struct ClientWorkspacesView: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
-        // The whole card, minus the buttons, opens that machine on Devices.
-        // `contentShape` so the padding is part of the target, and a plain
-        // background gesture rather than a `NavigationLink` because Connect,
-        // Disconnect and Open live inside this card and a link would swallow
-        // them. The Open row above says the same thing in words.
-        .contentShape(Rectangle())
-        .onTapGesture { navigation.openDevice(machineID: host.machineID) }
+        // No card-wide tap gesture: the card holds Connect/Disconnect, Open
+        // device and an Auto-connect toggle, and a parent `onTapGesture` fires
+        // for taps on those controls too, pushing to Devices mid-action. The
+        // explicit "Open device" row above is the way in.
     }
 }
 

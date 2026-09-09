@@ -227,9 +227,10 @@ fn mkdir(params: &str) -> Result<Value, String> {
         .map(|name| name.to_string_lossy().into_owned())
         .ok_or("A new folder needs a name.")?;
     // The name only, never a path: a caller must not be able to write two
-    // levels up by asking for one folder called `../..`.
-    if name.contains('/') || name.contains('\\') || name == "." || name == ".." {
-        return Err("A folder name cannot contain a path.".into());
+    // levels up by asking for one folder called `../..`. Same gate as a clone
+    // target, so odd names cannot arrive through this door either.
+    if let Err(error) = tokenstat_workspace::gitwrite::validate_clone_name(&name) {
+        return Err(error);
     }
     let target = parent.join(&name);
     std::fs::create_dir(&target)

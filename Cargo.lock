@@ -3563,6 +3563,7 @@ dependencies = [
  "crossterm",
  "directories",
  "jiff",
+ "libc",
  "ratatui",
  "serde_json",
  "tokenstat-core",

@@ -290,6 +290,7 @@ private struct RemoteCloneView: View {
     @State private var working = false
     @State private var status: RemoteCloneStatus?
     @State private var error: String?
+    @State private var watchTask: Task<Void, Never>?
 
     private var ready: Bool {
         !url.trimmingCharacters(in: .whitespaces).isEmpty && parent != nil && !working
@@ -356,6 +357,7 @@ private struct RemoteCloneView: View {
                     .buttonStyle(SecondaryButtonStyle())
             }
         }
+        .onDisappear { watchTask?.cancel() }
     }
 
     private var headline: String {
@@ -383,6 +385,7 @@ private struct RemoteCloneView: View {
         guard let parent else { return }
         working = true
         error = nil
+        status = nil
         defer { working = false }
         do {
             let trimmed = name.trimmingCharacters(in: .whitespaces)
@@ -392,7 +395,9 @@ private struct RemoteCloneView: View {
                 parent: parent,
                 name: trimmed.isEmpty ? nil : trimmed
             )
-            await watch(sessionID: info.id)
+            watchTask?.cancel()
+            watchTask = Task { await watch(sessionID: info.id) }
+            await watchTask?.value
         } catch {
             self.error = error.localizedDescription
         }
@@ -406,6 +411,14 @@ private struct RemoteCloneView: View {
                 if answer.state != "running" { return }
             }
             try? await Task.sleep(for: .seconds(2))
+        }
+        // Do not leave the UI on "Cloning…" forever: the poll is over, either
+        // by timeout or by the sheet going away (which cancels this task and
+        // skips this write).
+        guard !Task.isCancelled else { return }
+        if status?.state == "running" || status == nil {
+            let path = status?.path ?? parent ?? ""
+            status = RemoteCloneStatus(state: "failed", path: path, workspaceId: nil, error: "The clone timed out. Check the machine, or try again.")
         }
     }
 }
@@ -425,6 +438,9 @@ private struct RemoteFolderBrowser: View {
     @State private var error: String?
     @State private var newName = ""
     @State private var naming = false
+    /// Guards against stale responses: rapid taps let an older `browse` finish
+    /// last and overwrite the listing for the directory showing.
+    @State private var generation = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -493,14 +509,27 @@ private struct RemoteFolderBrowser: View {
             Button("Cancel", role: .cancel) { newName = "" }
             Button("Create") { Task { await create() } }
         }
-        .task(id: path) { await load() }
+        .task(id: path) {
+            // Seed the initial path once without retriggering: assigning `path`
+            // from inside this task restarts it and browses twice on appear.
+            if path == nil {
+                await load(initial: true)
+            } else {
+                await load()
+            }
+        }
     }
 
-    private func load() async {
+    private func load(initial: Bool = false) async {
+        generation &+= 1
+        let current = generation
         do {
-            listing = try await Bridge.browse(peer: peer.key, path: path)
-            if path == nil { path = listing?.path }
+            let answer = try await Bridge.browse(peer: peer.key, path: path)
+            guard current == generation else { return }
+            listing = answer
+            if initial, path == nil { path = answer.path }
         } catch {
+            guard current == generation else { return }
             self.error = error.localizedDescription
         }
     }
@@ -509,6 +538,10 @@ private struct RemoteFolderBrowser: View {
         let trimmed = newName.trimmingCharacters(in: .whitespaces)
         newName = ""
         guard !trimmed.isEmpty, let here = listing?.path, !here.isEmpty else { return }
+        guard !trimmed.contains("/"), trimmed != "..", trimmed != "." else {
+            self.error = "A folder name is one name, without a path in it."
+            return
+        }
         do {
             let made = try await Bridge.makeDirectory(peer: peer.key, path: "\(here)/\(trimmed)")
             path = made

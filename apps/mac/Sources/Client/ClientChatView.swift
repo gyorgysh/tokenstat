@@ -429,8 +429,10 @@ struct ClientChatThread: View {
         }
         .task {
             // A first task offered by setup, put in the composer rather than
-            // sent. Only into an empty one, and only once.
-            if draft.isEmpty, let offered = navigation.takeSuggestedPrompt() {
+            // sent. Only into an empty one, only once, and only for the folder
+            // setup opened: any other thread mounting first must not consume it.
+            if draft.isEmpty, let scope = navigation.folderID,
+               let offered = navigation.takeSuggestedPrompt(for: scope) {
                 draft = offered
             }
             guard let chat = model.chats.first(where: { $0.id == chatID }) else { return }

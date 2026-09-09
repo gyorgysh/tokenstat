@@ -21,7 +21,7 @@
 //! Nothing is ever deleted, including a clone that failed halfway. It is
 //! somebody's disk.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -40,6 +40,47 @@ fn jobs() -> &'static Mutex<HashMap<String, Job>> {
     static JOBS: OnceLock<Mutex<HashMap<String, Job>>> = OnceLock::new();
     JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
+
+/// Targets with a clone currently starting, so two concurrent calls for the
+/// same folder do not both pass the `exists` check and spawn into one path.
+fn inflight_targets() -> &'static Mutex<HashSet<PathBuf>> {
+    static TARGETS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    TARGETS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn claim_target(target: &PathBuf) -> Result<TargetClaim, String> {
+    let mut held = inflight_targets()
+        .lock()
+        .map_err(|_| "clone targets unavailable")?;
+    if held.contains(target) {
+        return Err(
+            "A clone into that folder is already starting. Wait for it to finish."
+                .into(),
+        );
+    }
+    held.insert(target.clone());
+    Ok(TargetClaim {
+        target: target.clone(),
+    })
+}
+
+struct TargetClaim {
+    target: PathBuf,
+}
+
+impl Drop for TargetClaim {
+    fn drop(&mut self) {
+        if let Ok(mut held) = inflight_targets().lock() {
+            held.remove(&self.target);
+        }
+    }
+}
+
+/// Clones running at once. Each spawns a watcher thread polling every 400ms;
+/// unbounded, a granted device can grow threads without limit.
+const MAX_RUNNING_CLONES: usize = 8;
+/// Finished outcomes kept for `cloneStatus`. Unbounded, the map only grows.
+const MAX_RETAINED_JOBS: usize = 32;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,10 +117,25 @@ fn start(params: &str) -> Result<Value, String> {
     };
     let args = tokenstat_workspace::gitwrite::clone_command(&p.url, &name)?;
     let target = parent.join(&name);
+    // Claim the target for this call so a second concurrent clone for the same
+    // name fails cleanly instead of both passing `exists` and spawning into
+    // one path. Held until `spawn` below; the watcher thread owns the rest.
+    let _claim = claim_target(&target)?;
     if target.exists() {
         return Err(format!(
             "{name} is already there. Pick another name, or add that folder instead."
         ));
+    }
+    // Bound resource use: cap concurrent watchers and prune finished outcomes
+    // so the map cannot grow without limit.
+    if let Ok(jobs) = jobs().lock() {
+        let running = jobs.values().filter(|job| job.outcome.is_none()).count();
+        if running >= MAX_RUNNING_CLONES {
+            return Err(
+                "Too many clones are already running. Wait for one to finish."
+                    .into(),
+            );
+        }
     }
     let info = tokenstat_pty::manager()
         .spawn(&tokenstat_pty::Spawn {
@@ -96,6 +152,29 @@ fn start(params: &str) -> Result<Value, String> {
         })
         .map_err(|error| error.to_string())?;
     if let Ok(mut jobs) = jobs().lock() {
+        // Prune finished entries first so a long-lived daemon keeps at most
+        // MAX_RETAINED_JOBS rows.
+        if jobs.len() >= MAX_RETAINED_JOBS {
+            let finished: Vec<String> = jobs
+                .iter()
+                .filter(|(_, job)| job.outcome.is_some())
+                .map(|(id, _)| id.clone())
+                .collect();
+            // Remove oldest-ish first: HashMap has no order, so drop enough
+            // finished rows to make room, oldest impossible to know, any will do.
+            let excess = jobs.len().saturating_sub(MAX_RETAINED_JOBS) + 1;
+            for id in finished.into_iter().take(excess.max(1)) {
+                jobs.remove(&id);
+            }
+            // Still full of running jobs: refuse rather than grow unbounded.
+            if jobs.len() >= MAX_RETAINED_JOBS * 2 {
+                jobs.remove(&info.id);
+                return Err(
+                    "Too many clones are already tracked. Wait for one to finish."
+                        .into(),
+                );
+            }
+        }
         jobs.insert(
             info.id.clone(),
             Job {

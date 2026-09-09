@@ -53,6 +53,8 @@ struct ClientSavedPlaceView: View {
     @State private var terminal: ClientTerminalSession?
     @State private var error: String?
     @State private var loaded = false
+    @State private var loading = false
+    @State private var loadedPlaceID: ClientRecentPlaces.Place.ID?
     @State private var showTerminal = false
     @State private var needsAccess = false
 
@@ -99,6 +101,12 @@ struct ClientSavedPlaceView: View {
     }
 
     private func load() async {
+        // Once per place: availability rebuilds recreate `destination` and its
+        // `.task`, and without this each rebuild re-pairs and re-raises the
+        // tunnel while the person sits on the screen.
+        guard !loading, loadedPlaceID != place.id else { return }
+        loading = true
+        defer { loading = false }
         error = nil
         do {
             // Home has never needed a tunnel. A cold-start tap must establish
@@ -108,6 +116,7 @@ struct ClientSavedPlaceView: View {
             _ = try await Bridge.setTunnel(true)
             guard try await Bridge.workspaceAccessAllowed(peer: place.id.peer) else {
                 needsAccess = true
+                loadedPlaceID = place.id
                 return
             }
             if place.id.kind == .workspace, let workspace = place.id.workspaceID {
@@ -125,6 +134,7 @@ struct ClientSavedPlaceView: View {
                 }
             }
             loaded = true
+            loadedPlaceID = place.id
         } catch {
             self.error = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }

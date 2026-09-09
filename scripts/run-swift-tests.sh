@@ -51,6 +51,11 @@ for test in "$tests"/*Tests.swift; do
     failed=1
     continue
   fi
+  if [ "${#paths[@]}" -eq 0 ]; then
+    echo "FAIL $name: no sources named" >&2
+    failed=1
+    continue
+  fi
   echo "== $name"
   if ! swiftc -parse-as-library -swift-version 5 -o "$work/$name" \
       "$test" "${paths[@]}" 2> "$work/$name.log"; then

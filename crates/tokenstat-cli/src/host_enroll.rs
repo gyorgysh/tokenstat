@@ -19,13 +19,7 @@ impl PairingCode {
                 let mut reader: Box<dyn Read> = if path == Path::new("-") {
                     Box::new(std::io::stdin())
                 } else {
-                    let metadata = std::fs::symlink_metadata(path)
-                        .context("Could not inspect the pairing-code file")?;
-                    validate_file(&metadata)?;
-                    let file = std::fs::File::open(path)
-                        .context("Could not open the pairing-code file")?;
-                    validate_file(&file.metadata()?)?;
-                    Box::new(file)
+                    Box::new(open_pairing_file(path)?)
                 };
                 let mut value = String::new();
                 reader
@@ -73,20 +67,69 @@ impl PairingCode {
 }
 
 fn remove_staged_file(path: &Path, home: &Path) -> Result<()> {
-    if path == home.join(".tokenstat-pairing") {
-        std::fs::remove_file(path).context("Could not remove the staged pairing-code file")?;
+    // Compare canonical forms: `./~/.tokenstat-pairing`, double slashes, or a
+    // hardlink spelling must still retire the wizard's file, and a symlink
+    // pointing at it must not delete through the link check below.
+    let staged = home.join(".tokenstat-pairing");
+    let same = path == staged
+        || std::fs::canonicalize(path).ok().as_ref() == Some(&staged)
+        || std::fs::canonicalize(&staged)
+            .ok()
+            .as_ref()
+            .zip(std::fs::canonicalize(path).ok().as_ref())
+            .is_some_and(|(a, b)| a == b);
+    if same {
+        std::fs::remove_file(&staged).context("Could not remove the staged pairing-code file")?;
     }
     Ok(())
 }
 
+/// Open the pairing file without following symlinks, then validate what was
+/// opened. `symlink_metadata` + `File::open` is a TOCTOU: a writer in the
+/// directory can swap file and link between the two calls. `O_NOFOLLOW` fails
+/// the open itself when the final component is a link.
+#[cfg(unix)]
+fn open_pairing_file(path: &Path) -> Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .context("Could not open the pairing-code file")?;
+    // `metadata()` here is fstat on the opened fd, so it describes what will
+    // be read rather than what the path named at some earlier instant.
+    validate_file(&file.metadata()?)?;
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+fn open_pairing_file(path: &Path) -> Result<std::fs::File> {
+    let metadata = std::fs::symlink_metadata(path)
+        .context("Could not inspect the pairing-code file")?;
+    validate_file(&metadata)?;
+    let file = std::fs::File::open(path).context("Could not open the pairing-code file")?;
+    validate_file(&file.metadata()?)?;
+    Ok(file)
+}
+
 fn validate_file(metadata: &std::fs::Metadata) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
-        bail!(
-            "The pairing-code file must be a regular private file. Use `chmod 600` before installing."
-        );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
+            bail!(
+                "The pairing-code file must be a regular private file. Use `chmod 600` before installing."
+            );
+        }
+        return Ok(());
     }
-    Ok(())
+    #[cfg(not(unix))]
+    {
+        if !metadata.is_file() {
+            bail!("The pairing-code file must be a regular file.");
+        }
+        return Ok(());
+    }
 }
 
 #[cfg(test)]

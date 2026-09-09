@@ -64,7 +64,7 @@ while [ $# -gt 0 ]; do
       ;;
     --version=*) VERSION="${1#--version=}"; shift ;;
     --help|-h)
-      sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -289,19 +289,23 @@ main() {
 
   mkdir -p "$BIN_DIR"
   dest="$BIN_DIR/tokenstat"
-  # Stage both before replacing either, so a failed copy keeps the installed pair.
+  # Best-effort staging: both copies land before either rename, so a failed
+  # copy leaves the installed pair untouched. The two renames are sequential,
+  # so a failed second rename can still leave a split pair; that path is
+  # unlikely (same-directory renames) and the version check below catches it.
   cp -f "$extracted" "$dest.new"
   cp -f "$daemon" "$BIN_DIR/tokenstat-hostd.new"
   mv -f "$BIN_DIR/tokenstat-hostd.new" "$BIN_DIR/tokenstat-hostd"
   mv -f "$dest.new" "$dest"
   if [ "$(uname -s)" = "Darwin" ]; then
     # Clear quarantine only. Do not ad-hoc re-sign (strips Developer ID).
-    xattr -cr "$dest" 2>/dev/null || true
+    xattr -cr "$dest" "$BIN_DIR/tokenstat-hostd" 2>/dev/null || true
     if command -v codesign >/dev/null 2>&1; then
-      if codesign --display --verbose=2 "$dest" 2>&1 | grep -q '^Authority='; then
+      if codesign --display --verbose=2 "$dest" 2>&1 | grep -q '^Authority=' \
+        && codesign --display --verbose=2 "$BIN_DIR/tokenstat-hostd" 2>&1 | grep -q '^Authority='; then
         ok "Developer ID signature kept (official release)"
       else
-        warn "installed binary has no Developer ID identity (unsigned or ad-hoc build)"
+        warn "installed binaries have no Developer ID identity (unsigned or ad-hoc build)"
       fi
     fi
   fi

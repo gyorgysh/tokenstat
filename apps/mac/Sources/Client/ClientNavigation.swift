@@ -59,13 +59,23 @@ final class ClientNavigationModel {
     /// Text, never a sent message. Setup ends by handing somebody a project and
     /// something to type into it, and a prompt may cost money, so the send stays
     /// theirs. Consumed once by the chat that picks it up: coming back to that
-    /// folder later must not refill an emptied composer.
-    var suggestedPrompt: String?
+    /// folder later must not refill an emptied composer. Scoped to the folder
+    /// setup opened, so any other chat that mounts first cannot consume it.
+    var suggestedPrompt: (folderID: String, text: String)?
 
-    /// Take the offered first task, if there is one. Reading it clears it.
+    /// Take the offered first task for this folder, if there is one. Reading it
+    /// clears it, and a folder that does not match leaves it for its own chat.
+    func takeSuggestedPrompt(for folderID: String) -> String? {
+        guard let offered = suggestedPrompt, offered.folderID == folderID else { return nil }
+        suggestedPrompt = nil
+        return offered.text
+    }
+
+    /// Compatibility for callers that do not scope. Prefer
+    /// `takeSuggestedPrompt(for:)`; this consumes whatever is held.
     func takeSuggestedPrompt() -> String? {
         defer { suggestedPrompt = nil }
-        return suggestedPrompt
+        return suggestedPrompt?.text
     }
 
     /// The machine Devices should be showing, when something outside that tab
@@ -125,11 +135,29 @@ final class ClientNavigationModel {
 }
 
 /// One folder's section, pushed on the Workspaces tab's stack.
+///
+/// Identity is the folder, not its snapshot: equality and hashing use only
+/// peer, folder id and section, so a folder refresh that changes its name,
+/// branch or counts neither duplicates the entry nor breaks pop semantics.
+/// The held `folder` is the push-time snapshot for the destination's initial
+/// draw; detail screens reload on appear.
 struct ClientFolderPush: Hashable {
     let peerKey: String
     let hostName: String
     let folder: WorkspaceFolder
     let section: WorkspaceSection
+
+    static func == (lhs: ClientFolderPush, rhs: ClientFolderPush) -> Bool {
+        lhs.peerKey == rhs.peerKey
+            && lhs.folder.id == rhs.folder.id
+            && lhs.section == rhs.section
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(peerKey)
+        hasher.combine(folder.id)
+        hasher.combine(section)
+    }
 
     @ViewBuilder
     var destination: some View {

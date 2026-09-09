@@ -1094,19 +1094,12 @@ fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
 /// hands one out, and re-parsing it into a `PublicKey` only to print it back
 /// would be a round trip through bytes for nothing.
 pub(crate) fn account_peer_label_hex(want: &str) -> Option<String> {
-    let fetched_at = directory_fetched_at_ms();
-    if let Some(label) = label_for(&account_machines(false), want) {
+    if let Some(label) = account_peer_label_hex_cached(want) {
         return Some(label);
     }
-    // Not in what we hold. A device that registered since the cache was filled
-    // is the ordinary reason, so refetch once, rate limited.
-    //
-    // Unless the call above already went to the network, which it does when
-    // the held copy was past its TTL. Asking again would be two round trips
-    // inside one handshake for the same answer.
-    if directory_fetched_at_ms() != fetched_at {
-        return None;
-    }
+    // Not in what we hold. A device that registered since the cache was
+    // filled is the ordinary reason, so refetch once, rate limited. The
+    // cached lookup above never fetches, so this is the single fetch.
     let now = jiff::Timestamp::now().as_millisecond();
     let may_refetch = last_directory_miss().lock().is_ok_and(|mut at| {
         let due = now - *at > DIRECTORY_MISS_REFETCH_MS;
@@ -1119,6 +1112,30 @@ pub(crate) fn account_peer_label_hex(want: &str) -> Option<String> {
         return None;
     }
     label_for(&account_machines(true), want)
+}
+
+/// Cache-only lookup: never touches the network.
+///
+/// For use while holding a lock (e.g. `workspace_policy::MUTATION`), where a
+/// blocking HTTP fetch would stall every other access call for the timeout
+/// duration. Best-effort: returns what the held directory knows.
+pub(crate) fn account_peer_label_hex_cached(want: &str) -> Option<String> {
+    let fetched_at = directory_fetched_at_ms();
+    let held = account_directory()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|held| held.machines.clone()));
+    let held = match held {
+        Some(machines) => machines,
+        None => return None,
+    };
+    // Only trust a fresh cache here; a stale one would trigger a fetch in the
+    // full lookup, which is exactly what must not happen under lock.
+    let now = jiff::Timestamp::now().as_millisecond();
+    if now - fetched_at >= DIRECTORY_TTL_MS {
+        return None;
+    }
+    label_for(&held, want)
 }
 
 /// When the held directory was last filled, or 0 when nothing is held. Used to

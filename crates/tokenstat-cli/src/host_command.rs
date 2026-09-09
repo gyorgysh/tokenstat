@@ -536,10 +536,21 @@ fn when(at: &str) -> String {
 
 /// Enough of a device key to recognise, not enough to retype by mistake.
 fn short(device: &str) -> String {
-    if device.len() <= 16 {
+    if device.chars().count() <= 16 {
         return device.to_owned();
     }
-    format!("{}…{}", &device[..8], &device[device.len() - 8..])
+    // Byte slicing panics on multi-byte chars; the audit file is locally
+    // editable, so truncate on char boundaries.
+    let head: String = device.chars().take(8).collect();
+    let tail: String = device
+        .chars()
+        .rev()
+        .take(8)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    format!("{head}…{tail}")
 }
 
 fn status(

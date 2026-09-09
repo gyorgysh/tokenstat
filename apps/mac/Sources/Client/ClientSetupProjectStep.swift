@@ -111,7 +111,7 @@ struct ClientSetupProjectStep: View {
             return
         }
         if let folderID {
-            navigation.suggestedPrompt = Self.firstTask
+            navigation.suggestedPrompt = (folderID: folderID, text: Self.firstTask)
             navigation.open(folderID: folderID, section: .chat)
         } else {
             navigation.destination = .workspaces

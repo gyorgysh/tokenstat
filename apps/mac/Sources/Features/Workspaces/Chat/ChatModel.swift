@@ -103,7 +103,18 @@ final class ChatModel {
     /// The open conversation per folder, so leaving a folder and coming back
     /// reopens its chat instead of collapsing to the first row. Memory only:
     /// a deleted conversation simply is not found and the first row wins.
+    /// Bounded: a long-lived model otherwise keeps a row for every folder ever
+    /// opened.
     private var lastSelectedByFolder: [String: String] = [:]
+    private static let lastSelectedCap = 20
+
+    private func rememberLastSelected(chatID: String, folderID: String) {
+        lastSelectedByFolder[folderID] = chatID
+        if lastSelectedByFolder.count > Self.lastSelectedCap,
+           let drop = lastSelectedByFolder.keys.first(where: { $0 != folderID }) {
+            lastSelectedByFolder.removeValue(forKey: drop)
+        }
+    }
     private var attachmentCacheGeneration: UInt64 = 0
     private var attemptedResponseAttachments: Set<String> = []
     private(set) var loadingResponseAttachments: Set<String> = []
@@ -135,7 +146,7 @@ final class ChatModel {
             // before the clear below drops it, or coming back can only ever
             // find the first row.
             if let selected, let old = folderID {
-                lastSelectedByFolder[old] = selected.id
+                rememberLastSelected(chatID: selected.id, folderID: old)
             }
             chats = []
             selected = nil
@@ -250,7 +261,7 @@ final class ChatModel {
         let generation = selectionGeneration
         selected = chat
         if let chat, let folderID {
-            lastSelectedByFolder[folderID] = chat.id
+            rememberLastSelected(chatID: chat.id, folderID: folderID)
         }
         attachments = []
         attachmentPreviews = [:]

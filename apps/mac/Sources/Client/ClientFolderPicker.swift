@@ -29,6 +29,8 @@ struct ClientFolderPicker: View {
     @State private var showHidden = false
     @State private var newFolder = ""
     @State private var naming = false
+    /// Guards against stale responses when rows are tapped in quick succession.
+    @State private var generation = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -190,17 +192,30 @@ struct ClientFolderPicker: View {
     }
 
     private func load(_ path: String?) async {
+        generation &+= 1
+        let current = generation
         loading = true
         error = nil
-        defer { loading = false }
-        do { listing = try await Bridge.browse(peer: peer, path: path) }
-        catch { self.error = ClientSetupModel.readable(error) }
+        defer { if current == generation { loading = false } }
+        do {
+            let answer = try await Bridge.browse(peer: peer, path: path)
+            guard current == generation else { return }
+            listing = answer
+        }
+        catch {
+            guard current == generation else { return }
+            self.error = ClientSetupModel.readable(error)
+        }
     }
 
     private func create() async {
         let name = newFolder.trimmingCharacters(in: .whitespaces)
         newFolder = ""
         guard !name.isEmpty, let here = listing?.path else { return }
+        guard !name.contains("/"), !name.contains("\\"), name != "..", name != "." else {
+            self.error = "A folder name is one name, without a path in it."
+            return
+        }
         loading = true
         error = nil
         defer { loading = false }

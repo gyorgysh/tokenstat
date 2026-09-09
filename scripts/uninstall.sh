@@ -161,11 +161,21 @@ remove_host() {
   case "$(uname -s)" in
     Darwin)
       local plist="$HOME/Library/LaunchAgents/ai.tokenstat.hostd.plist"
+      local legacy="$HOME/Library/LaunchAgents/ai.tokenstat.host.plist"
       local domain="gui/$(id -u)"
-      if [ -f "$plist" ] || launchctl print "${domain}/ai.tokenstat.hostd" >/dev/null 2>&1; then
-        say "removing the always-on host"
-        launchctl bootout "${domain}/ai.tokenstat.hostd" 2>/dev/null || true
-        rm -f "$plist"
+      # Older CLI installs used a second label; converge on one daemon. A unit
+      # pointing at a deleted binary is the worst leftover an uninstaller can
+      # leave, so retire both.
+      for unit in "ai.tokenstat.hostd" "ai.tokenstat.host"; do
+        local unit_plist="$HOME/Library/LaunchAgents/${unit}.plist"
+        if [ -f "$unit_plist" ] || launchctl print "${domain}/${unit}" >/dev/null 2>&1; then
+          say "removing the always-on host (${unit})"
+          launchctl bootout "${domain}/${unit}" 2>/dev/null || true
+          launchctl bootout "${domain}" "${unit}" 2>/dev/null || true
+          rm -f "$unit_plist"
+        fi
+      done
+      if [ -f "$plist" ] || [ -f "$legacy" ] || launchctl print "${domain}/ai.tokenstat.hostd" >/dev/null 2>&1; then
         rm -f "$HOME/Library/Logs/tokenstat/hostd.out.log" \
               "$HOME/Library/Logs/tokenstat/hostd.err.log"
         ok "host service removed"

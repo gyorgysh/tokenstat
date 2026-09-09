@@ -205,7 +205,9 @@ struct ClientCloneRepository: View {
     }
 
     /// The machine registers the folder itself when git exits, so this asks it
-    /// what happened rather than deciding from what scrolled past.
+    /// what happened rather than deciding from what scrolled past. The poll is
+    /// tied to the view's lifetime and surfaces a timeout instead of sitting
+    /// on "Cloning…" forever.
     private func watch() async {
         guard let id = session?.hostID else { return }
         let deadline = Date().addingTimeInterval(1800)
@@ -215,6 +217,10 @@ struct ClientCloneRepository: View {
                 if answer.state != "running" { return }
             }
             try? await Task.sleep(for: .seconds(2))
+        }
+        guard !Task.isCancelled else { return }
+        if status?.state == "running" || status == nil {
+            self.error = "The clone timed out. Check the terminal above, or try again."
         }
     }
 }
@@ -231,6 +237,7 @@ private struct ClientFolderPickerForClone: View {
     @State private var error: String?
     @State private var newFolder = ""
     @State private var naming = false
+    @State private var generation = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -314,14 +321,27 @@ private struct ClientFolderPickerForClone: View {
     }
 
     private func load(_ path: String?) async {
-        do { listing = try await Bridge.browse(peer: peer, path: path) }
-        catch { self.error = ClientSetupModel.readable(error) }
+        generation &+= 1
+        let current = generation
+        do {
+            let answer = try await Bridge.browse(peer: peer, path: path)
+            guard current == generation else { return }
+            listing = answer
+        }
+        catch {
+            guard current == generation else { return }
+            self.error = ClientSetupModel.readable(error)
+        }
     }
 
     private func create() async {
         let name = newFolder.trimmingCharacters(in: .whitespaces)
         newFolder = ""
         guard !name.isEmpty, let here = listing?.path else { return }
+        guard !name.contains("/"), !name.contains("\\"), name != "..", name != "." else {
+            self.error = "A folder name is one name, without a path in it."
+            return
+        }
         do {
             let made = try await Bridge.makeDirectory(peer: peer, path: "\(here)/\(name)")
             listing = try await Bridge.browse(peer: peer, path: made)

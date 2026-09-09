@@ -74,7 +74,7 @@ struct WorkspacesOverviewView: View {
                                 Text(scope.label).tag(scope.id as String?)
                             }
                         }
-                        .pickerStyle(.segmented)
+                        .pickerStyle(.menu)
                         .fixedSize()
                     }
                     Button("Add folder", .create) { onAdd() }

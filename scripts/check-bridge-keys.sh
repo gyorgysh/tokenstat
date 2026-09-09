@@ -39,6 +39,14 @@ ALLOWED = {
     # the bridge, and its host id is a row in the local SSH library rather than
     # anything a daemon knows about.
     ("ClientSetupDraft", "hostID"),
+    # Recent places are written and read by this app alone (UserDefaults under
+    # an account scope). They never cross the bridge; the ids are assembled
+    # locally from peer keys and workspace/chat/session ids the app already
+    # holds. `ID` is `ClientRecentPlaces.Place.ID`, the only type of that name.
+    ("Place", "workspaceID"),
+    ("Place", "itemID"),
+    ("ID", "workspaceID"),
+    ("ID", "itemID"),
 }
 
 DECL = re.compile(

@@ -370,7 +370,7 @@ jobs:
               exit 1
             fi
             local daemon="$(dirname "${bin}")/tokenstat-hostd"
-            test -f "${daemon}"
+            test -f "${daemon}" || { echo "no tokenstat-hostd beside ${bin} in ${archive}" >&2; exit 1; }
             for executable in "${bin}" "${daemon}"; do
               codesign --force --options runtime --timestamp \
                 --sign "${IDENTITY}" "${executable}"

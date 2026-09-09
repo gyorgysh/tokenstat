@@ -232,15 +232,7 @@ fn read_logs(lines: u32) -> Result<String, String> {
         if !path.is_file() {
             continue;
         }
-        let body = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        let tail: Vec<&str> = body
-            .lines()
-            .rev()
-            .take(lines as usize)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
+        let tail = bounded_tail(&path, lines)?;
         if tail.is_empty() {
             continue;
         }
@@ -250,6 +242,41 @@ fn read_logs(lines: u32) -> Result<String, String> {
         return Err("This host has not written a log yet.".into());
     }
     Ok(collected)
+}
+
+/// Last `lines` of a file without reading it whole.
+///
+/// Log files are unbounded; `read_to_string` on a multi-GB file OOMs the
+/// daemon for any allowed device. Read at most the final 512 KiB (plus one
+/// line's slack for a split), then take lines from that window.
+#[cfg(target_os = "macos")]
+fn bounded_tail(path: &std::path::Path, lines: u32) -> Result<Vec<String>, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX_BYTES: u64 = 512 * 1024;
+    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let len = file.metadata().map_err(|error| error.to_string())?.len();
+    let start = len.saturating_sub(MAX_BYTES);
+    file.seek(SeekFrom::Start(start))
+        .map_err(|error| error.to_string())?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)
+        .map_err(|error| error.to_string())?;
+    let text = String::from_utf8_lossy(&buf);
+    let mut all: Vec<&str> = text.lines().collect();
+    // If we started mid-file, the first line is a fragment; drop it unless we
+    // read the whole file.
+    if start > 0 && !all.is_empty() {
+        all.remove(0);
+    }
+    Ok(all
+        .into_iter()
+        .rev()
+        .take(lines as usize)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(str::to_owned)
+        .collect())
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
