@@ -423,7 +423,8 @@ struct ClientChatThread: View {
                             follow.jump()
                             followPulse += 1
                             Task { await model.sendNow(item) }
-                        }
+                        },
+                        onMove: { model.moveQueued(from: $0, to: $1) }
                     )
                     .padding(.horizontal, Theme.Space.s)
                 }

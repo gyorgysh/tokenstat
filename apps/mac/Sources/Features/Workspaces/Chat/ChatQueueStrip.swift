@@ -16,6 +16,7 @@ struct ChatQueueStrip: View {
     var onChange: (ChatQueuedMessage, String) -> Void
     var onRemove: (ChatQueuedMessage) -> Void
     var onSendNow: (ChatQueuedMessage) -> Void
+    var onMove: (IndexSet, Int) -> Void
 
     @State private var showingQueue = false
 
@@ -59,6 +60,7 @@ struct ChatQueueStrip: View {
                 onChange: onChange,
                 onRemove: onRemove,
                 onSendNow: onSendNow,
+                onMove: onMove,
                 onClose: { showingQueue = false }
             )
         }
@@ -87,15 +89,16 @@ private struct ChatPendingMessagesSheet: View {
     var onChange: (ChatQueuedMessage, String) -> Void
     var onRemove: (ChatQueuedMessage) -> Void
     var onSendNow: (ChatQueuedMessage) -> Void
+    var onMove: (IndexSet, Int) -> Void
     var onClose: () -> Void
 
     var body: some View {
         #if os(macOS)
         ThemedSheet(
             title: "Pending messages",
-            subtitle: "These send once the current turn finishes, in this order.",
+            subtitle: "These send once the current turn finishes, in this order. Drag to reorder.",
             icon: .scheduled,
-            scrolls: true,
+            scrolls: false,
             onClose: onClose
         ) {
             queueList
@@ -108,23 +111,15 @@ private struct ChatPendingMessagesSheet: View {
         .modalFrame(width: 520, height: 480)
         #else
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    Text("These send once the current turn finishes, in this order. Send now stops that turn so the chosen message goes out next.")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.controlGlyph)
-                    queueList
+            queueList
+                .background(Theme.background)
+                .navigationTitle("Pending messages")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done", .done) { onClose() }
+                    }
                 }
-                .padding(Theme.Space.m)
-            }
-            .background(Theme.background)
-            .navigationTitle("Pending messages")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", .done) { onClose() }
-                }
-            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -132,19 +127,31 @@ private struct ChatPendingMessagesSheet: View {
         #endif
     }
 
+    /// The send order, as a list with drag handles. Handles stay on like the
+    /// tabs editor: an Edit button would be a second step before the only
+    /// thing this screen is for.
     private var queueList: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                if index > 0 { ThemeRule() }
-                ChatQueueRow(
-                    item: item,
-                    onChange: { onChange(item, $0) },
-                    onRemove: { onRemove(item) },
-                    onSendNow: { onSendNow(item) }
-                )
+        List {
+            Section {
+                ForEach(items) { item in
+                    ChatQueueRow(
+                        item: item,
+                        onChange: { onChange(item, $0) },
+                        onRemove: { onRemove(item) },
+                        onSendNow: { onSendNow(item) }
+                    )
+                }
+                .onMove(perform: onMove)
+            } header: {
+                Text("Drag to reorder. These send once the current turn finishes, in this order.")
+            } footer: {
+                Text("Send now stops that turn so the chosen message goes out next.")
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .listStyle(.plain)
+        #if !os(macOS)
+        .environment(\.editMode, .constant(.active))
+        #endif
     }
 }
 

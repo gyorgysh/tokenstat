@@ -100,7 +100,8 @@ struct ChatView: View {
                                 follow.jump()
                                 followPulse += 1
                                 Task { await model.sendNow(item) }
-                            }
+                            },
+                            onMove: { model.moveQueued(from: $0, to: $1) }
                         )
                         .frame(maxWidth: ReadingRoom.laneWidth)
                         .padding(.horizontal, Theme.Space.l)

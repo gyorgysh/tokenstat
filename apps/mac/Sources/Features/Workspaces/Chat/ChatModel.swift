@@ -581,6 +581,13 @@ final class ChatModel {
         persistQueue()
     }
 
+    /// Drag reorder from the pending sheet. The order is the send order,
+    /// so it persists like every other queue change.
+    func moveQueued(from offsets: IndexSet, to destination: Int) {
+        queued.move(fromOffsets: offsets, toOffset: destination)
+        persistQueue()
+    }
+
     /// Stop the current turn and send this queued message as soon as the
     /// host will take it. Remaining queued items stay waiting.
     ///
