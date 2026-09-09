@@ -4,6 +4,22 @@ import Foundation
 /// Pure identifier routing shared by chat loads and sidebar actions. Resolving
 /// a local destination deliberately produces nil; nil is not a missing route.
 enum WorkDestinationResolver {
+    /// Anchors choose a reading position, not a different conversation.
+    /// Missing or malformed references never match, including nil with nil.
+    static func sameConversation(_ a: WorkReference?, _ b: WorkReference?) -> Bool {
+        guard let a, let b, let key = WorkReferenceKey.conversation(a) else { return false }
+        return key == WorkReferenceKey.conversation(b)
+    }
+
+    /// Only the named folder in the still-active account may consume a request.
+    static func requestedConversation(_ request: WorkReference?, scope: WorkReference.Scope?,
+                                      peer: String, workspaceID: String) -> String? {
+        guard let request, request.scope == scope, request.hostIdentity == peer,
+              request.workspaceID == workspaceID,
+              WorkReferenceKey.conversation(request) != nil else { return nil }
+        return request.itemID
+    }
+
     struct Route: Equatable, Sendable {
         let workspaceID: String
         let peer: String?

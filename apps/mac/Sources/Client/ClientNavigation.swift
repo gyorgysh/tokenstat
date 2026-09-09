@@ -35,13 +35,13 @@ final class ClientNavigationModel {
 
     /// Conversation a notification asked to open, consumed by the chat list
     /// once that folder is on screen.
-    var openChatID: String?
+    var requestedChat: WorkReference?
 
     /// The conversation the person is already in, as the folder thread or a
     /// Recents push. A notification tap for this id leaves that window as it
     /// is: locking the phone does not unmount it, and remounting blanks the
     /// transcript. The cover a tap presents is `presentedChat`, not this.
-    var visibleChatID: String?
+    var visibleChat: WorkReference?
 
     /// A chat opened from a notification on the tab layout, where there is
     /// no sidebar to land the folder in. Dismissing it returns where you were.
@@ -49,9 +49,30 @@ final class ClientNavigationModel {
 
     /// True when this conversation is already on screen, so a tap should not
     /// open it again.
-    func isShowing(chatID: String) -> Bool {
-        guard !chatID.isEmpty else { return false }
-        return presentedChat?.chatID == chatID || visibleChatID == chatID
+    func isShowing(peer: String, workspaceID: String, chatID: String) -> Bool {
+        guard let target = reference(peer: peer, workspaceID: workspaceID, chatID: chatID) else { return false }
+        return WorkDestinationResolver.sameConversation(presentedChat?.reference, target)
+            || WorkDestinationResolver.sameConversation(visibleChat, target)
+    }
+
+    func reference(peer: String, workspaceID: String, chatID: String) -> WorkReference? {
+        guard let scope = WorkSessionContext.shared.scope, scope.kind == .account,
+              !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else { return nil }
+        return WorkReference(scope: scope, hostIdentity: peer, workspaceID: workspaceID,
+                             kind: .conversation, itemID: chatID)
+    }
+
+    /// Remove the old account's entire navigation state before showing another.
+    func reset() {
+        destination = .home
+        folderID = nil
+        section = .sessions
+        requestedChat = nil
+        visibleChat = nil
+        presentedChat = nil
+        suggestedPrompt = nil
+        deviceMachineID = nil
+        workspacesPath = []
     }
 
     /// A first task, offered to the composer of the next chat that opens.
@@ -121,16 +142,20 @@ final class ClientNavigationModel {
     /// Open this conversation in its folder's chat section.
     ///
     /// If that thread is already the one on screen, only the destination
-    /// moves. Setting `openChatID` again would re-select it and blank the
+    /// moves. Setting `requestedChat` again would re-select it and blank the
     /// transcript.
     func openChat(folderID: String, chatID: String) {
         guard !folderID.isEmpty, !chatID.isEmpty else { return }
-        let already = self.folderID == folderID && section == .chat && isShowing(chatID: chatID)
+        let route = WorkDestinationResolver.route(folderID: folderID)
+        guard let peer = route.peer,
+              let target = reference(peer: peer, workspaceID: route.workspaceID, chatID: chatID) else { return }
+        let already = self.folderID == folderID && section == .chat
+            && isShowing(peer: peer, workspaceID: route.workspaceID, chatID: chatID)
         self.folderID = folderID
         self.section = .chat
         self.destination = .workspaces
         if already { return }
-        self.openChatID = chatID
+        self.requestedChat = target
     }
 }
 
@@ -181,7 +206,12 @@ struct ClientFolderPush: Hashable {
 /// model around. The ids are host-local and arrived over the tunnel, not
 /// on the push.
 struct PresentedChat: Identifiable, Equatable {
-    var id: String { "\(peer)/\(chatID)" }
+    var id: WorkReference { reference }
+    let scope: WorkReference.Scope
+    var reference: WorkReference {
+        WorkReference(scope: scope, hostIdentity: peer, workspaceID: workspaceID,
+                      kind: .conversation, itemID: chatID)
+    }
     var peer: String
     var workspaceID: String
     var folderName: String

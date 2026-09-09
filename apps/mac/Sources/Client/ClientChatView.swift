@@ -67,7 +67,12 @@ struct ClientChatView: View {
         // has left the window.
         .clientTabBarHidden(opened != nil)
         .onChange(of: opened?.id, initial: true) { _, id in
-            navigation.visibleChatID = id
+            if let id {
+                navigation.visibleChat = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: id)
+            } else if let old = navigation.visibleChat,
+                      old.hostIdentity == peer, old.workspaceID == workspaceID {
+                navigation.visibleChat = nil
+            }
         }
         .onDisappear {
             // Locking the phone must not forget this thread. A tap on its
@@ -75,8 +80,9 @@ struct ClientChatView: View {
             guard scenePhase == .active,
                   UIApplication.shared.applicationState == .active
             else { return }
-            if let id = opened?.id, navigation.visibleChatID == id {
-                navigation.visibleChatID = nil
+            if let id = opened?.id, WorkDestinationResolver.sameConversation(navigation.visibleChat,
+                navigation.reference(peer: peer, workspaceID: workspaceID, chatID: id)) {
+                navigation.visibleChat = nil
             }
         }
     }
@@ -163,7 +169,7 @@ struct ClientChatView: View {
                 }
             }
         }
-        .onChange(of: navigation.openChatID) { _, _ in
+        .onChange(of: navigation.requestedChat) { _, _ in
             Task { await openRequestedChat() }
         }
     }
@@ -244,15 +250,28 @@ struct ClientChatView: View {
     /// the transcript.
     @discardableResult
     private func openRequestedChat() async -> Bool {
-        guard let id = navigation.openChatID, !id.isEmpty else { return false }
+        guard let requested = navigation.requestedChat,
+              let id = WorkDestinationResolver.requestedConversation(requested,
+                  scope: WorkSessionContext.shared.scope, peer: peer, workspaceID: workspaceID)
+        else { return false }
+        // An explicit destination suppresses the launcher's most-recent/new
+        // fallback, including when that conversation has been deleted.
+        didOpenConversation = true
         if opened?.id == id {
-            navigation.openChatID = nil
+            navigation.requestedChat = nil
             return true
         }
-        guard let chat = model.chats.first(where: { $0.id == id }) else { return false }
+        guard let chat = model.chats.first(where: { $0.id == id }) else {
+            if loaded, model.error == nil {
+                model.error = "This conversation is no longer available in this folder. It may have been deleted on the machine."
+            }
+            return true
+        }
         await model.select(chat)
+        guard WorkDestinationResolver.sameConversation(navigation.requestedChat, requested),
+              requested.scope == WorkSessionContext.shared.scope else { return false }
         opened = chat
-        navigation.openChatID = nil
+        navigation.requestedChat = nil
         return true
     }
 }

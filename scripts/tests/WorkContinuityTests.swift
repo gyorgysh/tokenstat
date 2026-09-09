@@ -24,6 +24,29 @@ import Foundation
         let encoded = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as! [String: Any]
         assert(encoded["workspaceId"] as? String == "folder" && encoded["itemId"] as? String == "chat")
         let first = reference(alice, "host-a", "same-folder", "chat-a")
+        // A notification names one conversation, not any row sharing its id.
+        var anchored = first
+        anchored.anchor = "message-12"
+        assert(WorkDestinationResolver.sameConversation(first, anchored))
+        assert(!WorkDestinationResolver.sameConversation(nil, nil))
+        for wrong in [reference(bob, "host-a", "same-folder", "chat-a"),
+                      reference(alice, "host-b", "same-folder", "chat-a"),
+                      reference(alice, "host-a", "other-folder", "chat-a"),
+                      reference(alice, "host-a", "same-folder", "chat-b")] {
+            assert(!WorkDestinationResolver.sameConversation(first, wrong))
+        }
+        assert(WorkDestinationResolver.requestedConversation(first, scope: alice,
+            peer: "host-a", workspaceID: "same-folder") == "chat-a")
+        assert(WorkDestinationResolver.requestedConversation(first, scope: bob,
+            peer: "host-a", workspaceID: "same-folder") == nil)
+        assert(WorkDestinationResolver.requestedConversation(first, scope: nil,
+            peer: "host-a", workspaceID: "same-folder") == nil)
+        assert(WorkDestinationResolver.requestedConversation(first, scope: alice,
+            peer: "host-b", workspaceID: "same-folder") == nil)
+        assert(WorkDestinationResolver.requestedConversation(first, scope: alice,
+            peer: "host-a", workspaceID: "other-folder") == nil)
+        assert(WorkDestinationResolver.requestedConversation(reference(alice, "host-a", "same-folder", ""),
+            scope: alice, peer: "host-a", workspaceID: "same-folder") == nil)
         store.remember(first)
         otherWindow.remember(reference(alice, "host-b", "same-folder", "chat-b"))
         otherWindow.remember(reference(bob, "host-a", "same-folder", "bob-chat"))

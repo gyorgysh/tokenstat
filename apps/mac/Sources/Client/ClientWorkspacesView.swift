@@ -322,14 +322,15 @@ struct ClientWorkspacesView: View {
     /// feedback. A request that never resolves stays pending for the next
     /// tap rather than vanishing.
     private func fulfillNotification() async {
-        guard let request = NotificationOpen.shared.request else { return }
+        guard let request = NotificationOpen.shared.request,
+              let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
         guard let opened = await model.targetFromNotification(request, account: account.account) else {
             // A cancelled attempt is not a failed one. This runs from a
             // `.task`, which the system cancels the moment the view goes
             // away, and `targetFromNotification` answers nil for that too.
             // Acting on it would drop the tap and pull somebody back to
             // Workspaces at the moment they navigated off it.
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
             // Otherwise: not yet, or not ever, and this cannot tell the two
             // apart. Keep the tap for the next attempt until it goes stale,
             // then land on the machine list rather than leave somebody
@@ -337,7 +338,8 @@ struct ClientWorkspacesView: View {
             if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }
-        guard NotificationOpen.shared.take() == request else { return }
+        guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
+              NotificationOpen.shared.take() == request else { return }
         switch opened {
         case let .session(session):
             model.openSession(session)
@@ -348,13 +350,14 @@ struct ClientWorkspacesView: View {
             }
             // Same thread, phone was just locked: bring that window
             // forward. Presenting again remounts the transcript on top.
-            if navigation.isShowing(chatID: chat.id) {
+            if navigation.isShowing(peer: peer, workspaceID: chat.workspaceID, chatID: chat.id) {
                 if navigation.destination != .workspaces {
                     navigation.destination = .workspaces
                 }
                 return
             }
             navigation.presentedChat = PresentedChat(
+                scope: scope,
                 peer: peer,
                 workspaceID: chat.workspaceID,
                 folderName: folder?.name ?? "Workspace",

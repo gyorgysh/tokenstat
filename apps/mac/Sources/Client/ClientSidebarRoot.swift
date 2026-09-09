@@ -555,19 +555,21 @@ struct ClientSidebarRoot: View {
     /// Peek first, consume only once the tap resolves: taking up front and
     /// then failing lost the tap with nothing on screen.
     private func fulfillNotification() async {
-        guard let request = NotificationOpen.shared.request else { return }
+        guard let request = NotificationOpen.shared.request,
+              let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
         guard let opened = await workspaces.targetFromNotification(request, account: account.account) else {
             // A cancelled attempt is not a failed one: this runs from a
             // `.task` the system cancels when the view goes away, and
             // `targetFromNotification` answers nil for that too.
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
             // Otherwise, same as the phone: keep the tap while it is worth
             // retrying, land on the tree once it is not. See
             // `NotificationOpen.patience`.
             if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }
-        guard NotificationOpen.shared.take() == request else { return }
+        guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
+              NotificationOpen.shared.take() == request else { return }
         switch opened {
         case let .session(session):
             workspaces.openSession(session)
@@ -576,7 +578,7 @@ struct ClientSidebarRoot: View {
                 landAfterFailedTap()
                 return
             }
-            if navigation.isShowing(chatID: chat.id) {
+            if navigation.isShowing(peer: peer, workspaceID: chat.workspaceID, chatID: chat.id) {
                 if navigation.destination != .workspaces {
                     navigation.destination = .workspaces
                 }
@@ -586,6 +588,7 @@ struct ClientSidebarRoot: View {
                 navigation.openChat(folderID: folder.id, chatID: chat.id)
             } else {
                 navigation.presentedChat = PresentedChat(
+                    scope: scope,
                     peer: peer,
                     workspaceID: chat.workspaceID,
                     folderName: "Workspace",

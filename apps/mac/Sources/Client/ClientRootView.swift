@@ -144,9 +144,11 @@ struct ClientRootView: View {
                 signedOut
             } else if layout == .sidebar {
                 ClientSidebarRoot(showAccount: $showAccount)
+                    .id(WorkSessionContext.shared.scope)
                     .transition(.opacity)
             } else {
                 tabs
+                    .id(WorkSessionContext.shared.scope)
                     .transition(.opacity)
                     // Hiding the open tab lands on the first visible one
                     // rather than on a blank bar. The editor refuses the last
@@ -218,6 +220,13 @@ struct ClientRootView: View {
             await account.load()
             if let signed = account.account {
                 await store.finishPendingIntent(with: signed)
+            }
+        }
+        .onChange(of: WorkSessionContext.shared.scope) { oldScope, newScope in
+            if oldScope != nil && oldScope != newScope {
+                navigation.reset()
+                _ = NotificationOpen.shared.take()
+                editors.reset()
             }
         }
         .onChange(of: account.signedIn) { _, signedIn in

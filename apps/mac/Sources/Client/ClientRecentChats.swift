@@ -314,15 +314,16 @@ struct ClientRecentChatView: View {
             // The notification cover is `presentedChat`. Writing here would
             // hide the folder thread sitting under it.
             if navigation.presentedChat == nil {
-                navigation.visibleChatID = chatID
+                navigation.visibleChat = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
             }
         }
         .onDisappear {
             guard scenePhase == .active,
                   UIApplication.shared.applicationState == .active
             else { return }
-            if navigation.presentedChat == nil, navigation.visibleChatID == chatID {
-                navigation.visibleChatID = nil
+            if navigation.presentedChat == nil, WorkDestinationResolver.sameConversation(navigation.visibleChat,
+                navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)) {
+                navigation.visibleChat = nil
             }
         }
     }
