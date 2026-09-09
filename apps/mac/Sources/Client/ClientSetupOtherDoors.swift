@@ -177,10 +177,10 @@ struct ClientSetupCloudDoor: View {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Picker("Provider", selection: $provider) {
-                        ForEach(Provider.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
+                    // The platform segmented control is a grey track with a
+                    // grey pill, which is the one piece of chrome on this
+                    // screen wearing somebody else's palette.
+                    SegmentedTabs(options: Provider.allCases, selection: $provider)
                     if provider == .digitalOcean {
                         SecureField("Read-only API token", text: $token)
                             .textFieldStyle(.themed)
