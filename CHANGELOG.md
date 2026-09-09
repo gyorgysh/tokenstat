@@ -107,12 +107,15 @@ with a server that runs agents.
   itself gives up, the chat says so in a sentence instead of showing you
   `RetriableError: [resource_exhausted] Error` as though the agent had
   replied it.
-- A chat that has been open for a while no longer stops responding. The local
-  helper told the window it was healthy after every call it answered, several
-  times a second, from whatever thread had just answered one. Sooner or later
-  one of those arrived in the middle of the transcript laying itself out, and
-  the layout never finished. It reports once per change now, on the thread
-  that draws.
+- A chat that has been open for a while no longer stops responding. Two causes,
+  both of them a message arriving several times a second into a transcript in
+  the middle of laying itself out. The local helper told the window it was
+  healthy after every call it answered, from whatever thread had answered one;
+  it reports once per change now, on the thread that draws. And the message
+  field told the window its height might have changed on every update, whether
+  or not a word had been typed, which made the conversation beside it measure
+  every message it was holding. It says so when the draft or the width
+  actually changes.
 - The message field no longer answers its own writes. Putting the draft and
   the caret back where the app said they were made the field report that same
   position as news, mid-draw, which asked for another draw. It is quiet while

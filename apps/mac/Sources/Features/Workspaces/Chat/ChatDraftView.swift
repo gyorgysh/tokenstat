@@ -97,6 +97,22 @@ struct ChatDraftView: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
             textView.needsDisplay = true
+            // Only when the height this field reports can have changed.
+            //
+            // An invalidation is not free and it is not local. AppKit answers
+            // it by asking `intrinsicContentSize`, which lays the whole text
+            // out; SwiftUI answers the new height by sizing the pane again,
+            // and this field's neighbour in that pane is the transcript,
+            // whose lazy stack has to measure every row it is holding to say
+            // how wide it would like to be. Invalidating on every update
+            // meant a streamed reply paid all of that per word, which is what
+            // a chat open on a long conversation hung inside.
+            //
+            // The other two things that change the height already say so:
+            // typing, through the delegate, and a change of width, through
+            // `ChatDraftScrollView.layout()`.
+            textView.invalidateIntrinsicContentSize()
+            scroll.invalidateIntrinsicContentSize()
         }
         let safeSelection = NSRange(
             location: min(selection.location, (textView.string as NSString).length),
@@ -105,8 +121,6 @@ struct ChatDraftView: NSViewRepresentable {
         if textView.selectedRange() != safeSelection {
             textView.setSelectedRange(safeSelection)
         }
-        textView.invalidateIntrinsicContentSize()
-        scroll.invalidateIntrinsicContentSize()
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -204,6 +218,12 @@ final class ChatDraftScrollView: NSScrollView {
         let width = contentSize.width
         if abs(textView.frame.width - width) > 0.5 {
             textView.setFrameSize(NSSize(width: width, height: max(textView.frame.height, contentSize.height)))
+            // A different width rewraps the draft, which is the one other way
+            // the height changes. Nothing else asks again, and the guard
+            // above means this settles on the next pass rather than driving
+            // one of its own.
+            textView.invalidateIntrinsicContentSize()
+            invalidateIntrinsicContentSize()
         }
     }
 
