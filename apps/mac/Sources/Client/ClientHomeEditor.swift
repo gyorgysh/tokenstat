@@ -105,11 +105,11 @@ struct ClientHomeEditor: View {
                         )
                         .overlay(
                             Capsule().strokeBorder(
-                                preset == option ? Theme.accent : Theme.border,
+                                preset == option ? Theme.accent : Theme.accent.opacity(0.35),
                                 lineWidth: 1
                             )
                         )
-                        .foregroundStyle(preset == option ? Theme.accent : Color.secondary)
+                        .foregroundStyle(Theme.accent)
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -185,7 +185,7 @@ struct HomeLayoutPreview: View {
             // The greeting, which is not a card and cannot be moved. Drawn
             // so the bars below read as a screen rather than a stack.
             Capsule()
-                .fill(Color.secondary.opacity(0.25))
+                .fill(Theme.accent.opacity(0.35))
                 .frame(width: 84, height: 8)
                 .padding(.bottom, 3)
                 .accessibilityHidden(true)
@@ -211,7 +211,7 @@ struct HomeLayoutPreview: View {
                     .frame(height: section == .activity ? 30 : 20)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
-                        Theme.accent.opacity(0.10),
+                        Theme.accentSoft,
                         in: RoundedRectangle(cornerRadius: 5, style: .continuous)
                     )
                 }
