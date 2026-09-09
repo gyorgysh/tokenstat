@@ -128,6 +128,7 @@ pub(crate) mod transcript;
 pub mod vault;
 #[cfg(windows)]
 pub(crate) mod win32;
+pub mod work_cache;
 pub mod work_contracts;
 #[cfg(feature = "local-host")]
 pub mod workflows;

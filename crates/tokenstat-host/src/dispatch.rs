@@ -2837,6 +2837,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
     if let Some(answer) = crate::vault::call(method, params) {
         return Some(answer.map_err(DispatchError::from));
     }
+    // Saved work on this device. Local-client-only: the refusal above answers
+    // a machine asking over the tunnel, so these never leave the device.
+    if let Some(answer) = crate::work_cache::call(method, params) {
+        return Some(answer.map_err(DispatchError::from));
+    }
     // Identity and the peer list. Sessionless because the Machines screen is
     // where somebody goes when something is wrong, and an archive that will not
     // open must not take it away from them.
