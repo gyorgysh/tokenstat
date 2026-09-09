@@ -275,7 +275,10 @@ struct ClientChatComposer: View {
     }
 
     private var cannotSend: Bool {
-        model.sending
+        // A saved copy is read and drafted in, never sent from: the banner
+        // above says why, and the field stays editable for those drafts.
+        model.savedCopy != nil
+            || model.sending
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
     }
 

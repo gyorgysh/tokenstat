@@ -88,12 +88,26 @@ struct ChatView: View {
                             dropExperience
                         }
                     }
+                // A saved copy explains itself above the composer: what the
+                // rows are, when they were kept, and the way back to live.
+                if let copy = model.savedCopy {
+                    ChatSavedCopyBanner(info: copy, checking: model.checkingSavedCopy) {
+                        Task { await model.checkSavedCopyForUpdates() }
+                    }
+                    .frame(maxWidth: ReadingRoom.laneWidth)
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.bottom, Theme.Space.s)
+                    .frame(maxWidth: .infinity)
+                }
                 // A blocked turn takes the composer's place rather than
                 // sitting beside it. There is nothing useful to type while an
                 // agent is parked, and removing the field is the plainest way
                 // to say what the conversation is actually waiting for.
                 if model.approvals.isEmpty {
-                    if !model.queued.isEmpty {
+                    // The queue is live outbox state: its sends wait for the
+                    // machine, so it stays out of a snapshot. Queued words are
+                    // kept and drain on the next live open.
+                    if model.savedCopy == nil, !model.queued.isEmpty {
                         ChatQueueStrip(
                             items: model.queued,
                             ownerID: chat.id,

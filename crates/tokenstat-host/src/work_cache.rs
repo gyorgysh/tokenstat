@@ -1007,6 +1007,36 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_answers_cache_methods_locally() {
+        with_path(fresh_path(), || {
+            let sessionless = |method: &str, params: Value| {
+                crate::dispatch::call_sessionless(method, &params.to_string())
+                    .expect("cache method answered")
+            };
+            let put = sessionless(
+                "cache.put",
+                json!({
+                    "key": KEY, "scope": "s", "id": "c1", "kind": KIND_CONVERSATION,
+                    "itemId": "chat-1", "payload": {"messages": []},
+                }),
+            );
+            assert!(put.contains("\"ok\":true"), "put envelope: {put}");
+            let got = sessionless("cache.get", json!({"key": KEY, "scope": "s", "id": "c1"}));
+            assert!(got.contains("\"ok\":true"), "get envelope: {got}");
+            let stats = sessionless("cache.stats", json!({"scope": "s"}));
+            assert!(stats.contains("\"records\":1"), "stats envelope: {stats}");
+            assert!(crate::dispatch::call_sessionless("cache.unknown", "{}").is_none());
+
+            // A machine asking over the tunnel is refused, not answered.
+            let refused = crate::request_context::with_remote_peer("phone", || {
+                crate::dispatch::call_sessionless("cache.stats", "{}")
+                    .expect("answered with refusal")
+            });
+            assert!(refused.contains("local-only"), "remote refusal: {refused}");
+        });
+    }
+
+    #[test]
     fn rejects_what_it_cannot_hold() {
         with_path(fresh_path(), || {
             let mut bad_kind = params("s", "c1");

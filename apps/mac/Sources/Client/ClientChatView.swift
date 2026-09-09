@@ -517,7 +517,18 @@ struct ClientChatThread: View {
     private func bar(_ chat: ChatConversation) -> some View {
         if model.approvals.isEmpty {
             VStack(spacing: Theme.Space.s) {
-                if !model.queued.isEmpty {
+                // A saved copy explains itself above the composer: what the
+                // rows are, when they were kept, and the way back to live.
+                if let copy = model.savedCopy {
+                    ChatSavedCopyBanner(info: copy, checking: model.checkingSavedCopy) {
+                        Task { await model.checkSavedCopyForUpdates() }
+                    }
+                    .padding(.horizontal, Theme.Space.s)
+                }
+                // The queue is live outbox state: its sends wait for the
+                // machine, so it stays out of a snapshot. Queued words are
+                // kept and drain on the next live open.
+                if model.savedCopy == nil, !model.queued.isEmpty {
                     ChatQueueStrip(
                         items: model.queued,
                         ownerID: chat.id,

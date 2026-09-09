@@ -106,6 +106,7 @@ struct AccountView: View {
                             .padding(.vertical, Theme.Space.l)
                     }
                     ChatCacheSettings()
+                    SavedWorkSettings()
                     notificationsCard
                     licensesCard
                     deleteAccountCard
@@ -248,6 +249,7 @@ struct AccountView: View {
         }
         notificationsCard
         ChatCacheSettings()
+        SavedWorkSettings()
         terminalCard
         localModelsCard
     }

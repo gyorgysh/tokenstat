@@ -236,6 +236,7 @@ private struct ClientAccountContent: View {
             await model.loadTraffic()
         }
         ChatCacheSettings()
+        SavedWorkSettings()
         layoutCard
     }
 

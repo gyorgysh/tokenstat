@@ -28,6 +28,10 @@ import Foundation
         // Two pages with the same revision show the same conversation.
         assert(WorkCache.revision(maxSeq: 9, count: 2, nextOffset: 42) == "s9:2:42")
         assert(WorkCache.revision(maxSeq: 9, count: 3, nextOffset: 42) != "s9:2:42")
+        // Reconnecting compares the saved revision against the fresh page: a
+        // match means the conversation was quiet, anything else replaces it.
+        assert(WorkCache.matches("s9:2:42", maxSeq: 9, count: 2, nextOffset: 42))
+        assert(!WorkCache.matches("s9:2:42", maxSeq: 10, count: 3, nextOffset: 43))
 
         // The envelope carries the title, the revision and the page, and
         // reads back what was written. A damaged envelope is an error rather

@@ -425,6 +425,11 @@ final class AccountModel {
         guard !isSigningOut else { return }
         isSigningOut = true
         defer { isSigningOut = false }
+        // The scope whose saved work leaves with it. Captured first: the
+        // snapshot below clears the handle this is built from.
+        let purgeScope = account.flatMap { signed in
+            signed.handle.flatMap { WorkReference.Scope.account(origin: signed.host, handle: $0) }
+        }
         do {
             try await Bridge.signOut()
             lastSyncSummary = nil
@@ -453,6 +458,16 @@ final class AccountModel {
                 authChecked = true
             }
             await load()
+            // Saved work for that scope is removed with the sign-out, and its
+            // key with it, so the copies are unrecoverable rather than
+            // unlisted. Drafts are durable user data with their own store and
+            // stay for the account they belong to. A sign-out that never
+            // reached the host keeps everything until it completes.
+            if let purgeScope {
+                let scope = WorkCache.scope(for: purgeScope)
+                _ = try? await Bridge.cacheClearScope(scope: scope)
+                WorkCacheKey.delete(for: scope)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

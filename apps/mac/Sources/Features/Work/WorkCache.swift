@@ -42,6 +42,13 @@ enum WorkCache {
         "s\(maxSeq):\(count):\(nextOffset)"
     }
 
+    /// Whether a kept copy still names the live timeline. Reconnecting
+    /// compares the saved revision against the fresh page's: a match means
+    /// the conversation was quiet, anything else means the copy is replaced.
+    static func matches(_ savedRevision: String, maxSeq: UInt64, count: Int, nextOffset: UInt64) -> Bool {
+        savedRevision == revision(maxSeq: maxSeq, count: count, nextOffset: nextOffset)
+    }
+
     static func encode(title: String, revision: String, page: [String: Any],
                        at date: Date = Date()) throws -> [String: Any] {
         let envelope: [String: Any] = [

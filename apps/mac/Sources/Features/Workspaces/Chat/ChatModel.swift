@@ -85,6 +85,16 @@ final class ChatModel {
     /// things.
     private(set) var openingConversation = false
     var error: String?
+    /// What the transcript is showing when the machine cannot be reached.
+    ///
+    /// Set exactly when the live open failed and a sealed copy was read
+    /// instead. While set, the transcript is a snapshot: sending, approvals,
+    /// attachment downloads and earlier-page fetches are refused with a
+    /// reason, and drafting, copying and reading carry on. A live page
+    /// arriving clears it.
+    private(set) var savedCopy: SavedCopyInfo?
+    /// A recheck of the machine is running from the saved-copy banner.
+    private(set) var checkingSavedCopy = false
     /// The folder id RootView knows, which is `remote:<peer>:<id>` for a
     /// workspace on another machine. Host methods use `workspaceID` instead.
     private(set) var folderID: String?
@@ -356,6 +366,7 @@ final class ChatModel {
     /// and on a machine that did not answer they come back with a note saying
     /// so rather than a claim in either direction.
     func sendFromComposer() async {
+        guard savedCopy == nil else { return }
         guard let submission = heldSubmission else { return }
         defer {
             heldSubmission = nil
@@ -693,6 +704,7 @@ final class ChatModel {
         events = []
         outgoing = []
         outgoingWatermark = [:]
+        savedCopy = nil
         forgetWindow()
         loadQueue(for: chat?.id)
         loadDraft(for: chat?.id)
@@ -708,8 +720,18 @@ final class ChatModel {
             if selectionGeneration == generation { openingConversation = false }
         }
         await openEvents(id: chat.id, generation: generation)
-        await loadApprovals(id: chat.id, generation: generation)
-        await loadInstructions(id: chat.id, generation: generation)
+        if events.isEmpty, selectionMatches(id: chat.id, generation: generation) {
+            // The live open failed with nothing on screen. A sealed copy
+            // opens instead of an error, when one was kept.
+            await openSavedCopy(id: chat.id, generation: generation)
+        }
+        // Approvals and instructions are live state. Against a saved copy
+        // they are refused rather than read stale: an approval resolved from
+        // old rows would act on a conversation that has moved on.
+        if savedCopy == nil {
+            await loadApprovals(id: chat.id, generation: generation)
+            await loadInstructions(id: chat.id, generation: generation)
+        }
         #if !os(macOS)
         if !Task.isCancelled, selectionMatches(id: chat.id, generation: generation) {
             ClientChatReadState.shared.markRead(peer: peer, chat: selected ?? chat)
@@ -737,13 +759,20 @@ final class ChatModel {
                 if selectionGeneration == generation { openingConversation = false }
             }
             await openEvents(id: id, generation: generation)
+            if events.isEmpty, selectionMatches(id: id, generation: generation) {
+                await openSavedCopy(id: id, generation: generation)
+            }
         } else {
-            await loadEvents(id: id, reset: false, generation: generation)
+            // A failed recheck while a saved copy is on screen stays silent:
+            // the banner already says what is true.
+            await loadEvents(id: id, reset: false, generation: generation, quiet: savedCopy != nil)
         }
         guard selectionMatches(id: id, generation: generation) else { return }
-        await loadApprovals(id: id, generation: generation)
+        if savedCopy == nil {
+            await loadApprovals(id: id, generation: generation)
+        }
         guard selectionMatches(id: id, generation: generation) else { return }
-        if instructions == nil {
+        if instructions == nil, savedCopy == nil {
             await loadInstructions(id: id, generation: generation)
         }
         guard selectionMatches(id: id, generation: generation) else { return }
@@ -1010,6 +1039,10 @@ final class ChatModel {
     @discardableResult
     func enqueue(_ text: String, atFront: Bool = false) -> ChatQueuedMessage? {
         guard selected != nil else { return nil }
+        // No outbox against a snapshot. Queued sends drain on the next live
+        // open, and a snapshot must never enroll one: explicit "send when
+        // connected" is future work, not this queue by accident.
+        guard savedCopy == nil else { return nil }
         if queued.count >= Self.queueCap {
             error = "Already \(Self.queueCap) messages waiting."
             return nil
@@ -1056,6 +1089,7 @@ final class ChatModel {
     /// tool row must not hold the send: the conversation's own running
     /// flag is what the host uses to accept the next prompt.
     func sendNow(_ item: ChatQueuedMessage) async {
+        guard savedCopy == nil else { return }
         guard !sendingNow else { return }
         sendingNow = true
         defer { sendingNow = false }
@@ -1102,6 +1136,7 @@ final class ChatModel {
     }
 
     func drainQueue() async {
+        guard savedCopy == nil else { return }
         guard !busy, !sending, !sendingNow, let item = queued.first else { return }
         guard let ownerID = selected?.id else { return }
         let generation = selectionGeneration
@@ -1203,6 +1238,9 @@ final class ChatModel {
     }
 
     func stop() async {
+        // Nothing live to stop from a snapshot, and a stop that lands on a
+        // changed conversation stops the wrong turn.
+        guard savedCopy == nil else { return }
         guard let selected else { return }
         let generation = selectionGeneration
         do {
@@ -1237,6 +1275,10 @@ final class ChatModel {
     }
 
     func resolve(_ approval: ChatApproval, choice: String) async {
+        // An approval resolved from old rows acts on a conversation that has
+        // moved on. The snapshot shows pending approvals as text, never as
+        // live controls.
+        guard savedCopy == nil else { return }
         let generation = selectionGeneration
         do {
             _ = try await Bridge.resolveChatApproval(id: approval.id, choice: choice, peer: peer)
@@ -1306,7 +1348,7 @@ final class ChatModel {
     }
 
     func poll() async {
-        guard !Task.isCancelled, !openingConversation, let selected else { return }
+        guard !Task.isCancelled, !openingConversation, savedCopy == nil, let selected else { return }
         let generation = selectionGeneration
         await loadEvents(id: selected.id, reset: false, generation: generation, quiet: true)
         guard selectionMatches(id: selected.id, generation: generation) else { return }
@@ -1656,6 +1698,8 @@ final class ChatModel {
             guard selectionMatches(id: id, generation: generation) else { return }
             eventsEpoch &+= 1
             events = page.events
+            // A live page is the conversation again, not a copy of it.
+            savedCopy = nil
             reconcileOutgoing()
             offset = page.nextOffset
             earlierCursor = page.cursor
@@ -1692,7 +1736,9 @@ final class ChatModel {
     /// Called by the transcript as the top comes near, so the page is usually
     /// already there by the time somebody reaches it.
     func loadEarlier() async {
-        guard let selected else { return }
+        // The copy holds no earlier pages, and fetching them would mix live
+        // rows into a snapshot the banner describes as saved.
+        guard savedCopy == nil, let selected else { return }
         await loadEarlier(id: selected.id, generation: selectionGeneration, quiet: false)
     }
 
@@ -1802,6 +1848,8 @@ final class ChatModel {
             if reset {
                 eventsEpoch &+= 1
                 events = chunk.events
+                // A live page is the conversation again, not a copy of it.
+                savedCopy = nil
                 // The whole timeline, so there is nothing before it. Say so
                 // when there is something on screen; empty chats stay quiet.
                 earlierCursor = nil
@@ -1841,6 +1889,41 @@ final class ChatModel {
         }
     }
 
+    /// Open the sealed copy when the machine cannot be reached.
+    ///
+    /// Only with nothing on screen: a live conversation is never replaced by
+    /// an older copy of itself. The copy's rows are read-only state, and the
+    /// banner says when they were saved and what they do not contain.
+    private func openSavedCopy(id: String, generation: UInt64) async {
+        guard selectionMatches(id: id, generation: generation),
+              let reference = currentReference, reference.itemID == id,
+              let copy = await WorkCacheStore.shared.savedConversation(for: reference),
+              selectionMatches(id: id, generation: generation)
+        else { return }
+        eventsEpoch &+= 1
+        events = copy.page.events
+        reconcileOutgoing()
+        offset = copy.page.nextOffset
+        earlierCursor = nil
+        hasEarlier = false
+        reachedStart = false
+        conversationUsage = nil
+        error = nil
+        savedCopy = SavedCopyInfo(title: copy.title, savedAt: copy.savedAt,
+                                  hasEarlier: copy.page.hasEarlier, revision: copy.revision)
+        warmMarkdown()
+        settleNotifications()
+    }
+
+    /// Ask the machine again from the saved-copy banner. A live answer
+    /// replaces the copy; another failure keeps it, with its saved time.
+    func checkSavedCopyForUpdates() async {
+        guard savedCopy != nil, let chat = selected else { return }
+        checkingSavedCopy = true
+        defer { checkingSavedCopy = false }
+        await select(chat)
+    }
+
     func clearCachedAttachmentMemory() {
         attachmentCacheGeneration &+= 1
         responseAttachmentData = [:]
@@ -1855,7 +1938,10 @@ final class ChatModel {
     }
 
     func downloadResponseAttachment(_ attachment: ChatAttachment) async {
-        guard let selected else { return }
+        // File bytes are not in the copy, and a download against a snapshot
+        // would refill the row it came from with live state. The row says the
+        // file is unavailable instead.
+        guard savedCopy == nil, let selected else { return }
         await loadResponseAttachment(
             attachment, id: selected.id, generation: selectionGeneration, userInitiated: true
         )
