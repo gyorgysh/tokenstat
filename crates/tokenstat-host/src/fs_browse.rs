@@ -229,9 +229,7 @@ fn mkdir(params: &str) -> Result<Value, String> {
     // The name only, never a path: a caller must not be able to write two
     // levels up by asking for one folder called `../..`. Same gate as a clone
     // target, so odd names cannot arrive through this door either.
-    if let Err(error) = tokenstat_workspace::gitwrite::validate_clone_name(&name) {
-        return Err(error);
-    }
+    tokenstat_workspace::gitwrite::validate_clone_name(&name)?;
     let target = parent.join(&name);
     std::fs::create_dir(&target)
         .map_err(|error| format!("Could not create {}: {error}", target.display()))?;

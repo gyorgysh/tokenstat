@@ -23,6 +23,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -53,10 +54,7 @@ fn claim_target(target: &PathBuf) -> Result<TargetClaim, String> {
         .lock()
         .map_err(|_| "clone targets unavailable")?;
     if held.contains(target) {
-        return Err(
-            "A clone into that folder is already starting. Wait for it to finish."
-                .into(),
-        );
+        return Err("A clone into that folder is already starting. Wait for it to finish.".into());
     }
     held.insert(target.clone());
     Ok(TargetClaim {
@@ -81,6 +79,29 @@ impl Drop for TargetClaim {
 const MAX_RUNNING_CLONES: usize = 8;
 /// Finished outcomes kept for `cloneStatus`. Unbounded, the map only grows.
 const MAX_RETAINED_JOBS: usize = 32;
+
+// A permit covers both starting and running work, including the interval before
+// the PTY has an id. It is released on every spawn failure and watcher exit.
+static ACTIVE_CLONES: AtomicUsize = AtomicUsize::new(0);
+
+struct ClonePermit<'a>(&'a AtomicUsize);
+
+impl<'a> ClonePermit<'a> {
+    fn acquire(active: &'a AtomicUsize) -> Result<Self, String> {
+        active
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < MAX_RUNNING_CLONES).then_some(count + 1)
+            })
+            .map(|_| Self(active))
+            .map_err(|_| "Too many clones are already running. Wait for one to finish.".into())
+    }
+}
+
+impl Drop for ClonePermit<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,24 +140,17 @@ fn start(params: &str) -> Result<Value, String> {
     let target = parent.join(&name);
     // Claim the target for this call so a second concurrent clone for the same
     // name fails cleanly instead of both passing `exists` and spawning into
-    // one path. Held until `spawn` below; the watcher thread owns the rest.
-    let _claim = claim_target(&target)?;
+    // one path. The watcher keeps the claim until the process finishes.
+    let claim = claim_target(&target)?;
     if target.exists() {
         return Err(format!(
             "{name} is already there. Pick another name, or add that folder instead."
         ));
     }
-    // Bound resource use: cap concurrent watchers and prune finished outcomes
-    // so the map cannot grow without limit.
-    if let Ok(jobs) = jobs().lock() {
-        let running = jobs.values().filter(|job| job.outcome.is_none()).count();
-        if running >= MAX_RUNNING_CLONES {
-            return Err(
-                "Too many clones are already running. Wait for one to finish."
-                    .into(),
-            );
-        }
-    }
+    let permit = ClonePermit::acquire(&ACTIVE_CLONES)?;
+    // Acquire bookkeeping before spawning: a failed lock must not leave an
+    // untracked child. Watchers only hold this lock for short metadata updates.
+    let mut tracked = jobs().lock().map_err(|_| "clone jobs unavailable")?;
     let info = tokenstat_pty::manager()
         .spawn(&tokenstat_pty::Spawn {
             command: "git".into(),
@@ -151,39 +165,27 @@ fn start(params: &str) -> Result<Value, String> {
             environment: Vec::new(),
         })
         .map_err(|error| error.to_string())?;
-    if let Ok(mut jobs) = jobs().lock() {
-        // Prune finished entries first so a long-lived daemon keeps at most
-        // MAX_RETAINED_JOBS rows.
-        if jobs.len() >= MAX_RETAINED_JOBS {
-            let finished: Vec<String> = jobs
-                .iter()
-                .filter(|(_, job)| job.outcome.is_some())
-                .map(|(id, _)| id.clone())
-                .collect();
-            // Remove oldest-ish first: HashMap has no order, so drop enough
-            // finished rows to make room, oldest impossible to know, any will do.
-            let excess = jobs.len().saturating_sub(MAX_RETAINED_JOBS) + 1;
-            for id in finished.into_iter().take(excess.max(1)) {
-                jobs.remove(&id);
-            }
-            // Still full of running jobs: refuse rather than grow unbounded.
-            if jobs.len() >= MAX_RETAINED_JOBS * 2 {
-                jobs.remove(&info.id);
-                return Err(
-                    "Too many clones are already tracked. Wait for one to finish."
-                        .into(),
-                );
-            }
+    if tracked.len() >= MAX_RETAINED_JOBS {
+        let excess = tracked.len() - MAX_RETAINED_JOBS + 1;
+        let finished: Vec<String> = tracked
+            .iter()
+            .filter(|(_, job)| job.outcome.is_some())
+            .take(excess)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in finished {
+            tracked.remove(&id);
         }
-        jobs.insert(
-            info.id.clone(),
-            Job {
-                path: target.clone(),
-                outcome: None,
-            },
-        );
     }
-    watch(info.id.clone());
+    tracked.insert(
+        info.id.clone(),
+        Job {
+            path: target.clone(),
+            outcome: None,
+        },
+    );
+    drop(tracked);
+    watch(info.id.clone(), permit, claim);
     let mut value = serde_json::to_value(&info).map_err(|error| error.to_string())?;
     value["sessionId"] = json!(info.id);
     value["path"] = json!(target);
@@ -196,8 +198,10 @@ fn start(params: &str) -> Result<Value, String> {
 /// A thread rather than registering on the next poll, so the answer does not
 /// depend on somebody still watching: an app closed mid-clone must not leave a
 /// folder on disk that the machine does not know about.
-fn watch(session: String) {
+fn watch(session: String, permit: ClonePermit<'static>, claim: TargetClaim) {
     std::thread::spawn(move || {
+        let _permit = permit;
+        let _claim = claim;
         loop {
             std::thread::sleep(Duration::from_millis(400));
             let info = match tokenstat_pty::manager().info(&session) {
@@ -265,4 +269,47 @@ fn status(params: &str) -> Result<Value, String> {
         Some(Ok(id)) => json!({"state": "done", "path": job.path, "workspaceId": id}),
         Some(Err(error)) => json!({"state": "failed", "path": job.path, "error": error}),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Barrier;
+
+    #[test]
+    fn concurrent_starts_reserve_capacity_before_jobs_exist() {
+        let active = AtomicUsize::new(0);
+        let accepted = AtomicUsize::new(0);
+        let barrier = Barrier::new(32);
+        std::thread::scope(|scope| {
+            for _ in 0..32 {
+                scope.spawn(|| {
+                    let permit = ClonePermit::acquire(&active).ok();
+                    if permit.is_some() {
+                        accepted.fetch_add(1, Ordering::Relaxed);
+                    }
+                    // No permit is released until every contender has tried.
+                    barrier.wait();
+                    drop(permit);
+                });
+            }
+        });
+        assert_eq!(accepted.load(Ordering::Relaxed), MAX_RUNNING_CLONES);
+        assert_eq!(active.load(Ordering::Relaxed), 0);
+        assert!(ClonePermit::acquire(&active).is_ok());
+    }
+
+    #[test]
+    fn failed_start_releases_capacity_and_target() {
+        let active = AtomicUsize::new(0);
+        let target = PathBuf::from("clone-reservation-test-target");
+        {
+            let _permit = ClonePermit::acquire(&active).unwrap();
+            let _claim = claim_target(&target).unwrap();
+            assert!(claim_target(&target).is_err());
+            // Simulate returning early when the PTY cannot be spawned.
+        }
+        assert_eq!(active.load(Ordering::Relaxed), 0);
+        assert!(claim_target(&target).is_ok());
+    }
 }

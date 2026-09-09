@@ -104,8 +104,8 @@ fn open_pairing_file(path: &Path) -> Result<std::fs::File> {
 
 #[cfg(not(unix))]
 fn open_pairing_file(path: &Path) -> Result<std::fs::File> {
-    let metadata = std::fs::symlink_metadata(path)
-        .context("Could not inspect the pairing-code file")?;
+    let metadata =
+        std::fs::symlink_metadata(path).context("Could not inspect the pairing-code file")?;
     validate_file(&metadata)?;
     let file = std::fs::File::open(path).context("Could not open the pairing-code file")?;
     validate_file(&file.metadata()?)?;
@@ -121,14 +121,14 @@ fn validate_file(metadata: &std::fs::Metadata) -> Result<()> {
                 "The pairing-code file must be a regular private file. Use `chmod 600` before installing."
             );
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(unix))]
     {
         if !metadata.is_file() {
             bail!("The pairing-code file must be a regular file.");
         }
-        return Ok(());
+        Ok(())
     }
 }
 

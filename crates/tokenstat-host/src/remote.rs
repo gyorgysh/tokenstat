@@ -1125,10 +1125,7 @@ pub(crate) fn account_peer_label_hex_cached(want: &str) -> Option<String> {
         .lock()
         .ok()
         .and_then(|guard| guard.as_ref().map(|held| held.machines.clone()));
-    let held = match held {
-        Some(machines) => machines,
-        None => return None,
-    };
+    let held = held?;
     // Only trust a fresh cache here; a stale one would trigger a fetch in the
     // full lookup, which is exactly what must not happen under lock.
     let now = jiff::Timestamp::now().as_millisecond();

@@ -196,10 +196,8 @@ fn save(store: &Store) -> Result<(), String> {
             .open(&temp)
             .map_err(|e| e.to_string())?;
         use std::io::Write;
-        file.write_all(
-            &serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
+        file.write_all(&serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
     }
     #[cfg(not(unix))]
     {
@@ -460,13 +458,13 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         "workspace.access.pending" => {
             return Some((|| {
                 crate::request_context::refuse_remote("workspace access requests")?;
-                Ok(serde_json::to_value(load()?.pending).map_err(|e| e.to_string())?)
+                serde_json::to_value(load()?.pending).map_err(|e| e.to_string())
             })());
         }
         "workspace.access.list" => {
             return Some((|| {
                 crate::request_context::refuse_remote("workspace access settings")?;
-                Ok(serde_json::to_value(load()?.allowed).map_err(|e| e.to_string())?)
+                serde_json::to_value(load()?.allowed).map_err(|e| e.to_string())
             })());
         }
         // The record, for the console and for the machine's page in the app.
@@ -671,7 +669,12 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 save(&store)?;
                 let label_clone = label.clone();
                 drop(_guard);
-                access_audit::record("refused", Some(&peer), label_clone.as_deref(), Authority::Invite);
+                access_audit::record(
+                    "refused",
+                    Some(&peer),
+                    label_clone.as_deref(),
+                    Authority::Invite,
+                );
                 if retired {
                     access_audit::record("invite retired", None, None, Authority::Invite);
                     return Err(

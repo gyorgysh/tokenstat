@@ -74,6 +74,9 @@ pub struct ApplyReport {
     pub from: String,
     pub to: String,
     pub path: PathBuf,
+    /// The on-disk daemon changed. A running host keeps its old executable
+    /// until explicitly restarted; this does not claim a host is running.
+    pub host_binary_updated: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -531,6 +534,7 @@ pub fn apply_update() -> Result<ApplyReport, UpdateError> {
     // the candidate and make it prove itself before it replaces anything.
     verify_candidate(&extracted, &check.latest, &dest)?;
 
+    let host_binary_updated = cfg!(unix) && extracted.with_file_name("tokenstat-hostd").is_file();
     #[cfg(unix)]
     replace_unix_release(&extracted, &dest, &check.latest)?;
     #[cfg(not(unix))]
@@ -545,6 +549,7 @@ pub fn apply_update() -> Result<ApplyReport, UpdateError> {
         from: check.current,
         to: check.latest,
         path: dest,
+        host_binary_updated,
     })
 }
 

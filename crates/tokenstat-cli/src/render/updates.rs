@@ -43,12 +43,7 @@ pub fn self_update(check_only: bool, _yes: bool, json: bool) -> Result<()> {
 
     let report = tokenstat_sync::apply_update().map_err(|e| anyhow::anyhow!("{e}"))?;
     if json {
-        println!(
-            r#"{{"from":"{}","to":"{}","path":"{}"}}"#,
-            report.from,
-            report.to,
-            report.path.display()
-        );
+        println!("{}", applied_json(&report));
         return Ok(());
     }
     let g = good();
@@ -59,7 +54,9 @@ pub fn self_update(check_only: bool, _yes: bool, json: bool) -> Result<()> {
         report.to,
         report.path.display()
     );
-    println!("  {DIM}re-run the command in a new shell if this process looks odd{DIM:#}");
+    if report.host_binary_updated {
+        println!("  {}", HOST_RESTART_NOTICE);
+    }
     println!();
     Ok(())
 }
@@ -115,14 +112,12 @@ pub fn self_update_scheduled(json: bool) -> Result<()> {
         }
         Ok(tokenstat_sync::ScheduledUpdate::Applied(r)) => {
             if json {
-                println!(
-                    r#"{{"from":"{}","to":"{}","path":"{}"}}"#,
-                    r.from,
-                    r.to,
-                    r.path.display()
-                );
+                println!("{}", applied_json(&r));
             } else {
                 println!("updated {} → {}", r.from, r.to);
+                if r.host_binary_updated {
+                    println!("{}", HOST_RESTART_NOTICE);
+                }
             }
             Ok(())
         }
@@ -216,7 +211,43 @@ pub fn maybe_notify_update(json: bool) {
         Ok(Some(tokenstat_sync::UpdateOutcome::Applied(r))) => {
             let g = good();
             eprintln!("  {g}updated{g:#} {} → {}", r.from, r.to);
+            if r.host_binary_updated {
+                eprintln!("  {}", HOST_RESTART_NOTICE);
+            }
         }
         _ => {}
+    }
+}
+
+const HOST_RESTART_NOTICE: &str = "Host binary updated. If the host is running, finish active sessions, then run `tokenstat host restart` to use the new version.";
+
+fn applied_json(report: &tokenstat_sync::ApplyReport) -> serde_json::Value {
+    serde_json::json!({
+        "from": report.from,
+        "to": report.to,
+        "path": report.path.display().to_string(),
+        "host_binary_updated": report.host_binary_updated,
+        "host_restart_guidance": report.host_binary_updated.then_some(HOST_RESTART_NOTICE),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_report_escapes_paths_and_only_advises_restart_for_a_changed_host() {
+        let mut report = tokenstat_sync::ApplyReport {
+            from: "0.9.2".into(),
+            to: "1.0.0".into(),
+            path: std::path::PathBuf::from("/tmp/a\"b/tokenstat"),
+            host_binary_updated: true,
+        };
+        let value = applied_json(&report);
+        let decoded: serde_json::Value = serde_json::from_str(&value.to_string()).unwrap();
+        assert_eq!(decoded["path"], report.path.to_str().unwrap());
+        assert_eq!(decoded["host_restart_guidance"], HOST_RESTART_NOTICE);
+        report.host_binary_updated = false;
+        assert!(applied_json(&report)["host_restart_guidance"].is_null());
     }
 }
