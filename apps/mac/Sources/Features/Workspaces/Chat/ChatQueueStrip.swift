@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Messages waiting for the open turn to finish, sitting above the composer.
 ///
@@ -127,10 +128,15 @@ private struct ChatPendingMessagesSheet: View {
         #endif
     }
 
-    /// The send order, as a list with drag handles. Handles stay on like the
-    /// tabs editor: an Edit button would be a second step before the only
-    /// thing this screen is for.
+    /// The send order. iOS gets the list with its standard handles, always on
+    /// like the tabs editor: an Edit button would be a second step before the
+    /// only thing this screen is for. macOS gets plain cards with the same
+    /// familiar grip, because a Mac list draws no handles and its grey
+    /// section box only repeated the sheet's own words.
     private var queueList: some View {
+        #if os(macOS)
+        macQueueList
+        #else
         List {
             Section {
                 ForEach(items) { item in
@@ -149,11 +155,98 @@ private struct ChatPendingMessagesSheet: View {
             }
         }
         .listStyle(.plain)
-        #if !os(macOS)
         .environment(\.editMode, .constant(.active))
         #endif
     }
+
+    #if os(macOS)
+    @State private var draggingID: String?
+
+    /// One card per message, no section box. The sheet subtitle already says
+    /// where these go and in what order; the footnote keeps what Send now
+    /// does, which otherwise lived only in a tooltip.
+    private var macQueueList: some View {
+        ScrollView {
+            LazyVStack(spacing: Theme.Space.s) {
+                ForEach(items) { item in
+                    macQueueRow(item)
+                }
+                Text("Send now stops that turn so the chosen message goes out next.")
+                    .font(Theme.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, Theme.Space.xs)
+            }
+            .padding(Theme.Space.m)
+        }
+    }
+
+    /// The grip people know from every reorder list, wired to a live move:
+    /// rows slide aside as the drag passes, the way the iOS handles do. Only
+    /// the grip starts a drag, so selecting text in the field still works.
+    private func macQueueRow(_ item: ChatQueuedMessage) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            Image(systemName: "line.3.horizontal")
+                .font(Theme.font(13, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: 20, height: 30)
+                .contentShape(.rect)
+                .help("Drag to reorder")
+                .accessibilityLabel("Reorder message")
+                .onDrag {
+                    draggingID = item.id
+                    return NSItemProvider(object: item.id as NSString)
+                }
+            ChatQueueRow(
+                item: item,
+                onChange: { onChange(item, $0) },
+                onRemove: { onRemove(item) },
+                onSendNow: { onSendNow(item) }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(Theme.Space.s)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .onDrop(
+            of: [.text],
+            delegate: QueueDropDelegate(
+                targetID: item.id,
+                items: items,
+                draggingID: $draggingID,
+                onMove: onMove
+            )
+        )
+    }
+    #endif
 }
+
+#if os(macOS)
+/// Live reorder for the pending-messages sheet: crossing a row moves the
+/// dragged message there at once, so the list itself shows the new order
+/// instead of waiting for the drop.
+private struct QueueDropDelegate: DropDelegate {
+    let targetID: String
+    let items: [ChatQueuedMessage]
+    @Binding var draggingID: String?
+    let onMove: (IndexSet, Int) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let draggingID, draggingID != targetID,
+              let from = items.firstIndex(where: { $0.id == draggingID }),
+              let to = items.firstIndex(where: { $0.id == targetID }),
+              from != to
+        else { return }
+        withAnimation {
+            onMove(IndexSet(integer: from), to > from ? to + 1 : to)
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingID = nil
+        return true
+    }
+}
+#endif
 
 private struct ChatQueueRow: View {
     let item: ChatQueuedMessage

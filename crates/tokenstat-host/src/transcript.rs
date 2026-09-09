@@ -112,6 +112,19 @@ pub struct Parser {
     /// last assistant payload so structured chat events can drop that summary
     /// copy while retaining result-only output from older CLI versions.
     last_claude_assistant: Option<String>,
+    /// Cursor repeats every assistant message: word pieces, then the whole
+    /// message again, plus a whole-turn repeat when no tool runs in between.
+    /// `cursor_msg` is what the current message already emitted, `cursor_run`
+    /// what the run since the last tool call emitted, and `cursor_repeats`
+    /// how many message copies were dropped. A copy that only repeats what
+    /// is already on the transcript never reaches it twice. The message copy
+    /// matches the plain-text renderer's standing rule for this stream; the
+    /// turn copy additionally needs two dropped messages behind it, so a
+    /// second identical message on its own is kept rather than mistaken for
+    /// one.
+    cursor_msg: String,
+    cursor_run: String,
+    cursor_repeats: u32,
     /// The session this stream has already reported.
     ///
     /// Some CLIs announce the session once, others stamp it on every line.
@@ -134,6 +147,9 @@ impl Parser {
             open_tools: Vec::new(),
             tool_inputs: HashMap::new(),
             last_claude_assistant: None,
+            cursor_msg: String::new(),
+            cursor_run: String::new(),
+            cursor_repeats: 0,
             last_session: None,
             muse_tasks: HashMap::new(),
         }
@@ -344,6 +360,47 @@ impl Parser {
                     }
                 }
                 _ => {}
+            }
+        }
+        if self.backend == "cursor" {
+            match value.get("type").and_then(Value::as_str) {
+                Some("assistant") => {
+                    let text = cursor_assistant_text(&value);
+                    if !text.is_empty()
+                        && (text == self.cursor_msg
+                            || (self.cursor_repeats >= 2 && text == self.cursor_run))
+                    {
+                        // A snapshot copy of what is already recorded: the
+                        // message after its pieces, or the turn after its
+                        // messages. The turn copy needs two dropped messages
+                        // behind it, so a second identical message on its own
+                        // is kept rather than mistaken for one.
+                        events.retain(|event| !matches!(event, Event::Text { .. }));
+                        self.cursor_msg.clear();
+                        self.cursor_repeats += 1;
+                    } else {
+                        self.cursor_msg.push_str(&text);
+                        self.cursor_run.push_str(&text);
+                    }
+                }
+                Some("result") => {
+                    let text = value.get("result").and_then(Value::as_str).unwrap_or("");
+                    if !text.is_empty() && text == self.cursor_run {
+                        events.retain(|event| !matches!(event, Event::Text { .. }));
+                    }
+                    self.cursor_msg.clear();
+                    self.cursor_run.clear();
+                    self.cursor_repeats = 0;
+                }
+                // Thinking and the connection/retry noise ride between a
+                // message's pieces and its snapshot repeat, so they leave
+                // the buffers alone. Anything else bounds the run.
+                Some("thinking") | Some("connection") | Some("retry") | None => {}
+                _ => {
+                    self.cursor_msg.clear();
+                    self.cursor_run.clear();
+                    self.cursor_repeats = 0;
+                }
             }
         }
         self.take_events(events)
@@ -1500,6 +1557,23 @@ fn assistant_event_text(value: &Value) -> Vec<Event> {
                 .iter()
                 .flat_map(|block| event_text(block.get("text").and_then(Value::as_str)))
                 .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The text one cursor `assistant` event carries: its content blocks joined,
+/// the same traversal [`assistant_event_text`] records from, so a snapshot
+/// copy compares equal to the pieces it repeats.
+fn cursor_assistant_text(value: &Value) -> String {
+    value
+        .pointer("/message/content")
+        .or_else(|| value.get("content"))
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .collect::<String>()
         })
         .unwrap_or_default()
 }
@@ -2893,6 +2967,29 @@ mod tests {
         assert!(out.contains("Shell"));
         assert_eq!(out.matches("Shell").count(), 1);
         assert_eq!(out.matches("Hi").count(), 1);
+    }
+
+    #[test]
+    fn cursor_message_and_turn_repeats_are_dropped() {
+        // Cursor streams every assistant message twice, word pieces then the
+        // whole message, plus a whole-turn repeat when no tool runs. Only one
+        // copy of each message may reach the transcript; the tool boundary
+        // still resets the run, and result-only text is kept.
+        let raw = include_str!("../../../fixtures/chat/cursor-repeat.ndjson");
+        let mut parser = Parser::new("cursor");
+        let events = parser.push_events(raw.as_bytes());
+        let text: String = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Text { delta } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "I will check.It is done.Listed two.All set.");
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::ToolStart { verb, .. } if verb == "Shell"
+        )));
     }
 
     #[test]

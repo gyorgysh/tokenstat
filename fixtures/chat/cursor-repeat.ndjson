@@ -1,0 +1,13 @@
+{"type":"assistant","message":{"content":[{"type":"text","text":"I will"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":" check."}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I will check."}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"It is"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":" done."}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"It is done."}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I will check.It is done."}]}}
+{"type":"tool_call","subtype":"started","tool_call":{"shellToolCall":{"id":"shell-1","args":{"command":"ls"}}}}
+{"type":"tool_call","subtype":"completed","tool_call":{"shellToolCall":{"id":"shell-1"}}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Listed"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":" two."}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Listed two."}]}}
+{"type":"result","result":"All set."}
