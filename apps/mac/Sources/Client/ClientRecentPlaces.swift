@@ -21,8 +21,9 @@ final class ClientRecentPlaces {
         }
 
         fileprivate var key: String {
-            let data = try! JSONEncoder().encode([host, handle])
-            return "client.recentPlaces.v1." + data.base64EncodedString()
+            // Length-prefixed rather than encoded: no throwing, and "ab"+"c"
+            // never shares a key with "a"+"bc".
+            "client.recentPlaces.v1.\(host.count):\(host)\(handle.count):\(handle)"
         }
     }
 
