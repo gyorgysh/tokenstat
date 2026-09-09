@@ -1174,6 +1174,56 @@ extension Bridge {
         return try await chatInvoke(peer: peer, "chat.eventPage", params, as: ChatEventPage.self)
     }
 
+    /// Saved work on this device. These always ride the local transport
+    /// (`background`, never a peer), which is what makes them local-client
+    /// reads and writes; a machine asking over the tunnel is refused by the
+    /// host rather than answered. An older helper that does not know them
+    /// refuses with `unknown_method`, and the caller treats the cache as
+    /// unavailable rather than as empty.
+    static func cachePut(
+        key: String, scope: String, id: String, kind: String, itemId: String,
+        revision: String?, payload: [String: Any]
+    ) async throws -> CachePutResult {
+        var params: [String: Any] = [
+            "key": key, "scope": scope, "id": id, "kind": kind,
+            "itemId": itemId, "payload": payload,
+        ]
+        if let revision { params["revision"] = revision }
+        return try await background("cache.put", params, as: CachePutResult.self)
+    }
+
+    static func cacheGet(key: String, scope: String, id: String) async throws -> CachedRecord {
+        try await background(
+            "cache.get", ["key": key, "scope": scope, "id": id], as: CachedRecord.self
+        )
+    }
+
+    static func cacheList(scope: String) async throws -> CacheListResult {
+        try await background("cache.list", ["scope": scope], as: CacheListResult.self)
+    }
+
+    static func cacheRemove(scope: String, id: String) async throws -> CacheRemoveResult {
+        try await background(
+            "cache.remove", ["scope": scope, "id": id], as: CacheRemoveResult.self
+        )
+    }
+
+    static func cachePin(scope: String, id: String, pinned: Bool) async throws -> CachePinResult {
+        try await background(
+            "cache.pin", ["scope": scope, "id": id, "pinned": pinned], as: CachePinResult.self
+        )
+    }
+
+    static func cacheStats(scope: String?) async throws -> CacheStatsResult {
+        var params: [String: Any] = [:]
+        if let scope { params["scope"] = scope }
+        return try await background("cache.stats", params, as: CacheStatsResult.self)
+    }
+
+    static func cacheClearScope(scope: String) async throws -> CacheClearResult {
+        try await background("cache.clearScope", ["scope": scope], as: CacheClearResult.self)
+    }
+
     static func chatAttachment(
         id: String,
         attachmentID: String,

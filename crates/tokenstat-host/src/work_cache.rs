@@ -57,7 +57,10 @@ fn valid_token(value: &str, max: usize) -> bool {
     !value.is_empty()
         && value.len() <= max
         && value.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'|' | b':' | b'/' | b'@')
+            // Scopes and ids are JSON keys and associated data, never paths
+            // or commands, so percent-encoded storage keys are harmless here.
+            b.is_ascii_alphanumeric()
+                || matches!(b, b'-' | b'_' | b'.' | b'|' | b':' | b'/' | b'@' | b'%')
         })
 }
 
@@ -1009,8 +1012,10 @@ mod tests {
             let mut bad_kind = params("s", "c1");
             bad_kind.kind = "terminal-scrollback".into();
             assert!(put(&bad_kind).is_err());
-            // Scopes and ids are JSON keys, never paths, so dots and slashes
-            // are harmless. Control characters, blanks and emptiness are not.
+            // Scopes and ids are JSON keys, never paths, so dots, slashes
+            // and percent-encoded storage keys are harmless. Control
+            // characters, blanks and emptiness are not.
+            assert!(put(&params("acc%7Calice", "c1")).is_ok());
             let mut bad_scope = params("s", "c1");
             bad_scope.scope = "has space".into();
             assert!(put(&bad_scope).is_err());

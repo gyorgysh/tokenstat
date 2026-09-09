@@ -1668,6 +1668,7 @@ final class ChatModel {
             if !page.hasEarlier, !page.events.isEmpty { reachedStart = true }
             warmMarkdown()
             settleNotifications()
+            keepOfflineCopy(id: id, title: selected?.title, page: page)
             var pulled = 0
             while displayItems.count < Self.openDisplayItems,
                   hasEarlier,
@@ -1806,6 +1807,10 @@ final class ChatModel {
                 earlierCursor = nil
                 hasEarlier = false
                 if !chunk.events.isEmpty { reachedStart = true }
+                keepOfflineCopy(
+                    id: id, title: selected?.title,
+                    page: ChatEventPage(events: chunk.events, nextOffset: chunk.nextOffset)
+                )
             } else {
                 events.append(contentsOf: chunk.events)
             }
@@ -1819,6 +1824,20 @@ final class ChatModel {
             if !quiet, selectionMatches(id: id, generation: generation) {
                 self.error = error.localizedDescription
             }
+        }
+    }
+
+    /// Keep an encrypted copy of what just opened, for airplane mode.
+    ///
+    /// Fire and forget: a copy that cannot be sealed simply does not exist,
+    /// and the live conversation is unaffected. Only the newest page is kept;
+    /// earlier pages stay on the host, and the copy says so through the
+    /// page's own `hasEarlier` flag.
+    private func keepOfflineCopy(id: String, title: String?, page: ChatEventPage) {
+        guard let reference = currentReference, reference.itemID == id else { return }
+        let title = title ?? "Conversation"
+        Task {
+            await WorkCacheStore.shared.saveConversation(reference: reference, title: title, page: page)
         }
     }
 

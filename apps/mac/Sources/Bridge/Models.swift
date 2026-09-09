@@ -2952,6 +2952,16 @@ struct ChatEventPage: Codable, Sendable {
         case events, nextOffset, cursor, hasEarlier, reset, usage
     }
 
+    init(events: [ChatTimelineEvent], nextOffset: UInt64, cursor: String? = nil,
+         hasEarlier: Bool = false, reset: Bool = false, usage: ChatUsageTotals? = nil) {
+        self.events = events
+        self.nextOffset = nextOffset
+        self.cursor = cursor
+        self.hasEarlier = hasEarlier
+        self.reset = reset
+        self.usage = usage
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         nextOffset = try c.decodeIfPresent(UInt64.self, forKey: .nextOffset) ?? 0
@@ -3043,7 +3053,6 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
 }
 
 /// What a conversation says to its agent before the person's own words.
-///
 /// Two halves on purpose. `brief` belongs to the person and is theirs to edit.
 /// `added` is the one rule tokenstat puts in every conversation, and the
 /// inspector shows it verbatim rather than describing it, because a product
