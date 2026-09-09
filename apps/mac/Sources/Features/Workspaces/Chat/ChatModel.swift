@@ -95,7 +95,7 @@ final class ChatModel {
     /// Async bridge calls may finish after navigation. Only the generation
     /// that started them may mutate the currently displayed workspace/chat.
     private var loadGeneration: UInt64 = 0
-    private var selectionGeneration: UInt64 = 0
+    private(set) var selectionGeneration: UInt64 = 0
     /// Conversation a notification asked to open, consumed by the next load.
     private var pendingRevealID: String?
     /// The folder that reveal was asked for, so a load of a different one
@@ -196,6 +196,10 @@ final class ChatModel {
     var currentReference: WorkReference? {
         guard let selected, let folderID else { return nil }
         return draftReference(for: selected.id, in: folderID)
+    }
+
+    var readingIdentity: ChatReadingIdentity {
+        ChatReadingIdentity(reference: currentReference, generation: selectionGeneration)
     }
 
     private func scheduleDraftSave() {
@@ -2481,17 +2485,13 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 flushText()
                 flushThinking()
                 let callId = agent.callId ?? "tool-\(stamp(event, items.count))"
-                // Every tool row needs an identity of its own. `ForEach` is
-                // keyed on it, and a list where fourteen rows answer to
-                // "tool-tool" lays out fourteen slots and draws one, which is
-                // the tall blank stretch in the middle of an Antigravity
-                // transcript. The call id still matches an end to its start,
-                // so only the row's name changes here, and it changes only
-                // for the second and later use of a repeated id: an agent
-                // that names its calls properly keeps the ids it has.
+                // Archive positions keep a tool's row stable when older
+                // pages bring another use of the same call ID. Legacy hosts
+                // without positions keep the occurrence-based fallback.
                 let occurrence = (toolStarts[callId] ?? 0) + 1
                 toolStarts[callId] = occurrence
-                let rowID = occurrence == 1 ? "tool-\(callId)" : "tool-\(callId)#\(occurrence)"
+                let rowID = event.seq != nil ? "tool-\(stamp(event, items.count))"
+                    : (occurrence == 1 ? "tool-\(callId)" : "tool-\(callId)#\(occurrence)")
                 let verb = agent.verb ?? "Tool"
                 let target = ChatToolState.clip(agent.target ?? "")
                 toolIndex[callId] = items.count
@@ -2579,7 +2579,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     state.applyDetail(agent.detail)
                     items.append(
                         ChatDisplayItem(
-                            id: "edit-\(callId.isEmpty ? stamp(event, items.count) : callId)",
+                            id: "edit-\(event.seq != nil || callId.isEmpty ? stamp(event, items.count) : callId)",
                             kind: .edit(state)
                         )
                     )
@@ -2588,7 +2588,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     let fallbackVerb = agent.verb ?? "Tool"
                     items.append(
                         ChatDisplayItem(
-                            id: "tool-\(fallback)",
+                            id: "tool-\(event.seq != nil ? stamp(event, items.count) : fallback)",
                             kind: .tool(
                                 ChatToolState(
                                     callId: fallback,
@@ -2651,7 +2651,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     )
                     state.recountIfNeeded()
                     let rowID: String = {
-                        if callId.isEmpty { return "edit-\(stamp(event, items.count))" }
+                        if event.seq != nil || callId.isEmpty { return "edit-\(stamp(event, items.count))" }
                         let occurrence = (editStarts[callId] ?? 0) + 1
                         editStarts[callId] = occurrence
                         return occurrence == 1 ? "edit-\(callId)" : "edit-\(callId)#\(occurrence)"

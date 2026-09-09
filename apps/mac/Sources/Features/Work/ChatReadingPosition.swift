@@ -32,3 +32,10 @@ enum ChatReadingPosition: Equatable {
         )
     }
 }
+
+/// A transcript task belongs to this selection, even while account identity
+/// is still loading or the same conversation is reopened after a refresh.
+struct ChatReadingIdentity: Hashable {
+    let reference: WorkReference?
+    let generation: UInt64
+}

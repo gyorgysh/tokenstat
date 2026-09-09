@@ -36,6 +36,14 @@ import Foundation
         // Only a row the host named. A row named by its position in a page is
         // a different row on the next page, so it is never kept.
         assert(ChatReadingMark.isStable(eventID: "s0"))
+        for kind in ["user", "text", "think", "handoff", "turn", "usage", "failed", "tool", "edit"] {
+            assert(ChatReadingMark.isStable(eventID: "\(kind)-s4096"))
+            assert(!ChatReadingMark.isStable(eventID: "\(kind)-1234-5"))
+        }
+        assert(!ChatReadingMark.isStable(eventID: "tool-call-id#2"))
+        assert(!ChatReadingMark.isStable(eventID: "s١٢"))
+        store.remember(mark("text-s4096"), for: chat(id: "rendered"))
+        assert(ChatReadingStore(defaults: defaults).mark(for: chat(id: "rendered"))?.eventID == "text-s4096")
         assert(!ChatReadingMark.isStable(eventID: "s"))
         assert(!ChatReadingMark.isStable(eventID: "1757404800000-12"))
         assert(!ChatReadingMark.isStable(eventID: "sx12"))

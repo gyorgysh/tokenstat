@@ -28,8 +28,19 @@ struct ChatReadingMark: Codable, Equatable, Sendable {
     /// differently, so remembering one of those would send somebody back to
     /// a place that is no longer there.
     static func isStable(eventID: String) -> Bool {
-        eventID.count > 1 && eventID.hasPrefix("s")
-            && eventID.dropFirst().allSatisfy(\.isNumber)
+        let parts = eventID.split(separator: "-", omittingEmptySubsequences: false)
+        let stamp: Substring
+        if parts.count == 1 {
+            stamp = parts[0]
+        } else if parts.count == 2,
+                  ["user", "text", "think", "handoff", "turn", "usage", "failed", "tool", "edit"]
+                    .contains(String(parts[0])) {
+            stamp = parts[1]
+        } else {
+            return false
+        }
+        return stamp.first == "s" && stamp.count > 1
+            && stamp.dropFirst().utf8.allSatisfy { (48...57).contains($0) }
     }
 }
 

@@ -15,11 +15,14 @@ import SwiftUI
 /// `ChatReadingPosition`; this is the part that needs a scroll view.
 @MainActor
 enum TranscriptReading {
+    enum Restoration { case restored, unavailable, interrupted }
+
     /// Keep, or drop, this conversation's place.
     static func record(follow: TranscriptFollowState, window: TranscriptWindow,
                        for reference: WorkReference?,
-                       into store: ChatReadingStore = .shared) {
+                       into suppliedStore: ChatReadingStore? = nil) {
         guard let reference else { return }
+        let store = suppliedStore ?? .shared
         let anchor = window.anchor
         switch ChatReadingPosition.from(atEnd: follow.atEnd, pinned: follow.pinned,
                                         anchorID: anchor?.id,
@@ -42,23 +45,34 @@ enum TranscriptReading {
 
     /// Put the viewport back where this conversation was left.
     ///
-    /// Answers whether it did. False means the row is no longer in the
-    /// conversation, or never arrived, and the caller should open at the
-    /// latest turn the way it always has.
+    /// An unavailable row opens at the latest turn. An interrupted restore
+    /// leaves navigation and the reader's own scrolling in control.
     ///
     /// `place` slides the built window so the row is its first, then scrolls
     /// to it. Sliding first is what keeps the walk short: the row ends up at
     /// the top of what is built, so reaching it costs nothing like a walk to
     /// the end of a long conversation would.
-    static func restore(_ mark: ChatReadingMark, model: ChatModel,
+    static func restore(_ mark: ChatReadingMark, reference: WorkReference, model: ChatModel,
                         follow: TranscriptFollowState,
-                        place: (String, UnitPoint) -> Void) async -> Bool {
+                        place: (String, UnitPoint) -> Void) async -> Restoration {
+        let generation = model.selectionGeneration
+        guard !Task.isCancelled, model.currentReference == reference else { return .interrupted }
         let point = UnitPoint(x: 0, y: min(max(mark.offset, 0), 0.6))
         follow.settle(true)
         var placements = 0
         for _ in 0..<frames {
             try? await Task.sleep(for: frame)
-            if Task.isCancelled { break }
+            guard model.currentReference == reference,
+                  model.selectionGeneration == generation else { return .interrupted }
+            if Task.isCancelled {
+                follow.settle(false)
+                return .interrupted
+            }
+            if follow.abandoned {
+                follow.settle(false)
+                follow.stopFollowing()
+                return .interrupted
+            }
             // Still arriving: the row may be in a page that has not landed.
             if model.openingConversation, placements == 0 { continue }
             guard model.displayItems.contains(where: { $0.id == mark.eventID }) else { break }
@@ -67,11 +81,11 @@ enum TranscriptReading {
             if placements > corrections { break }
         }
         follow.settle(false)
-        guard placements > 0 else { return false }
+        guard placements > 0 else { return .unavailable }
         // The reader is above the latest turn on purpose, so the transcript
         // stops following it and offers the way back instead of chasing the
         // end under them.
         follow.stopFollowing()
-        return true
+        return .restored
     }
 }

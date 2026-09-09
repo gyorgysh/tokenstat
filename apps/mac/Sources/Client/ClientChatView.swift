@@ -733,11 +733,15 @@ struct ClientChatThread: View {
             // they report on the update this change itself causes.
             .onChange(of: follow.scrolling) { _, moving in
                 guard !moving else { return }
+                let reference = model.currentReference
+                let generation = model.selectionGeneration
                 Task {
                     try? await Task.sleep(for: .milliseconds(140))
-                    guard !Task.isCancelled, !follow.scrolling else { return }
+                    guard !Task.isCancelled, !follow.scrolling, !follow.settling,
+                          reference == model.currentReference,
+                          generation == model.selectionGeneration else { return }
                     TranscriptReading.record(follow: follow, window: window,
-                                             for: model.currentReference)
+                                             for: reference)
                 }
             }
             // A request that arrives mid-stream would otherwise be pushed off
@@ -771,13 +775,14 @@ struct ClientChatThread: View {
                 installRepin(proxy)
                 pinToLatest(proxy, animated: false)
             }
-            .task(id: model.selected?.id) {
+            .task(id: model.readingIdentity) {
                 // A lazy stack does not know its own height until it has drawn
                 // the rows, so the first scroll to the end lands on estimates.
                 // Hold the end across the frames the real heights take to
                 // arrive: every one of those says the end is far below, and
                 // believing one is how a long chat opened in its middle.
-                if await restoreReadingPlace(proxy) { return }
+                if await restoreReadingPlace(proxy) != .unavailable { return }
+                guard !Task.isCancelled else { return }
                 showNewest()
                 follow.settle(true)
                 defer { follow.settle(false) }
@@ -1041,11 +1046,11 @@ struct ClientChatThread: View {
     }
 
     /// Open this conversation where it was left, when it was left above the
-    /// latest turn. Answers whether it did.
-    private func restoreReadingPlace(_ proxy: ScrollViewProxy) async -> Bool {
+    /// latest turn. Navigation or scrolling interrupts restoration.
+    private func restoreReadingPlace(_ proxy: ScrollViewProxy) async -> TranscriptReading.Restoration {
         guard let reference = model.currentReference,
-              let mark = ChatReadingStore.shared.mark(for: reference) else { return false }
-        return await TranscriptReading.restore(mark, model: model, follow: follow) { id, point in
+              let mark = ChatReadingStore.shared.mark(for: reference) else { return .unavailable }
+        return await TranscriptReading.restore(mark, reference: reference, model: model, follow: follow) { id, point in
             placeRow(id, proxy, at: point)
         }
     }
