@@ -171,8 +171,10 @@ struct ChatFileEditRow: View {
 
     private var bar: Color {
         if state.failed { return Theme.danger }
-        if state.running { return Theme.accent }
-        return Theme.diffAdded
+        // Finished reads accent like its header: the bar marks the card, and
+        // the added/removed meaning already lives in the patch lines and the
+        // stat, which keep their diff colours.
+        return Theme.accent
     }
 
     private var border: Color {
