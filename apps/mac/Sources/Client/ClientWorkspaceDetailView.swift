@@ -226,7 +226,7 @@ struct ClientWorkspaceSessionsView: View {
                     .foregroundStyle(bypassOn ? Theme.warning : Theme.accent)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("Bypass")
+                Text("Bypass permissions")
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                 Text(bypassOn ? "On" : "Off")
