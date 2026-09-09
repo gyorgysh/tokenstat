@@ -61,7 +61,7 @@ walkdir = "2"
 rayon = "1"
 directories = "6"
 tempfile = "3"
-zstd = "0.13"
+zstd = "0.14"
 
 # Sync (the only crate allowed to link a network stack)
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
