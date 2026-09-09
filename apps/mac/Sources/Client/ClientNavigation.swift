@@ -84,6 +84,18 @@ final class ClientNavigationModel {
         if folderID != nil { destination = .workspaces }
     }
 
+    /// Folders pushed on the Workspaces tab's stack. `folderID` alone cannot
+    /// do this: the tab layout observes the destination but not the folder,
+    /// so a push needs its own road.
+    var workspacesPath: [ClientFolderPush] = []
+
+    /// Open a folder's section as a push on the Workspaces tab. New chat
+    /// lands in that folder's chat, new session in its launcher.
+    func pushFolder(peerKey: String, hostName: String, folder: WorkspaceFolder, section: WorkspaceSection) {
+        workspacesPath.append(ClientFolderPush(peerKey: peerKey, hostName: hostName, folder: folder, section: section))
+        destination = .workspaces
+    }
+
     /// Show one machine on Devices, from anywhere.
     ///
     /// Workspaces lists the same computers it can reach, and the readings on
@@ -109,6 +121,31 @@ final class ClientNavigationModel {
         self.destination = .workspaces
         if already { return }
         self.openChatID = chatID
+    }
+}
+
+/// One folder's section, pushed on the Workspaces tab's stack.
+struct ClientFolderPush: Hashable {
+    let peerKey: String
+    let hostName: String
+    let folder: WorkspaceFolder
+    let section: WorkspaceSection
+
+    @ViewBuilder
+    var destination: some View {
+        switch section {
+        case .chat:
+            ClientChatView(
+                peer: peerKey,
+                workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id,
+                folderName: folder.name,
+                hostName: hostName
+            )
+        case .sessions:
+            ClientWorkspaceSessionsView(peer: peerKey, hostName: hostName, folder: folder)
+        default:
+            ClientWorkspaceDetailView(peer: peerKey, hostName: hostName, folder: folder)
+        }
     }
 }
 

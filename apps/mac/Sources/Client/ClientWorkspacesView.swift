@@ -240,6 +240,7 @@ struct ClientWorkspacesView: View {
                     ) { folder in
                         let raw = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
                         navigation.open(folderID: "remote:\(peer):\(raw)", section: section)
+                        navigation.pushFolder(peerKey: peer, hostName: host.name, folder: folder, section: section)
                     }
                 }
             }

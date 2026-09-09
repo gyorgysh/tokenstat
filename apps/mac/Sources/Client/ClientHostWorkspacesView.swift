@@ -265,9 +265,12 @@ struct ClientHostWorkspacesView: View {
 
     /// Open a folder's section to start something there. The launch tiles and
     /// the chat composer already live in the folder; this only gets there.
+    /// Both roads: `open` for the sidebar layout, the push for the tab
+    /// layout, which observes the destination but not the folder.
     private func open(_ folder: WorkspaceFolder, section: WorkspaceSection) {
         let raw = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
         navigation.open(folderID: "remote:\(peerKey):\(raw)", section: section)
+        navigation.pushFolder(peerKey: peerKey, hostName: hostName, folder: folder, section: section)
     }
 
 }

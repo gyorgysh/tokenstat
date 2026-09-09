@@ -302,9 +302,10 @@ struct ClientRootView: View {
             TabView(selection: $navigation.destination) {
                 ForEach(tabCustomization.visibleTabs) { tab in
                     Tab(tab.label, systemImage: tab.symbol, value: tab) {
-                        NavigationStack {
+                        NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                             tab.content
                                 .clientChrome(showAccount: $showAccount)
+                                .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                         }
                     }
                 }
@@ -318,9 +319,10 @@ struct ClientRootView: View {
         } else {
             TabView(selection: $navigation.destination) {
                 ForEach(tabCustomization.visibleTabs) { tab in
-                    NavigationStack {
+                    NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                         tab.content
                             .clientChrome(showAccount: $showAccount)
+                            .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                     }
                     .tabItem { Label(tab.label, systemImage: tab.symbol) }
                     .tag(tab)
