@@ -2595,24 +2595,31 @@ struct RootView: View {
     }
     #endif
 
-    /// The five most recent chats live with their workspace section. The
-    /// model only holds one workspace at a time, so folders that have not
-    /// been opened in this app session retain their compact Chat row and its
-    /// host-provided count until the user opens them.
+    /// The chats live with their workspace section, for every folder opened
+    /// in this session. The model holds one folder's live list and caches the
+    /// rest, so opening a chat in one project no longer clears the rows just
+    /// left in another. A folder never opened keeps its compact Chat row and
+    /// its host-provided count until it is opened.
     @ViewBuilder
     private func chatHistoryRows(for folder: WorkspaceFolder) -> some View {
-        if chat.folderID == folder.id || chat.workspaceID == folder.id {
-            chatHistoryList(for: folder)
-        } else {
+        let list = chat.sidebarChats(in: folder.id)
+        if list.isEmpty {
             EmptyView()
+        } else {
+            chatHistoryList(for: folder, conversations: list)
         }
     }
 
     @ViewBuilder
-    private func chatHistoryList(for folder: WorkspaceFolder) -> some View {
+    private func chatHistoryList(for folder: WorkspaceFolder, conversations: [ChatConversation]) -> some View {
+        // Whether this folder's list is the live one. Rows under another
+        // folder open through a reveal, so their transcript is read from the
+        // owning host: selecting directly would fetch it against the folder
+        // on screen and its peer.
+        let isCurrent = chat.folderID == folder.id || chat.workspaceID == folder.id
         let visible = expandedChatHistories.contains(folder.id)
-            ? chat.chats
-            : Array(chat.chats.prefix(5))
+            ? conversations
+            : Array(conversations.prefix(5))
         ForEach(visible) { conversation in
             ChatSidebarConversationRow(
                 conversation: conversation,
@@ -2623,16 +2630,21 @@ struct RootView: View {
                 isSelected: chat.selected?.id == conversation.id
                     && route == .workspace(id: folder.id, section: .chat),
                 select: {
-                    openSection(.chat, in: folder.id) {
-                        Task { await chat.select(conversation) }
+                    if isCurrent {
+                        openSection(.chat, in: folder.id) {
+                            Task { await chat.select(conversation) }
+                        }
+                    } else {
+                        chat.reveal(id: conversation.id, in: folder.id)
+                        openSection(.chat, in: folder.id)
                     }
                 },
                 remove: {
-                    Task { await chat.remove(conversation) }
+                    Task { await chat.remove(conversation, in: folder.id) }
                 }
             )
         }
-        if chat.chats.count > 5 {
+        if conversations.count > 5 {
             Button(expandedChatHistories.contains(folder.id) ? "Show less" : "Show more") {
                 if expandedChatHistories.contains(folder.id) {
                     expandedChatHistories.remove(folder.id)

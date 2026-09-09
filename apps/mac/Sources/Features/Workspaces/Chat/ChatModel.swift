@@ -101,18 +101,65 @@ final class ChatModel {
     /// cannot answer for it. See the not-found branch in `load`.
     private var pendingRevealFolderID: String?
     /// The open conversation per folder, so leaving a folder and coming back
-    /// reopens its chat instead of collapsing to the first row. Memory only:
-    /// a deleted conversation simply is not found and the first row wins.
-    /// Bounded: a long-lived model otherwise keeps a row for every folder ever
-    /// opened.
-    private var lastSelectedByFolder: [String: String] = [:]
+    /// reopens its chat instead of collapsing to the first row. Persisted, so
+    /// it survives a relaunch too. A deleted conversation simply is not found
+    /// and the first row wins. Bounded: a long-lived model otherwise keeps a
+    /// row for every folder ever opened.
+    private var lastSelectedByFolder: [String: String] = ChatModel.storedLastSelected()
     private static let lastSelectedCap = 20
+    private static let lastSelectedKey = "chat.lastSelectedByFolder.v1"
+
+    private static func storedLastSelected() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: lastSelectedKey),
+              let map = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return map
+    }
 
     private func rememberLastSelected(chatID: String, folderID: String) {
         lastSelectedByFolder[folderID] = chatID
         if lastSelectedByFolder.count > Self.lastSelectedCap,
            let drop = lastSelectedByFolder.keys.first(where: { $0 != folderID }) {
             lastSelectedByFolder.removeValue(forKey: drop)
+        }
+        if let data = try? JSONEncoder().encode(lastSelectedByFolder) {
+            UserDefaults.standard.set(data, forKey: Self.lastSelectedKey)
+        }
+    }
+
+    /// Drop the remembered conversation for a folder, for example after its
+    /// chat was deleted. The next open then falls back to the first row
+    /// rather than to an id that is never coming back.
+    private func forgetLastSelected(folderID: String) {
+        guard lastSelectedByFolder.removeValue(forKey: folderID) != nil else { return }
+        if let data = try? JSONEncoder().encode(lastSelectedByFolder) {
+            UserDefaults.standard.set(data, forKey: Self.lastSelectedKey)
+        }
+    }
+
+    /// Conversation lists read earlier this session, keyed by the folder id
+    /// the sidebar knows (`remote:<peer>:<id>` for a folder on another
+    /// machine). The model holds one folder's live list, while the cache lets
+    /// the sidebar keep every opened folder's chats on screen, so opening a
+    /// chat in one project does not collapse the one just left in another.
+    /// Small records only, never transcripts. Refreshed on every open, so a
+    /// stale entry lasts until its folder is opened again.
+    private var chatListCache: [String: [ChatConversation]] = [:]
+    private static let chatListCacheCap = 30
+
+    /// The conversations to draw under this folder in the sidebar. The live
+    /// list for the folder on screen, otherwise what its last load read, or
+    /// nothing when the folder has not been opened in this session.
+    func sidebarChats(in folderID: String) -> [ChatConversation] {
+        if self.folderID == folderID || workspaceID == folderID { return chats }
+        return chatListCache[folderID] ?? []
+    }
+
+    private func storeChatListCache(_ list: [ChatConversation], folderID: String) {
+        chatListCache[folderID] = list
+        if chatListCache.count > Self.chatListCacheCap,
+           let drop = chatListCache.keys.first(where: { $0 != folderID }) {
+            chatListCache.removeValue(forKey: drop)
         }
     }
     private var attachmentCacheGeneration: UInt64 = 0
@@ -148,13 +195,49 @@ final class ChatModel {
             if let selected, let old = folderID {
                 rememberLastSelected(chatID: selected.id, folderID: old)
             }
-            chats = []
-            selected = nil
-            events = []
-            outgoing = []
-            outgoingWatermark = [:]
-            approvals = []
-            forgetWindow()
+            if let old = folderID, !chats.isEmpty {
+                storeChatListCache(chats, folderID: old)
+            }
+            if selectFirst, let cached = chatListCache[workspaceID] {
+                // Opened before. Show its remembered conversation at once,
+                // from the cache, while the refresh below re-reads the list.
+                // Clicking the Chat row then opens the last chat rather than
+                // an empty loading state, and the transcript fetch runs once,
+                // after the list confirms what is still there.
+                if let pending = pendingRevealID,
+                   (pendingRevealFolderID == nil || pendingRevealFolderID == workspaceID),
+                   let found = cached.first(where: { $0.id == pending }) {
+                    selected = found
+                } else if let remembered = lastSelectedByFolder[workspaceID],
+                          let found = cached.first(where: { $0.id == remembered }) {
+                    selected = found
+                } else {
+                    selected = cached.first
+                }
+                chats = cached
+                events = []
+                outgoing = []
+                outgoingWatermark = [:]
+                approvals = []
+                instructions = nil
+                attachments = []
+                attachmentPreviews = [:]
+                responseAttachmentData = [:]
+                attemptedResponseAttachments = []
+                loadingResponseAttachments = []
+                responseAttachmentErrors = [:]
+                forgetWindow()
+                loadQueue(for: selected?.id)
+                openingConversation = selected != nil
+            } else {
+                chats = []
+                selected = nil
+                events = []
+                outgoing = []
+                outgoingWatermark = [:]
+                approvals = []
+                forgetWindow()
+            }
             selectionGeneration &+= 1
         }
         folderID = workspaceID
@@ -173,6 +256,7 @@ final class ChatModel {
             // it, so the empty string never gets past this line.
             defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
             chats = Self.uniqued(loaded.2)
+            storeChatListCache(chats, folderID: workspaceID)
             if let pending = pendingRevealID {
                 if let found = chats.first(where: { $0.id == pending }) {
                     pendingRevealID = nil
@@ -231,6 +315,9 @@ final class ChatModel {
         } catch {
             if generation == loadGeneration {
                 self.error = error.localizedDescription
+                // A primed folder otherwise keeps its opening state with
+                // nothing coming to clear it.
+                openingConversation = false
             }
         }
     }
@@ -391,6 +478,7 @@ final class ChatModel {
             )
             guard context == loadGeneration else { return }
             chats.insert(chat, at: 0)
+            if let folderID { storeChatListCache(chats, folderID: folderID) }
             await select(chat)
         } catch {
             if context == loadGeneration { self.error = error.localizedDescription }
@@ -509,13 +597,35 @@ final class ChatModel {
     }
 
     func remove(_ chat: ChatConversation) async {
+        await remove(chat, in: folderID)
+    }
+
+    /// Delete one conversation shown in the sidebar.
+    ///
+    /// A row under another folder cannot use the live peer, which is the
+    /// folder on screen and not the conversation's host. Routing by folder id
+    /// deletes from the owning host and drops the row from the cache, leaving
+    /// the open transcript alone.
+    func remove(_ chat: ChatConversation, in folderID: String?) async {
+        let route = folderID.map { Bridge.chatRoute(workspaceID: $0) }
         let context = loadGeneration
         do {
-            try await Bridge.removeChat(id: chat.id, peer: peer)
+            try await Bridge.removeChat(id: chat.id, peer: route?.peer ?? peer)
             guard context == loadGeneration else { return }
-            chats.removeAll { $0.id == chat.id }
-            if selected?.id == chat.id {
-                await select(chats.first)
+            if let folderID, folderID != self.folderID {
+                chatListCache[folderID]?.removeAll { $0.id == chat.id }
+                if lastSelectedByFolder[folderID] == chat.id { forgetLastSelected(folderID: folderID) }
+                if pendingRevealID == chat.id,
+                   pendingRevealFolderID == nil || pendingRevealFolderID == folderID {
+                    pendingRevealID = nil
+                    pendingRevealFolderID = nil
+                }
+            } else {
+                chats.removeAll { $0.id == chat.id }
+                if let folderID { storeChatListCache(chats, folderID: folderID) }
+                if selected?.id == chat.id {
+                    await select(chats.first)
+                }
             }
         } catch {
             if context == loadGeneration { self.error = error.localizedDescription }
@@ -530,6 +640,8 @@ final class ChatModel {
             // itself instead of borrowing the current conversation's peer.
             _ = try await Bridge.removeAllChats(workspaceID: folderID)
             guard context == loadGeneration else { return }
+            storeChatListCache([], folderID: folderID)
+            forgetLastSelected(folderID: folderID)
             if self.folderID == folderID || workspaceID == folderID {
                 chats = []
                 await select(nil)
@@ -770,7 +882,10 @@ final class ChatModel {
             // not on the difference, and this runs four hundred milliseconds
             // at a time: an unconditional assignment redraws every open
             // transcript twice a second for nothing.
-            if chats != latest { chats = latest }
+            if chats != latest {
+                chats = latest
+                if let folderID { storeChatListCache(chats, folderID: folderID) }
+            }
             if let current = latest.first(where: { $0.id == selected.id }),
                current != self.selected {
                 self.selected = current
@@ -862,7 +977,10 @@ final class ChatModel {
             // Same rule as the event chunk below: the write is what redraws
             // the transcript, and most polls of a running turn arrive with
             // an unchanged list.
-            if chats != latest { chats = latest }
+            if chats != latest {
+                chats = latest
+                if let folderID { storeChatListCache(chats, folderID: folderID) }
+            }
             if let current = latest.first(where: { $0.id == selected.id }),
                current != self.selected {
                 self.selected = current
@@ -1509,6 +1627,7 @@ final class ChatModel {
             chats.insert(chat, at: 0)
         }
         chats.sort { $0.updatedAtMs > $1.updatedAtMs }
+        if let folderID { storeChatListCache(chats, folderID: folderID) }
         saveLaunchChoice(from: chat)
         settleNotifications()
     }
