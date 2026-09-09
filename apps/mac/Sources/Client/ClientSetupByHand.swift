@@ -37,7 +37,8 @@ struct ClientSetupByHand: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                VStack(spacing: Theme.Space.s) {
+                    ClientEmptyArt(kind: .connect)
                     Text("Run it yourself")
                         .font(Theme.title.weight(.semibold))
                     Text(
@@ -48,6 +49,8 @@ struct ClientSetupByHand: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
@@ -68,43 +71,38 @@ struct ClientSetupByHand: View {
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                SetupActions {
+                    Button(copied ? "Copied" : "Copy the command", copied ? ActionIcon.done : .copy) {
+                        guard let line else { return }
+                        UIPasteboard.general.string = line.oneLine
+                        copied = true
+                    }
+                    .setupPrimaryStyle()
+                    .disabled(line == nil || working)
+                    Button("Generate a new code", .refresh) {
+                        line = nil
+                        code = nil
+                        copied = false
+                        Task { await prepare() }
+                    }
+                    .font(ClientType.label)
+                    .disabled(working)
+                    Button("I ran it, check my account", .next) {
+                        model.manualInstall = true
+                        model.expectedPeer = nil
+                        path.append(.finish)
+                    }
+                        .font(ClientType.label)
+                }
             }
             .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .setupColumn()
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
         .navigationTitle("By hand")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: Theme.Space.s) {
-                Button(copied ? "Copied" : "Copy the command", copied ? ActionIcon.done : .copy) {
-                    guard let line else { return }
-                    UIPasteboard.general.string = line.oneLine
-                    copied = true
-                }
-                .clientProminentStyle()
-                .disabled(line == nil || working)
-                Button("Generate a new code", .refresh) {
-                    line = nil
-                    code = nil
-                    copied = false
-                    Task { await prepare() }
-                }
-                .font(ClientType.label)
-                .disabled(working)
-                Button("I ran it, check my account", .next) {
-                    model.manualInstall = true
-                    model.expectedPeer = nil
-                    path.append(.finish)
-                }
-                    .font(ClientType.label)
-            }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.bottom, Theme.Space.m)
-            .padding(.top, Theme.Space.s)
-            .frame(maxWidth: .infinity)
-            .background(.bar)
-        }
+
         .task { await prepare() }
     }
 

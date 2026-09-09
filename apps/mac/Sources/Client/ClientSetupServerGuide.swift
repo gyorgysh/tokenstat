@@ -26,7 +26,8 @@ struct ClientSetupServerGuide: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                VStack(spacing: Theme.Space.s) {
+                    ClientEmptyArt(kind: .connect)
                     Text("Renting a server")
                         .font(Theme.title.weight(.semibold))
                     Text(
@@ -38,6 +39,8 @@ struct ClientSetupServerGuide: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
 
                 section("What it has to be") {
                     requirement("Linux with systemd", "Setup installs a service that starts "
@@ -95,6 +98,11 @@ struct ClientSetupServerGuide: View {
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                SetupActions {
+                    Button("I have a server now", .next) { path = [.where] }
+                        .setupPrimaryStyle()
+                        .accessibilityIdentifier("setup.serverGuide.continue")
+                }
             }
             .padding(Theme.Space.m)
             .setupColumn()
@@ -103,18 +111,7 @@ struct ClientSetupServerGuide: View {
         .navigationTitle("I need a server")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("setup.serverGuide")
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: Theme.Space.s) {
-                Button("I have a server now", .next) { path = [.where] }
-                    .clientProminentStyle()
-                    .accessibilityIdentifier("setup.serverGuide.continue")
-            }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.bottom, Theme.Space.m)
-            .padding(.top, Theme.Space.s)
-            .setupColumn()
-            .background(.bar)
-        }
+
     }
 
     private func section<Content: View>(

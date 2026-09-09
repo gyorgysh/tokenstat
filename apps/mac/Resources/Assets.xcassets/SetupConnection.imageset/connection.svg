@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="126" viewBox="0 0 192 126">
+  <defs>
+    <linearGradient id="bridge" x1="32" y1="92" x2="155" y2="29" gradientUnits="userSpaceOnUse"><stop stop-color="#9061ff"/><stop offset="1" stop-color="#df9aff"/></linearGradient>
+  </defs>
+  <!-- Two workspaces sharing an orbital path, with a spark at the handoff. -->
+  <ellipse cx="96" cy="65" rx="82" ry="43" fill="#9061ff" fill-opacity=".045"/>
+  <path d="M38 83C9 39 77 8 132 31M154 43C186 89 114 118 61 95" fill="none" stroke="#9061ff" stroke-opacity=".32" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M58 71C78 71 79 48 102 48H126" fill="none" stroke="url(#bridge)" stroke-width="3" stroke-linecap="round"/>
+  <rect x="24" y="45" width="42" height="52" rx="10" fill="#151021" stroke="#a67aff" stroke-width="2"/>
+  <path d="M35 59H54M35 66H47M39 86H51" stroke="#b795ff" stroke-width="2" stroke-linecap="round"/>
+  <rect x="123" y="27" width="46" height="57" rx="11" fill="#1d142c" stroke="#cc96ff" stroke-width="2"/>
+  <rect x="132" y="37" width="28" height="13" rx="4" fill="#9061ff" fill-opacity=".22"/>
+  <path d="M133 60H149M133 68H143" stroke="#b795ff" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="155" cy="69" r="3" fill="#dfa6ff"/>
+  <path d="M94 54L97 61L104 64L97 67L94 74L91 67L84 64L91 61Z" fill="#dab6ff"/>
+  <circle cx="84" cy="25" r="3" fill="#b795ff"/>
+  <circle cx="109" cy="105" r="2" fill="#9061ff"/>
+</svg>

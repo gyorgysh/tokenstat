@@ -64,6 +64,11 @@ extension View {
         modifier(ProminentGlassSwitch())
     }
 
+    /// Stable, full-width action for the machine setup forms.
+    func setupPrimaryStyle() -> some View {
+        buttonStyle(ClientProminentButtonStyle())
+    }
+
     /// Secondary chrome action. Liquid glass on iOS 26, quiet capsule below.
     @ViewBuilder
     func clientGlassStyle() -> some View {

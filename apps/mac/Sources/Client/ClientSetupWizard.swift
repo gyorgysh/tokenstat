@@ -132,6 +132,7 @@ struct ClientSetupWizard: View {
                 .padding(.top, Theme.Space.xs)
             }
             .padding(Theme.Space.m)
+            .setupColumn()
         }
         .background(Theme.background)
     }
@@ -165,7 +166,7 @@ struct ClientSetupWizard: View {
                 Button("Continue setup", .next) {
                     if let step = model.resume(library: library) { path = [step] }
                 }
-                .clientProminentStyle()
+                .setupPrimaryStyle()
                 .accessibilityIdentifier("setup.resume")
                 Button("Start over", .restore) {
                     if model.startNewSetup() { path = [.where] }
@@ -189,7 +190,7 @@ struct ClientSetupWizard: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
+        VStack(spacing: Theme.Space.s) {
             ClientEmptyArt(kind: .connect)
                 .frame(maxWidth: .infinity)
             Text("How do you want to work?")
@@ -202,6 +203,8 @@ struct ClientSetupWizard: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
         .padding(.bottom, Theme.Space.xs)
     }
 

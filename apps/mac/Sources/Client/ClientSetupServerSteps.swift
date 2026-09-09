@@ -84,7 +84,7 @@ struct StepScaffold<Content: View, Footer: View>: View {
                             .frame(maxWidth: .infinity)
                             .padding(.top, Theme.Space.xs)
                     }
-                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    VStack(spacing: Theme.Space.s) {
                         SetupRail(number: number, total: total)
                         Text(title).font(Theme.title.weight(.semibold))
                         Text(subtitle)
@@ -92,6 +92,8 @@ struct StepScaffold<Content: View, Footer: View>: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
                     if let failure {
                         SetupFailureBanner(
                             failure: failure,
@@ -102,16 +104,14 @@ struct StepScaffold<Content: View, Footer: View>: View {
                         InlineBanner(text: error, kind: .danger) { onDismissError?() }
                     }
                     content()
+                    SetupActions { footer() }
                 }
                 .padding(Theme.Space.m)
                 .setupColumn()
             }
             .scrollBounceBehavior(.basedOnSize)
-            VStack(spacing: Theme.Space.s) { footer() }
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.bottom, Theme.Space.m)
-                .padding(.top, Theme.Space.s)
-                .setupColumn()
+            .scrollDismissesKeyboard(.interactively)
+
         }
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("setup.step.\(number)")
@@ -123,6 +123,33 @@ struct StepScaffold<Content: View, Footer: View>: View {
             announced = now
             AccessibilityNotification.Announcement(now).post()
         }
+    }
+}
+
+/// Actions stay in the scroll layout, above the home indicator and keyboard.
+struct SetupActions<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(spacing: Theme.Space.m) { content() }
+            .buttonStyle(SetupSecondaryButtonStyle())
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.top, Theme.Space.m)
+            .padding(.bottom, Theme.Space.m)
+    }
+}
+
+private struct SetupSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(ClientType.label)
+            .foregroundStyle(Theme.accent)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
+            .opacity(isEnabled ? (configuration.isPressed ? 0.65 : 1) : 0.45)
     }
 }
 
@@ -283,9 +310,10 @@ struct SetupRail: View {
         // which would leave somebody reading "Conn…", the rail falls back to
         // the milestone they are on and how far along it is.
         ViewThatFits(in: .horizontal) {
-            full
+            full.fixedSize(horizontal: true, vertical: false)
             short
         }
+        .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "Step \(number) of \(total), \(Self.milestones[index].name)"
@@ -304,7 +332,6 @@ struct SetupRail: View {
                 }
                 chip(milestone.name, at: position)
             }
-            Spacer(minLength: 0)
         }
         .lineLimit(1)
     }
@@ -315,7 +342,6 @@ struct SetupRail: View {
             Text("\(number) of \(total)")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
         }
     }
 
@@ -334,7 +360,7 @@ struct SetupRail: View {
 
     private func tint(for position: Int) -> Color {
         if position == index { return Theme.accent }
-        return position < index ? Color.secondary : Color.secondary.opacity(0.5)
+        return Color.secondary
     }
 }
 
@@ -372,8 +398,7 @@ private struct WhereStep: View {
     var body: some View {
         StepScaffold(
             title: "Which server",
-            subtitle: "A machine you can already reach over SSH. tokenstat connects as you, "
-                + "with your own key, and nothing about it goes through our servers.",
+            subtitle: "Choose a saved server or enter its address. Connect securely over SSH with your own credentials.",
             number: 1,
             art: .find,
             failure: model.failure,
@@ -425,14 +450,14 @@ private struct WhereStep: View {
                 }
                 path.append(.credential)
             }
-            .clientProminentStyle()
+            .setupPrimaryStyle()
             .disabled(!ready)
-            Button("I would rather run the command myself", .docs) {
+            Button("Set up with a terminal", .docs) {
                 path.append(.byHand)
             }
             .font(ClientType.label)
         }
-        .navigationTitle("Where")
+        .navigationTitle("Connect a server")
         .onAppear { model.resetServer() }
         .onChange(of: model.pickedHostID) { _, picked in
             guard let picked, let host = library.hosts.first(where: { $0.id == picked }) else {
@@ -523,7 +548,7 @@ private struct CredentialStep: View {
             Button("Continue", .next) {
                 path.append(model.resumingInstallation ? .finish : .fingerprint)
             }
-                .clientProminentStyle()
+                .setupPrimaryStyle()
                 .disabled(!ready)
         }
         .navigationTitle("Sign in")
@@ -581,12 +606,12 @@ private struct FingerprintStep: View {
             if model.fingerprint == nil {
                 if model.working {
                     Button("Stop", .stop) { model.cancelWork() }
-                        .clientProminentStyle()
+                        .setupPrimaryStyle()
                 } else {
                     Button("Ask the server", .connect) {
                         Task { await model.probe(library: library) }
                     }
-                    .clientProminentStyle()
+                    .setupPrimaryStyle()
                 }
             } else {
                 Button("This is my server", .approve) {
@@ -595,7 +620,7 @@ private struct FingerprintStep: View {
                         if model.trusted { path.append(.check) }
                     }
                 }
-                .clientProminentStyle()
+                .setupPrimaryStyle()
                 .disabled(model.working)
                 Button("Ask again", .refresh) {
                     model.fingerprint = nil
@@ -682,16 +707,16 @@ private struct CheckStep: View {
         } footer: {
             if model.working {
                 Button("Stop", .stop) { model.cancelWork() }
-                    .clientProminentStyle()
+                    .setupPrimaryStyle()
             } else if model.check?.ready == true {
                 Button("Install", .download) { path.append(.install) }
-                    .clientProminentStyle()
+                    .setupPrimaryStyle()
                     .disabled(model.working || model.machineName.trimmingCharacters(in: .whitespaces).isEmpty)
             } else {
                 Button("Check again", .refresh) {
                     Task { await model.inspect(library: library) }
                 }
-                .clientProminentStyle()
+                .setupPrimaryStyle()
                 .disabled(model.working)
             }
             Button("Show me the command instead", .docs) { path.append(.byHand) }
@@ -744,7 +769,7 @@ private struct InstallStep: View {
                 ThemeRule()
                 VStack(spacing: Theme.Space.s) {
                     Button("It finished, check the machine", .next) { path.append(.finish) }
-                        .clientProminentStyle()
+                        .setupPrimaryStyle()
                     Button("It failed, show me the command", .docs) { path.append(.byHand) }
                         .font(ClientType.label)
                 }
@@ -787,7 +812,7 @@ private struct InstallStep: View {
                     Button("Start the install", .download) {
                         Task { await model.install(library: library) }
                     }
-                    .clientProminentStyle()
+                    .setupPrimaryStyle()
                     .disabled(model.working)
                     Button("I would rather run it myself", .docs) { path.append(.byHand) }
                         .font(ClientType.label)
@@ -890,11 +915,11 @@ private struct FinishStep: View {
                 Button("Check again", .refresh) {
                     Task { await model.waitForMachine(library: library, account: account) }
                 }
-                .clientProminentStyle()
+                .setupPrimaryStyle()
                 .disabled(model.working || !model.canCheckMachine)
             } else {
                 Button("Continue", .next) { path.append(.agents) }
-                    .clientProminentStyle()
+                    .setupPrimaryStyle()
             }
         }
         .navigationTitle("Finish")

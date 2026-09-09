@@ -91,7 +91,7 @@ struct ClientSetupAgentStep: View {
             }
         } footer: {
             Button("Continue", .next) { path.append(.project) }
-                .clientProminentStyle()
+                .setupPrimaryStyle()
             Button("Check again", .refresh) { Task { await load() } }
                 .disabled(loading || busyID != nil)
         }

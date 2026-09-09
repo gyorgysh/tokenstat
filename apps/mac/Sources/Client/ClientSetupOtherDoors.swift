@@ -32,7 +32,8 @@ struct ClientSetupMacDoor: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                VStack(spacing: Theme.Space.s) {
+                    ClientEmptyArt(kind: .connect)
                     Text("Your computer")
                         .font(Theme.title.weight(.semibold))
                     Text(
@@ -43,6 +44,8 @@ struct ClientSetupMacDoor: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
                 GettingStartedRail(steps: steps)
                 // The address as a real link, beside the share sheet. Opening
                 // it leaves the app for the browser on purpose: a download
@@ -64,8 +67,9 @@ struct ClientSetupMacDoor: View {
                 }
             }
             .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .setupColumn()
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
         .navigationTitle("On my Mac")
         .navigationBarTitleDisplayMode(.inline)
@@ -157,18 +161,20 @@ struct ClientSetupCloudDoor: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                VStack(spacing: Theme.Space.s) {
+                    ClientEmptyArt(kind: .connect)
                     Text("A cloud machine")
                         .font(Theme.title.weight(.semibold))
                     Text(
-                        "A VPS or a dedicated server that stays on. tokenstat reads the list "
-                        + "of the ones you already have and adds them to your SSH library. It "
-                        + "never creates one and never spends money."
+                        "Import an existing server from your provider, then connect over SSH. "
+                        + "No servers are created and nothing is purchased."
                     )
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
                 // First, because somebody with no server at all cannot use
                 // anything below this and would otherwise read a form asking
                 // for an account token they have no reason to have.
@@ -182,7 +188,9 @@ struct ClientSetupCloudDoor: View {
                     // screen wearing somebody else's palette.
                     SegmentedTabs(options: Provider.allCases, selection: $provider)
                     if provider == .digitalOcean {
-                        SecureField("Read-only API token", text: $token)
+                        Text("Read-only API token")
+                            .font(ClientType.caption).foregroundStyle(.secondary)
+                        SecureField("Paste your DigitalOcean token", text: $token)
                             .textFieldStyle(.themed)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -195,6 +203,8 @@ struct ClientSetupCloudDoor: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if provider == .digitalOcean {
+                        Text("SSH username")
+                            .font(ClientType.caption).foregroundStyle(.secondary)
                         TextField("SSH username", text: $username)
                             .textFieldStyle(.themed)
                             .textInputAutocapitalization(.never)
@@ -217,39 +227,35 @@ struct ClientSetupCloudDoor: View {
                         .font(ClientType.label)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                SetupActions {
+                    if provider == .aws {
+                        Button("Enter server address", .next) {
+                            model.pickedHostID = nil
+                            model.host.username = "ec2-user"
+                            path.append(.where)
+                        }
+                        .setupPrimaryStyle()
+                    } else if imported == nil {
+                        Button(working ? "Reading the list…" : "Read my servers", .download) {
+                            Task { await load() }
+                        }
+                        .setupPrimaryStyle()
+                        .disabled(working || (provider == .digitalOcean && token.isEmpty)
+                            || username.trimmingCharacters(in: .whitespaces).isEmpty)
+                    } else {
+                        Button("Pick a server", .next) { path.append(.where) }
+                            .setupPrimaryStyle()
+                    }
+                }
             }
             .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .setupColumn()
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
         .navigationTitle("Cloud")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: Theme.Space.s) {
-                if provider == .aws {
-                    Button("Enter server address", .next) {
-                        model.pickedHostID = nil
-                        model.host.username = "ec2-user"
-                        path.append(.where)
-                    }
-                    .clientProminentStyle()
-                } else if imported == nil {
-                    Button(working ? "Reading the list…" : "Read my servers", .download) {
-                        Task { await load() }
-                    }
-                    .clientProminentStyle()
-                    .disabled(working || (provider == .digitalOcean && token.isEmpty)
-                        || username.trimmingCharacters(in: .whitespaces).isEmpty)
-                } else {
-                    Button("Pick a server", .next) { path.append(.where) }
-                        .clientProminentStyle()
-                }
-            }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, Theme.Space.s)
-            .frame(maxWidth: .infinity)
-            .background(.bar)
-        }
+
     }
 
     /// The way out for somebody who has none yet.

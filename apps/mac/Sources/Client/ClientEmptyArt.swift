@@ -80,7 +80,8 @@ struct ClientEmptyArt: View {
             case .noMachine: ServerScene(reduceMotion: reduceMotion, state: .waiting)
             case .provisioning: ServerScene(reduceMotion: reduceMotion, state: .working)
             case .serverReady: ServerScene(reduceMotion: reduceMotion, state: .ready)
-            case .connect: ConnectScene(reduceMotion: reduceMotion)
+            case .connect:
+                Image("SetupConnection").resizable().scaledToFit()
             case .sessions: SessionsScene(reduceMotion: reduceMotion)
             case .tasks: TasksScene(reduceMotion: reduceMotion)
             case .notes: NotesScene(reduceMotion: reduceMotion)
@@ -242,111 +243,6 @@ private struct ServerScene: View {
 }
 
 // MARK: - Connect
-
-/// This device reaching a machine: the phone, the server, and the handshake
-/// travelling an arc between them. The server's light comes on as the dot
-/// arrives, then the loop breathes out and starts over. No plugs and no
-/// cables: the travelling dot is the connection being made, which is what
-/// every screen using this is actually waiting for.
-private struct ConnectScene: View {
-    var reduceMotion: Bool
-    @State private var travel: CGFloat = 0
-
-    /// The arc the handshake travels, in canvas points.
-    private let from = CGPoint(x: 46, y: 43)
-    private let via = CGPoint(x: 67, y: 21)
-    private let to = CGPoint(x: 86, y: 39)
-
-    var body: some View {
-        ZStack {
-            arc
-            dot
-            phone
-            server
-        }
-        .frame(width: ClientEmptyArt.size.width, height: ClientEmptyArt.size.height)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 1.7).repeatForever(autoreverses: false)) {
-                travel = 1
-            }
-        }
-    }
-
-    /// The arc draws itself ahead of the dot, then both fade at the end of
-    /// the loop so the restart reads as a breath rather than a snap.
-    private var arc: some View {
-        Path { path in
-            path.move(to: from)
-            path.addQuadCurve(to: to, control: via)
-        }
-        .trim(from: 0, to: reduceMotion ? 1 : min(1, travel * 1.12))
-        .stroke(Ink.lead, style: Ink.style)
-        .opacity(fade)
-    }
-
-    private var dot: some View {
-        Circle()
-            .fill(Ink.second)
-            .frame(width: 6, height: 6)
-            .position(point(at: reduceMotion ? 0.85 : travel))
-            .opacity(reduceMotion ? 1 : min(1, travel * 5) * fade)
-    }
-
-    private var fade: CGFloat {
-        guard !reduceMotion else { return 1 }
-        return 1 - max(0, travel - 0.78) * 4.5
-    }
-
-    /// The server lights up as the handshake arrives. The frame stays quiet:
-    /// it is the far end, and quiet is what far ends are drawn in.
-    private var server: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .strokeBorder(Ink.quiet, style: Ink.style)
-            .frame(width: 26, height: 38)
-            .overlay {
-                VStack(spacing: 11) {
-                    Rectangle().fill(Ink.quiet).frame(width: 26, height: Ink.width)
-                    Rectangle().fill(Ink.quiet).frame(width: 26, height: Ink.width)
-                }
-            }
-            .overlay(alignment: .topLeading) {
-                Circle()
-                    .fill(lit ? Ink.lead : Ink.quiet)
-                    .frame(width: 5, height: 5)
-                    .padding(.top, 5)
-                    .padding(.leading, 5)
-            }
-            .position(x: 101, y: 43)
-    }
-
-    private var lit: Bool {
-        reduceMotion || travel > 0.8
-    }
-
-    /// This device is the one doing the reaching, so it draws in lead while
-    /// the far end stays quiet.
-    private var phone: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .strokeBorder(Ink.lead, style: Ink.style)
-            .frame(width: 24, height: 42)
-            .overlay(alignment: .top) {
-                Ghost(width: 12, color: Ink.second)
-                    .padding(.top, 10)
-            }
-            .position(x: 32, y: 43)
-    }
-
-    /// A point on the quadratic arc, so the dot rides the same curve that is
-    /// drawn rather than a straight line pretending to.
-    private func point(at t: CGFloat) -> CGPoint {
-        let u = 1 - t
-        return CGPoint(
-            x: u * u * from.x + 2 * u * t * via.x + t * t * to.x,
-            y: u * u * from.y + 2 * u * t * via.y + t * t * to.y
-        )
-    }
-}
 
 // MARK: - Sessions
 
