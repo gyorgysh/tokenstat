@@ -36,6 +36,8 @@ struct ClientHomeEditor: View {
                     HomeLayoutPreview(sections: visible)
                         .listRowInsets(EdgeInsets(top: Theme.Space.s, leading: Theme.Space.m,
                                                   bottom: Theme.Space.s, trailing: Theme.Space.m))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 } footer: {
                     Text("A starting arrangement. It moves the cards and nothing else.")
                 }
@@ -57,9 +59,14 @@ struct ClientHomeEditor: View {
                         hidden = []
                         preset = .balanced
                     }
+                    .listRowBackground(Color.clear)
                 }
             }
             .environment(\.editMode, .constant(.active))
+            // The platform's grouped grey is not our dark. Rows paint
+            // themselves; the list is only the scroll behind them.
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
             .navigationTitle("Customize Home")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -119,6 +126,8 @@ struct ClientHomeEditor: View {
         }
         .listRowInsets(EdgeInsets(top: Theme.Space.s, leading: Theme.Space.m,
                                   bottom: 0, trailing: Theme.Space.m))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     private func row(_ section: HomeSection) -> some View {
@@ -147,6 +156,7 @@ struct ClientHomeEditor: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .listRowBackground(Color.clear)
         .accessibilityLabel(section.label)
         .accessibilityValue(on ? "On, position \(place) of \(order.count)" : "Off")
         // Dragging is not the only way to move a card. VoiceOver and a
