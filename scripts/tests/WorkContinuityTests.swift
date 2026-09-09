@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with WorkReference.swift WorkDestinationResolver.swift WorkContinuityStore.swift.
+// Compile with WorkReference.swift WorkDestinationResolver.swift
+// WorkContinuityStore.swift WorkPlace.swift.
 import Foundation
 
 @main struct WorkContinuityTests {

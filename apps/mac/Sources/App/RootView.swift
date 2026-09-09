@@ -175,6 +175,10 @@ struct RootView: View {
     #endif
     /// Logo splash until the host answers; then wireframes and data take over.
     @State private var launch = LaunchState()
+    /// Whether the launch route has been decided. The chrome waits for it, so
+    /// the window opens on the folder that was left open rather than jumping
+    /// to it once the folder list lands. See `settleLaunchPlace`.
+    @State private var placeSettled = false
 
     var body: some View {
         // Split the modifier chain. A single expression here is too much
@@ -264,7 +268,7 @@ struct RootView: View {
         // toolbar. Mount the chrome only after the host is ready; traffic
         // lights stay because the window itself is already up with the splash.
         ZStack {
-            if launch.hostReady {
+            if launch.hostReady, placeSettled {
                 // Same NavigationSplitView chrome in both modes. Full screen
                 // parks the content below a real titlebar. Windowed chrome
                 // still shares the traffic-light row.
@@ -276,6 +280,12 @@ struct RootView: View {
         .environment(\.hostReady, launch.hostReady)
         .task {
             await launch.prepare()
+        }
+        // Decided under the splash, not after it. A window that opens on Home
+        // and moves to last night's folder a beat later is a window that
+        // looks like it changed its mind.
+        .task {
+            await settleLaunchPlace()
         }
         // Width may already be known from the splash observer. Apply it
         // when the split view appears, because `onChange` of the width
@@ -2795,6 +2805,82 @@ struct RootView: View {
         }
     }
 
+    /// Where the shell was left, in identifiers the next launch can resolve.
+    ///
+    /// Two shapes are remembered and the rest clear the record. A folder and
+    /// a machine-wide screen are places to come back to. The SSH library and
+    /// the all-folders overview are places people go deliberately, and a
+    /// terminal screen restored days later is a screen of shells that have
+    /// since ended, so those launch on Home instead of half a memory.
+    private func rememberPlace(_ next: Route) {
+        let store = WorkContinuityStore.shared
+        switch next {
+        case let .global(section):
+            store.rememberPlace(.global(section.rawValue))
+        case let .workspace(id, section):
+            // No scope yet means the account has not finished loading, which
+            // is the first moments of a launch. Skipping the write there keeps
+            // an unowned folder out of the record; the next navigation writes.
+            guard let scope = WorkSessionContext.shared.scope else { return }
+            let resolved = WorkDestinationResolver.route(folderID: id)
+            guard let host = resolved.peer ?? WorkSessionContext.shared.localHostIdentity,
+                  let place = WorkPlace.workspace(
+                      WorkReference(scope: scope, hostIdentity: host,
+                                    workspaceID: resolved.workspaceID,
+                                    kind: .workspace, itemID: nil),
+                      section: section.rawValue
+                  ) else { return }
+            store.rememberPlace(place)
+        case .workspacesOverview, .ssh, .sshTerminals:
+            store.forgetPlace()
+        }
+    }
+
+    /// Open the place the shell was left, once per launch.
+    ///
+    /// Bounded on purpose. The folder list is the host's answer and the splash
+    /// is already waiting for the host, so in practice this costs nothing; a
+    /// machine slow enough to miss the deadline opens on Home rather than
+    /// holding a logo while it thinks. Nothing jumps afterwards either: a
+    /// window that is already up stays where it is.
+    private func settleLaunchPlace() async {
+        defer { placeSettled = true }
+        guard WorkPlaceLaunch.claim(), let stored = WorkContinuityStore.shared.place() else { return }
+        if let section = stored.globalSection {
+            if let global = GlobalSection(rawValue: section), global != .account {
+                navigate(to: .global(global))
+            }
+            return
+        }
+        await WorkSessionContext.shared.resolveLocalHostIdentity()
+        // A folder on another machine is not in the list yet: the peer sweep
+        // is deliberately behind Home's first paint. Ask now, because the
+        // place being on that machine is the reason to dial it at all.
+        if stored.folder?.hostIdentity != WorkSessionContext.shared.localHostIdentity {
+            Task { await workspaces.loadRemote() }
+        }
+        let deadline = ContinuousClock.now + Self.placeDeadline
+        while ContinuousClock.now < deadline {
+            let destination = WorkPlaceRestoration.destination(
+                place: stored,
+                folderIDs: workspaces.folders.map(\.id),
+                scope: WorkSessionContext.shared.scope,
+                localHostIdentity: WorkSessionContext.shared.localHostIdentity
+            )
+            if case let .workspace(folderID, name)? = destination,
+               let section = WorkspaceSection(rawValue: name) {
+                openSection(section, in: folderID)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+        }
+    }
+
+    /// How long the splash may wait for the folder list before giving up on
+    /// reopening a folder.
+    private static let placeDeadline: Duration = .milliseconds(1400)
+
     /// Go somewhere, and apply the state that arrival needs, in one
     /// un-animated transaction.
     ///
@@ -2806,6 +2892,7 @@ struct RootView: View {
         transaction.animation = nil
         withTransaction(transaction) {
             route = next
+            rememberPlace(next)
             #if os(macOS)
             // The chat pane is mounted for the life of the window once a
             // folder's chat has been opened, so claim the folder here rather

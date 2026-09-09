@@ -8,6 +8,7 @@ final class WorkContinuityStore {
     static let shared = WorkContinuityStore()
     private let defaults: UserDefaults
     private let key = "work.continuity.v1"
+    private let placeKey = "work.place.v1"
     private let capacity = 100
 
     private struct Visit: Codable {
@@ -17,6 +18,10 @@ final class WorkContinuityStore {
     private struct Envelope: Codable {
         let version: Int
         var visits: [Visit]
+    }
+    private struct PlaceEnvelope: Codable {
+        let version: Int
+        var place: WorkPlace
     }
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
@@ -47,6 +52,27 @@ final class WorkContinuityStore {
 
     func remove(scope: WorkReference.Scope) {
         write(read().filter { $0.reference.scope != scope })
+        if place()?.folder?.scope == scope { defaults.removeObject(forKey: placeKey) }
+    }
+
+    /// Where the shell is pointed now. One record, not one per scope: it
+    /// answers "where was I", and there is only ever one answer to that.
+    func rememberPlace(_ place: WorkPlace) {
+        guard place.isWellFormed,
+              let data = try? JSONEncoder().encode(PlaceEnvelope(version: 1, place: place))
+        else { return }
+        defaults.set(data, forKey: placeKey)
+    }
+
+    func forgetPlace() {
+        defaults.removeObject(forKey: placeKey)
+    }
+
+    func place() -> WorkPlace? {
+        guard let data = defaults.data(forKey: placeKey), data.count <= 32 * 1024,
+              let stored = try? JSONDecoder().decode(PlaceEnvelope.self, from: data),
+              stored.version == 1, stored.place.isWellFormed else { return nil }
+        return stored.place
     }
 
     private func sameFolder(_ a: WorkReference, _ b: WorkReference) -> Bool {
