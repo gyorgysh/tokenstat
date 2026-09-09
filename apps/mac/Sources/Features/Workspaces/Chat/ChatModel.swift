@@ -601,7 +601,8 @@ final class ChatModel {
             defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
             chats = Self.uniqued(loaded.2)
             storeChatListCache(chats, folderID: workspaceID)
-            if let pending = pendingRevealID {
+            if let pending = pendingRevealID,
+               pendingRevealFolderID == nil || pendingRevealFolderID == workspaceID {
                 if let found = chats.first(where: { $0.id == pending }) {
                     pendingRevealID = nil
                     pendingRevealFolderID = nil
@@ -626,14 +627,10 @@ final class ChatModel {
                         pendingRevealID = nil
                         pendingRevealFolderID = nil
                     }
-                    if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
-                        if fresh != selected { self.selected = fresh }
-                        await refreshOpen(id: fresh.id)
-                    } else if selectFirst {
-                        await select(chats.first)
-                    } else {
-                        await select(nil)
-                    }
+                    // An explicit destination must never fall back to a different
+                    // conversation. Pins and notifications name one exact thread.
+                    await select(nil)
+                    error = "This conversation is no longer available in this folder. Choose another conversation from the sidebar."
                 }
             } else if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
                 // This conversation is already open. Re-selecting it would

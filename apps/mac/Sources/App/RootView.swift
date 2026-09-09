@@ -152,6 +152,9 @@ struct RootView: View {
     /// The section each folder was last left on, so returning to a folder
     /// returns to what you were doing in it.
     @State private var lastSection: [String: WorkspaceSection] = [:]
+    /// Observed, so pinning anywhere redraws every pin mark without leaving
+    /// the screen: sidebar rows, chat chrome and Home read the same shelf.
+    @State private var pins = PinnedWorkStore.shared
     /// The every-folder group. Shut by default, and remembered: it answers a
     /// question people ask about once a week.
     @AppStorage("sidebar.globalGroupExpanded") private var isGlobalGroupExpanded = false
@@ -281,6 +284,8 @@ struct RootView: View {
         .environment(\.hostReady, launch.hostReady)
         .task {
             await launch.prepare()
+            // Sidebar pins need the local identity even when launch restores Home.
+            await WorkSessionContext.shared.resolveLocalHostIdentity()
         }
         // Decided under the splash, not after it. A window that opens on Home
         // and moves to last night's folder a beat later is a window that
@@ -1784,6 +1789,25 @@ struct RootView: View {
                             ) { selectWorkspace(folder.id) }
                         }
                         .contextMenu {
+                            if let reference = pinReference(for: folder) {
+                                let pinned = pins.isPinned(reference)
+                                Button(pinned ? "Unpin" : "Pin", pinned ? .pinned : .pin) {
+                                    Task {
+                                        if pinned {
+                                            await PinnedWorkActions.unpin(reference)
+                                        } else {
+                                            await PinnedWorkActions.pin(
+                                                reference, label: folder.name, folderName: folder.name
+                                            )
+                                        }
+                                    }
+                                }
+                                .disabled(!pinned && pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity)
+                                if !pinned && pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity {
+                                    Text("Home holds eight pins. Unpin one to make room.")
+                                }
+                                ThemeRule()
+                            }
                             if !folder.isRemote {
                                 Button("Reveal in Finder", .reveal) { workspaces.revealInFinder(folder) }
                             }
@@ -2354,7 +2378,10 @@ struct RootView: View {
                 // on, rather than sending somebody to Insights to find the
                 // button. Same model as that screen's own scan, so the two
                 // cannot be running at once.
-                scanner: model
+                scanner: model,
+                onOpenPin: openPin,
+                pinAvailability: pinAvailability,
+                pinSubtitle: pinSubtitle
             )
         case .workspace(_, .automations), .global(.automations):
             AutomationsView(
@@ -2755,7 +2782,6 @@ struct RootView: View {
     #endif
 
     /// Open one of a folder's sections, and put the centre pane on it.
-    ///
     /// The scoped screens (Tasks, Workflows, Automations) need nothing here:
     /// their scope is set in `navigate(to:)` with the route, so a screen
     /// cannot be showing one folder's cards under another folder's row.
@@ -2792,6 +2818,69 @@ struct RootView: View {
             }
             #endif
             update?()
+        }
+    }
+
+    /// What a pin files a folder under. Same resolution the place record
+    /// uses, so a pin and the relaunch record never disagree about which
+    /// machine owns the folder. Signed-out work uses its local scope; it
+    /// never joins the next account that signs in.
+    private func pinReference(for folder: WorkspaceFolder) -> WorkReference? {
+        guard let scope = WorkSessionContext.shared.scope else { return nil }
+        let resolved = WorkDestinationResolver.route(folderID: folder.id)
+        guard let host = resolved.peer ?? WorkSessionContext.shared.localHostIdentity,
+              !resolved.workspaceID.isEmpty
+        else { return nil }
+        return WorkReference(scope: scope, hostIdentity: host,
+                             workspaceID: resolved.workspaceID,
+                             kind: .workspace, itemID: nil)
+    }
+
+    private func pinSubtitle(_ pin: PinnedWorkStore.Pin) -> String {
+        let folderID = WorkPlaceRestoration.folderID(
+            for: pin.reference, among: workspaces.folders.map(\.id),
+            localHostIdentity: WorkSessionContext.shared.localHostIdentity
+        )
+        let folder = workspaces.folders.first { $0.id == folderID }
+        let machine = pin.reference.hostIdentity == WorkSessionContext.shared.localHostIdentity
+            ? "This Mac" : folder?.machineLabel ?? "Remote machine"
+        return pin.reference.kind == .workspace ? machine : "\(pin.folderName) · \(machine)"
+    }
+
+    /// Availability is resolved without opening a peer connection from Home.
+    private func pinAvailability(_ pin: PinnedWorkStore.Pin) -> String? {
+        guard pin.reference.scope == WorkSessionContext.shared.scope else {
+            return "Sign in to the account that pinned this work"
+        }
+        guard WorkPlaceRestoration.folderID(
+            for: pin.reference, among: workspaces.folders.map(\.id),
+            localHostIdentity: WorkSessionContext.shared.localHostIdentity
+        ) != nil else { return "Folder is not available in Workspaces" }
+        return nil
+    }
+
+    /// Reuse the exact folder and conversation routing used by the sidebar.
+    private func openPin(_ pin: PinnedWorkStore.Pin) {
+        guard pinAvailability(pin) == nil else { return }
+        let ids = workspaces.folders.map(\.id)
+        guard let folderID = WorkPlaceRestoration.folderID(
+            for: pin.reference, among: ids,
+            localHostIdentity: WorkSessionContext.shared.localHostIdentity
+        ) else { return }
+        if WorkDestinationResolver.route(folderID: folderID).peer != nil {
+            guard WorkSessionContext.shared.scope == pin.reference.scope else { return }
+        }
+        switch pin.reference.kind {
+        case .workspace:
+            openSection(lastSection[folderID] ?? .chat, in: folderID)
+        case .conversation:
+            guard let item = pin.reference.itemID, !item.isEmpty else { return }
+            chat.reveal(id: item, in: folderID)
+            expandedWorkspaces.insert(folderID)
+            expandedChatHistories.insert(folderID)
+            openSection(.chat, in: folderID)
+        case .terminal, .commit, .savedDiff:
+            return
         }
     }
 

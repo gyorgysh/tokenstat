@@ -25,6 +25,10 @@ struct HomeView: View {
     /// The screen that owns scanning, so the getting-started card can run the
     /// first one without sending anybody to look for the button.
     @Bindable var scanner: InsightsModel
+    var onOpenPin: (PinnedWorkStore.Pin) -> Void
+    var pinAvailability: (PinnedWorkStore.Pin) -> String?
+    var pinSubtitle: (PinnedWorkStore.Pin) -> String
+    @State private var pinsStore = PinnedWorkStore.shared
 
     var body: some View {
         // Same chrome shape as Insights: a fixed bar above the scrolling
@@ -60,6 +64,10 @@ struct HomeView: View {
                         }
 
                         profile
+                        DesktopPinnedWorkSection(
+                            pins: pinsStore.pins(in: WorkSessionContext.shared.scope),
+                            availability: pinAvailability, subtitle: pinSubtitle, onOpen: onOpenPin
+                        )
                         activity
 
                         panels(width: width)

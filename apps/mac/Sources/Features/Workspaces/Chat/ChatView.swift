@@ -57,6 +57,9 @@ struct ChatView: View {
     @State private var sliceAnchor: String?
     @State private var paneDropTargeted = false
     @State private var composerDropTargeted = false
+    /// Observed, so pinning from the sidebar or Home redraws the chrome
+    /// without leaving the conversation.
+    @State private var pins = PinnedWorkStore.shared
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -76,6 +79,30 @@ struct ChatView: View {
                     }
                 }
             ) {
+                if model.selected != nil, let reference = model.currentReference {
+                    let pinned = pins.isPinned(reference)
+                    let full = pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity
+                    ToolbarIconButton(
+                        systemImage: pinned ? ActionIcon.pinned.symbol : ActionIcon.pin.symbol,
+                        help: pinned ? "Unpin this conversation"
+                            : full ? "Home holds eight pins. Unpin one to make room."
+                            : "Pin this conversation to Home",
+                        isAccent: pinned,
+                        isEnabled: pinned || !full
+                    ) {
+                        Task {
+                            if pinned {
+                                await PinnedWorkActions.unpin(reference)
+                            } else {
+                                await PinnedWorkActions.pin(
+                                    reference,
+                                    label: model.selected?.title ?? "Chat",
+                                    folderName: workspaceName ?? "Workspace"
+                                )
+                            }
+                        }
+                    }
+                }
                 ToolbarIconButton(systemImage: "plus", help: "New chat") {
                     Task { await model.create() }
                 }

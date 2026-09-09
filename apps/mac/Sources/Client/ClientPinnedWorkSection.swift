@@ -3,16 +3,6 @@
 #if !os(macOS)
 import SwiftUI
 
-extension Account {
-    /// The scope pins file under. Same account the recent places use, so a
-    /// pin and the history row it came from never disagree about whose they
-    /// are.
-    var pinnedWorkScope: WorkReference.Scope? {
-        guard signedIn else { return nil }
-        return PinnedWorkStore.scope(host: host, handle: handle)
-    }
-}
-
 extension PinnedWorkStore.Pin {
     /// The row navigates the way a Continue row does: the destination owns
     /// reachability, and a machine that is asleep says so there.
@@ -28,26 +18,6 @@ extension PinnedWorkStore.Pin {
             kind: kind, itemID: reference.itemID
         )
         return ClientRecentPlaces.Place(id: id, workspaceName: folderName, openedAt: pinnedAt)
-    }
-}
-
-/// Pin and unpin, with the sealed copy following the pin.
-///
-/// A pinned conversation's copy survives age eviction; unpinning hands it
-/// back to the ordinary quota. Either way the pin itself is only ever
-/// identifiers and a label.
-@MainActor
-enum PinnedWorkActions {
-    @discardableResult
-    static func pin(_ reference: WorkReference, label: String, folderName: String) async -> Bool {
-        guard PinnedWorkStore.shared.pin(reference, label: label, folderName: folderName) else { return false }
-        await WorkCacheStore.shared.setPinned(true, for: reference)
-        return true
-    }
-
-    static func unpin(_ reference: WorkReference) async {
-        PinnedWorkStore.shared.unpin(reference)
-        await WorkCacheStore.shared.setPinned(false, for: reference)
     }
 }
 
