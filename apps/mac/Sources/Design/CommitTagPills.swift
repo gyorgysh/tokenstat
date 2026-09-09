@@ -21,9 +21,9 @@ struct CommitTagPills: View {
                 ForEach(tags, id: \.self) { tag in
                     HStack(spacing: 3) {
                         Image(systemName: "tag")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(Theme.font(8, weight: .semibold, relativeTo: .caption2))
                         Text(tag)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .font(Theme.monoText(10, weight: .medium, relativeTo: .caption2))
                             .lineLimit(1)
                     }
                     .foregroundStyle(Theme.accent)
