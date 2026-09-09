@@ -306,12 +306,15 @@ struct ChatComposerControls: View {
         )
         .disabled(locked)
         if isBypassOnly {
-            Text("Bypass")
-                .font(Theme.font(12, weight: .medium))
-                .foregroundStyle(Theme.accent)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Theme.accentSoft, in: Capsule())
+            // One option, same block. A lone capsule read smaller and
+            // unrelated beside the mode pills, while this is the same control
+            // with its choice made by the backend. Never enabled: there is
+            // nothing to switch to, like the setup form's locked toggle.
+            ChatCompactPills(
+                options: [(value: "bypass", label: "Bypass")],
+                selection: autonomyBinding
+            )
+            .disabled(true)
         } else {
             ChatCompactPills(
                 options: [
