@@ -37,7 +37,12 @@ struct ClientChatView: View {
     /// The launcher may skip the list once. Back from the thread must still
     /// reach the list rather than immediately pushing the same chat again.
     @State private var didOpenConversation = false
+    /// A foreground refresh is in flight. Reopening the app onto yesterday's
+    /// rows in silence reads as broken sync; the strip says what is happening
+    /// until the fresh answer lands.
+    @State private var refreshing = false
     @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
 
     private var place: String { folderName.isEmpty ? "this folder" : folderName }
@@ -103,6 +108,18 @@ struct ClientChatView: View {
                     Button("Delete", role: .destructive) { pendingDelete = chat }
                 }
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if showReconnect {
+                ClientReconnectBanner(offline: !refreshing && connectivity.status == .offline)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await foregroundRefresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            Task { await foregroundRefresh() }
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -189,6 +206,20 @@ struct ClientChatView: View {
         await openRequestedChat()
     }
 
+    private var showReconnect: Bool {
+        refreshing || connectivity.status == .offline
+    }
+
+    /// Fresh on return, with the strip up while it happens. The list's own
+    /// `.task` runs once on appear; minimizing and reopening never
+    /// re-appears, so without this the rows sit stale in silence.
+    private func foregroundRefresh() async {
+        guard !refreshing else { return }
+        refreshing = true
+        defer { refreshing = false }
+        await reload()
+    }
+
     private func create() async {
         await model.create()
         opened = model.selected
@@ -210,6 +241,33 @@ struct ClientChatView: View {
         opened = chat
         navigation.openChatID = nil
         return true
+    }
+}
+
+/// The slim strip both chat screens show while a foreground refresh is in
+/// flight, or while the connection is down. A spinner while working, plain
+/// words while waiting: the two states ask for different patience.
+private struct ClientReconnectBanner: View {
+    var offline: Bool = false
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            if !offline {
+                ProgressView()
+                    .tint(Theme.accent)
+                    .accessibilityHidden(true)
+            }
+            Text(offline ? "Waiting for connection…" : "Reconnecting…")
+                .font(ClientType.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(offline ? "Waiting for connection" : "Reconnecting")
     }
 }
 
@@ -260,11 +318,26 @@ struct ClientChatThread: View {
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
     @State private var previewFile: ChatPreviewedFile?
+    /// Same strip as the list: reopening onto a stale transcript says what
+    /// is happening until the explicit poll below answers.
+    @State private var refreshing = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
 
     private var chat: ChatConversation? {
         model.chats.first { $0.id == chatID } ?? model.selected
+    }
+
+    /// One explicit round trip on return. The poll loop restarts on its own
+    /// but sleeps first, so without this the transcript sits a full interval
+    /// stale with no strip to say so. Never a re-select: that empties the
+    /// transcript and reads it back, which is the screen blanking.
+    private func foregroundRefresh() async {
+        guard !refreshing else { return }
+        refreshing = true
+        defer { refreshing = false }
+        await model.poll()
     }
 
     var body: some View {
@@ -318,6 +391,18 @@ struct ClientChatThread: View {
         .overlay(alignment: .topTrailing) {
             TransientToast(message: $dropNotice, severity: .warning)
                 .padding(Theme.Space.m)
+        }
+        .overlay(alignment: .top) {
+            if refreshing || connectivity.status == .offline {
+                ClientReconnectBanner(offline: !refreshing && connectivity.status == .offline)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await foregroundRefresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            Task { await foregroundRefresh() }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
         .navigationTitle(chat?.title ?? "Chat")
