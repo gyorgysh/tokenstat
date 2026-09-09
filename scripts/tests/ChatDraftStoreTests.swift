@@ -114,15 +114,87 @@ final class Notified: @unchecked Sendable {
         assert(merged.draft(for: reference(chat: "one"))?.text == "from one")
         assert(merged.draft(for: reference(chat: "two"))?.text == "from two")
 
-        // A file somebody replaced with rubbish loses its contents and
-        // nothing else: the next save still works.
+        // An old window edits only its own changed keys. It cannot revive
+        // another window's deletion or overwrite that window's newer words.
+        let stale = ChatDraftStore(directory: root)
+        windowOne.save(text: "newer", attachments: [], for: reference(chat: "one"))
+        windowTwo.clear(for: reference(chat: "two"))
+        windowTwo.settle()
+        stale.save(text: "unrelated", attachments: [], for: reference(chat: "three"))
+        stale.settle()
+        let afterStale = ChatDraftStore(directory: root)
+        assert(afterStale.draft(for: reference(chat: "one"))?.text == "newer")
+        assert(afterStale.draft(for: reference(chat: "two")) == nil)
+
+        // Hundreds of unsent conversations remain user data, regardless of age.
+        let manyRoot = root.appendingPathComponent("many")
+        let many = ChatDraftStore(directory: manyRoot)
+        for n in 0..<405 {
+            many.save(text: "draft \(n)", attachments: [], for: reference(chat: "many-\(n)"))
+        }
+        many.settle()
+        let manyAgain = ChatDraftStore(directory: manyRoot)
+        assert(!many.saveFailed && manyAgain.occupied.count == 405)
+        assert(manyAgain.draft(for: reference(chat: "many-0"))?.text == "draft 0")
+        let longText = String(repeating: "a", count: 200_001) + "end 🪻"
+        many.save(text: longText, attachments: [], for: reference(chat: "long"))
+        many.settle()
+        assert(ChatDraftStore(directory: manyRoot).draft(for: reference(chat: "long"))?.text == longText)
+
+        // A full store refuses the whole update, leaves the previous file
+        // readable, and keeps the complete new draft in memory for recovery.
+        let boundedRoot = root.appendingPathComponent("bounded")
+        let bounded = ChatDraftStore(directory: boundedRoot, byteLimit: 2048)
+        let boundedReference = reference(chat: "bounded")
+        bounded.save(text: "saved", attachments: [], for: boundedReference)
+        bounded.settle()
+        assert(!bounded.saveFailed)
+        let overLimit = String(repeating: "x", count: 3000)
+        bounded.save(text: overLimit, attachments: [], for: boundedReference)
+        bounded.settle()
+        assert(bounded.saveFailed)
+        assert(bounded.draft(for: boundedReference)?.text == overLimit)
+        assert(ChatDraftStore(directory: boundedRoot).draft(for: boundedReference)?.text == "saved")
+        bounded.save(text: "fits again", attachments: [], for: boundedReference)
+        bounded.settle()
+        assert(!bounded.saveFailed)
+        assert(ChatDraftStore(directory: boundedRoot).draft(for: boundedReference)?.text == "fits again")
+
+        // A failed deletion survives Retry instead of being read back from
+        // the old file. Another edit cannot accidentally restore it either.
+        let boundedPath = boundedRoot.appendingPathComponent("drafts.v1.json")
+        let savedBeforeFailure = try! Data(contentsOf: boundedPath)
+        try! FileManager.default.removeItem(at: boundedPath)
+        try! FileManager.default.createDirectory(at: boundedPath, withIntermediateDirectories: false)
+        bounded.clear(for: boundedReference)
+        bounded.settle()
+        assert(bounded.saveFailed)
+        try! FileManager.default.removeItem(at: boundedPath)
+        try! savedBeforeFailure.write(to: boundedPath)
+        bounded.retryFailedSave()
+        bounded.settle()
+        assert(!bounded.saveFailed)
+        assert(ChatDraftStore(directory: boundedRoot).draft(for: boundedReference) == nil)
+
+        // A damaged file must survive failed writes for recovery. Once the
+        // original file is restored, retry merges the new writing into it.
         let path = root.appendingPathComponent("drafts.v1.json")
-        try! Data("not json".utf8).write(to: path)
+        let beforeCorruption = try! Data(contentsOf: path)
+        let damaged = Data("not json".utf8)
+        try! damaged.write(to: path)
         let afterCorruption = ChatDraftStore(directory: path.deletingLastPathComponent())
         assert(afterCorruption.draft(for: reference(chat: "one")) == nil)
         assert(!afterCorruption.hasDraft(for: reference(chat: "one")))
         afterCorruption.save(text: "after", attachments: [], for: reference(chat: "three"))
         afterCorruption.settle()
+        assert(afterCorruption.saveFailed)
+        assert(try! Data(contentsOf: path) == damaged)
+        assert(afterCorruption.draft(for: reference(chat: "three"))?.text == "after")
+        try! beforeCorruption.write(to: path)
+        afterCorruption.retryFailedSave()
+        assert(afterCorruption.saveFailed, "Retry does not claim success before the write")
+        afterCorruption.settle()
+        assert(!afterCorruption.saveFailed)
         assert(ChatDraftStore(directory: root).draft(for: reference(chat: "three"))?.text == "after")
 
         // Nothing without a conversation is a draft.

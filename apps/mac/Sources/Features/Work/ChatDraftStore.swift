@@ -41,7 +41,7 @@ struct ChatDraft: Codable, Equatable, Sendable {
 ///
 /// A cache may be thrown away to make room. This may not: nothing evicts a
 /// draft to free space, and the only things that remove one are sending it,
-/// clearing it and signing the account out. It lives in a file rather than in
+/// or explicitly clearing it. It lives in a file rather than in
 /// preferences because preferences are a plist that any process with the
 /// container can read, have no file protection on iOS, and are the wrong
 /// place for prose.
@@ -69,23 +69,26 @@ final class ChatDraftStore {
     @ObservationIgnored private var drafts: [String: ChatDraft] = [:]
     private let directory: URL
     private let file: URL
-    private let queue = DispatchQueue(label: "ai.tokenstat.drafts", qos: .utility)
+    private nonisolated static let queue = DispatchQueue(label: "ai.tokenstat.drafts", qos: .utility)
+    @ObservationIgnored private let writer = Writer()
+    @ObservationIgnored private var writeGeneration: UInt64 = 0
+    private let byteLimit: Int
     /// Enough for a long message with a few files named beside it, and small
     /// enough that a corrupt or hostile file cannot be read into memory.
     private nonisolated static let maxFileBytes = 8 * 1024 * 1024
-    private static let maxDraftCharacters = 200_000
-    /// Old drafts are still somebody's writing, so the bound is generous and
-    /// the oldest go first only once there are more than a person could have
-    /// meant to keep.
-    private nonisolated static let capacity = 400
 
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, byteLimit: Int = 8 * 1024 * 1024) {
+        self.byteLimit = min(max(byteLimit, 1), Self.maxFileBytes)
         let base = directory ?? FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         )[0].appendingPathComponent("tokenstat-drafts", isDirectory: true)
         self.directory = base
         file = base.appendingPathComponent("drafts.v1.json")
-        drafts = Self.read(file)
+        do {
+            drafts = try Self.queue.sync { try Self.read(file, byteLimit: self.byteLimit) }
+        } catch {
+            saveFailed = true
+        }
         occupied = Set(drafts.keys)
         // A save is queued, not awaited, so quitting a second after the last
         // keystroke could otherwise leave the write unmade.
@@ -103,7 +106,7 @@ final class ChatDraftStore {
 
     /// Wait for the queued writes to reach the disk.
     func settle() {
-        queue.sync {}
+        saveFailed = Self.queue.sync { writer.failed } || (saveFailed && writeGeneration == 0)
     }
 
     // MARK: - Reading
@@ -133,13 +136,13 @@ final class ChatDraftStore {
               at date: Date = Date()) {
         guard let key = Self.key(reference) else { return }
         let draft = ChatDraft(reference: reference,
-                              text: String(text.prefix(Self.maxDraftCharacters)),
+                              text: text,
                               attachments: attachments, updatedAt: date,
                               messageID: drafts[key]?.messageID ?? UUID().uuidString)
         if draft.isEmpty {
             guard drafts.removeValue(forKey: key) != nil else { return }
             mark(key, occupied: false)
-            flush(removing: [key])
+            flush(key: key, mutation: .remove)
             return
         }
         // The time is not part of "has this changed": a save with the same
@@ -149,7 +152,7 @@ final class ChatDraftStore {
         }
         drafts[key] = draft
         mark(key, occupied: true)
-        flush()
+        flush(key: key, mutation: .save(draft))
     }
 
     /// Touch `occupied` only when membership actually changes.
@@ -171,69 +174,113 @@ final class ChatDraftStore {
     func clear(for reference: WorkReference) {
         guard let key = Self.key(reference), drafts.removeValue(forKey: key) != nil else { return }
         mark(key, occupied: false)
-        flush(removing: [key])
+        flush(key: key, mutation: .remove)
     }
 
     /// Try the failed write again with what is on screen now.
     func retryFailedSave() {
-        saveFailed = false
         flush()
     }
 
     // MARK: - Storage
 
-    /// Write what is in memory, plus whatever the file holds for windows and
-    /// builds this one knows nothing about, minus the keys just removed.
-    private func flush(removing doomed: Set<String> = []) {
-        let snapshot = drafts
-        let directory = directory
-        let file = file
-        queue.async {
-            var merged = Self.read(file).filter { !doomed.contains($0.key) }
-            for (key, value) in snapshot { merged[key] = value }
-            if merged.count > Self.capacity {
-                let keep = merged.sorted { $0.value.updatedAt > $1.value.updatedAt }
-                    .prefix(Self.capacity)
-                merged = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+    private enum Mutation: Sendable {
+        case save(ChatDraft)
+        case remove
+    }
+
+    /// Accessed only on the shared serial queue. Failed changes stay pending,
+    /// including deletions, until a complete atomic write succeeds.
+    private final class Writer: @unchecked Sendable {
+        var pending: [String: Mutation] = [:]
+        var failed = false
+
+        func flush(file: URL, directory: URL, byteLimit: Int) {
+            do {
+                var merged = try ChatDraftStore.read(file, byteLimit: byteLimit)
+                for (key, mutation) in pending {
+                    switch mutation {
+                    case let .save(draft): merged[key] = draft
+                    case .remove: merged.removeValue(forKey: key)
+                    }
+                }
+                if !pending.isEmpty {
+                    try ChatDraftStore.write(merged, to: file, in: directory, byteLimit: byteLimit)
+                }
+                pending.removeAll()
+                failed = false
+            } catch {
+                failed = true
             }
-            let ok = Self.write(merged, to: file, in: directory)
-            Task { @MainActor in self.saveFailed = !ok }
         }
     }
 
-    private nonisolated static func read(_ file: URL) -> [String: ChatDraft] {
-        guard let data = try? Data(contentsOf: file), data.count <= maxFileBytes,
-              let stored = try? JSONDecoder().decode([String: ChatDraft].self, from: data)
-        else { return [:] }
-        return stored.filter { key($0.value.reference) == $0.key && !$0.value.isEmpty }
+    /// Merge only edits from this store. Rewriting an old in-memory snapshot
+    /// would resurrect a draft another window cleared or replace its edits.
+    private func flush(key: String? = nil, mutation: Mutation? = nil) {
+        writeGeneration &+= 1
+        let generation = writeGeneration
+        let writer = writer
+        let file = file
+        let directory = directory
+        let byteLimit = byteLimit
+        Self.queue.async {
+            if let key, let mutation { writer.pending[key] = mutation }
+            writer.flush(file: file, directory: directory, byteLimit: byteLimit)
+            let failed = writer.failed
+            Task { @MainActor in
+                guard self.writeGeneration == generation else { return }
+                self.saveFailed = failed
+            }
+        }
+    }
+
+    private enum StorageError: Error { case tooLarge, invalidRecord }
+
+    /// A missing file is empty. An unreadable or damaged file is an error,
+    /// so saving cannot overwrite writing we were unable to recover.
+    private nonisolated static func read(_ file: URL, byteLimit: Int) throws -> [String: ChatDraft] {
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: file)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+            // FileHandle can report a directory as missing. It must never
+            // become an empty draft store that a later write removes.
+            guard !FileManager.default.fileExists(atPath: file.path) else { throw error }
+            return [:]
+        }
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: byteLimit + 1) ?? Data()
+        guard data.count <= byteLimit else { throw StorageError.tooLarge }
+        let stored = try JSONDecoder().decode([String: ChatDraft].self, from: data)
+        guard stored.allSatisfy({ key($0.value.reference) == $0.key && !$0.value.isEmpty })
+        else { throw StorageError.invalidRecord }
+        return stored
     }
 
     private nonisolated static func write(
-        _ drafts: [String: ChatDraft], to file: URL, in directory: URL
-    ) -> Bool {
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-                attributes: [.posixPermissions: 0o700])
-            if drafts.isEmpty {
-                if FileManager.default.fileExists(atPath: file.path) {
-                    try FileManager.default.removeItem(at: file)
-                }
-                return true
+        _ drafts: [String: ChatDraft], to file: URL, in directory: URL, byteLimit: Int
+    ) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        if drafts.isEmpty {
+            if FileManager.default.fileExists(atPath: file.path) {
+                try FileManager.default.removeItem(at: file)
             }
-            let data = try JSONEncoder().encode(drafts)
-            // Unsent writing is not reconstructible, so it is backed up like
-            // the user data it is. On iOS it stays readable to a background
-            // save after first unlock and unreadable to anything before it.
-            #if os(macOS)
-            try data.write(to: file, options: .atomic)
-            #else
-            try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            #endif
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-            return true
-        } catch {
-            return false
+            return
         }
+        let data = try JSONEncoder().encode(drafts)
+        guard data.count <= byteLimit else { throw StorageError.tooLarge }
+        // Unsent writing is not reconstructible, so it is backed up like
+        // the user data it is. On iOS it stays readable to a background
+        // save after first unlock and unreadable to anything before it.
+        #if os(macOS)
+        try data.write(to: file, options: .atomic)
+        #else
+        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        #endif
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
     }
 
     /// One conversation on one machine under one account, in the name every
