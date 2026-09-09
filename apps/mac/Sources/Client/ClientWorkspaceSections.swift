@@ -491,6 +491,12 @@ struct ClientFolderBranchRow: View {
     let folder: WorkspaceFolder
     let onChanged: () async -> Void
 
+    /// Named, not just valued: a bare "v1.0" beside two plain header lines
+    /// never said it opens the picker.
+    private var branchLabel: String {
+        "Branch \(folder.subtitle ?? "detached")"
+    }
+
     var body: some View {
         if let git = folder.git, git.isRepo {
             BranchPickerPresentation(
@@ -500,15 +506,21 @@ struct ClientFolderBranchRow: View {
             ) {
                 HStack(spacing: Theme.Space.xs) {
                     Image(systemName: "arrow.triangle.branch")
-                    Text(folder.subtitle ?? "detached")
+                    Text(branchLabel)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 0)
+                    Text("Switch")
                     Image(systemName: "chevron.right")
-                        .foregroundStyle(.tertiary)
                 }
                 .font(ClientType.caption)
                 .foregroundStyle(Theme.accent)
+                .padding(.horizontal, Theme.Space.s)
+                .padding(.vertical, 7)
+                .background(
+                    Theme.accent.opacity(0.09),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
             }
         } else if let subtitle = folder.subtitle {
             Text(subtitle)
