@@ -336,6 +336,11 @@ pub fn agent_command(
                 args.push("--model".into());
                 args.push(m.into());
             }
+            // `--trust` trusts the workspace, it does not allow a tool.
+            // Without `--force` every shell command comes back `rejected`
+            // with an empty reason, which is a run that reads as though the
+            // agent chose not to work. Both flags are stripped together when
+            // the turn is not a bypass one.
             args.extend(
                 [
                     "-p",
@@ -343,6 +348,7 @@ pub fn agent_command(
                     "stream-json",
                     "--stream-partial-output",
                     "--trust",
+                    "--force",
                     "--",
                     p,
                 ]
@@ -577,7 +583,7 @@ pub fn chat_agent_command(
         match backend {
             "claude" | "agy" => argv.retain(|arg| arg != "--dangerously-skip-permissions"),
             "codex" => argv.retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox"),
-            "cursor" => argv.retain(|arg| arg != "--trust"),
+            "cursor" => argv.retain(|arg| !matches!(arg.as_str(), "--trust" | "--force")),
             "opencode" | "opencode2" => argv.retain(|arg| arg != "--auto"),
             _ => {}
         }
@@ -2789,6 +2795,38 @@ mod tests {
     }
 
     #[test]
+    fn a_guarded_cursor_turn_keeps_neither_permission_flag() {
+        // Cursor is Bypass-only in chat, so this is the older-conversation
+        // path. The two flags are one decision and must move together: a turn
+        // that keeps `--force` without the workspace trust, or the trust
+        // without the permission, is a turn that half-runs.
+        let guarded = chat_agent_command(
+            "cursor",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                mode: "execute",
+                hook_helper: None,
+                system_append: None,
+                agy_customization_dir: None,
+                grok_allow_rules: &[],
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        assert!(
+            !guarded
+                .iter()
+                .any(|arg| matches!(arg.as_str(), "--trust" | "--force")),
+            "{guarded:?}"
+        );
+    }
+
+    #[test]
     fn chat_bypass_retains_each_backends_unattended_permission_flag() {
         let launch = |backend: &str| {
             chat_agent_command(
@@ -2815,6 +2853,9 @@ mod tests {
             ("codex", "--dangerously-bypass-approvals-and-sandbox"),
             ("muse", "--yolo"),
             ("cursor", "--trust"),
+            // Cursor's own permission layer, not the workspace trust prompt.
+            // Without it every tool call comes back rejected.
+            ("cursor", "--force"),
             ("agy", "--dangerously-skip-permissions"),
             ("opencode", "--auto"),
             ("opencode2", "--auto"),
@@ -2849,6 +2890,7 @@ mod tests {
                 "--dangerously-skip-permissions",
                 "--dangerously-bypass-approvals-and-sandbox",
                 "--trust",
+                "--force",
                 "--auto",
                 "bypassPermissions",
                 "--always-approve",

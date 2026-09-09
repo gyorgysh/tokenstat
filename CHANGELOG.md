@@ -96,6 +96,17 @@ with a server that runs agents.
   Separate windows preserve each other's recent selections; old unscoped
   selections are not assigned to whichever account signs in next.
 
+- **Cursor chats work.** A Cursor turn used to fill the transcript with rows
+  called HookAdditionalContexts and GetMcpTools, none of which ever finished,
+  while every shell command it tried came back refused without saying so and
+  its answer arrived two or three times over. Tool rows now carry the name of
+  the tool that ran, its output, and its verdict; a file it changes shows the
+  red and green lines; each message appears once, including when the CLI loses
+  its connection and says the whole turn again; and the conversation carries
+  over between messages instead of starting again each time. When Cursor
+  itself gives up, the chat says so in a sentence instead of showing you
+  `RetriableError: [resource_exhausted] Error` as though the agent had
+  replied it.
 - A chat that has been open for a while no longer stops responding. The local
   helper told the window it was healthy after every call it answered, several
   times a second, from whatever thread had just answered one. Sooner or later

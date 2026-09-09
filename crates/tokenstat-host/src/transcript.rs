@@ -87,6 +87,16 @@ pub enum Event {
     },
 }
 
+/// A reconnected cursor stream saying its turn again.
+enum CursorReplay {
+    /// Waiting for the first record, which is what says where it resumed.
+    Pending,
+    /// The boundary it resumed from, and how much of the turn it has
+    /// reproduced since. A replay is the same message being said again, so
+    /// what it repeats belongs to the message its first record continued.
+    At { from: usize, at: usize },
+}
+
 enum Piece {
     /// A streamed text delta. Consecutive ones join without a blank line.
     Text(String),
@@ -112,19 +122,28 @@ pub struct Parser {
     /// last assistant payload so structured chat events can drop that summary
     /// copy while retaining result-only output from older CLI versions.
     last_claude_assistant: Option<String>,
-    /// Cursor repeats every assistant message: word pieces, then the whole
-    /// message again, plus a whole-turn repeat when no tool runs in between.
-    /// `cursor_msg` is what the current message already emitted, `cursor_run`
-    /// what the run since the last tool call emitted, and `cursor_repeats`
-    /// how many message copies were dropped. A copy that only repeats what
-    /// is already on the transcript never reaches it twice. The message copy
-    /// matches the plain-text renderer's standing rule for this stream; the
-    /// turn copy additionally needs two dropped messages behind it, so a
-    /// second identical message on its own is kept rather than mistaken for
-    /// one.
-    cursor_msg: String,
-    cursor_run: String,
+    /// Cursor says every assistant message twice: word pieces, then the whole
+    /// message again. A `result` says the whole turn again after that, and a
+    /// stream that loses its connection resumes from a checkpoint and says
+    /// the turn again from the top. Only one copy of anything may reach the
+    /// transcript.
+    ///
+    /// `cursor_turn` is everything the turn has said, `cursor_msg_start` and
+    /// `cursor_run_start` index into it: the message in progress, and the run
+    /// since the last tool call. Comparing a record against those three is
+    /// what tells a snapshot from a new sentence. `cursor_repeats` counts the
+    /// copies already dropped, so a second identical *message* on its own is
+    /// kept rather than mistaken for a snapshot of the run.
+    cursor_turn: String,
+    cursor_msg_starts: Vec<usize>,
+    cursor_run_start: usize,
     cursor_repeats: u32,
+    /// Where a reconnected stream has got to in the turn it is repeating. It
+    /// resumes at a message boundary, not always the first one, so the anchor
+    /// is chosen from `cursor_msg_starts` by what the replay actually says.
+    /// While the replay matches what is already on the transcript nothing is
+    /// added, and the first thing it says differently ends it.
+    cursor_replay: Option<CursorReplay>,
     /// The session this stream has already reported.
     ///
     /// Some CLIs announce the session once, others stamp it on every line.
@@ -147,9 +166,11 @@ impl Parser {
             open_tools: Vec::new(),
             tool_inputs: HashMap::new(),
             last_claude_assistant: None,
-            cursor_msg: String::new(),
-            cursor_run: String::new(),
+            cursor_turn: String::new(),
+            cursor_msg_starts: vec![0],
+            cursor_run_start: 0,
             cursor_repeats: 0,
+            cursor_replay: None,
             last_session: None,
             muse_tasks: HashMap::new(),
         }
@@ -202,6 +223,7 @@ impl Parser {
             self.line_events(&line)
         };
         events.extend(self.close_open_tools(false, Some("ended".into())));
+        self.cursor_reset();
         events
     }
 
@@ -330,7 +352,7 @@ impl Parser {
             }
             let events = if self.is_json_backend() && cleaned.contains("\"type\":") {
                 Vec::new()
-            } else if let Some(text) = cli_refusal_text(&cleaned) {
+            } else if let Some(text) = cli_refusal_text(&self.backend, &cleaned) {
                 vec![Event::Failed { text }]
             } else {
                 vec![Event::Text { delta: cleaned }]
@@ -366,44 +388,155 @@ impl Parser {
             match value.get("type").and_then(Value::as_str) {
                 Some("assistant") => {
                     let text = cursor_assistant_text(&value);
-                    if !text.is_empty()
-                        && (text == self.cursor_msg
-                            || (self.cursor_repeats >= 2 && text == self.cursor_run))
-                    {
-                        // A snapshot copy of what is already recorded: the
-                        // message after its pieces, or the turn after its
-                        // messages. The turn copy needs two dropped messages
-                        // behind it, so a second identical message on its own
-                        // is kept rather than mistaken for one.
+                    if !text.is_empty() && self.cursor_absorbs(&text) {
                         events.retain(|event| !matches!(event, Event::Text { .. }));
-                        self.cursor_msg.clear();
-                        self.cursor_repeats += 1;
-                    } else {
-                        self.cursor_msg.push_str(&text);
-                        self.cursor_run.push_str(&text);
                     }
                 }
                 Some("result") => {
+                    // A result repeats the whole turn, every message of it,
+                    // and it is the last word either way. It needs no guard:
+                    // unlike an assistant record it cannot be a second
+                    // message that happens to read the same.
                     let text = value.get("result").and_then(Value::as_str).unwrap_or("");
-                    if !text.is_empty() && text == self.cursor_run {
+                    if !text.is_empty()
+                        && (text == self.cursor_turn
+                            || text == self.cursor_since(self.cursor_run_start)
+                            || text == self.cursor_since(self.cursor_msg_start()))
+                    {
                         events.retain(|event| !matches!(event, Event::Text { .. }));
                     }
-                    self.cursor_msg.clear();
-                    self.cursor_run.clear();
-                    self.cursor_repeats = 0;
+                    self.cursor_reset();
                 }
-                // Thinking and the connection/retry noise ride between a
-                // message's pieces and its snapshot repeat, so they leave
-                // the buffers alone. Anything else bounds the run.
-                Some("thinking") | Some("connection") | Some("retry") | None => {}
+                // A reconnect resumes the turn from its checkpoint and says
+                // it again from the top, so the whole turn is the message
+                // being repeated until the replay says something new.
+                Some("retry") => self.cursor_replay = Some(CursorReplay::Pending),
+                // Thinking and the connection noise ride between a message's
+                // pieces and its snapshot repeat, so they leave the buffers
+                // alone. Anything else bounds the message and the run.
+                Some("thinking") | Some("connection") | None => {}
                 _ => {
-                    self.cursor_msg.clear();
-                    self.cursor_run.clear();
+                    self.cursor_open_message_at(self.cursor_turn.len());
+                    self.cursor_run_start = self.cursor_turn.len();
                     self.cursor_repeats = 0;
                 }
             }
         }
         self.take_events(events)
+    }
+
+    /// Whether this piece of cursor prose is already on the transcript.
+    ///
+    /// True means drop it. Anything kept is appended to the turn, which is
+    /// what the next comparison is made against.
+    fn cursor_absorbs(&mut self, text: &str) -> bool {
+        match self.cursor_replay {
+            Some(CursorReplay::Pending) => {
+                // The first record after a reconnect says where the stream
+                // resumed: the newest message boundary it continues from.
+                if let Some(from) = self.cursor_replay_anchor(text) {
+                    self.cursor_replay = Some(CursorReplay::At {
+                        from,
+                        at: from + text.len(),
+                    });
+                    return true;
+                }
+                self.cursor_replay = None;
+            }
+            Some(CursorReplay::At { from, at }) => {
+                if self.cursor_since(at).starts_with(text) {
+                    self.cursor_replay = Some(CursorReplay::At {
+                        from,
+                        at: at + text.len(),
+                    });
+                    return true;
+                }
+                // Not where it was, but a reconnect can drop again and
+                // resume at another message, so a boundary that this record
+                // does start is the replay carrying on elsewhere.
+                if let Some(from) = self.cursor_replay_anchor(text) {
+                    self.cursor_replay = Some(CursorReplay::At {
+                        from,
+                        at: from + text.len(),
+                    });
+                    return true;
+                }
+                // The replay has said something new. What it repeated is the
+                // start of the message this continues, so the snapshot that
+                // closes that message still matches it.
+                self.cursor_replay = None;
+                self.cursor_open_message_at(from);
+            }
+            None => {}
+        }
+        if text == self.cursor_since(self.cursor_msg_start()) {
+            // The whole message, after its pieces.
+            self.cursor_end_message();
+            return true;
+        }
+        if self.cursor_repeats >= 2
+            && (text == self.cursor_turn || text == self.cursor_since(self.cursor_run_start))
+        {
+            // The whole turn, or the run since the last tool call, after its
+            // messages. Two dropped copies behind it, so a second identical
+            // message on its own is kept rather than mistaken for one.
+            self.cursor_end_message();
+            return true;
+        }
+        self.cursor_turn.push_str(text);
+        false
+    }
+
+    /// The newest message boundary a replay could be resuming from: the last
+    /// one whose text this record starts.
+    fn cursor_replay_anchor(&self, text: &str) -> Option<usize> {
+        self.cursor_msg_starts.iter().rev().copied().find(|at| {
+            !self.cursor_since(*at).is_empty() && self.cursor_since(*at).starts_with(text)
+        })
+    }
+
+    /// Where the message being written started.
+    fn cursor_msg_start(&self) -> usize {
+        self.cursor_msg_starts.last().copied().unwrap_or(0)
+    }
+
+    /// Close the message: whatever comes next starts a new one.
+    fn cursor_end_message(&mut self) {
+        self.cursor_repeats += 1;
+        self.cursor_open_message_at(self.cursor_turn.len());
+    }
+
+    /// Say which message is being written now, without losing the boundaries
+    /// a later replay has to choose between.
+    fn cursor_open_message_at(&mut self, at: usize) {
+        if self.cursor_msg_start() == at {
+            return;
+        }
+        if at < self.cursor_msg_start() {
+            self.cursor_msg_starts.retain(|start| *start <= at);
+        }
+        if self.cursor_msg_starts.last() != Some(&at) {
+            self.cursor_msg_starts.push(at);
+        }
+    }
+
+    /// What the turn has said since a boundary, empty when the index has been
+    /// invalidated by a reset.
+    fn cursor_since(&self, at: usize) -> &str {
+        if at <= self.cursor_turn.len() && self.cursor_turn.is_char_boundary(at) {
+            &self.cursor_turn[at..]
+        } else {
+            ""
+        }
+    }
+
+    fn cursor_reset(&mut self) {
+        self.cursor_turn.clear();
+        self.cursor_msg_starts.clear();
+        self.cursor_msg_starts.push(0);
+        self.cursor_run_start = 0;
+        self.cursor_repeats = 0;
+        self.cursor_replay = None;
     }
 
     fn take_events(&mut self, events: Vec<Event>) -> Vec<Event> {
@@ -559,8 +692,13 @@ impl Parser {
 /// Headless CLIs print a refusal as plain text, not NDJSON. That is a failed
 /// turn, not the agent talking. Keep the original line unless it is one of
 /// the two refusals we have copy for.
-fn cli_refusal_text(line: &str) -> Option<String> {
+fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
     let lower = line.to_ascii_lowercase();
+    if backend == "cursor"
+        && let Some(text) = cursor_error_text(&lower)
+    {
+        return Some(text);
+    }
     if lower.contains("please run /login") {
         return Some(
             "Claude Code is not signed in on this Mac. Open a terminal, run claude, and use /login."
@@ -592,6 +730,37 @@ fn cli_refusal_text(line: &str) -> Option<String> {
     }
     if lower.starts_with("error:") || lower.contains("actionrequirederror") {
         return Some(line.to_string());
+    }
+    None
+}
+
+/// What cursor prints on stderr when a turn dies, said in words.
+///
+/// `RetriableError: [resource_exhausted] Error` is a sentence about somebody's
+/// plan, and it reached the transcript as an assistant message: the chat read
+/// as though the agent had answered with a stack trace. These are failures,
+/// and they say what to do about them.
+fn cursor_error_text(lower: &str) -> Option<String> {
+    if !(lower.starts_with("retriableerror") || lower.starts_with("error:")) {
+        return None;
+    }
+    if lower.contains("resource_exhausted") || lower.contains("rate limit") {
+        return Some(
+            "Cursor stopped: this plan's limit is used up. Wait for it to reset, or pick another model."
+                .into(),
+        );
+    }
+    if lower.contains("unauthenticated") || lower.contains("unauthorized") {
+        return Some(
+            "Cursor is not signed in on this machine. Open a terminal and run cursor-agent login."
+                .into(),
+        );
+    }
+    if lower.starts_with("retriableerror") {
+        return Some(
+            "Cursor lost its connection and gave up after retrying, so this turn may be unfinished."
+                .into(),
+        );
     }
     None
 }
@@ -847,49 +1016,302 @@ fn claude_tool_result_detail(block: &Value) -> Option<String> {
 
 fn events_cursor(value: &Value) -> Vec<Event> {
     match value.get("type").and_then(Value::as_str) {
-        Some("assistant") => assistant_event_text(value),
-        Some("result") => {
-            let mut events = event_text(value.get("result").and_then(Value::as_str));
-            events.push(done("done", value.get("exit_code").and_then(json_i32)));
-            events
-        }
-        Some("tool_call") => {
-            let subtype = value
-                .get("subtype")
-                .and_then(Value::as_str)
-                .unwrap_or("started");
-            let Some((name, call)) = value
-                .get("tool_call")
-                .and_then(Value::as_object)
-                .and_then(|calls| calls.iter().next())
-            else {
-                return Vec::new();
-            };
-            let id = call
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or(name)
-                .to_string();
-            if subtype == "started" {
-                vec![tool_start_with_id(
-                    &id,
-                    name,
-                    call.get("args").cloned().unwrap_or(Value::Null),
-                )]
+        // Not `assistant_event_text`: cursor streams word pieces and sends
+        // the space between two words as a delta of its own, which a
+        // whitespace filter drops and leaves "report line2". The whole
+        // record's text, spaces and all, is also exactly what the repeat
+        // check compares against.
+        Some("assistant") => {
+            let text = cursor_assistant_text(value);
+            if text.is_empty() {
+                Vec::new()
             } else {
-                vec![Event::ToolEnd {
-                    call_id: id,
-                    ok: subtype != "failed",
-                    detail: call
-                        .get("error")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                }]
+                vec![Event::Text { delta: text }]
             }
         }
-        Some("error") => event_failed(value.get("message").and_then(Value::as_str)),
+        // The session id is what `--resume` needs on the next turn. Without
+        // it every message in a cursor chat starts a conversation the agent
+        // has never had before.
+        Some("system") => cursor_session(value),
+        Some("thinking") => event_thinking(value.get("text").and_then(Value::as_str)),
+        Some("result") => {
+            let mut events = cursor_session(value);
+            events.extend(event_text(value.get("result").and_then(Value::as_str)));
+            events.extend(event_usage(value));
+            let failed = value
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || value.get("subtype").and_then(Value::as_str) == Some("error");
+            events.push(done(if failed { "error" } else { "done" }, None));
+            events
+        }
+        Some("tool_call") => events_cursor_tool(value),
+        Some("error") => event_failed(
+            value
+                .get("message")
+                .or_else(|| value.get("error"))
+                .and_then(Value::as_str),
+        ),
         _ => Vec::new(),
     }
+}
+
+fn cursor_session(value: &Value) -> Vec<Event> {
+    value
+        .get("session_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(|id| vec![Event::Session { id: id.into() }])
+        .unwrap_or_default()
+}
+
+/// One cursor `tool_call` record.
+///
+/// The map beside the call carries bookkeeping (`toolCallId`, `startedAtMs`,
+/// `hookAdditionalContexts`), and serde sorts object keys, so "the first
+/// entry" was `hookAdditionalContexts` on a start and `completedAtMs` on an
+/// end: two rows for one call, named after neither the tool nor each other,
+/// and every start left open until the turn closed it as `ended`. The tool is
+/// the entry whose key ends in `ToolCall`, and the id is the one both halves
+/// agree on.
+fn events_cursor_tool(value: &Value) -> Vec<Event> {
+    let subtype = value
+        .get("subtype")
+        .and_then(Value::as_str)
+        .unwrap_or("started");
+    let Some(calls) = value.get("tool_call").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let Some((name, call)) = cursor_tool_entry(calls) else {
+        return Vec::new();
+    };
+    let id = cursor_call_id(value, calls, call, name);
+    if subtype == "started" {
+        return vec![tool_start_with_id(
+            &id,
+            name,
+            call.get("args").cloned().unwrap_or(Value::Null),
+        )];
+    }
+    let (ok, detail) = cursor_tool_result(call, subtype);
+    let mut events = vec![Event::ToolEnd {
+        call_id: id.clone(),
+        ok,
+        detail,
+    }];
+    // Cursor reports the diff only when the write has happened, so unlike the
+    // old/new pair other CLIs send up front, the change card can only be made
+    // here.
+    events.extend(cursor_edit_event(&id, call));
+    events
+}
+
+fn cursor_tool_entry(calls: &serde_json::Map<String, Value>) -> Option<(&str, &Value)> {
+    calls
+        .iter()
+        .find(|(key, _)| key.ends_with("ToolCall"))
+        .or_else(|| calls.iter().find(|(_, value)| value.is_object()))
+        .map(|(key, value)| (key.as_str(), value))
+}
+
+/// The id both halves of a call carry. Cursor puts a two-line id on the
+/// record; the first line is the call, and a row id is never read out loud,
+/// so keep that half rather than a value with a newline in it.
+fn cursor_call_id(
+    value: &Value,
+    calls: &serde_json::Map<String, Value>,
+    call: &Value,
+    name: &str,
+) -> String {
+    let raw = value
+        .get("call_id")
+        .or_else(|| calls.get("toolCallId"))
+        .or_else(|| call.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or(name);
+    let first = raw.split('\n').next().unwrap_or(raw).trim();
+    if first.is_empty() {
+        name.to_string()
+    } else {
+        first.to_string()
+    }
+}
+
+/// Whether a finished call worked, and what to show under it.
+///
+/// A cursor result is one of four shapes. `rejected` is the one worth naming:
+/// it is what every shell command becomes when the CLI was not given
+/// permission to run tools, and it arrives with an empty reason, so a row
+/// that only said "failed" left nothing to act on.
+fn cursor_tool_result(call: &Value, subtype: &str) -> (bool, Option<String>) {
+    let Some(result) = call.get("result") else {
+        let detail = call
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        return (subtype != "failed", detail);
+    };
+    if let Some(rejected) = result.get("rejected") {
+        let reason = rejected
+            .get("reason")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|reason| !reason.is_empty());
+        let command = rejected
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|command| !command.is_empty());
+        let text = match (command, reason) {
+            (Some(command), Some(reason)) => format!("Cursor refused to run {command}: {reason}"),
+            (Some(command), None) => format!("Cursor refused to run {command}"),
+            (None, Some(reason)) => format!("Cursor refused this call: {reason}"),
+            (None, None) => "Cursor refused this call".to_string(),
+        };
+        return (false, Some(text));
+    }
+    if let Some(error) = result.get("error").or_else(|| result.get("spawnError")) {
+        let text = error
+            .get("errorMessage")
+            .or_else(|| error.get("error"))
+            .or_else(|| error.get("message"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| error.as_str().map(str::to_string));
+        return (false, text);
+    }
+    let Some(success) = result.get("success") else {
+        return (subtype != "failed", None);
+    };
+    let ok = success
+        .get("exitCode")
+        .and_then(json_i32)
+        .map(|code| code == 0)
+        .unwrap_or(subtype != "failed");
+    (ok, cursor_success_detail(success))
+}
+
+/// What a finished call is worth showing: the shell's own output, the file a
+/// read returned, the paths a glob matched, or whatever sentence the tool
+/// wrote about itself.
+fn cursor_success_detail(success: &Value) -> Option<String> {
+    const MAX_CHARS: usize = 4000;
+    let mut parts: Vec<String> = Vec::new();
+    for key in ["stdout", "stderr"] {
+        if let Some(text) = success
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim_end)
+            .filter(|text| !text.trim().is_empty())
+        {
+            parts.push(text.to_string());
+        }
+    }
+    if parts.is_empty() {
+        if let Some(text) = success
+            .get("interleavedOutput")
+            .or_else(|| success.get("content"))
+            .or_else(|| success.get("message"))
+            .and_then(Value::as_str)
+            .map(str::trim_end)
+            .filter(|text| !text.trim().is_empty())
+        {
+            parts.push(text.to_string());
+        }
+    }
+    if parts.is_empty()
+        && let Some(files) = success.get("files").and_then(Value::as_array)
+    {
+        let listed: Vec<&str> = files.iter().filter_map(Value::as_str).take(20).collect();
+        if !listed.is_empty() {
+            parts.push(listed.join("\n"));
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let mut out = parts.join("\n");
+    if out.len() > MAX_CHARS {
+        let mut end = MAX_CHARS;
+        while end > 0 && !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+        out.push_str("\n…");
+    }
+    Some(out)
+}
+
+/// The change card for a cursor write, built from the diff the CLI reports
+/// when the file has been written. Keyed on the result rather than the tool
+/// name, so a rename of the write tool cannot quietly lose the card.
+fn cursor_edit_event(call_id: &str, call: &Value) -> Option<Event> {
+    let success = call.pointer("/result/success")?;
+    let path = success
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            call.pointer("/args/path")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+    let patch = success
+        .get("diffString")
+        .and_then(Value::as_str)
+        .map(cursor_patch)
+        .filter(|patch| !patch.is_empty())
+        .or_else(|| {
+            let before = success
+                .get("beforeFullFileContent")
+                .and_then(Value::as_str)?;
+            let after = success
+                .get("afterFullFileContent")
+                .and_then(Value::as_str)?;
+            (before != after).then(|| render_edit_snippet(before, after))
+        })?;
+    let added = success
+        .get("linesAdded")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    let removed = success
+        .get("linesRemoved")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    Some(Event::Edit {
+        call_id: call_id.to_string(),
+        path,
+        added,
+        removed,
+        patch,
+    })
+}
+
+/// Cursor's diff, without the two file headers. They repeat the path the card
+/// already names, and they are the one place a workspace's absolute path
+/// would be drawn twice inside a change nobody asked to see it in.
+fn cursor_patch(diff: &str) -> String {
+    const MAX_CHARS: usize = 4000;
+    let mut out = diff
+        .lines()
+        .filter(|line| {
+            !(line.starts_with("--- ")
+                || line.starts_with("+++ ")
+                || line.starts_with("diff --git"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if out.len() > MAX_CHARS {
+        let mut end = MAX_CHARS;
+        while end > 0 && !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+        out.push_str("\n…");
+    }
+    out
 }
 
 fn events_codex(value: &Value) -> Vec<Event> {
@@ -1547,23 +1969,10 @@ fn done(status: &str, exit_code: Option<i32>) -> Event {
         exit_code,
     }
 }
-fn assistant_event_text(value: &Value) -> Vec<Event> {
-    value
-        .pointer("/message/content")
-        .or_else(|| value.get("content"))
-        .and_then(Value::as_array)
-        .map(|blocks| {
-            blocks
-                .iter()
-                .flat_map(|block| event_text(block.get("text").and_then(Value::as_str)))
-                .collect()
-        })
-        .unwrap_or_default()
-}
 
-/// The text one cursor `assistant` event carries: its content blocks joined,
-/// the same traversal [`assistant_event_text`] records from, so a snapshot
-/// copy compares equal to the pieces it repeats.
+/// The text one cursor `assistant` record carries: its content blocks joined.
+/// This is both what reaches the transcript and what a snapshot copy is
+/// compared against, so the two can never disagree about what was said.
 fn cursor_assistant_text(value: &Value) -> String {
     value
         .pointer("/message/content")
@@ -1778,7 +2187,7 @@ fn render_cursor(value: &serde_json::Value) -> Option<Piece> {
                 return None;
             }
             let map = value.get("tool_call")?.as_object()?;
-            let (key, call) = map.iter().next()?;
+            let (key, call) = cursor_tool_entry(map)?;
             let title = display_verb(&tool_label(key));
             Some(Piece::Block(format_tool(&title, call.get("args"))))
         }
@@ -1979,7 +2388,7 @@ fn format_tool(verb: &str, input: Option<&serde_json::Value>) -> String {
 
 fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
     let value = input?;
-    const KEYS: [&str; 14] = [
+    const KEYS: [&str; 15] = [
         "path",
         "file_path",
         "filePath",
@@ -1988,6 +2397,7 @@ fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
         "target_directory",
         "command",
         "pattern",
+        "globPattern",
         "query",
         // Antigravity stream-json uses PascalCase.
         "TargetFile",
@@ -2967,6 +3377,227 @@ mod tests {
         assert!(out.contains("Shell"));
         assert_eq!(out.matches("Shell").count(), 1);
         assert_eq!(out.matches("Hi").count(), 1);
+    }
+
+    #[test]
+    fn cursor_reads_the_call_not_the_bookkeeping_beside_it() {
+        // Recorded from cursor-agent stream-json. The map holds the call plus
+        // `hookAdditionalContexts`, `toolCallId` and the timestamps, and
+        // serde sorts it, so taking its first entry named a start after the
+        // hook contexts and an end after `completedAtMs`: two rows per call,
+        // neither of them matching, and every start left open.
+        let raw = include_str!("../../../fixtures/chat/cursor.ndjson");
+        let mut parser = Parser::new("cursor");
+        let mut events = parser.push_events(raw.as_bytes());
+        events.extend(parser.finish_events());
+        let verbs: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::ToolStart { verb, .. } => Some(verb.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(verbs, ["Read", "Edit", "Shell"], "{events:?}");
+        for (start, end) in events
+            .iter()
+            .filter_map(|event| match event {
+                Event::ToolStart { call_id, .. } => Some(call_id.clone()),
+                _ => None,
+            })
+            .zip(events.iter().filter_map(|event| match event {
+                Event::ToolEnd { call_id, ok, .. } => Some((call_id.clone(), *ok)),
+                _ => None,
+            }))
+        {
+            assert_eq!(start, end.0, "a call whose halves do not match");
+            assert!(end.1, "a call that worked was recorded as failed");
+        }
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { detail: Some(detail), .. } if detail == "ended"
+            )),
+            "a matched call was closed by the end of the stream: {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { detail: Some(detail), .. } if detail.contains("3 notes.txt")
+            )),
+            "the shell output never reached the row: {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { detail: Some(detail), .. } if detail.contains("alpha\nbeta")
+            )),
+            "the file a read returned never reached the row: {events:?}"
+        );
+    }
+
+    #[test]
+    fn cursor_reports_its_session_thinking_and_usage() {
+        // The session id is what `--resume` needs: without it every message
+        // in a chat starts a conversation the agent has never had before.
+        let raw = include_str!("../../../fixtures/chat/cursor.ndjson");
+        let mut parser = Parser::new("cursor");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(
+            matches!(events.first(), Some(Event::Session { id }) if id.starts_with("11111111")),
+            "{events:?}"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::Session { .. }))
+                .count(),
+            1,
+            "one session per stream: {events:?}"
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::Thinking { delta } if delta == "Reading notes.txt."
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::Usage {
+                input: 25_665,
+                output: 262,
+                cache_read: 43_392,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn cursor_edit_carries_the_diff_the_cli_reports() {
+        // Cursor names the change only once the file is written, so unlike
+        // the old/new pair other CLIs send up front, the card can only be
+        // built from the finished call.
+        let raw = include_str!("../../../fixtures/chat/cursor.ndjson");
+        let mut parser = Parser::new("cursor");
+        let events = parser.push_events(raw.as_bytes());
+        let edit = events
+            .iter()
+            .find_map(|event| match event {
+                Event::Edit {
+                    path,
+                    added,
+                    removed,
+                    patch,
+                    ..
+                } => Some((path.clone(), *added, *removed, patch.clone())),
+                _ => None,
+            })
+            .expect("no change card");
+        assert_eq!(edit.0, "/work/notes.txt");
+        assert_eq!((edit.1, edit.2), (1, 1));
+        assert!(edit.3.contains("-beta"), "{:?}", edit.3);
+        assert!(edit.3.contains("+BETA"), "{:?}", edit.3);
+        assert!(
+            !edit.3.contains("--- a/"),
+            "the file headers repeat the path the card already names: {:?}",
+            edit.3
+        );
+    }
+
+    #[test]
+    fn cursor_says_a_whole_turn_once() {
+        // The `result` record repeats every message of the turn, not only the
+        // last one, so comparing it against the run since the last tool call
+        // put the whole conversation on the transcript twice.
+        let raw = include_str!("../../../fixtures/chat/cursor.ndjson");
+        let mut parser = Parser::new("cursor");
+        let events = parser.push_events(raw.as_bytes());
+        let text: String = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Text { delta } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "Changing line two.Done: 3 lines.");
+    }
+
+    #[test]
+    fn cursor_replay_after_a_reconnect_is_not_a_second_answer() {
+        // A turn that loses its connection resumes from a checkpoint and says
+        // the whole turn again. Only what it says differently is new.
+        let raw = include_str!("../../../fixtures/chat/cursor-retry.ndjson");
+        let mut parser = Parser::new("cursor");
+        let events = parser.push_events(raw.as_bytes());
+        let text: String = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Text { delta } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "hello, world. That is all.");
+    }
+
+    #[test]
+    fn cursor_names_a_refused_tool_call() {
+        // Without permission to run tools every shell command comes back
+        // rejected with an empty reason. A row that only said "failed" left
+        // nothing to act on.
+        let raw = concat!(
+            r#"{"type":"tool_call","subtype":"started","call_id":"c-1","tool_call":{"shellToolCall":{"args":{"command":"wc -l notes.txt"}},"hookAdditionalContexts":[],"toolCallId":"c-1","startedAtMs":"1"}}"#,
+            "\n",
+            r#"{"type":"tool_call","subtype":"completed","call_id":"c-1","tool_call":{"shellToolCall":{"result":{"rejected":{"command":"wc -l notes.txt","workingDirectory":"/work","reason":"","isReadonly":false}}},"hookAdditionalContexts":[],"toolCallId":"c-1","startedAtMs":"1","completedAtMs":"2"}}"#,
+            "\n",
+            r#"{"type":"tool_call","subtype":"completed","call_id":"c-2","tool_call":{"shellToolCall":{"result":{"spawnError":{"command":"ls","workingDirectory":"/work","error":"The shell command returned no exit status"}}},"toolCallId":"c-2"}}"#,
+            "\n",
+        );
+        let mut parser = Parser::new("cursor");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, ok: false, detail: Some(detail) }
+                    if call_id == "c-1" && detail == "Cursor refused to run wc -l notes.txt"
+            )),
+            "{events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, ok: false, detail: Some(detail) }
+                    if call_id == "c-2" && detail.contains("no exit status")
+            )),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn cursor_stderr_is_a_failure_not_an_answer() {
+        // `RetriableError: [resource_exhausted] Error` reached the transcript
+        // as an assistant message, so a chat read as though the agent had
+        // replied with a stack trace.
+        let mut parser = Parser::new("cursor");
+        let events = parser.push_events(b"RetriableError: [resource_exhausted] Error\n");
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::Failed { text } if text.contains("limit is used up")
+            )),
+            "{events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::Text { .. }))
+        );
+
+        let mut parser = Parser::new("cursor");
+        let events = parser.push_events(b"RetriableError: WritableIterable is closed\n");
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::Failed { text } if text.contains("lost its connection")
+            )),
+            "{events:?}"
+        );
     }
 
     #[test]

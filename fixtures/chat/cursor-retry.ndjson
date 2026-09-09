@@ -1,0 +1,22 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","model":"Auto","permissionMode":"default"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hel"}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2000}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"lo, "}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2001}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"world."}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2002}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello, world."}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2003}
+{"type":"connection","subtype":"reconnecting","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2100,"attempt":1,"endpoint_url":"https://agent.example.invalid"}
+{"type":"retry","subtype":"starting","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2200,"attempt":1,"is_resume":true}
+{"type":"retry","subtype":"resuming","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2201,"checkpoint_turn_count":1,"attempt":1}
+{"type":"connection","subtype":"reconnected","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2300}
+{"type":"thinking","subtype":"delta","text":"Saying it again.","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2400}
+{"type":"thinking","subtype":"completed","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2401}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hel"}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2500}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"lo, "}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2501}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"world."}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2502}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" That"}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2600}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" is all."}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":2601}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello, world. That is all."}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
+{"type":"connection","subtype":"reconnecting","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":3000,"attempt":2,"endpoint_url":"https://agent.example.invalid"}
+{"type":"retry","subtype":"starting","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":3001,"attempt":2,"is_resume":true}
+{"type":"retry","subtype":"resuming","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":3002,"checkpoint_turn_count":1,"attempt":2}
+{"type":"connection","subtype":"reconnected","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":3003}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello, world. That is all."}]},"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","timestamp_ms":3100}
