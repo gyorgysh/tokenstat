@@ -461,6 +461,7 @@ struct ClientChatThread: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            if phase != .active { model.saveDraftNow() }
             guard phase == .active else { return }
             Task { await foregroundRefresh() }
         }
@@ -476,8 +477,8 @@ struct ClientChatThread: View {
                     Button(action: onBack) { ActionIcon.back.label("Chats") }
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                if chat != nil {
+            if chat != nil && (pinReference != nil || model.savedCopy == nil) {
+                ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 0) {
                         PinToggleButton(
                             reference: pinReference,
@@ -549,11 +550,12 @@ struct ClientChatThread: View {
                 .ignoresSafeArea()
         }
         .onDisappear {
+            model.saveDraftNow()
             UserPresence.shared.chatSurface(showing: nil)
         }
         // The host is on the other computer and cannot see this screen. Until
         // it is told, a turn finishing here pushed to this very phone.
-        .watching(conversationID: chatID, peer: model.peer)
+        .watching(conversationID: chatID, peer: model.peer, isActive: model.savedCopy == nil)
         // Optimistic while offline. A modal for a failure the recovery pass
         // is about to erase is a popup, not information: the strip says
         // reconnecting, the foreground refresh retries, and anything still
@@ -578,7 +580,8 @@ struct ClientChatThread: View {
                 // A saved copy explains itself above the composer: what the
                 // rows are, when they were kept, and the way back to live.
                 if let copy = model.savedCopy {
-                    ChatSavedCopyBanner(info: copy, checking: model.checkingSavedCopy) {
+                    ChatSavedCopyBanner(info: copy, checking: model.checkingSavedCopy,
+                        canCheck: model.currentReference?.scope == WorkSessionContext.shared.scope) {
                         Task { await checkSavedCopyUpdates() }
                     }
                     .padding(.horizontal, Theme.Space.s)

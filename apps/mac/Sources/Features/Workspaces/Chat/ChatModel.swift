@@ -116,7 +116,7 @@ final class ChatModel {
     private var continuityScope: WorkReference.Scope?
 
     private func continuityOwner(folderID: String) -> (scope: WorkReference.Scope, host: String, workspace: String)? {
-        guard let scope = continuityScope, scope == WorkSessionContext.shared.scope else { return nil }
+        guard let scope = continuityScope, scope == WorkSessionContext.shared.readingScope else { return nil }
         let route = WorkDestinationResolver.route(folderID: folderID,
             explicitPeer: folderID == self.folderID ? peer : nil)
         guard let host = route.peer ?? WorkSessionContext.shared.localHostIdentity else { return nil }
@@ -425,6 +425,7 @@ final class ChatModel {
 
     /// Ask the machine what became of a message it never answered for.
     func checkUnconfirmedSend() async {
+        guard savedCopy == nil else { return }
         guard var pending = unconfirmedSend, !pending.checking,
               selected?.id == pending.conversationID
         else { return }
@@ -693,13 +694,13 @@ final class ChatModel {
     /// reconciliation runs here. Only a fresh model may adopt this owner.
     func loadSavedConversation(_ reference: WorkReference) async -> Bool {
         guard folderID == nil, selected == nil,
-              reference.scope == WorkSessionContext.shared.scope,
+              reference.scope == WorkSessionContext.shared.readingScope,
               WorkReferenceKey.conversation(reference) != nil else { return false }
         loadGeneration &+= 1
         let generation = loadGeneration
         guard let copy = await WorkCacheStore.shared.savedConversation(for: reference),
               !Task.isCancelled, generation == loadGeneration,
-              reference.scope == WorkSessionContext.shared.scope else { return false }
+              reference.scope == WorkSessionContext.shared.readingScope else { return false }
         continuityScope = reference.scope
         peer = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity ? nil : reference.hostIdentity
         workspaceID = reference.workspaceID
@@ -1955,6 +1956,10 @@ final class ChatModel {
     func checkSavedCopyForUpdates(prepareConnection: (() async throws -> Void)? = nil) async {
         guard savedCopy != nil, !checkingSavedCopy, let chat = selected,
               let workspaceID, let reference = currentReference else { return }
+        guard reference.scope == WorkSessionContext.shared.scope else {
+            error = "Verify your account before returning to the live conversation. Your draft stays on this device."
+            return
+        }
         let generation = selectionGeneration
         checkingSavedCopy = true
         defer { checkingSavedCopy = false }
@@ -2117,7 +2122,7 @@ final class ChatModel {
 
     private func selectionMatches(id: String, generation: UInt64) -> Bool {
         selectionGeneration == generation && selected?.id == id
-            && continuityScope == WorkSessionContext.shared.scope
+            && continuityScope == WorkSessionContext.shared.readingScope
     }
 
     private func replace(_ chat: ChatConversation) {

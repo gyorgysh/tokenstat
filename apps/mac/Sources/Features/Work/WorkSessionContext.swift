@@ -9,12 +9,17 @@ final class WorkSessionContext {
     static let shared = WorkSessionContext()
     private(set) var scope: WorkReference.Scope?
     private(set) var localHostIdentity: String?
+    /// Only saved-page ownership may use this fallback. Live routing continues
+    /// to require `scope`, which remains nil until the account answers.
+    var readingScope: WorkReference.Scope? { scope ?? savedAccess.reader?.scope }
     private let installationID: String
+    private let savedAccess: SavedWorkAccess
 
-    private init() {
+    init(defaults: UserDefaults = .standard, savedAccess: SavedWorkAccess? = nil) {
+        self.savedAccess = savedAccess ?? .shared
         let key = "work.localInstallation.v1"
-        let id = UserDefaults.standard.string(forKey: key) ?? UUID().uuidString
-        UserDefaults.standard.set(id, forKey: key)
+        let id = defaults.string(forKey: key) ?? UUID().uuidString
+        defaults.set(id, forKey: key)
         installationID = id
     }
 
@@ -26,6 +31,19 @@ final class WorkSessionContext {
                 : .local(installationID: installationID)
         } else {
             next = nil
+        }
+        if let account {
+            let owner = next.flatMap { scope -> SavedWorkOwner? in
+                guard account.signedIn, scope.kind == .account else { return nil }
+                let hosts = account.machines.reduce(into: [String: String]()) { result, machine in
+                    guard let identity = machine.publicIdentity, !identity.isEmpty else { return }
+                    result[identity] = machine.displayName
+                }
+                return SavedWorkOwner(scope: scope, name: account.title ?? scope.identity, hosts: hosts)
+            }
+            savedAccess.verified(owner)
+        } else {
+            savedAccess.accountUnknown()
         }
         if scope != next { scope = next }
     }

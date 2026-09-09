@@ -13,6 +13,7 @@ import SwiftUI
 struct ChatSavedCopyBanner: View {
     var info: SavedCopyInfo
     var checking: Bool
+    var canCheck = true
     var onCheck: () -> Void
 
     var body: some View {
@@ -41,7 +42,7 @@ struct ChatSavedCopyBanner: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Checking for updates")
-            } else {
+            } else if canCheck {
                 Button("Check for updates", .refresh, action: onCheck)
                     .modifier(NoticeActionButtonStyle())
             }
@@ -55,10 +56,11 @@ struct ChatSavedCopyBanner: View {
 
     private var subtitle: String {
         let when = RelativeClock.phrase(for: info.savedAt, style: .full)
+        let accountNote = canCheck ? "" : " Verify your account for live updates."
         if info.hasEarlier {
-            return "Updated \(when). Earlier messages were not saved."
+            return "Updated \(when). Earlier messages were not saved." + accountNote
         }
-        return "Updated \(when)."
+        return "Updated \(when)." + accountNote
     }
 }
 

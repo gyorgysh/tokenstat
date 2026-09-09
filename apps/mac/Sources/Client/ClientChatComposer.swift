@@ -46,6 +46,10 @@ struct ClientChatComposer: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if model.draftSaveFailed {
                 ChatDraftNotice(retrySave: { model.retryDraftSave() })
+            } else if model.unconfirmedSend != nil, model.savedCopy != nil {
+                Text("A previous send needs confirmation. Return to the live conversation to check it.")
+                    .font(Theme.caption)
+                    .foregroundStyle(.secondary)
             } else if let unconfirmed = model.unconfirmedSend {
                 ChatDraftNotice(unconfirmed: unconfirmed,
                                 checkAgain: { Task { await model.checkUnconfirmedSend() } })

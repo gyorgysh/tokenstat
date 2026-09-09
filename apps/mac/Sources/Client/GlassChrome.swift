@@ -132,7 +132,7 @@ extension View {
     func clientFloatingBar(cornerRadius: CGFloat = 22) -> some View {
         if #available(iOS 26, *) {
             glassEffect(
-                .regular,
+                .regular.tint(Theme.panel),
                 in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             )
         } else {

@@ -32,6 +32,22 @@ struct CachedRecordPayload: Decodable, Sendable {
     var savedAt: Date
     var revision: String
     var page: ChatEventPage
+
+    enum CodingKeys: String, CodingKey { case backend, title, savedAt, revision, page }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        backend = try values.decodeIfPresent(String.self, forKey: .backend)
+        title = try values.decode(String.self, forKey: .title)
+        revision = try values.decode(String.self, forKey: .revision)
+        page = try values.decode(ChatEventPage.self, forKey: .page)
+        let timestamp = try values.decode(String.self, forKey: .savedAt)
+        guard let date = ISO8601DateFormatter().date(from: timestamp) else {
+            throw DecodingError.dataCorruptedError(forKey: .savedAt, in: values,
+                debugDescription: "Saved work timestamp is not ISO 8601")
+        }
+        savedAt = date
+    }
 }
 
 struct CachedRecord: Decodable, Sendable {

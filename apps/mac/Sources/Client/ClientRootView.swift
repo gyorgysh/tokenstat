@@ -60,6 +60,7 @@ struct ClientRootView: View {
     @State private var showAccount = false
     @State private var store = ClientStore()
     @State private var notificationOpen = NotificationOpen.shared
+    @State private var savedAccess = SavedWorkAccess.shared
 
     /// The door for a phone or an iPad with no account on it.
     ///
@@ -135,7 +136,10 @@ struct ClientRootView: View {
             } else if account.authNeedsRetry {
                 ClientAuthRetryView(
                     message: account.authCheckError,
-                    isLoading: account.isLoading
+                    isLoading: account.isLoading,
+                    onSavedWork: savedAccess.offeredOwner.map { owner in
+                        { _ = savedAccess.beginReading(owner) }
+                    }
                 ) {
                     Task { await account.load() }
                 }
@@ -243,8 +247,14 @@ struct ClientRootView: View {
             Task { await Bridge.nudgeTunnel(reconnect: true) }
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard phase == .active, account.signedIn else { return }
             Task { await Bridge.nudgeTunnelOnForeground() }
+        }
+        .fullScreenCover(item: Binding(
+            get: { savedAccess.reader },
+            set: { if $0 == nil { savedAccess.endReading() } }
+        )) { owner in
+            ClientSavedWorkView(owner: owner)
         }
         .sheet(isPresented: $showAccount) {
             ClientAccountSheet()
@@ -434,6 +444,7 @@ struct ClientSSHTab: View {
 private struct ClientAuthRetryView: View {
     let message: String?
     let isLoading: Bool
+    var onSavedWork: (() -> Void)? = nil
     let onRetry: () -> Void
 
     /// The failure in the app's own words. Raw transport text ("unknown
@@ -469,6 +480,10 @@ private struct ClientAuthRetryView: View {
                 .clientProminentStyle()
                 .controlSize(.large)
                 .disabled(isLoading)
+                if let onSavedWork {
+                    Button("Open saved work", .archive, action: onSavedWork)
+                        .buttonStyle(SecondaryButtonStyle())
+                }
             }
             .tint(Theme.accent)
             .padding(.horizontal, Theme.Space.l)

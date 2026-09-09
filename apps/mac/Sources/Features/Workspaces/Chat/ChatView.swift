@@ -256,7 +256,8 @@ struct ChatView: View {
         .onDisappear { model.saveDraftNow() }
         // And the same fact to the host, which is the one deciding whether a
         // phone hears about this turn.
-        .watching(conversationID: model.selected?.id, peer: model.peer, isActive: isActive)
+        .watching(conversationID: model.selected?.id, peer: model.peer,
+                  isActive: isActive && model.savedCopy == nil)
         .task(id: "\(model.selected?.id ?? "")-\(isActive)") {
             guard isActive else { return }
             // A daemon that has just started serves its curated fallbacks

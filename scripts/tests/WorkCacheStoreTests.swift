@@ -37,7 +37,7 @@ enum Bridge {
             throw BridgeError.core(code: "missing", message: "No saved copy")
         }
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // Match Bridge.background's ordinary JSONDecoder, without a date override.
         return Record(payload: try decoder.decode(CachedRecordPayload.self, from: saved.data))
     }
     static func cacheRemove(scope: String, id: String) async throws {
@@ -78,6 +78,10 @@ enum Bridge {
         await store.saveConversation(reference: ref(), title: "Empty", page: .init(events: [], nextOffset: 0, hasEarlier: false))
         let old = await store.savedConversation(for: ref())
         assert(old?.backend == nil && old?.page.events.isEmpty == true)
+        // The production bridge does not install a custom Date strategy.
+        // A malformed saved timestamp must fail rather than claim a fresh copy.
+        let malformed = Data(#"{"title":"x","revision":"r","savedAt":"bad","page":{"events":[],"nextOffset":0,"hasEarlier":false}}"#.utf8)
+        assert((try? JSONDecoder().decode(CachedRecordPayload.self, from: malformed)) == nil)
         // Corruption and unavailable keys fail closed rather than inventing rows.
         let storageKey = WorkCache.scope(for: alice) + "/" + WorkCache.recordID(for: ref())!
         Bridge.records[storageKey]!.data = Data("corrupt".utf8)

@@ -93,8 +93,10 @@ extension RelativeClock {
         // nobody deletes it as unused.
         let ticked = shared.now
         shared.wasRead = true
+        let now = max(ticked, Date())
+        if abs(date.timeIntervalSince(now)) < 1 { return "just now" }
         formatter.unitsStyle = style
-        return formatter.localizedString(for: date, relativeTo: max(ticked, Date()))
+        return formatter.localizedString(for: date, relativeTo: now)
     }
 
     /// Shared because building one is not free and this renders once per row.

@@ -30,6 +30,18 @@ enum WorkCache {
             .map(WorkReferenceKey.encode).joined(separator: "|")
     }
 
+    static func reference(recordID: String, scope: WorkReference.Scope) -> WorkReference? {
+        let fields = recordID.split(separator: "|", omittingEmptySubsequences: false)
+        guard fields.count == 4, fields[0] == "conv",
+              let host = String(fields[1]).removingPercentEncoding, !host.isEmpty,
+              let folder = String(fields[2]).removingPercentEncoding, !folder.isEmpty,
+              let item = String(fields[3]).removingPercentEncoding, !item.isEmpty else { return nil }
+        let reference = WorkReference(scope: scope, hostIdentity: host, workspaceID: folder,
+                                      kind: .conversation, itemID: item)
+        guard self.recordID(for: reference) == recordID else { return nil }
+        return reference
+    }
+
     static func scope(for scope: WorkReference.Scope) -> String {
         [scope.kind.rawValue, scope.origin, scope.identity]
             .map(WorkReferenceKey.encode).joined(separator: "|")

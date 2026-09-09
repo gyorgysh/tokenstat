@@ -25,6 +25,15 @@ import Foundation
         let alsoAwkward = conversation(folder: "a", chat: "b|c")
         assert(WorkCache.recordID(for: awkward) != WorkCache.recordID(for: alsoAwkward))
 
+        for reference in [conversation(), awkward, alsoAwkward,
+                          conversation(host: "machine|one", folder: "a:b/é", chat: "消息")] {
+            assert(WorkCache.reference(recordID: WorkCache.recordID(for: reference)!, scope: alice) == reference)
+        }
+        for invalid in ["conv|host|folder", "conv||folder|chat", "conv|host|folder|", "conv|host|%ZZ|chat",
+                        "other|host|folder|chat", "conv|host|folder|chat|extra"] {
+            assert(WorkCache.reference(recordID: invalid, scope: alice) == nil)
+        }
+
         // Two pages with the same revision show the same conversation.
         assert(WorkCache.revision(maxSeq: 9, count: 2, nextOffset: 42) == "s9:2:42")
         assert(WorkCache.revision(maxSeq: 9, count: 3, nextOffset: 42) != "s9:2:42")
