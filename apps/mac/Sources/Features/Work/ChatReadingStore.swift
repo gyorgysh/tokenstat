@@ -13,11 +13,42 @@ struct ChatReadingMark: Codable, Equatable, Sendable {
     /// Its top edge, as a fraction of the viewport's height. Zero is a row
     /// resting against the top edge.
     var offset: Double
+    /// How far down the row itself the reader was, as a fraction of the
+    /// row's height. Zero is the row's top edge showing. Above zero means
+    /// the row's top had scrolled past the viewport's top edge: a long
+    /// message the reader is halfway down reopens in its middle rather
+    /// than at its first line. A fraction, not points, because the same
+    /// row is a different height on a phone or at a larger text size.
+    /// Older records carry no value and read as zero.
+    var within: Double
     var updatedAt: Date
 
+    init(eventID: String, offset: Double, updatedAt: Date, within: Double = 0) {
+        self.eventID = eventID
+        self.offset = offset
+        self.updatedAt = updatedAt
+        self.within = within
+    }
+
     enum CodingKeys: String, CodingKey {
-        case offset, updatedAt
+        case offset, updatedAt, within
         case eventID = "eventId"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        eventID = try values.decode(String.self, forKey: .eventID)
+        offset = try values.decode(Double.self, forKey: .offset)
+        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
+        within = try values.decodeIfPresent(Double.self, forKey: .within) ?? 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(eventID, forKey: .eventID)
+        try values.encode(offset, forKey: .offset)
+        try values.encode(updatedAt, forKey: .updatedAt)
+        try values.encode(within, forKey: .within)
     }
 
     /// Whether a row's name will still mean this row after a relaunch.

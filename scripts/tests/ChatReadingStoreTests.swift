@@ -88,26 +88,40 @@ import Foundation
         // above it is, and only when a row has said where it is.
         let when = Date(timeIntervalSince1970: 1_000)
         assert(ChatReadingPosition.from(atEnd: true, pinned: true, anchorID: "s7",
-                                        anchorTop: 0, viewportHeight: 800) == .latest)
+                                        anchorTop: 0, anchorHeight: 44, viewportHeight: 800) == .latest)
         assert(ChatReadingPosition.from(atEnd: false, pinned: false, anchorID: nil,
-                                        anchorTop: 0, viewportHeight: 800) == .unknown)
+                                        anchorTop: 0, anchorHeight: 0, viewportHeight: 800) == .unknown)
         assert(ChatReadingPosition.from(atEnd: false, pinned: false, anchorID: "s7",
-                                        anchorTop: 0, viewportHeight: 0) == .unknown)
+                                        anchorTop: 0, anchorHeight: 44, viewportHeight: 0) == .unknown)
         assert(ChatReadingPosition.from(atEnd: false, pinned: false, anchorID: "12-3",
-                                        anchorTop: 0, viewportHeight: 800) == .unknown)
+                                        anchorTop: 0, anchorHeight: 44, viewportHeight: 800) == .unknown)
         assert(ChatReadingPosition.from(atEnd: false, pinned: false, anchorID: "s7",
-                                        anchorTop: 200, viewportHeight: 800, at: when)
+                                        anchorTop: 200, anchorHeight: 44, viewportHeight: 800, at: when)
             == .away(mark("s7", 0.25, when)))
-        // A row scrolled off the top reads as the top edge, never as a
-        // negative fraction that would place it off screen next time.
+        // A row whose top has scrolled past the viewport's edge means the
+        // reader is inside the row itself, so the mark keeps how far down
+        // it they are. Near the top that is still roughly the top edge;
+        // halfway down a long message reopens in its middle.
         assert(ChatReadingPosition.from(atEnd: false, pinned: false, anchorID: "s7",
-                                        anchorTop: -40, viewportHeight: 800, at: when)
-            == .away(mark("s7", 0, when)))
+                                        anchorTop: -40, anchorHeight: 800, viewportHeight: 800, at: when)
+            == .away(ChatReadingMark(eventID: "s7", offset: 0, updatedAt: when, within: 0.05)))
+        assert(ChatReadingPosition.from(atEnd: false, pinned: false, anchorID: "s7",
+                                        anchorTop: -400, anchorHeight: 800, viewportHeight: 800, at: when)
+            == .away(ChatReadingMark(eventID: "s7", offset: 0, updatedAt: when, within: 0.5)))
         // At the end but no longer following it (a page landed above, or the
         // reader paused): still a place worth keeping.
         assert(ChatReadingPosition.from(atEnd: true, pinned: false, anchorID: "s9",
-                                        anchorTop: 80, viewportHeight: 800, at: when)
+                                        anchorTop: 80, anchorHeight: 44, viewportHeight: 800, at: when)
             == .away(mark("s9", 0.1, when)))
+
+        // A record written before `within` existed still opens at the row's
+        // top rather than failing to decode into no place at all.
+        let legacyJSON = """
+            {"k":{"eventId":"s3","offset":0.2,"updatedAt":\(when.timeIntervalSinceReferenceDate)}}
+            """.data(using: .utf8)!
+        assert((try! JSONSerialization.jsonObject(with: legacyJSON) as! [String: [String: Any]])["k"]?["within"] == nil)
+        let revived = try! JSONDecoder().decode([String: ChatReadingMark].self, from: legacyJSON)
+        assert(revived["k"] == ChatReadingMark(eventID: "s3", offset: 0.2, updatedAt: when))
 
         print("Chat reading: per-conversation places, stable rows only, scope removal, bounds, corruption and geometry passed")
     }

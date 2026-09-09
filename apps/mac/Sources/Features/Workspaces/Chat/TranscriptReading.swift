@@ -27,6 +27,7 @@ enum TranscriptReading {
         switch ChatReadingPosition.from(atEnd: follow.atEnd, pinned: follow.pinned,
                                         anchorID: anchor?.id,
                                         anchorTop: anchor.map { Double($0.top) } ?? 0,
+                                        anchorHeight: anchor.map { Double($0.height) } ?? 0,
                                         viewportHeight: Double(window.viewportHeight)) {
         case .latest: store.forget(for: reference)
         case let .away(mark): store.remember(mark, for: reference)
@@ -42,6 +43,12 @@ enum TranscriptReading {
     /// measured over the frames that follow, so one scroll lands on a stack
     /// that is still settling.
     private static let corrections = 3
+    /// How many older pages restoration pulls while the kept row is still
+    /// not among the loaded ones. A conversation reopened months later
+    /// opens on its newest page, and the row it was left on is screens
+    /// above that. Each pull is one bridge round trip; past this bound the
+    /// row is treated as gone rather than keeping the opening waiting.
+    private static let earlierPages = 8
 
     /// Put the viewport back where this conversation was left.
     ///
@@ -57,9 +64,18 @@ enum TranscriptReading {
                         place: (String, UnitPoint) -> Void) async -> Restoration {
         let generation = model.selectionGeneration
         guard !Task.isCancelled, model.currentReference == reference else { return .interrupted }
-        let point = UnitPoint(x: 0, y: min(max(mark.offset, 0), 0.6))
+        // Inside a long row the reader was partway down it, so the row's
+        // own fraction puts them back there. Otherwise the row's top goes
+        // where it was in the viewport.
+        let point: UnitPoint
+        if mark.within > 0 {
+            point = UnitPoint(x: 0, y: min(max(mark.within, 0), 0.9))
+        } else {
+            point = UnitPoint(x: 0, y: min(max(mark.offset, 0), 0.6))
+        }
         follow.settle(true)
         var placements = 0
+        var fetched = 0
         for _ in 0..<frames {
             try? await Task.sleep(for: frame)
             guard model.currentReference == reference,
@@ -74,8 +90,18 @@ enum TranscriptReading {
                 return .interrupted
             }
             // Still arriving: the row may be in a page that has not landed.
-            if model.openingConversation, placements == 0 { continue }
-            guard model.displayItems.contains(where: { $0.id == mark.eventID }) else { break }
+            if model.openingConversation, placements == 0, fetched == 0 { continue }
+            if !model.displayItems.contains(where: { $0.id == mark.eventID }) {
+                // Not loaded yet, not necessarily gone: the conversation
+                // opens on its newest page, and the kept row may be screens
+                // above it. Pull older pages until it appears, the start is
+                // reached, or the bound is spent. Past that the row is
+                // treated as gone and the conversation opens at its end.
+                guard fetched < earlierPages, model.hasEarlier, !model.reachedStart else { break }
+                await model.loadEarlier()
+                fetched += 1
+                continue
+            }
             place(mark.eventID, point)
             placements += 1
             if placements > corrections { break }

@@ -19,12 +19,24 @@ enum ChatReadingPosition: Equatable {
     /// `top` is the row's top edge measured from the top of the viewport, in
     /// the same points `viewportHeight` is in. The mark keeps their ratio,
     /// because the same conversation is a different height on a phone, at a
-    /// larger text size, or with an older page loaded above it.
+    /// larger text size, or with an older page loaded above it. `height` is
+    /// the row's own height in the same points: when the top has scrolled
+    /// past the viewport's edge the reader is inside the row, and the mark
+    /// keeps how far down it as a fraction of that height. A reader halfway
+    /// down a long message reopens in its middle, not at its first line.
     static func from(atEnd: Bool, pinned: Bool, anchorID: String?, anchorTop: Double,
-                     viewportHeight: Double, at date: Date = Date()) -> Self {
+                      anchorHeight: Double, viewportHeight: Double,
+                      at date: Date = Date()) -> Self {
         if atEnd, pinned { return .latest }
         guard viewportHeight > 0, let anchorID,
               ChatReadingMark.isStable(eventID: anchorID) else { return .unknown }
+        if anchorTop < 0, anchorHeight > 0 {
+            return .away(
+                ChatReadingMark(eventID: anchorID, offset: 0,
+                                updatedAt: date,
+                                within: min(max(-anchorTop / anchorHeight, 0), 1))
+            )
+        }
         return .away(
             ChatReadingMark(eventID: anchorID,
                             offset: min(max(anchorTop / viewportHeight, 0), 1),

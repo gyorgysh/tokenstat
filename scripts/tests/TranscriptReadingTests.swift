@@ -7,8 +7,27 @@ import SwiftUI
     var selectionGeneration: UInt64 = 0
     var currentReference: WorkReference?
     var openingConversation = false
-    var displayItems: [Row] = [Row(id: "text-s1")]
+    var displayItems: [Row] = [ChatModel.Row(id: "text-s1")]
     struct Row { let id: String }
+    var hasEarlier = false
+    var reachedStart = false
+    /// Pages the next fetch reveals, oldest first. Empty means the host
+    /// answers with nothing further.
+    var earlierPages: [[Row]] = []
+    var fetches = 0
+    func loadEarlier() async {
+        fetches += 1
+        guard !earlierPages.isEmpty else {
+            hasEarlier = false
+            reachedStart = true
+            return
+        }
+        displayItems = earlierPages.removeFirst() + displayItems
+        if earlierPages.isEmpty {
+            hasEarlier = false
+            reachedStart = true
+        }
+    }
 }
 @MainActor final class TranscriptFollowState {
     var atEnd = false
@@ -22,7 +41,7 @@ import SwiftUI
 @MainActor final class TranscriptWindow {
     var anchor: Anchor?
     var viewportHeight: CGFloat = 800
-    struct Anchor { let id: String; let top: CGFloat }
+    struct Anchor { let id: String; let top: CGFloat; let height: CGFloat = 44 }
 }
 
 @main struct TranscriptReadingTests {
@@ -91,6 +110,41 @@ import SwiftUI
         let missing = await TranscriptReading.restore(mark, reference: reference,
             model: model, follow: follow) { _, _ in assertionFailure("Placed missing row") }
         assert(missing == .unavailable && !follow.settling)
-        print("Transcript reading: restoration, navigation, scope changes, scrolling, cancellation and missing rows passed")
+
+        // A row above the loaded page is screens away, not gone: restoration
+        // pulls older pages until it appears, then lands on it.
+        model.displayItems = [ChatModel.Row(id: "text-s9")]
+        model.hasEarlier = true
+        model.earlierPages = [[ChatModel.Row(id: "text-s1")]]
+        var landed: UnitPoint?
+        let paged = await TranscriptReading.restore(mark, reference: reference,
+            model: model, follow: follow) { id, point in
+                assert(id == "text-s1")
+                landed = point
+                placements += 1
+            }
+        assert(paged == .restored && model.fetches == 1 && !follow.settling)
+        assert(landed == UnitPoint(x: 0, y: 0))
+
+        // Inside a long row the placement carries the reader's fraction
+        // down it rather than the row's top edge in the viewport.
+        let deep = ChatReadingMark(eventID: "text-s1", offset: 0,
+                                   updatedAt: Date(), within: 0.5)
+        var deepPoint: UnitPoint?
+        let deepRestored = await TranscriptReading.restore(deep, reference: reference,
+            model: model, follow: follow) { _, point in deepPoint = point }
+        assert(deepRestored == .restored && deepPoint == UnitPoint(x: 0, y: 0.5))
+
+        // Pages that never contain the row end at the start of the chat,
+        // and the conversation opens at its latest turn instead of waiting.
+        model.displayItems = [ChatModel.Row(id: "text-s9")]
+        model.hasEarlier = true
+        model.reachedStart = false
+        model.earlierPages = [[ChatModel.Row(id: "text-s8")]]
+        let gone = await TranscriptReading.restore(mark, reference: reference,
+            model: model, follow: follow) { _, _ in assertionFailure("Placed missing row") }
+        assert(gone == .unavailable && model.fetches == 2 && !follow.settling)
+
+        print("Transcript reading: restoration, navigation, scope changes, scrolling, cancellation, missing rows, earlier pages and within-row places passed")
     }
 }
