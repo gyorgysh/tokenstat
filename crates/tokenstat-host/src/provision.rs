@@ -174,6 +174,10 @@ fn runs_as() -> Value {
     }
 }
 
+/// The user's home directory. Linux and macOS only: like `read_logs` below,
+/// every caller is platform-gated, and an ungated definition is dead code on
+/// Windows, iOS and Android, which `-D warnings` refuses to compile.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn home() -> Option<std::path::PathBuf> {
     directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
 }
