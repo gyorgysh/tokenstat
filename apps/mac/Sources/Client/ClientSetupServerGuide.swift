@@ -52,6 +52,19 @@ struct ClientSetupServerGuide: View {
                         + "much depends on them rather than on us.")
                 }
 
+                section("What size is enough") {
+                    Text("Start small. The usual $5 plan with 1 vCPU and 1 GB of "
+                        + "memory runs most agents well enough to get started.")
+                        .font(ClientType.label)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    bullet("Add about 2 GB of swap. Agents spike, and swap is "
+                        + "where the spike goes instead of the helper being "
+                        + "killed.")
+                    bullet("Grow when the projects do. Disk and memory follow "
+                        + "your checkouts and models, not us.")
+                }
+
                 section("Who takes the money") {
                     Text("Three separate things, and only one of them is ours.")
                         .font(ClientType.label)

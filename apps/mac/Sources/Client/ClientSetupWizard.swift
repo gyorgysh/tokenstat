@@ -12,9 +12,9 @@ import SwiftUI
 /// How somebody gets a machine, asked once and answerable forever after.
 ///
 /// Not a modal that traps anybody: every step can be left, and leaving lands
-/// on the numbers, which is a real product rather than a failure state. That
-/// is the whole reason door four exists on the same screen as the other three
-/// instead of being a Skip button in the corner.
+/// on the numbers, which is a real product rather than a failure state. Skip
+/// sits below the three doors as a quiet button rather than a fourth card,
+/// so it never reads as a fourth way to set up.
 struct ClientSetupWizard: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AccountModel.self) private var account
@@ -102,16 +102,24 @@ struct ClientSetupWizard: View {
                 ) {
                     path = [.mac]
                 }
-                door(
-                    title: "Skip for now",
-                    body: "Go to your account and your numbers. Usage from machines you "
+                // Leaving, without pretending it is a setup choice. A fourth card
+                // wore the same surface as the three doors and read as a fourth
+                // way to set up. A quiet bordered button says what it is.
+                VStack(spacing: Theme.Space.s) {
+                    Button("Skip for now", .next) { dismiss() }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .accessibilityIdentifier("setup.skip")
+                    Text("Go to your account and your numbers. Usage from machines you "
                         + "already have keeps arriving on its own, and a machine can be "
-                        + "connected later from Devices.",
-                    requirement: nil,
-                    symbol: "chart.bar.xaxis"
-                ) {
-                    dismiss()
+                        + "connected later from Devices.")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
                 }
+                .padding(.top, Theme.Space.xs)
                 Text(
                     "Nothing here is permanent. Every door can be left, and leaving lands on "
                     + "your numbers, which keep arriving whatever you choose."

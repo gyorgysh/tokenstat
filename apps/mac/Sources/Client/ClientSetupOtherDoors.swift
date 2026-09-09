@@ -22,6 +22,7 @@ import UIKit
 struct ClientSetupMacDoor: View {
     @Environment(AccountModel.self) private var account
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     @State private var sharing = false
     @State private var arrived: Machine?
@@ -43,6 +44,15 @@ struct ClientSetupMacDoor: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
                 GettingStartedRail(steps: steps)
+                // The address as a real link, beside the share sheet. Opening
+                // it leaves the app for the browser on purpose: a download
+                // page is used there, and an in-app view of one is the worse
+                // place to be signed in.
+                Button("tokenstat.ai/download", .external) {
+                    if let url = URL(string: Self.address) { openURL(url) }
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("setup.mac.download")
                 if arrived != nil {
                     Text(
                         "One step is left and it happens on the computer: when this device asks "
