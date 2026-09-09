@@ -63,6 +63,8 @@ pub mod chat_brain;
 #[cfg(feature = "local-host")]
 pub mod chat_gate;
 #[cfg(feature = "local-host")]
+pub mod chat_receipts;
+#[cfg(feature = "local-host")]
 pub mod chat_turn;
 pub mod cloud_import;
 pub mod dispatch;
@@ -183,4 +185,8 @@ pub use tokenstat_pty::warm_shell_pool;
 /// `host.provisionStatus`: `readiness`, `expiresAt` and `checked` beside the
 /// `signedIn` that older clients read. An older host omits them, which a
 /// client must read as "not checked" rather than as signed out.
-pub const PROTOCOL_VERSION: &str = "9";
+/// Version 10 adds `clientMessageId` on `chat.send` and the `chat.receipt`
+/// read beside it, so a send whose answer went missing can be repeated
+/// without running the agent twice. An older host ignores the field, so a
+/// client must not repeat a send against one.
+pub const PROTOCOL_VERSION: &str = "10";

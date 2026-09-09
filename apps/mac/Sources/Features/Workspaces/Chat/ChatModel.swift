@@ -278,6 +278,93 @@ final class ChatModel {
         setDraft(text)
     }
 
+    /// The name this draft's words travel under. Minted with the draft and
+    /// kept for as long as it exists, so sending again is the same message
+    /// rather than a second one.
+    private var draftMessageID: String? {
+        guard let draftReference else { return nil }
+        return ChatDraftStore.shared.draft(for: draftReference)?.messageID
+    }
+
+    // MARK: - Sends that are not confirmed
+
+    /// A message the machine had and did not answer for.
+    ///
+    /// Not a failure and not a success. The words are back in the composer,
+    /// and because they carry a name the machine recognises, sending them
+    /// again cannot run the agent a second time.
+    struct UnconfirmedSend: Equatable, Sendable {
+        let conversationID: String
+        let messageID: String
+        var checking: Bool
+    }
+
+    private(set) var unconfirmedSend: UnconfirmedSend?
+    /// Whether this conversation's machine keeps receipts. Asked once per
+    /// machine: a host does not grow a method while a conversation is open.
+    private var confirmedSendSupport: [String: Bool] = [:]
+    private var lastSendFailure: Error?
+
+    private func machineConfirmsSends() async -> Bool {
+        guard let peer, !peer.isEmpty else { return true }
+        if let known = confirmedSendSupport[peer] { return known }
+        let supported = await RemoteHostFeature.confirmedSend.isSupported(peer: peer)
+        confirmedSendSupport[peer] = supported
+        return supported
+    }
+
+    /// Send what is in the composer.
+    ///
+    /// The composer is emptied by the caller and the stored copy is kept, so
+    /// the words exist somewhere at every moment. They come back on a refusal,
+    /// and on a machine that did not answer they come back with a note saying
+    /// so rather than a claim in either direction.
+    func sendFromComposer(_ text: String) async {
+        let conversationID = selected?.id
+        let messageID = await machineConfirmsSends() ? draftMessageID : nil
+        unconfirmedSend = nil
+        if await send(text, clientMessageID: messageID) {
+            clearDraft()
+            return
+        }
+        returnDraft(text)
+        guard let conversationID, let messageID, let failure = lastSendFailure,
+              Bridge.isDeliveryUnknown(failure), selected?.id == conversationID
+        else { return }
+        error = nil
+        unconfirmedSend = UnconfirmedSend(conversationID: conversationID,
+                                          messageID: messageID, checking: false)
+        await checkUnconfirmedSend()
+    }
+
+    /// Ask the machine what became of a message it never answered for.
+    func checkUnconfirmedSend() async {
+        guard var pending = unconfirmedSend, !pending.checking,
+              selected?.id == pending.conversationID
+        else { return }
+        pending.checking = true
+        unconfirmedSend = pending
+        let generation = selectionGeneration
+        let receipt = try? await Bridge.chatReceipt(id: pending.conversationID,
+            clientMessageID: pending.messageID, peer: peer)
+        guard selectionMatches(id: pending.conversationID, generation: generation),
+              unconfirmedSend?.messageID == pending.messageID
+        else { return }
+        switch receipt?.state {
+        case .accepted:
+            // It was taken after all. The words on screen are a copy of a
+            // message that is already in the conversation.
+            unconfirmedSend = nil
+            clearDraft()
+            await loadEvents(id: pending.conversationID, reset: false, generation: generation)
+        case .unknown:
+            // The machine never took it, so this is an ordinary retry.
+            unconfirmedSend = nil
+        case .pending, .none:
+            unconfirmedSend?.checking = false
+        }
+    }
+
     /// Conversation lists read earlier this session, keyed by the folder id
     /// the sidebar knows (`remote:<peer>:<id>` for a folder on another
     /// machine). The model holds one folder's live list, while the cache lets
@@ -962,18 +1049,21 @@ final class ChatModel {
     }
 
     @discardableResult
-    func send(_ text: String, attachmentIDs: [String]? = nil) async -> Bool {
+    func send(_ text: String, attachmentIDs: [String]? = nil,
+              clientMessageID: String? = nil) async -> Bool {
         guard let selected, !sending else { return false }
         sending = true
         let staged = stageOutgoing(text)
         defer { sending = false }
         let generation = selectionGeneration
         let ids = attachmentIDs ?? attachments.map(\.id)
+        lastSendFailure = nil
         do {
             let updated = try await Bridge.sendChat(
                 id: selected.id,
                 text: text,
                 attachmentIDs: ids,
+                clientMessageID: clientMessageID,
                 peer: peer
             )
             guard selectionMatches(id: updated.id, generation: generation) else {
@@ -988,6 +1078,7 @@ final class ChatModel {
             return true
         } catch {
             dropOutgoing(staged)
+            lastSendFailure = error
             if selectionMatches(id: selected.id, generation: generation) {
                 self.error = error.localizedDescription
             }

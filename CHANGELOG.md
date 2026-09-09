@@ -53,6 +53,14 @@ with a server that runs agents.
   the hole: no machine offers to set one up, a machine with no folders offers
   both ways to give it one, and a machine that is not answering says what to
   run on it when it is a server rather than telling you to wake a Mac.
+- **A message is sent once, even when the answer goes missing.** A machine
+  that takes a message now keeps a receipt for it, so pressing Send again
+  after a connection that went quiet gets you the conversation rather than a
+  second agent run on the same words. When that happens the message goes back
+  in the field with a line saying the machine did not answer and that sending
+  again is safe, and the app asks the machine what became of it. The machine
+  has to be on this version for the guarantee; an older one behaves as it did,
+  and the app does not repeat a send to one.
 - **Half-written messages are kept.** What is in a chat's message field stays
   with that conversation: leave it, open another thread, quit the app, and it
   is there when you come back, with the files you attached to it. A list marks

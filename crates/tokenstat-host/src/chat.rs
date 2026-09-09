@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -1400,11 +1400,84 @@ impl Store {
         })
     }
 
+    fn receipts_path(&self, id: &str) -> PathBuf {
+        crate::chat_receipts::path_for(&self.root.join(safe_file_name(id)))
+    }
+
+    fn write_receipt(
+        &self,
+        id: &str,
+        key: &str,
+        receipt: crate::chat_receipts::Receipt,
+    ) -> Result<(), String> {
+        // Read back before writing: two sends into the same conversation
+        // would otherwise write the file over each other's entries.
+        let mut ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms());
+        ledger.put(key.to_string(), receipt);
+        ledger.save()
+    }
+
+    fn drop_receipt(&self, id: &str, key: &str) {
+        let mut ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms());
+        ledger.remove(key);
+        let _ = ledger.save();
+    }
+
+    /// What the host already knows about one client's message.
+    ///
+    /// A client whose answer went missing asks this before deciding whether
+    /// to send again. It reports, it never runs anything.
+    pub fn receipt(
+        &self,
+        id: &str,
+        client_message_id: &str,
+    ) -> Result<Option<crate::chat_receipts::Receipt>, String> {
+        if !crate::chat_receipts::valid_id(client_message_id) {
+            return Err("that clientMessageId is not usable".into());
+        }
+        self.get(id)?;
+        let key = crate::chat_receipts::key(
+            crate::request_context::remote_peer().as_deref(),
+            client_message_id,
+        );
+        let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms());
+        Ok(ledger.get(&key).cloned())
+    }
+
+    /// Whether the message this receipt was written for reached the timeline.
+    ///
+    /// A pending receipt means the host started the work and did not get to
+    /// record the end of it. The answer is on the timeline or it is not, and
+    /// looking is the only honest way to tell a launched turn from a send
+    /// that fell over before it did anything.
+    fn pending_reached_the_timeline(&self, id: &str, prompt: &str, at_ms: i64) -> bool {
+        let Ok(file) = fs::File::open(self.events_path(id)) else {
+            return false;
+        };
+        BufReader::new(file)
+            .lines()
+            .map_while(Result::ok)
+            .any(|line| {
+                let Ok(StoredEvent::User {
+                    text,
+                    at_ms: event_at,
+                }) = serde_json::from_str::<StoredEvent>(&line)
+                else {
+                    return false;
+                };
+                // The stored row is the composed turn, which begins with what
+                // the person typed and can carry the names of their files
+                // after it. A prefix is the honest comparison.
+                text.starts_with(prompt) && event_at + 1 >= at_ms
+            })
+    }
+
     pub fn send(
         self: &Arc<Self>,
         id: &str,
         text: &str,
         attachment_ids: &[String],
+        client_message_id: Option<&str>,
     ) -> Result<Conversation, String> {
         let typed = text.trim();
         if typed.is_empty() && attachment_ids.is_empty() {
@@ -1421,10 +1494,56 @@ impl Store {
             typed
         };
         let chat = self.get(id)?;
+        // Before the running guard, deliberately. The case this exists for is
+        // a send whose answer went missing, and the turn it started is
+        // usually still going: "this chat is already responding" would be a
+        // failure where the truth is that the message was taken.
+        //
+        // The device is the authenticated peer rather than anything in the
+        // body, so one client cannot claim another's receipt and skip a send.
+        let receipt_key = match client_message_id {
+            Some(client_message_id) => {
+                if !crate::chat_receipts::valid_id(client_message_id) {
+                    return Err("that clientMessageId is not usable".into());
+                }
+                Some(crate::chat_receipts::key(
+                    crate::request_context::remote_peer().as_deref(),
+                    client_message_id,
+                ))
+            }
+            None => None,
+        };
+        let digest = crate::chat_receipts::digest(text, attachment_ids);
+        if let Some(key) = &receipt_key {
+            let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms());
+            if let Some(receipt) = ledger.get(key) {
+                if receipt.digest != digest {
+                    return Err("that message id was already used for a different message".into());
+                }
+                match receipt.state {
+                    crate::chat_receipts::ReceiptState::Accepted => return Ok(chat),
+                    // The host got as far as starting this and not as far as
+                    // recording the end of it. The timeline is the evidence:
+                    // the message is on it, so the turn ran and this is a
+                    // repeat, or it is not, so nothing was delivered and this
+                    // send proceeds.
+                    crate::chat_receipts::ReceiptState::Pending => {
+                        if self.pending_reached_the_timeline(id, prompt, receipt.at_ms) {
+                            let settled = crate::chat_receipts::Receipt {
+                                state: crate::chat_receipts::ReceiptState::Accepted,
+                                ..receipt.clone()
+                            };
+                            self.write_receipt(id, key, settled)?;
+                            return Ok(chat);
+                        }
+                        self.drop_receipt(id, key);
+                    }
+                }
+            }
+        }
         if chat.running {
             return Err("this chat is already responding".into());
         }
-        let workspace = crate::workspaces::folder(&chat.workspace_id)?;
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.response_output_dir(id);
         fs::create_dir_all(&response_output_dir).map_err(|e| e.to_string())?;
@@ -1585,7 +1704,27 @@ impl Store {
         } else {
             None
         };
-        let info = tokenstat_pty::manager()
+        // Read last of the things that can refuse this send, so a repeat of a
+        // message the host already took is answered even if the folder has
+        // since been unregistered.
+        let workspace = crate::workspaces::folder(&chat.workspace_id)?;
+        // Written before anything is started, so a host that dies between the
+        // spawn and its answer leaves a record to reconcile against rather
+        // than a message the next attempt would run a second time.
+        let accepted_at = now_ms();
+        if let Some(key) = &receipt_key {
+            self.write_receipt(
+                id,
+                key,
+                crate::chat_receipts::Receipt {
+                    state: crate::chat_receipts::ReceiptState::Pending,
+                    digest: digest.clone(),
+                    at_ms: accepted_at,
+                    event_at_ms: None,
+                },
+            )?;
+        }
+        let info = match tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
                 command: crate::launcher::spawn_command(&argv[0]),
                 args: argv[1..].to_vec(),
@@ -1598,7 +1737,18 @@ impl Store {
                 dark: None,
                 environment,
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())
+        {
+            Ok(info) => info,
+            Err(error) => {
+                // Nothing was delivered, so the receipt has to go with it or
+                // the next attempt would be refused as a repeat.
+                if let Some(key) = &receipt_key {
+                    self.drop_receipt(id, key);
+                }
+                return Err(error);
+            }
+        };
         // Only once the process exists. A spawn that failed delivered nothing,
         // and marking it sent would silently drop this conversation's rules
         // from every later turn on that backend.
@@ -1633,6 +1783,20 @@ impl Store {
                 at_ms: user_at,
             },
         )?;
+        // The turn is running and the message is on the timeline. A repeat of
+        // this id now gets the conversation back and starts nothing.
+        if let Some(key) = &receipt_key {
+            self.write_receipt(
+                id,
+                key,
+                crate::chat_receipts::Receipt {
+                    state: crate::chat_receipts::ReceiptState::Accepted,
+                    digest,
+                    at_ms: accepted_at,
+                    event_at_ms: Some(user_at),
+                },
+            )?;
+        }
         // What the person attached rides the timeline as its own rows, so a
         // sent image stays visible instead of vanishing into the turn. The
         // bytes already live beside the chat; these records are only the
@@ -3488,6 +3652,183 @@ mod tests {
             backend: "claude",
         });
         assert!(spoken.user_text.contains("diagram.png"));
+    }
+
+    /// A conversation with nothing behind it, for the receipt paths, which
+    /// all decide before anything is spawned.
+    fn conversation_for_receipts(store: &Store, id: &str) {
+        store.conversations.lock().unwrap().push(Conversation {
+            id: id.into(),
+            workspace_id: "workspace-a".into(),
+            title: "New chat".into(),
+            backend: "claude".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: default_mode(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            last_message_at_ms: None,
+            last_message_author: None,
+            running: false,
+        });
+    }
+
+    #[test]
+    fn a_message_the_host_already_took_is_not_run_again() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&store, "chat-receipt");
+        let key = crate::chat_receipts::key(None, "m-1");
+        store
+            .write_receipt(
+                "chat-receipt",
+                &key,
+                crate::chat_receipts::Receipt {
+                    state: crate::chat_receipts::ReceiptState::Accepted,
+                    digest: crate::chat_receipts::digest("hello", &[]),
+                    at_ms: now_ms(),
+                    event_at_ms: Some(now_ms()),
+                },
+            )
+            .unwrap();
+        // Returns the conversation without reaching the workspace lookup,
+        // which is the first thing a real send needs and does not exist here.
+        let chat = store
+            .send("chat-receipt", "hello", &[], Some("m-1"))
+            .unwrap();
+        assert_eq!(chat.id, "chat-receipt");
+        assert!(!store.events_path("chat-receipt").exists());
+
+        // The same name for different words is a mistake, not a repeat.
+        let conflict = store
+            .send("chat-receipt", "something else", &[], Some("m-1"))
+            .unwrap_err();
+        assert!(conflict.contains("different message"), "{conflict}");
+
+        // And a name that could shape a key in the ledger is refused.
+        let bad = store
+            .send("chat-receipt", "hello", &[], Some("../escape"))
+            .unwrap_err();
+        assert!(bad.contains("not usable"), "{bad}");
+    }
+
+    #[test]
+    fn a_repeat_is_answered_while_the_turn_it_started_is_still_running() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&store, "chat-running");
+        store.set_running("chat-running", true).unwrap();
+        // Without a receipt this is the ordinary refusal.
+        let busy = store.send("chat-running", "hello", &[], None).unwrap_err();
+        assert!(busy.contains("already responding"), "{busy}");
+        // With one it is the answer the client was waiting for. The case this
+        // exists for is a send whose reply went missing while its turn ran.
+        let key = crate::chat_receipts::key(None, "m-4");
+        store
+            .write_receipt(
+                "chat-running",
+                &key,
+                crate::chat_receipts::Receipt {
+                    state: crate::chat_receipts::ReceiptState::Accepted,
+                    digest: crate::chat_receipts::digest("hello", &[]),
+                    at_ms: now_ms(),
+                    event_at_ms: Some(now_ms()),
+                },
+            )
+            .unwrap();
+        let chat = store
+            .send("chat-running", "hello", &[], Some("m-4"))
+            .unwrap();
+        assert!(chat.running);
+    }
+
+    #[test]
+    fn a_pending_receipt_is_settled_by_the_timeline_and_not_by_guesswork() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&store, "chat-pending");
+        let key = crate::chat_receipts::key(None, "m-2");
+        let at_ms = now_ms();
+        let pending = crate::chat_receipts::Receipt {
+            state: crate::chat_receipts::ReceiptState::Pending,
+            digest: crate::chat_receipts::digest("hello", &[]),
+            at_ms,
+            event_at_ms: None,
+        };
+        store
+            .write_receipt("chat-pending", &key, pending.clone())
+            .unwrap();
+
+        // Nothing on the timeline: the attempt delivered nothing, so this is
+        // a fresh send. It gets as far as the workspace, which is missing.
+        let error = store
+            .send("chat-pending", "hello", &[], Some("m-2"))
+            .unwrap_err();
+        assert!(!error.contains("different message"), "{error}");
+        let ledger =
+            crate::chat_receipts::Ledger::load(store.receipts_path("chat-pending"), now_ms());
+        assert!(
+            ledger.get(&key).is_none(),
+            "a dead attempt keeps no receipt"
+        );
+
+        // The message on the timeline: the turn ran, so the repeat is
+        // answered rather than run.
+        store.write_receipt("chat-pending", &key, pending).unwrap();
+        store
+            .append(
+                "chat-pending",
+                &StoredEvent::User {
+                    text: "hello".into(),
+                    at_ms,
+                },
+            )
+            .unwrap();
+        let chat = store
+            .send("chat-pending", "hello", &[], Some("m-2"))
+            .unwrap();
+        assert_eq!(chat.id, "chat-pending");
+        let settled =
+            crate::chat_receipts::Ledger::load(store.receipts_path("chat-pending"), now_ms());
+        assert_eq!(
+            settled.get(&key).map(|receipt| receipt.state),
+            Some(crate::chat_receipts::ReceiptState::Accepted)
+        );
+    }
+
+    #[test]
+    fn a_receipt_can_be_read_back_without_sending_anything() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&store, "chat-read");
+        assert!(store.receipt("chat-read", "m-3").unwrap().is_none());
+        let at_ms = now_ms();
+        store
+            .write_receipt(
+                "chat-read",
+                &crate::chat_receipts::key(None, "m-3"),
+                crate::chat_receipts::Receipt {
+                    state: crate::chat_receipts::ReceiptState::Accepted,
+                    digest: crate::chat_receipts::digest("hello", &[]),
+                    at_ms,
+                    event_at_ms: Some(at_ms),
+                },
+            )
+            .unwrap();
+        let receipt = store.receipt("chat-read", "m-3").unwrap().unwrap();
+        assert_eq!(receipt.state, crate::chat_receipts::ReceiptState::Accepted);
+        assert_eq!(receipt.event_at_ms, Some(at_ms));
+        assert!(store.receipt("chat-read", "../escape").is_err());
+        assert!(store.receipt("no-such-chat", "m-3").is_err());
     }
 
     #[test]

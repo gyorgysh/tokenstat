@@ -2862,6 +2862,34 @@ struct ChatPersonaDraft: Codable, Sendable, Hashable {
     var systemPrompt: String
 }
 
+/// What the host says about a message a client named.
+///
+/// `unknown` is not "never sent": receipts are kept for thirty days, so an
+/// older message that has fallen out of the ledger reads as unknown too. The
+/// conversation is the answer in that case, not a resend.
+struct ChatSendReceipt: Codable, Sendable, Hashable {
+    enum State: String, Codable, Sendable {
+        case accepted
+        case pending
+        case unknown
+    }
+
+    var state: State
+    var atMs: Int64?
+    var eventAtMs: Int64?
+
+    /// The host started this turn and the message is on the transcript.
+    var isAccepted: Bool { state == .accepted }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // A host that grows another state must not make this undecodable.
+        state = (try? container.decode(State.self, forKey: .state)) ?? .unknown
+        atMs = try container.decodeIfPresent(Int64.self, forKey: .atMs)
+        eventAtMs = try container.decodeIfPresent(Int64.self, forKey: .eventAtMs)
+    }
+}
+
 struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var name: String

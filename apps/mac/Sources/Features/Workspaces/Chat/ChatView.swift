@@ -743,13 +743,7 @@ struct ChatView: View {
         showNewest()
         follow.jump()
         followPulse += 1
-        Task {
-            if await model.send(text) {
-                model.clearDraft()
-            } else {
-                model.returnDraft(text)
-            }
-        }
+        Task { await model.sendFromComposer(text) }
     }
 
     private var dropExperienceVisible: Bool {

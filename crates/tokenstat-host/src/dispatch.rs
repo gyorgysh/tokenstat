@@ -501,6 +501,10 @@ struct ChatParams {
     allowed_shell_prefixes: Option<Vec<String>>,
     text: Option<String>,
     attachment_ids: Option<Vec<String>>,
+    /// `chat.send` and `chat.receipt`. The client's own name for one message,
+    /// so a send whose answer went missing can be repeated without running
+    /// the agent twice. See `chat_receipts`.
+    client_message_id: Option<String>,
     attachment_id: Option<String>,
     name: Option<String>,
     data: Option<String>,
@@ -1834,8 +1838,26 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             &p.id.ok_or("chat.send needs id")?,
             &p.text.ok_or("chat.send needs text")?,
             &p.attachment_ids.unwrap_or_default(),
+            p.client_message_id.as_deref(),
         )?)
         .envelope(),
+        // What the host already knows about one message. Reporting only: a
+        // client asks before deciding whether to send again.
+        "chat.receipt" => {
+            let receipt = store.receipt(
+                &p.id.ok_or("chat.receipt needs id")?,
+                &p.client_message_id
+                    .ok_or("chat.receipt needs clientMessageId")?,
+            )?;
+            Ok(match receipt {
+                Some(receipt) => json!({
+                    "state": receipt.state,
+                    "atMs": receipt.at_ms,
+                    "eventAtMs": receipt.event_at_ms,
+                }),
+                None => json!({ "state": "unknown" }),
+            })
+        }
         "chat.attach" => serde_json::to_value(store.attach(
             &p.id.ok_or("chat.attach needs id")?,
             &p.name.ok_or("chat.attach needs name")?,

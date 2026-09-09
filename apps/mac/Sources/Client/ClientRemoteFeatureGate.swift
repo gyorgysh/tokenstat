@@ -18,6 +18,7 @@ enum RemoteHostFeature {
     case provisioning
     case inviteCode
     case agentSignIn
+    case confirmedSend
 
     var title: String {
         switch self {
@@ -29,6 +30,7 @@ enum RemoteHostFeature {
         case .provisioning: "Setup"
         case .inviteCode: "Adding this device"
         case .agentSignIn: "Signing in to an agent"
+        case .confirmedSend: "Confirming a sent message"
         }
     }
 
@@ -38,7 +40,10 @@ enum RemoteHostFeature {
     /// added `fs.browse` and `fs.mkdir`, `host.provisionStatus` and
     /// `host.logs`, the invite half of workspace access, and `workspace.clone`.
     /// Version 9 added agent readiness on `launcher.catalog` and the
-    /// `launcher.signIn` terminal handoff.
+    /// `launcher.signIn` terminal handoff. Version 10 added `clientMessageId`
+    /// on `chat.send` and `chat.receipt`, which is what makes repeating a send
+    /// safe: an older machine ignores the id, so a message must never be sent
+    /// to one twice.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
@@ -49,6 +54,7 @@ enum RemoteHostFeature {
         case .provisioning: 7
         case .inviteCode: 7
         case .agentSignIn: 9
+        case .confirmedSend: 10
         }
     }
 
@@ -62,6 +68,7 @@ enum RemoteHostFeature {
         case .provisioning: "sparkles"
         case .inviteCode: "key.horizontal.fill"
         case .agentSignIn: "person.badge.key.fill"
+        case .confirmedSend: "checkmark.message.fill"
         }
     }
 

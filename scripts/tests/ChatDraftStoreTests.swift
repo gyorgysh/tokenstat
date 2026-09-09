@@ -102,6 +102,21 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         afterCorruption.save(text: "no owner", attachments: [], for: workspace)
         assert(afterCorruption.draft(for: workspace) == nil)
 
+        // The name a draft's words travel under is minted once and kept, so
+        // sending the same message again is the same message.
+        let named = reference(chat: "named")
+        afterCorruption.save(text: "first", attachments: [], for: named)
+        let minted = afterCorruption.draft(for: named)?.messageID
+        assert(minted?.isEmpty == false)
+        afterCorruption.save(text: "first, edited", attachments: [file], for: named)
+        assert(afterCorruption.draft(for: named)?.messageID == minted)
+        afterCorruption.settle()
+        assert(ChatDraftStore(directory: root).draft(for: named)?.messageID == minted)
+        // A message that was sent takes its name with it: the next one is new.
+        afterCorruption.clear(for: named)
+        afterCorruption.save(text: "second", attachments: [], for: named)
+        assert(afterCorruption.draft(for: named)?.messageID != minted)
+
         // What the composer does when the screen points somewhere else.
         let one = reference(chat: "one")
         let two = reference(chat: "two")
@@ -126,6 +141,6 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         assert(ChatDraftTransition.resolve(incoming: "one", reference: nil,
             current: "two", currentReference: two) == .swap(nil))
 
-        print("Chat drafts: per-conversation ownership, relaunch, merge, removal, corruption and composer transitions passed")
+        print("Chat drafts: ownership, relaunch, merge, removal, corruption, message names and composer transitions passed")
     }
 }

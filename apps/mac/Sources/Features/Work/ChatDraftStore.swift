@@ -17,6 +17,19 @@ struct ChatDraft: Codable, Equatable, Sendable {
     var text: String
     var attachments: [ChatAttachment]
     var updatedAt: Date
+    /// The name these words travel under when they are sent.
+    ///
+    /// Minted once per draft and kept for as long as the draft exists, which
+    /// is what makes sending again safe: a machine that has already taken a
+    /// message under this name answers instead of running the agent twice.
+    var messageID: String?
+
+    /// Written in the same camelCase a host record uses, so this file and a
+    /// draft that later travels between devices spell their keys one way.
+    enum CodingKeys: String, CodingKey {
+        case reference, text, attachments, updatedAt
+        case messageID = "messageId"
+    }
 
     var isEmpty: Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty
@@ -128,7 +141,8 @@ final class ChatDraftStore {
         guard let key = Self.key(reference) else { return }
         let draft = ChatDraft(reference: reference,
                               text: String(text.prefix(Self.maxDraftCharacters)),
-                              attachments: attachments, updatedAt: date)
+                              attachments: attachments, updatedAt: date,
+                              messageID: drafts[key]?.messageID ?? UUID().uuidString)
         if draft.isEmpty {
             guard drafts.removeValue(forKey: key) != nil else { return }
             occupied.remove(key)

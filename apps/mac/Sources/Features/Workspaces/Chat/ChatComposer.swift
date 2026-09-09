@@ -55,7 +55,10 @@ struct ChatComposer: View {
     private var well: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             if model.draftSaveFailed {
-                ChatDraftNotice { model.retryDraftSave() }
+                ChatDraftNotice(retrySave: { model.retryDraftSave() })
+            } else if let unconfirmed = model.unconfirmedSend {
+                ChatDraftNotice(unconfirmed: unconfirmed,
+                                checkAgain: { Task { await model.checkUnconfirmedSend() } })
             }
             if !attachments.isEmpty {
                 strip

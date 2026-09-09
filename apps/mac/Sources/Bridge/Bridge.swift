@@ -509,6 +509,14 @@ enum Bridge {
         return code == "host_unreachable"
     }
 
+    /// The host had the request and did not answer in time, so whether it
+    /// acted on it is unknown.
+    ///
+    /// Different from unreachable, which never arrived and can be repeated
+    /// without a thought. A send that timed out has to be reconciled before
+    /// anybody claims it failed.
+    static func isDeliveryUnknown(_ error: Error) -> Bool { isTimeout(error) }
+
     /// Whether an error means the host was unreachable or silent, which is
     /// worth retrying once it is back.
     ///
@@ -1094,17 +1102,44 @@ extension Bridge {
         ).removed
     }
 
+    /// Send a message, optionally under a name the client chose for it.
+    ///
+    /// With a `clientMessageID` the host keeps a receipt, so the same message
+    /// arriving twice is answered rather than run twice. Only pass one to a
+    /// machine that speaks protocol 10 (`RemoteHostFeature.confirmedSend`):
+    /// an older host ignores the field, which would turn a repeat into a
+    /// second agent turn.
     static func sendChat(
         id: String,
         text: String,
         attachmentIDs: [String] = [],
+        clientMessageID: String? = nil,
         peer: String? = nil
     ) async throws -> ChatConversation {
-        try await chatInvoke(
+        var params: [String: Any] = ["id": id, "text": text, "attachmentIds": attachmentIDs]
+        if let clientMessageID { params["clientMessageId"] = clientMessageID }
+        return try await chatInvoke(
             peer: peer,
             "chat.send",
-            ["id": id, "text": text, "attachmentIds": attachmentIDs],
+            params,
             as: ChatConversation.self
+        )
+    }
+
+    /// What the host knows about a message it may or may not have taken.
+    ///
+    /// Reporting only. A client whose answer went missing asks this before it
+    /// decides whether to put the words back in the composer.
+    static func chatReceipt(
+        id: String,
+        clientMessageID: String,
+        peer: String? = nil
+    ) async throws -> ChatSendReceipt {
+        try await chatInvoke(
+            peer: peer,
+            "chat.receipt",
+            ["id": id, "clientMessageId": clientMessageID],
+            as: ChatSendReceipt.self
         )
     }
 

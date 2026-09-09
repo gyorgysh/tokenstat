@@ -45,7 +45,10 @@ struct ClientChatComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if model.draftSaveFailed {
-                ChatDraftNotice { model.retryDraftSave() }
+                ChatDraftNotice(retrySave: { model.retryDraftSave() })
+            } else if let unconfirmed = model.unconfirmedSend {
+                ChatDraftNotice(unconfirmed: unconfirmed,
+                                checkAgain: { Task { await model.checkUnconfirmedSend() } })
             }
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 ChatComposerControls(
