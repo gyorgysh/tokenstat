@@ -327,24 +327,36 @@ struct ClientCommitDetailView: View {
         max(0, paneWidth - Theme.Space.m * 2)
     }
 
+    /// Eager, like the file diff: a lazy stack widens as rows materialize and
+    /// the widening drags a horizontal scroll back to the start. Capped for
+    /// the same reason, with the count said out loud.
+    private static let maxLines = 2000
+
     private func hunks(of diff: FileDiff) -> some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(diff.hunks) { hunk in
-                    Text(hunk.header)
-                        .font(ClientType.code)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .padding(.horizontal, Theme.Space.s)
-                        .padding(.vertical, 6)
-                        .frame(minWidth: rowWidth, alignment: .leading)
-                        .background(Theme.panel)
-                    ForEach(hunk.lines) { line in
-                        DiffLineRow(line: line, minWidth: rowWidth)
+        let total = diff.hunks.reduce(0) { $0 + $1.lines.count }
+        let (shown, cut) = diff.clipped(toLines: Self.maxLines)
+        return VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(shown.hunks) { hunk in
+                        Text(hunk.header)
+                            .font(ClientType.code)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .padding(.horizontal, Theme.Space.s)
+                            .padding(.vertical, 6)
+                            .frame(minWidth: rowWidth, alignment: .leading)
+                            .background(Theme.panel)
+                        ForEach(hunk.lines) { line in
+                            DiffLineRow(line: line, minWidth: rowWidth)
+                        }
                     }
                 }
+                .padding(.vertical, Theme.Space.xs)
             }
-            .padding(.vertical, Theme.Space.xs)
+            if cut > 0 {
+                note("Showing the first \(total - cut) of \(total) lines.")
+            }
         }
     }
 

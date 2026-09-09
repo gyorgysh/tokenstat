@@ -142,26 +142,40 @@ struct ClientDiffView: View {
 
     /// One horizontal scroll around the whole diff, not one per row, so the
     /// gutter and the code cannot slide out of step with each other.
+    ///
+    /// Eager, deliberately. A lazy stack grows wider as new rows materialize,
+    /// and content widening mid-scroll is what dragged the offset back to the
+    /// start. The width is known up front here instead. Capped, because eager
+    /// means every row exists at once and a generated file can have oceans.
+    private static let maxLines = 2000
+
     private func hunks(of diff: FileDiff) -> some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(diff.hunks) { hunk in
-                    Text(hunk.header)
-                        .font(ClientType.code)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .padding(.horizontal, Theme.Space.s)
-                        .padding(.vertical, 6)
-                        .frame(minWidth: rowWidth, alignment: .leading)
-                        .background(Theme.panel)
-                    ForEach(hunk.lines) { line in
-                        DiffLineRow(line: line, minWidth: rowWidth)
+        let total = diff.hunks.reduce(0) { $0 + $1.lines.count }
+        let (shown, cut) = diff.clipped(toLines: Self.maxLines)
+        return VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(shown.hunks) { hunk in
+                        Text(hunk.header)
+                            .font(ClientType.code)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .padding(.horizontal, Theme.Space.s)
+                            .padding(.vertical, 6)
+                            .frame(minWidth: rowWidth, alignment: .leading)
+                            .background(Theme.panel)
+                        ForEach(hunk.lines) { line in
+                            DiffLineRow(line: line, minWidth: rowWidth)
+                        }
                     }
                 }
+                .padding(.vertical, Theme.Space.xs)
             }
-            .padding(.vertical, Theme.Space.xs)
+            .cardSurface()
+            if cut > 0 {
+                note("Showing the first \(total - cut) of \(total) lines. The rest is on \(hostName.isEmpty ? "the computer" : hostName).")
+            }
         }
-        .cardSurface()
     }
 
     private func note(_ text: String) -> some View {
