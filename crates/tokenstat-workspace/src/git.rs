@@ -173,6 +173,10 @@ pub struct Commit {
     /// "who am I in this repository", it can differ per repository, and the app
     /// has no other way to learn it.
     pub mine: bool,
+    /// Tags pointing at this commit, so a history list can say which commit a
+    /// release went out on. Decorations, not a separate lookup: one `log`
+    /// answers for every row.
+    pub tags: Vec<String>,
 }
 
 /// What one line of a diff is.
@@ -483,6 +487,9 @@ pub struct CommitDetail {
     /// Parent hashes. Two or more means a merge, which is why the diff below
     /// can be empty for a commit that plainly changed things.
     pub parents: Vec<String>,
+    /// Tags pointing at this commit, so the detail screen can say the same
+    /// thing the history row does.
+    pub tags: Vec<String>,
     pub files: Vec<FileChange>,
     pub added: u64,
     pub removed: u64,
@@ -572,6 +579,18 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
         })
         .collect();
 
+    // One read-only call for the detail screen's tag line. `log --decorate`
+    // would answer too, but it walks history; `--points-at` asks about this
+    // commit only.
+    if let Some(raw) = git(dir, &["tag", "--points-at", id]) {
+        detail.tags = raw
+            .lines()
+            .map(str::trim)
+            .filter(|tag| !tag.is_empty())
+            .map(str::to_string)
+            .collect();
+    }
+
     Some(detail)
 }
 
@@ -587,11 +606,20 @@ pub fn log(dir: &Path, limit: u32) -> Vec<Commit> {
 
     // Unit separator between fields and record separator between commits, so a
     // subject containing a newline or a tab cannot shift the parse. `%x1f` and
-    // `%x1e` are exactly what those two ASCII controls are for.
-    let format = format!("--format=%H{US}%s{US}%an{US}%ae{US}%at{RS}");
+    // `%x1e` are exactly what those two ASCII controls are for. `%D` carries
+    // the decorations (`tag: v0.9.2, origin/main`), from which the tags are
+    // read; explicit `--decorate` because outside a terminal git may print
+    // none at all.
+    let format = format!("--format=%H{US}%s{US}%an{US}%ae{US}%at{US}%D{RS}");
     let raw = match git(
         dir,
-        &["log", &format!("--max-count={limit}"), &format, "HEAD"],
+        &[
+            "log",
+            "--decorate=short",
+            &format!("--max-count={limit}"),
+            &format,
+            "HEAD",
+        ],
     ) {
         Some(s) => s,
         None => return Vec::new(),
@@ -632,12 +660,13 @@ fn parse_log(
         .map(str::trim_start)
         .filter(|record| !record.is_empty())
         .filter_map(|record| {
-            let mut fields = record.splitn(5, US);
+            let mut fields = record.splitn(6, US);
             let id = fields.next()?.to_string();
             let subject = fields.next()?.to_string();
             let author = fields.next()?.to_string();
             let email = fields.next()?.to_string();
             let timestamp = fields.next()?.trim().parse().ok()?;
+            let tags = fields.next().map(parse_tags).unwrap_or_default();
             // Addresses are case insensitive in practice and git does not
             // normalise them, so a repository configured with `Ada@Example.com`
             // still recognises its own commits.
@@ -650,8 +679,22 @@ fn parse_log(
                 email,
                 timestamp,
                 mine,
+                tags,
             })
         })
+        .collect()
+}
+
+/// Tags out of one `%D` decoration list.
+///
+/// `HEAD -> main, tag: v0.9.2, origin/main` yields `["v0.9.2"]`; branch names
+/// and `HEAD` markers are not tags and are left out. Empty when the commit
+/// has no decorations at all.
+fn parse_tags(decorations: &str) -> Vec<String> {
+    decorations
+        .split(", ")
+        .filter_map(|part| part.strip_prefix("tag: "))
+        .map(str::to_string)
         .collect()
 }
 
@@ -1120,6 +1163,43 @@ mod tests {
         assert_eq!(commits[0].timestamp, 1_700_000_000);
         assert!(!commits[0].unpushed);
         assert!(commits[1].unpushed);
+    }
+
+    #[test]
+    fn decorations_yield_only_the_tags() {
+        assert_eq!(
+            parse_tags("HEAD -> main, tag: v0.9.2, origin/main"),
+            vec!["v0.9.2".to_string()]
+        );
+        assert_eq!(
+            parse_tags("tag: v0.9.0, tag: v0.9.1"),
+            vec!["v0.9.0".to_string(), "v0.9.1".to_string()]
+        );
+        assert!(parse_tags("HEAD -> main, origin/main").is_empty());
+        assert!(parse_tags("").is_empty());
+    }
+
+    #[test]
+    fn a_log_record_carries_its_release_tags() {
+        let raw = format!(
+            "aaa{US}fix: shipped{US}Ada{US}ada@example.com{US}1700000000{US}HEAD -> main, tag: v0.9.2, origin/main{RS}\
+             bbb{US}feat: plain{US}Grace{US}grace@example.com{US}1700000100{US}{RS}"
+        );
+        let commits = parse_log(&raw, &std::collections::HashSet::new(), None);
+
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].tags, vec!["v0.9.2".to_string()]);
+        assert!(commits[1].tags.is_empty());
+    }
+
+    #[test]
+    fn a_log_without_decorations_still_parses() {
+        // Records written before `%D` joined the format have five fields.
+        let raw = format!("aaa{US}fix: old{US}Ada{US}ada@example.com{US}1700000000{RS}");
+        let commits = parse_log(&raw, &std::collections::HashSet::new(), None);
+
+        assert_eq!(commits.len(), 1);
+        assert!(commits[0].tags.is_empty());
     }
 
     #[test]

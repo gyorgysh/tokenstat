@@ -2452,11 +2452,18 @@ struct Commit: Codable, Sendable, Hashable, Identifiable {
     /// decides it, because `user.email` is git's answer to "who am I here" and
     /// can differ per repository. Optional for the same reason as `email`.
     var mine: Bool?
+    /// Tags pointing at this commit, so history can say which commit a release
+    /// went out on. Optional because a running daemon can be older than the
+    /// app, and a commit without tags is still a commit.
+    var tags: [String]?
 
     /// The seven characters everyone actually reads.
     var shortID: String { String(id.prefix(7)) }
 
     var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
+
+    /// Tags to draw, newest daemon or old: absent means none, not unknown.
+    var tagList: [String] { tags ?? [] }
 }
 
 /// How close to a limit a window is.
@@ -2564,10 +2571,16 @@ struct CommitDetail: Codable, Sendable, Hashable, Identifiable {
     var added: UInt64
     var removed: UInt64
     var diffs: [FileDiff]
+    /// Tags pointing at this commit. Optional for the same older-daemon
+    /// reason as on `Commit`.
+    var tags: [String]?
 
     var shortID: String { String(id.prefix(7)) }
     var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
     var isMerge: Bool { parents.count > 1 }
+
+    /// Tags to draw, newest daemon or old: absent means none, not unknown.
+    var tagList: [String] { tags ?? [] }
 }
 
 /// What a folder is holding, as counts and nothing else.

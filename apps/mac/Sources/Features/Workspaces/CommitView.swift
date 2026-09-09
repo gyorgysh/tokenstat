@@ -47,6 +47,8 @@ struct CommitView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            CommitTagPills(tags: detail.tagList)
+
             HStack(spacing: Theme.Space.s) {
                 Text(detail.author)
                     .font(Theme.font(12))

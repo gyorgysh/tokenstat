@@ -305,6 +305,7 @@ private struct CommitRow: View {
                     .font(Theme.font(13))
                     .lineLimit(2)
                     .truncationMode(.tail)
+                CommitTagPills(tags: commit.tagList)
                 HStack(spacing: Theme.Space.xs) {
                     Text(commit.author)
                         .font(Theme.font(11))

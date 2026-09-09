@@ -142,6 +142,7 @@ private struct ClientCommitRow: View {
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
+                CommitTagPills(tags: commit.tagList)
                 HStack(spacing: 5) {
                     Text(commit.author)
                         .lineLimit(1)
@@ -232,6 +233,7 @@ struct ClientCommitDetailView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            CommitTagPills(tags: detail?.tagList ?? commit.tagList)
             HStack(spacing: Theme.Space.s) {
                 Text(commit.author)
                     .font(ClientType.caption)
