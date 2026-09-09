@@ -29,7 +29,6 @@ struct ClientDevicesView: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @State private var model = ClientDevicesModel()
     @State private var showSetup = false
-    @State private var showSample = false
 
     private var machines: [Machine] { account.account?.machines ?? [] }
 
@@ -87,9 +86,7 @@ struct ClientDevicesView: View {
                             actionTitle: "Set up a machine",
                             actionIcon: .connect,
                             action: { showSetup = true },
-                            art: .noMachine,
-                            secondaryActionTitle: "See a sample",
-                            secondaryAction: { showSample = true }
+                            art: .noMachine
                         )
                     }
                 }
@@ -131,7 +128,6 @@ struct ClientDevicesView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .sheet(isPresented: $showSample) { ClientSampleWorkspace() }
         .fullScreenCover(isPresented: $showSetup) {
             ClientSetupWizard()
         }

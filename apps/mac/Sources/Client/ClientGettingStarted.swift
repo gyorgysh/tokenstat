@@ -30,7 +30,6 @@ struct ClientGettingStarted: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
     @State private var showSetup = false
-    @State private var showSample = false
 
     /// The account's own name for this phone, when it has one. "Signed in" is
     /// true of somebody's account, and naming the device makes it true of the
@@ -50,7 +49,6 @@ struct ClientGettingStarted: View {
         .fullScreenCover(isPresented: $showSetup) {
             ClientSetupWizard()
         }
-        .sheet(isPresented: $showSample) { ClientSampleWorkspace() }
     }
 
     private var header: some View {
@@ -103,12 +101,6 @@ struct ClientGettingStarted: View {
                 .fixedSize(horizontal: false, vertical: true)
             GettingStartedGhostGrid(weeks: 16, alignment: .center)
                 .padding(.top, Theme.Space.xs)
-            // Reachable whether or not anybody is part-way through setup: the
-            // question "what is this actually like" does not stop being worth
-            // answering once a machine exists.
-            Button("See a sample", .preview) { showSample = true }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("home.sample")
         }
         .padding(.top, Theme.Space.xs)
     }
