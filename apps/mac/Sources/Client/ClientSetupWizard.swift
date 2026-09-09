@@ -75,6 +75,17 @@ struct ClientSetupWizard: View {
                     )
                 }
                 if let draft = model.savedDraft { resumeCard(draft) }
+                // The computer first: no token, no rental, nothing to buy.
+                // The doors below it both assume a server.
+                door(
+                    title: "On my Mac",
+                    body: "Install the desktop app on the computer you work on, sign in "
+                        + "to this account, and let this device in.",
+                    requirement: nil,
+                    symbol: "laptopcomputer"
+                ) {
+                    path = [.mac]
+                }
                 door(
                     title: "On a server I have",
                     body: "Connect over SSH and set it up. tokenstat installs itself, "
@@ -92,15 +103,6 @@ struct ClientSetupWizard: View {
                     symbol: "cloud.fill"
                 ) {
                     path = [.cloud]
-                }
-                door(
-                    title: "On my Mac",
-                    body: "Install the desktop app on the computer you work on, sign in "
-                        + "to this account, and let this device in.",
-                    requirement: nil,
-                    symbol: "laptopcomputer"
-                ) {
-                    path = [.mac]
                 }
                 // Leaving, without pretending it is a setup choice. A fourth card
                 // wore the same surface as the three doors and read as a fourth
@@ -203,8 +205,8 @@ struct ClientSetupWizard: View {
         .padding(.bottom, Theme.Space.xs)
     }
 
-    /// Doors two and three need the tunnel, which is patron and up. Said on the
-    /// door rather than after twenty minutes of SSH.
+    /// The server and cloud doors need the tunnel, which is patron and up.
+    /// Said on the door rather than after twenty minutes of SSH.
     private var paywalled: Bool {
         if let remote = account.account?.canRemote { return !remote }
         return !["patron", "legend"].contains(account.account?.tier?.lowercased())
