@@ -65,7 +65,15 @@ struct ChatDraftView: NSViewRepresentable {
             height: CGFloat.greatestFiniteMagnitude
         )
         textView.textContainer?.lineFragmentPadding = 0
+        // The delegate is already attached, and setting `string` moves the
+        // caret, which AppKit reports as a selection change before the
+        // assignment returns. Writing the SwiftUI binding from there is a
+        // write during view creation. It went unnoticed while this field was
+        // always born empty; a restored draft is not. Same guard, same
+        // reason as `updateNSView`.
+        context.coordinator.applyingUpdate = true
         textView.string = text
+        context.coordinator.applyingUpdate = false
         scroll.documentView = textView
         context.coordinator.textView = textView
         return scroll

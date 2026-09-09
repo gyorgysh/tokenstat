@@ -751,7 +751,7 @@ struct ChatView: View {
     }
 
     private var dropExperience: some View {
-        ChatDropExperience(seed: model.faceSeed)
+        ChatDropExperience()
     }
 
     private func receive(_ providers: [NSItemProvider]) async {
@@ -879,7 +879,6 @@ private extension ChatDisplayItem {
 /// One themed promise for every chat drop target, from a wide Mac transcript
 /// to an empty iPad conversation.
 struct ChatDropExperience: View {
-    var seed: UInt64
 
     var body: some View {
         ZStack {
@@ -888,7 +887,10 @@ struct ChatDropExperience: View {
                 .strokeBorder(Theme.accent.opacity(0.82), lineWidth: 1.5)
                 .padding(8)
             VStack(spacing: Theme.Space.s) {
-                PersonaMark(seed: seed, size: 58, state: .waiting)
+                Image(systemName: "paperclip")
+                    .font(Theme.font(36, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 58, height: 58)
                 Text("Drop to attach")
                     .font(Theme.callout.weight(.semibold))
                     .foregroundStyle(Theme.accent)

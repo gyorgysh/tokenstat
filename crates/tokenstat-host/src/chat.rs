@@ -415,13 +415,25 @@ impl Store {
         let root = tokenstat_paths::data_dir()
             .map(|path| path.join("chat"))
             .unwrap_or_else(|| PathBuf::from("chat"));
+        Self::load_at(root)
+    }
+
+    fn load_at(root: PathBuf) -> Self {
         let mut conversations = fs::read(root.join("conversations.json"))
             .ok()
             .and_then(|body| serde_json::from_slice::<Index>(&body).ok())
             .map(|index| index.conversations)
             .unwrap_or_default();
         let mut migrated = false;
+        let mut interrupted = Vec::new();
         for chat in &mut conversations {
+            // A fresh store owns no PTYs. A persisted running bit describes
+            // the previous daemon, and cannot keep this chat busy forever.
+            if chat.running {
+                chat.running = false;
+                interrupted.push((chat.id.clone(), chat.backend.clone()));
+                migrated = true;
+            }
             if chat.last_message_at_ms.is_some() {
                 continue;
             }
@@ -443,6 +455,16 @@ impl Store {
             approvals: Mutex::new(Vec::new()),
             turn_tokens: Mutex::new(HashMap::new()),
         };
+        for (id, backend) in interrupted {
+            store.record_events(
+                &id,
+                &backend,
+                vec![Event::Done {
+                    status: "interrupted".into(),
+                    exit_code: None,
+                }],
+            );
+        }
         if migrated {
             let _ = store.save();
         }
@@ -1887,9 +1909,21 @@ impl Store {
                 }
             }
         } else {
-            // A daemon restart can leave the persisted bit behind without an
-            // in-memory PTY. Clear that stale state, but keep a live turn
-            // marked running until its drain thread observes process exit.
+            // Also terminate the transcript's open tools. Clearing only the
+            // conversation bit left older clients treating a dangling tool
+            // as a live turn, so Stop could never release their composer.
+            let chat = self.get(id)?;
+            self.append(
+                id,
+                &StoredEvent::Agent {
+                    event: Event::Done {
+                        status: "stopped".into(),
+                        exit_code: None,
+                    },
+                    at_ms: now_ms(),
+                    backend: chat.backend,
+                },
+            )?;
             self.set_running(id, false)?;
         }
         Ok(())
@@ -3400,8 +3434,45 @@ mod tests {
             last_message_author: None,
             running: true,
         });
+        store.record_events(
+            "chat-test",
+            "muse",
+            vec![Event::ToolStart {
+                call_id: "orphan".into(),
+                verb: "Bash".into(),
+                target: "".into(),
+                input: Value::Null,
+            }],
+        );
         store.stop("chat-test").unwrap();
         assert!(!store.list("workspace-a")[0].running);
+        let rows = fs::read_to_string(store.events_path("chat-test")).unwrap();
+        let last: StoredEvent = serde_json::from_str(rows.lines().last().unwrap()).unwrap();
+        assert!(matches!(last, StoredEvent::Agent {
+            event: Event::Done { ref status, .. }, ..
+        } if status == "stopped"));
+    }
+
+    #[test]
+    fn restarting_settles_a_turn_without_a_process() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("chat");
+        let store = Store::at(path.clone());
+        conversation_for_receipts(&store, "interrupted");
+        store.set_running("interrupted", true).unwrap();
+        let recovered = Store::load_at(path.clone());
+        assert!(!recovered.get("interrupted").unwrap().running);
+        let rows = fs::read_to_string(recovered.events_path("interrupted")).unwrap();
+        let last: StoredEvent = serde_json::from_str(rows.lines().last().unwrap()).unwrap();
+        assert!(matches!(last, StoredEvent::Agent {
+            event: Event::Done { ref status, .. }, ..
+        } if status == "interrupted"));
+        // Recovery persists once; a second restart adds no duplicate ending.
+        let again = Store::load_at(path);
+        assert_eq!(
+            rows,
+            fs::read_to_string(again.events_path("interrupted")).unwrap()
+        );
     }
 
     #[test]

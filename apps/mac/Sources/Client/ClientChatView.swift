@@ -96,12 +96,11 @@ struct ClientChatView: View {
             refreshKey: "workspace-chat-\(workspaceID)",
             reload: { await reload() }
         ) {
-            let unsent = model.conversationsWithDrafts(in: workspaceID)
             ForEach(model.chats) { chat in
                 Button {
                     opened = chat
                 } label: {
-                    row(chat, hasDraft: unsent.contains(chat.id))
+                    row(chat, draft: model.draftReference(for: chat.id, in: workspaceID))
                 }
                 .buttonStyle(.plain)
                 .clientCardRow()
@@ -169,7 +168,7 @@ struct ClientChatView: View {
         }
     }
 
-    private func row(_ chat: ChatConversation, hasDraft: Bool) -> some View {
+    private func row(_ chat: ChatConversation, draft: WorkReference?) -> some View {
         HStack(spacing: Theme.Space.s) {
             HarnessMark(id: chat.backend, size: 28)
             VStack(alignment: .leading, spacing: 3) {
@@ -183,14 +182,10 @@ struct ClientChatView: View {
                         .font(ClientType.label.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    // Words waiting in this thread. The only way to find them
-                    // again from a list is to say which row holds them.
-                    if hasDraft {
-                        Image(systemName: "pencil")
-                            .font(Theme.font(10, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
-                            .accessibilityLabel("Unsent draft")
-                    }
+                    // Words waiting in this thread. The mark reads the draft
+                    // store itself, so this list is not rebuilt every time
+                    // somebody pauses typing in one of them.
+                    ChatDraftMark(reference: draft, size: 10, scalesWithText: true)
                 }
                 Text(rowDetail(chat))
                     .font(ClientType.caption)
@@ -371,7 +366,7 @@ struct ClientChatThread: View {
                 transcript(chat)
                     .overlay {
                         if dropExperienceVisible {
-                            ChatDropExperience(seed: model.faceSeed)
+                            ChatDropExperience()
                         }
                     }
                     .clientBottomBar {

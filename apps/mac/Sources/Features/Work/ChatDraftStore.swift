@@ -113,23 +113,16 @@ final class ChatDraftStore {
         return drafts[key]
     }
 
-    /// Which conversations in one folder have unsent words, so a list can
-    /// mark them without reading a single draft.
-    func conversationsWithDrafts(
-        scope: WorkReference.Scope, hostIdentity: String, workspaceID: String
-    ) -> Set<String> {
-        guard !hostIdentity.isEmpty, !workspaceID.isEmpty else { return [] }
-        let prefix = Self.folderPrefix(scope: scope, hostIdentity: hostIdentity,
-                                       workspaceID: workspaceID)
-        var found: Set<String> = []
-        for key in occupied where key.hasPrefix(prefix) {
-            let item = key.dropFirst(prefix.count)
-            guard !item.isEmpty, !item.contains("|"),
-                  let decoded = item.removingPercentEncoding, !decoded.isEmpty
-            else { continue }
-            found.insert(decoded)
-        }
-        return found
+    /// Whether one conversation is holding unsent words.
+    ///
+    /// A key lookup rather than a list, and asked by the mark itself rather
+    /// than by the screen that lists the conversations. Reading `occupied`
+    /// registers whoever reads it as an observer of every draft coming and
+    /// going, and a screen that does that is a screen laid out again for a
+    /// mark on one of its rows.
+    func hasDraft(for reference: WorkReference) -> Bool {
+        guard let key = Self.key(reference) else { return false }
+        return occupied.contains(key)
     }
 
     // MARK: - Writing
@@ -145,7 +138,7 @@ final class ChatDraftStore {
                               messageID: drafts[key]?.messageID ?? UUID().uuidString)
         if draft.isEmpty {
             guard drafts.removeValue(forKey: key) != nil else { return }
-            occupied.remove(key)
+            mark(key, occupied: false)
             flush(removing: [key])
             return
         }
@@ -155,13 +148,29 @@ final class ChatDraftStore {
             return
         }
         drafts[key] = draft
-        occupied.insert(key)
+        mark(key, occupied: true)
         flush()
+    }
+
+    /// Touch `occupied` only when membership actually changes.
+    ///
+    /// Assigning a stored property the value it already has does not notify,
+    /// but a set mutated in place cannot be compared and notifies every time.
+    /// A conversation that is already marked was being re-marked on every
+    /// keystroke pause, and everything observing the set was laid out again
+    /// for a mark that had not moved. `ChatDraftStoreTests` pins this.
+    private func mark(_ key: String, occupied wanted: Bool) {
+        guard occupied.contains(key) != wanted else { return }
+        if wanted {
+            occupied.insert(key)
+        } else {
+            occupied.remove(key)
+        }
     }
 
     func clear(for reference: WorkReference) {
         guard let key = Self.key(reference), drafts.removeValue(forKey: key) != nil else { return }
-        occupied.remove(key)
+        mark(key, occupied: false)
         flush(removing: [key])
     }
 

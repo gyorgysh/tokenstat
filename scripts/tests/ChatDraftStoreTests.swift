@@ -11,6 +11,12 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
     var size: UInt64?
 }
 
+/// A box, because `withObservationTracking`'s callback may not capture a
+/// mutable local in Swift 6 concurrency checking.
+final class Notified: @unchecked Sendable {
+    var fired = false
+}
+
 @main struct ChatDraftStoreTests {
     @MainActor static func main() {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -41,16 +47,41 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         assert(relaunched.draft(for: reference(folder: "folder-2", chat: "chat-a")) == nil)
         assert(relaunched.draft(for: reference(bob, chat: "chat-a")) == nil)
 
-        // A list marks the conversations that hold words, and no others.
+        // A mark belongs to one conversation, on one machine, under one
+        // account, and to no other.
         relaunched.save(text: "second", attachments: [], for: reference(chat: "chat-b"))
-        relaunched.save(text: "elsewhere", attachments: [], for: reference(folder: "folder-2", chat: "chat-c"))
         relaunched.save(text: "someone else", attachments: [], for: reference(bob, chat: "chat-d"))
-        assert(relaunched.conversationsWithDrafts(scope: alice, hostIdentity: "host-a",
-            workspaceID: "folder-1") == ["chat-a", "chat-b"])
-        assert(relaunched.conversationsWithDrafts(scope: bob, hostIdentity: "host-a",
-            workspaceID: "folder-1") == ["chat-d"])
-        assert(relaunched.conversationsWithDrafts(scope: alice, hostIdentity: "host-b",
-            workspaceID: "folder-1").isEmpty)
+        assert(relaunched.hasDraft(for: reference(chat: "chat-a")))
+        assert(relaunched.hasDraft(for: reference(chat: "chat-b")))
+        assert(!relaunched.hasDraft(for: reference(chat: "chat-c")))
+        assert(!relaunched.hasDraft(for: reference(host: "host-b", chat: "chat-a")))
+        assert(!relaunched.hasDraft(for: reference(folder: "folder-2", chat: "chat-a")))
+        assert(relaunched.hasDraft(for: reference(bob, chat: "chat-d")))
+        assert(!relaunched.hasDraft(for: reference(chat: "chat-d")))
+
+        // **The mark only moves when it moves.** Editing a draft that is
+        // already marked must notify nothing: a set mutated in place cannot
+        // compare itself, so re-inserting a key that is already there
+        // notifies every observer. That laid the whole Mac window out again
+        // on every pause in typing, with a chat transcript inside it, and
+        // hung the app for 25 seconds. See the 2026-09-09 hang.
+        func notifies(_ mutate: () -> Void) -> Bool {
+            let box = Notified()
+            withObservationTracking { _ = relaunched.occupied } onChange: { box.fired = true }
+            mutate()
+            return box.fired
+        }
+        let marked = reference(chat: "already-marked")
+        assert(notifies { relaunched.save(text: "one", attachments: [], for: marked) },
+               "the first words in a conversation mark it")
+        assert(!notifies { relaunched.save(text: "one, edited", attachments: [], for: marked) },
+               "editing a marked conversation must not notify")
+        assert(!notifies { relaunched.save(text: "one, edited again", attachments: [file], for: marked) },
+               "attaching to a marked conversation must not notify")
+        assert(notifies { relaunched.clear(for: marked) },
+               "sending the words takes the mark with them")
+        assert(!notifies { relaunched.clear(for: marked) },
+               "clearing what is already clear must not notify")
 
         // Separators inside an id cannot make two conversations one.
         let awkward = reference(folder: "a|b", chat: "c")
@@ -59,14 +90,13 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         relaunched.save(text: "second", attachments: [], for: alsoAwkward)
         assert(relaunched.draft(for: awkward)?.text == "first")
         assert(relaunched.draft(for: alsoAwkward)?.text == "second")
-        assert(relaunched.conversationsWithDrafts(scope: alice, hostIdentity: "host-a",
-            workspaceID: "a|b") == ["c"])
+        assert(relaunched.hasDraft(for: awkward))
+        assert(!relaunched.hasDraft(for: reference(folder: "a|b", chat: "b")))
 
         // Emptying the composer removes the record rather than storing nothing.
         relaunched.save(text: "   \n ", attachments: [], for: reference(chat: "chat-b"))
         assert(relaunched.draft(for: reference(chat: "chat-b")) == nil)
-        assert(!relaunched.conversationsWithDrafts(scope: alice, hostIdentity: "host-a",
-            workspaceID: "folder-1").contains("chat-b"))
+        assert(!relaunched.hasDraft(for: reference(chat: "chat-b")))
         relaunched.clear(for: reference(chat: "chat-a"))
         assert(relaunched.draft(for: reference(chat: "chat-a")) == nil)
         relaunched.settle()
@@ -90,8 +120,7 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         try! Data("not json".utf8).write(to: path)
         let afterCorruption = ChatDraftStore(directory: path.deletingLastPathComponent())
         assert(afterCorruption.draft(for: reference(chat: "one")) == nil)
-        assert(afterCorruption.conversationsWithDrafts(scope: alice, hostIdentity: "host-a",
-            workspaceID: "folder-1").isEmpty)
+        assert(!afterCorruption.hasDraft(for: reference(chat: "one")))
         afterCorruption.save(text: "after", attachments: [], for: reference(chat: "three"))
         afterCorruption.settle()
         assert(ChatDraftStore(directory: root).draft(for: reference(chat: "three"))?.text == "after")
@@ -185,6 +214,6 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         assert(ChatDraftTransition.resolve(incoming: "one", reference: nil,
             current: "one", currentReference: one) == .swap(nil))
 
-        print("Chat drafts: ownership, relaunch, merge, removal, corruption, message names and composer transitions passed")
+        print("Chat drafts: ownership, relaunch, merge, removal, corruption, quiet marks, message names and composer transitions passed")
     }
 }

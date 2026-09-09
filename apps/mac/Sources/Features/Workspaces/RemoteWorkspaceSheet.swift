@@ -56,6 +56,7 @@ struct RemoteWorkspaceSheet: View {
             title: title,
             subtitle: subtitle,
             icon: .create,
+            scrolls: true,
             onClose: { dismiss() }
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
@@ -497,6 +498,7 @@ private struct RemoteFolderBrowser: View {
                     }
                 }
             }
+            .frame(height: listing == nil ? 0 : 180)
             .frame(maxWidth: .infinity, alignment: .leading)
             Button(selectTitle, .approve) {
                 if let path { onSelect(path) }
@@ -527,6 +529,7 @@ private struct RemoteFolderBrowser: View {
             let answer = try await Bridge.browse(peer: peer.key, path: path)
             guard current == generation else { return }
             listing = answer
+            error = nil
             if initial, path == nil { path = answer.path }
         } catch {
             guard current == generation else { return }

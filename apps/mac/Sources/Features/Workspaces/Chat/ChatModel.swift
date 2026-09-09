@@ -175,12 +175,14 @@ final class ChatModel {
     /// The last save did not reach the disk, so the composer is the only copy.
     var draftSaveFailed: Bool { ChatDraftStore.shared.saveFailed }
 
-    /// Conversations in this folder with words waiting in them, so a list can
-    /// mark them.
-    func conversationsWithDrafts(in folderID: String) -> Set<String> {
-        guard let owner = continuityOwner(folderID: folderID) else { return [] }
-        return ChatDraftStore.shared.conversationsWithDrafts(scope: owner.scope,
-            hostIdentity: owner.host, workspaceID: owner.workspace)
+    /// How to name one of this folder's conversations to the draft store.
+    ///
+    /// Built by the list once and handed to each row's mark, so the list
+    /// itself never reads the store. See `ChatDraftMark`.
+    func draftReference(for conversationID: String, in folderID: String) -> WorkReference? {
+        guard let owner = continuityOwner(folderID: folderID) else { return nil }
+        return WorkReference(scope: owner.scope, hostIdentity: owner.host,
+            workspaceID: owner.workspace, kind: .conversation, itemID: conversationID)
     }
 
     private func scheduleDraftSave() {
@@ -1314,7 +1316,7 @@ final class ChatModel {
     }
 
     var busy: Bool {
-        selected?.running == true || hasRunningTool
+        selected?.running == true
     }
 
     var hasRunningTool: Bool {
@@ -1482,14 +1484,15 @@ final class ChatModel {
             count: events.count,
             firstSeq: events.first?.seq,
             lastSeq: events.last?.seq,
-            backend: selected?.backend
+            backend: selected?.backend,
+            running: selected?.running == true
         )
         let pending = outgoing
         let coalesced: [ChatDisplayItem]
         if key == displayKey {
             coalesced = displayCache
         } else {
-            displayCache = ChatDisplayItem.coalesce(events, defaultBackend: key.backend)
+            displayCache = ChatDisplayItem.coalesce(events, defaultBackend: key.backend, running: key.running)
             displayKey = key
             coalesced = displayCache
         }
@@ -1526,6 +1529,7 @@ final class ChatModel {
         var firstSeq: UInt64?
         var lastSeq: UInt64?
         var backend: String?
+        var running: Bool
     }
 
     @ObservationIgnored private var displayCache: [ChatDisplayItem] = []
@@ -2281,7 +2285,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
         return "\(event.atMs ?? 0)-\(position)"
     }
 
-    static func coalesce(_ events: [ChatTimelineEvent], defaultBackend: String? = nil) -> [ChatDisplayItem] {
+    static func coalesce(_ events: [ChatTimelineEvent], defaultBackend: String? = nil, running: Bool = true) -> [ChatDisplayItem] {
         var items: [ChatDisplayItem] = []
         var toolIndex: [String: Int] = [:]
         // How many times each call id has already started a tool in this
@@ -2389,6 +2393,9 @@ struct ChatDisplayItem: Identifiable, Equatable {
             if event.kind == "user" {
                 flushText()
                 flushThinking()
+                // A new user turn bounds any tools left open by an interrupted
+                // older turn, including histories recorded by older hosts.
+                closeRunningTools(failed: false, at: event.atMs, detail: "Interrupted")
                 editRevisions = [:]
                 items.append(
                     ChatDisplayItem(
@@ -2691,6 +2698,10 @@ struct ChatDisplayItem: Identifiable, Equatable {
         }
         flushText()
         flushThinking()
+        // Tool logs are history; only the host knows whether a process lives.
+        if !running {
+            closeRunningTools(failed: false, at: nil, detail: "Ended without a tool result")
+        }
         return items
     }
 }
