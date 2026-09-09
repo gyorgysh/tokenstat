@@ -32,6 +32,13 @@ import Foundation
         assert(store.lastConversation(scope: alice, hostIdentity: "host-b", workspaceID: "same-folder")?.itemID == "chat-b")
         assert(store.lastConversation(scope: bob, hostIdentity: "host-a", workspaceID: "same-folder")?.itemID == "bob-chat")
         assert(store.lastConversation(scope: local, hostIdentity: "host-a", workspaceID: "same-folder")?.itemID == "local-chat")
+        // Home receives only this scope, even after another window records visits.
+        assert(Set(store.recentConversations(scope: alice)) == Set([
+            first, reference(alice, "host-b", "same-folder", "chat-b")
+        ]))
+        assert(store.recentConversations(scope: alice, limit: 1).count == 1)
+        assert(store.recentConversations(scope: alice, limit: -1).isEmpty)
+        assert(store.recentConversations(scope: bob).map(\.itemID) == ["bob-chat"])
         let reloaded = WorkContinuityStore(defaults: defaults)
         assert(reloaded.lastConversation(scope: alice, hostIdentity: "host-a", workspaceID: "same-folder") == first)
         assert(WorkDestinationResolver.route(reference: first, currentScope: bob, localHostIdentity: "host-a") == nil)
@@ -52,6 +59,8 @@ import Foundation
         }
         assert(store.lastConversation(scope: alice, hostIdentity: "host-a", workspaceID: "folder-0") == nil)
         assert(store.lastConversation(scope: alice, hostIdentity: "host-a", workspaceID: "folder-119") != nil)
+        assert(store.recentConversations(scope: alice).map(\.workspaceID)
+            == ["same-folder", "folder-119", "folder-118", "folder-117"])
         defaults.set(Data("corrupt".utf8), forKey: "work.continuity.v1")
         assert(store.lastConversation(scope: alice, hostIdentity: "host-a", workspaceID: "folder-119") == nil)
         defaults.set(try! JSONEncoder().encode(["ambiguous-folder": "old-chat"]), forKey: "chat.lastSelectedByFolder.v1")

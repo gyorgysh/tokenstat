@@ -9,24 +9,24 @@ import Foundation
         defer { defaults.removePersistentDomain(forName: name) }
 
         // A device that has never been arranged gets the balanced order,
-        // which is the order Home has always drawn.
+        // with a separate usage summary available under Hidden.
         let fresh = HomeLayout(defaults: defaults)
         assert(fresh.order == HomePreset.balanced.order)
-        assert(fresh.sections == [.continueWork, .pinnedWork, .machines, .usage, .activity, .limits])
-        assert(fresh.hidden.isEmpty)
+        assert(fresh.sections == [.continueWork, .pinnedWork, .activity, .limits, .machines])
+        assert(fresh.hidden == [.usage])
         // And says so: a device nobody has arranged is balanced, not "none of
         // these three".
         assert(fresh.preset == .balanced)
 
         // Moving a card and switching one off survives a relaunch, and stops
         // claiming to be a preset.
-        fresh.move(from: IndexSet(integer: 4), to: 0)
+        fresh.move(from: IndexSet(integer: 2), to: 0)
         fresh.setVisible(false, section: .machines)
-        assert(fresh.sections == [.activity, .continueWork, .pinnedWork, .usage, .limits])
+        assert(fresh.sections == [.activity, .continueWork, .pinnedWork, .limits])
         assert(fresh.preset == nil)
         let relaunched = HomeLayout(defaults: defaults)
         assert(relaunched.order == fresh.order)
-        assert(relaunched.hidden == [.machines])
+        assert(relaunched.hidden == [.machines, .usage])
 
         // Every card can be off. A clear Home is an answer, not a failure.
         for section in HomeSection.allCases { relaunched.setVisible(false, section: section) }
@@ -39,7 +39,7 @@ import Foundation
         assert(relaunched.sections == HomePreset.usage.order)
         assert(HomeLayout(defaults: defaults).preset == .usage)
         relaunched.reset()
-        assert(relaunched.sections == HomePreset.balanced.order)
+        assert(relaunched.sections == HomePreset.balanced.order.filter { !HomePreset.balanced.hidden.contains($0) })
         assert(relaunched.preset == .balanced)
 
         // A stored order this build cannot read is made usable rather than
@@ -69,7 +69,7 @@ import Foundation
 
         // Moving matches what a drag does: the destination is an index in the
         // list before the rows are lifted out of it.
-        let five = HomePreset.balanced.order
+        let five: [HomeSection] = [.continueWork, .pinnedWork, .machines, .usage, .activity, .limits]
         assert(HomeLayout.moved(five, from: IndexSet(integer: 5), to: 0)
             == [.limits, .continueWork, .pinnedWork, .machines, .usage, .activity])
         assert(HomeLayout.moved(five, from: IndexSet(integer: 0), to: 6)
@@ -79,6 +79,16 @@ import Foundation
             == [.machines, .usage, .continueWork, .pinnedWork, .activity, .limits])
         // An offset nothing is at leaves the order alone rather than crashing.
         assert(HomeLayout.moved(five, from: IndexSet(integer: 9), to: 0) == five)
+
+        // Visible-row offsets must not move a hidden card accidentally.
+        let withHidden: [HomeSection] = [.continueWork, .usage, .activity, .pinnedWork, .limits, .machines]
+        let visibleMove = HomeLayout.movedVisible(withHidden, hidden: [.usage, .machines],
+                                                 from: IndexSet(integer: 0), to: 3)
+        assert(visibleMove == [.activity, .usage, .pinnedWork, .continueWork, .limits, .machines])
+        assert(HomeLayout.movedVisible(withHidden, hidden: Set(withHidden),
+                                       from: IndexSet(integer: 0), to: 2) == withHidden)
+        assert(HomeLayout.movedVisible(withHidden, hidden: [.usage],
+                                       from: IndexSet(integer: 50), to: 0) == withHidden)
 
         // Nothing stored at all is the default, not an empty Home.
         assert(HomeLayout.normalize(order: nil, hidden: []).order == HomePreset.balanced.order)

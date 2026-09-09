@@ -28,6 +28,11 @@ struct HomeView: View {
     var onOpenPin: (PinnedWorkStore.Pin) -> Void
     var pinAvailability: (PinnedWorkStore.Pin) -> String?
     var pinSubtitle: (PinnedWorkStore.Pin) -> String
+    var recentWork: [DesktopHomeDestination]
+    var onOpenRecent: (WorkReference) -> Void
+    var onOpenMachine: (Machine) -> Void
+    @State private var layout = HomeLayout.shared
+    @State private var editingHome = false
     @State private var pinsStore = PinnedWorkStore.shared
 
     var body: some View {
@@ -35,7 +40,10 @@ struct HomeView: View {
         // content. Refresh lives here, not in the window toolbar, so it is
         // not a floating mark over the heatmap.
         VStack(spacing: 0) {
-            DetailChromeBar {
+            DetailChromeBar(accessory: { scopePicker }) {
+                ToolbarIconButton(systemImage: ActionIcon.layout.symbol, help: "Customize Home") {
+                    editingHome = true
+                }
                 if hostReady {
                     ToolbarIconButton(
                         systemImage: "arrow.clockwise",
@@ -63,22 +71,17 @@ struct HomeView: View {
                             ErrorBanner(message: message)
                         }
 
+                        if model.needsAccountSignIn { accountSignInPrompt }
                         profile
-                        DesktopPinnedWorkSection(
-                            pins: pinsStore.pins(in: WorkSessionContext.shared.scope),
-                            availability: pinAvailability, subtitle: pinSubtitle, onOpen: onOpenPin
-                        )
-                        activity
-
-                        panels(width: width)
-
-                        if showsLimitsSyncHint {
-                            limitsSyncHint
+                        if layout.sections.isEmpty {
+                            clearHome
+                        } else {
+                            ForEach(layout.sections) { section in
+                                sectionView(section, width: width)
+                                    .id(section)
+                            }
                         }
-
-                        if limitsPending {
-                            panelPlaceholder
-                        }
+                        if showsLimitsSyncHint { limitsSyncHint }
                     }
                 }
                 // Tighter than the old inset all round. This screen is a stack of
@@ -88,6 +91,11 @@ struct HomeView: View {
             }
         }
         .background(Theme.background)
+        #if os(macOS)
+        .sheet(isPresented: $editingHome) {
+            DesktopHomeEditor(layout: layout, emptyReason: emptyReason)
+        }
+        #endif
         // Launch flow: app splash (logo) → these wireframes with a light pulse
         // → real content fades in. The splash is owned by RootView.
         // Leaving the screen while a cell is under the pointer: the popover
@@ -123,6 +131,72 @@ struct HomeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
             Task { await model.refresh() }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionView(_ section: HomeSection, width: CGFloat) -> some View {
+        switch section {
+        case .continueWork:
+            DesktopContinueSection(destinations: recentWork, onOpen: onOpenRecent)
+        case .pinnedWork:
+            DesktopPinnedWorkSection(
+                pins: pinsStore.pins(in: WorkSessionContext.shared.scope),
+                availability: pinAvailability, subtitle: pinSubtitle, onOpen: onOpenPin
+            )
+        case .machines:
+            DesktopHomeMachines(machines: account.account?.machines ?? [], onOpen: onOpenMachine)
+        case .usage:
+            usageSummary
+        case .activity:
+            activity
+        case .limits:
+            panels(width: width)
+            if limitsPending { panelPlaceholder }
+        }
+    }
+
+    private func emptyReason(_ section: HomeSection) -> String? {
+        switch section {
+        case .continueWork where recentWork.isEmpty:
+            return "Appears after you open a conversation."
+        case .pinnedWork where pinsStore.pins(in: WorkSessionContext.shared.scope).isEmpty:
+            return "Pin a folder from the sidebar or a conversation from its toolbar."
+        case .machines where (account.account?.machines ?? []).isEmpty:
+            return "Appears when your account has linked devices."
+        case .limits where panels.isEmpty && !limitsPending:
+            return "Appears when a connected plan has usage to show."
+        default: return nil
+        }
+    }
+
+    private var clearHome: some View {
+        Card(title: "Your Home is clear", subtitle: "Your work is still in the sidebar.",
+             leading: AnyView(ActionSeat(icon: .home, size: 24))) {
+            Button("Customize Home", .layout) { editingHome = true }
+                .buttonStyle(SecondaryButtonStyle())
+        }
+    }
+
+    private var usageSummary: some View {
+        Card(title: "Today and this week", subtitle: "Value at list rates · "
+             + (model.deliveredScope == .allMachines ? "All devices" : "This device"),
+             mark: "mark_insights") {
+            if model.calendar != nil {
+                HStack(alignment: .top, spacing: Theme.Space.xl) {
+                    Stat(label: "Today", value: model.todayValue.formatted, size: 20, expands: false)
+                    Stat(label: "Last 7 days", value: model.weekValue.formatted, size: 20, expands: false)
+                    if let busiest = model.calendar?.busiest {
+                        Stat(label: "Busiest", value: formatSpend(busiest.value), note: busiest.date,
+                             size: 20, expands: false)
+                    }
+                    Spacer(minLength: 0)
+                }
+            } else if model.errorMessage != nil {
+                EmptyHint(text: "Usage could not be read. See the message above.")
+            } else {
+                bar(width: nil, height: 40)
+            }
         }
     }
 
@@ -412,15 +486,6 @@ struct HomeView: View {
     /// not blurred: the real card fades in over it.
     private var activityPlaceholder: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .top, spacing: Theme.Space.xl) {
-                ForEach(0..<3, id: \.self) { index in
-                    VStack(alignment: .leading, spacing: 6) {
-                        bar(width: 54, height: 9, phase: Double(index) * 0.1)
-                        bar(width: 88, height: 18, phase: Double(index) * 0.1 + 0.05)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
             // The height the heatmap reserves for its grid, so the card is the
             // size it will still be a moment later.
             bar(width: nil, height: 187, phase: 0.12)
@@ -459,9 +524,8 @@ struct HomeView: View {
 
     /// Switches what the grid counts.
     ///
-    /// On the card rather than on the screen, because it changes this card and
-    /// nothing else. Today and Last 7 days beside the grid stay local: they are
-    /// "what have I spent here", which is the question Home opens with.
+    /// Kept in the fixed chrome so hiding Activity cannot remove the scope
+    /// control for the independently arranged usage summary.
     private var scopePicker: some View {
         let binding = Binding<ActivityScope>(
             get: { model.scope },
@@ -504,42 +568,10 @@ struct HomeView: View {
         Card(
             title: "Activity",
             subtitle: activitySubtitle,
-            mark: "mark_activity",
-            accessory: AnyView(scopePicker)
+            mark: "mark_activity"
         ) {
             if let calendar = model.calendar {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    if model.needsAccountSignIn {
-                        accountSignInPrompt
-                    }
-                    // Grouped at the leading edge rather than spread across
-                    // the card. These three are meant to be read against each
-                    // other, and a full-screen window put them a third of a
-                    // metre apart.
-                    HStack(alignment: .top, spacing: Theme.Space.xl) {
-                        Stat(
-                            label: "Today",
-                            value: model.todayValue.formatted,
-                            size: 20,
-                            expands: false
-                        )
-                        Stat(
-                            label: "Last 7 days",
-                            value: model.weekValue.formatted,
-                            size: 20,
-                            expands: false
-                        )
-                        if let busiest = calendar.busiest {
-                            Stat(
-                                label: "Busiest",
-                                value: formatSpend(busiest.value),
-                                note: busiest.date,
-                                size: 20,
-                                expands: false
-                            )
-                        }
-                        Spacer(minLength: 0)
-                    }
                     HeatmapView(
                         calendar: calendar,
                         onSelect: { model.select(day: $0) },

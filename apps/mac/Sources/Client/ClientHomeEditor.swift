@@ -18,6 +18,9 @@ struct ClientHomeEditor: View {
     @State private var order: [HomeSection]
     @State private var hidden: Set<HomeSection>
     @State private var preset: HomePreset?
+    @State private var beforeReset: (order: [HomeSection], hidden: Set<HomeSection>, preset: HomePreset?)?
+    @State private var announcement = ""
+    @AccessibilityFocusState private var focusedSection: HomeSection?
 
     init(layout: HomeLayout) {
         self.layout = layout
@@ -43,23 +46,49 @@ struct ClientHomeEditor: View {
                 }
 
                 Section {
-                    ForEach(order) { section in
+                    ForEach(visible) { section in
                         row(section)
                     }
                     .onMove(perform: move)
                 } header: {
-                    Text("Drag to reorder. Uncheck what you never read.")
+                    Text("Visible · drag to reorder")
                 } footer: {
                     Text(footerText)
                 }
 
+                if !hidden.isEmpty {
+                    Section("Hidden") {
+                        ForEach(order.filter { hidden.contains($0) }) { section in
+                            row(section)
+                        }
+                    }
+                }
+
                 Section {
                     Button("Reset Home", .refresh) {
+                        beforeReset = (order, hidden, preset)
                         order = HomePreset.balanced.order
-                        hidden = []
+                        hidden = HomePreset.balanced.hidden
                         preset = .balanced
+                        announcement = "Balanced arrangement restored."
                     }
                     .listRowBackground(Color.clear)
+                    if let previous = beforeReset {
+                        Button("Undo reset", .restore) {
+                            order = previous.order
+                            hidden = previous.hidden
+                            preset = previous.preset
+                            beforeReset = nil
+                            announcement = "Previous arrangement restored."
+                        }
+                        .listRowBackground(Color.clear)
+                    }
+                    if !announcement.isEmpty {
+                        Text(announcement)
+                            .font(ClientType.caption)
+                            .foregroundStyle(Theme.accent)
+                            .listRowBackground(Color.clear)
+                    }
                 }
             }
             .environment(\.editMode, .constant(.active))
@@ -71,10 +100,10 @@ struct ClientHomeEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel", .dismiss) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
+                    Button("Done", .done) {
                         layout.apply(order: order, hidden: hidden, preset: preset)
                         dismiss()
                     }
@@ -98,8 +127,10 @@ struct ClientHomeEditor: View {
             ForEach(HomePreset.allCases) { option in
                 Button {
                     order = option.order
-                    hidden = []
+                    hidden = option.hidden
                     preset = option
+                    beforeReset = nil
+                    announcement = ""
                 } label: {
                     Text(option.label)
                         .font(ClientType.caption.weight(.medium))
@@ -132,10 +163,12 @@ struct ClientHomeEditor: View {
 
     private func row(_ section: HomeSection) -> some View {
         let on = !hidden.contains(section)
-        let place = (order.firstIndex(of: section) ?? 0) + 1
+        let place = (visible.firstIndex(of: section) ?? 0) + 1
         return Button {
             if on { hidden.insert(section) } else { hidden.remove(section) }
             preset = nil
+            beforeReset = nil
+            announcement = "\(section.label) \(on ? "hidden" : "shown")."
         } label: {
             HStack(spacing: Theme.Space.m) {
                 Image(systemName: section.symbol)
@@ -158,87 +191,37 @@ struct ClientHomeEditor: View {
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
         .accessibilityLabel(section.label)
-        .accessibilityValue(on ? "On, position \(place) of \(order.count)" : "Off")
+        .accessibilityValue(on ? "Visible, position \(place) of \(visible.count)" : "Hidden")
+        .accessibilityFocused($focusedSection, equals: section)
         // Dragging is not the only way to move a card. VoiceOver and a
         // keyboard both reach these.
         .accessibilityActions {
-            Button("Move up") { shift(section, by: -1) }
-            Button("Move down") { shift(section, by: 1) }
+            if on {
+                Button("Move up") { shift(section, by: -1) }
+                Button("Move down") { shift(section, by: 1) }
+            }
         }
     }
 
     private func move(from: IndexSet, to: Int) {
-        order = HomeLayout.moved(order, from: from, to: to)
+        let movedSection = from.first.flatMap { visible.indices.contains($0) ? visible[$0] : nil }
+        order = HomeLayout.movedVisible(order, hidden: hidden, from: from, to: to)
         preset = nil
+        beforeReset = nil
+        if let movedSection { announceMove(movedSection) }
     }
 
     private func shift(_ section: HomeSection, by delta: Int) {
-        guard let index = order.firstIndex(of: section) else { return }
+        guard let index = visible.firstIndex(of: section) else { return }
         let target = index + delta
-        guard order.indices.contains(target) else { return }
-        order.swapAt(index, target)
-        preset = nil
+        guard visible.indices.contains(target) else { return }
+        move(from: IndexSet(integer: index), to: target > index ? target + 1 : target)
+        focusedSection = section
     }
-}
 
-/// Home at a glance: one bar per visible card, in order.
-///
-/// Small enough to sit above the list and still say what the arrangement will
-/// look like, which is the thing a list of names cannot show. Not a rendering
-/// of the real cards: a miniature that pretended to be the screen would be
-/// wrong the moment any of them had nothing to say.
-struct HomeLayoutPreview: View {
-    let sections: [HomeSection]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // The greeting, which is not a card and cannot be moved. Drawn
-            // so the bars below read as a screen rather than a stack.
-            Capsule()
-                .fill(Theme.accent.opacity(0.35))
-                .frame(width: 84, height: 8)
-                .padding(.bottom, 3)
-                .accessibilityHidden(true)
-            if sections.isEmpty {
-                Text("Your Home is clear")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-            } else {
-                ForEach(sections) { section in
-                    HStack(spacing: 6) {
-                        Image(systemName: section.symbol)
-                            .font(Theme.fixed(8, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
-                            .frame(width: 12)
-                        Text(section.label)
-                            .font(Theme.fixed(9, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 6)
-                    .frame(height: section == .activity ? 30 : 20)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        Theme.accentSoft,
-                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    )
-                }
-            }
-        }
-        .padding(Theme.Space.s)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
-        )
-        .animation(.easeOut(duration: 0.18), value: sections)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(sections.isEmpty
-            ? "Preview: Home is clear"
-            : "Preview: \(sections.map(\.label).joined(separator: ", "))")
+    private func announceMove(_ section: HomeSection) {
+        announcement = "\(section.label) moved to position \((visible.firstIndex(of: section) ?? 0) + 1)."
+        AccessibilityNotification.Announcement(announcement).post()
     }
 }
 

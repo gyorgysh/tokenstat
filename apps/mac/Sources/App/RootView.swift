@@ -2381,7 +2381,13 @@ struct RootView: View {
                 scanner: model,
                 onOpenPin: openPin,
                 pinAvailability: pinAvailability,
-                pinSubtitle: pinSubtitle
+                pinSubtitle: pinSubtitle,
+                recentWork: recentHomeWork,
+                onOpenRecent: openHomeWork,
+                onOpenMachine: { machine in
+                    machines.selectAccount(machine)
+                    navigate(to: .global(.machines))
+                }
             )
         case .workspace(_, .automations), .global(.automations):
             AutomationsView(
@@ -2834,6 +2840,39 @@ struct RootView: View {
         return WorkReference(scope: scope, hostIdentity: host,
                              workspaceID: resolved.workspaceID,
                              kind: .workspace, itemID: nil)
+    }
+
+    private var recentHomeWork: [DesktopHomeDestination] {
+        guard let scope = WorkSessionContext.shared.scope else { return [] }
+        return WorkContinuityStore.shared.recentConversations(scope: scope).map { reference in
+            let folderID = WorkPlaceRestoration.folderID(
+                for: reference, among: workspaces.folders.map(\.id),
+                localHostIdentity: WorkSessionContext.shared.localHostIdentity
+            )
+            let folder = workspaces.folders.first { $0.id == folderID }
+            let title = folderID.flatMap { id in
+                chat.sidebarChats(in: id).first { $0.id == reference.itemID }?.title
+            }
+            let machine = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity
+                ? "This Mac" : folder?.machineLabel ?? "Remote machine"
+            return DesktopHomeDestination(
+                reference: reference, title: title ?? "Conversation in \(folder?.name ?? "a previous folder")",
+                subtitle: "\(folder?.name ?? "Folder") · \(machine)",
+                unavailable: folder == nil ? "Folder is not available in Workspaces" : nil
+            )
+        }
+    }
+
+    private func openHomeWork(_ reference: WorkReference) {
+        guard reference.scope == WorkSessionContext.shared.scope,
+              let folderID = WorkPlaceRestoration.folderID(
+                for: reference, among: workspaces.folders.map(\.id),
+                localHostIdentity: WorkSessionContext.shared.localHostIdentity
+              ), let item = reference.itemID else { return }
+        chat.reveal(id: item, in: folderID)
+        expandedWorkspaces.insert(folderID)
+        expandedChatHistories.insert(folderID)
+        openSection(.chat, in: folderID)
     }
 
     private func pinSubtitle(_ pin: PinnedWorkStore.Pin) -> String {

@@ -38,7 +38,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
     var detail: String {
         switch self {
         case .continueWork: "The folders and conversations you were last in"
-        case .pinnedWork: "The work you kept. Always here, even offline"
+        case .pinnedWork: "Shortcuts to the folders and conversations you pinned"
         case .machines: "Which of your machines are awake"
         case .usage: "What today and this week came to"
         case .activity: "The year, a square a day"
@@ -79,9 +79,13 @@ enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
+    /// The default puts work and activity first. The separate usage summary
+    /// stays available; Usage first explicitly brings it forward.
+    var hidden: Set<HomeSection> { self == .balanced ? [.usage] : [] }
+
     var order: [HomeSection] {
         switch self {
-        case .balanced: [.continueWork, .pinnedWork, .machines, .usage, .activity, .limits]
+        case .balanced: [.continueWork, .pinnedWork, .activity, .limits, .machines, .usage]
         case .work: [.continueWork, .pinnedWork, .machines, .limits, .usage, .activity]
         case .usage: [.usage, .limits, .activity, .continueWork, .pinnedWork, .machines]
         }
@@ -141,7 +145,7 @@ final class HomeLayout {
     static func normalize(
         order stored: [HomeSection]?, hidden: [HomeSection]
     ) -> (order: [HomeSection], hidden: Set<HomeSection>) {
-        guard let stored else { return (HomePreset.balanced.order, []) }
+        guard let stored else { return (HomePreset.balanced.order, HomePreset.balanced.hidden) }
         var seen: Set<HomeSection> = []
         var order = stored.filter { seen.insert($0).inserted }
         order += HomePreset.balanced.order.filter { !seen.contains($0) }
@@ -181,6 +185,16 @@ final class HomeLayout {
         return remaining
     }
 
+    /// Reorder the visible rows while retaining hidden cards in their saved
+    /// slots. List offsets refer to the visible group, not the full arrangement.
+    static func movedVisible(
+        _ order: [HomeSection], hidden: Set<HomeSection>, from offsets: IndexSet, to destination: Int
+    ) -> [HomeSection] {
+        let visible = order.filter { !hidden.contains($0) }
+        var moved = moved(visible, from: offsets, to: destination).makeIterator()
+        return order.map { hidden.contains($0) ? $0 : moved.next() ?? $0 }
+    }
+
     /// Apply an arrangement made somewhere else, in one go, so Home changes
     /// once rather than card by card.
     func apply(order: [HomeSection], hidden: Set<HomeSection>, preset: HomePreset?) {
@@ -192,7 +206,7 @@ final class HomeLayout {
     }
 
     func reset() {
-        apply(order: HomePreset.balanced.order, hidden: [], preset: .balanced)
+        apply(order: HomePreset.balanced.order, hidden: HomePreset.balanced.hidden, preset: .balanced)
     }
 
     private func save() {

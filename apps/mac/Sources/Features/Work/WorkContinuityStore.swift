@@ -35,6 +35,11 @@ final class WorkContinuityStore {
         }?.reference
     }
 
+    /// Most recently visited conversations in this scope, without contacting hosts.
+    func recentConversations(scope: WorkReference.Scope, limit: Int = 4) -> [WorkReference] {
+        Array(read().filter { $0.reference.scope == scope }.prefix(max(0, limit))).map(\.reference)
+    }
+
     func remember(_ reference: WorkReference, at date: Date = Date()) {
         guard reference.kind == .conversation, let item = reference.itemID, !item.isEmpty,
               !reference.hostIdentity.isEmpty, !reference.workspaceID.isEmpty else { return }
