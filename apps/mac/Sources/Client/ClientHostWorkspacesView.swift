@@ -20,7 +20,11 @@ struct ClientHostWorkspacesView: View {
     let peerKey: String
     let hostName: String
     @Environment(AccountModel.self) private var account
+    @Environment(ClientNavigationModel.self) private var navigation
     @State private var model = ClientHostWorkspacesModel()
+    /// Which folder chooser is showing, if any. Chats and sessions live
+    /// inside folders, so starting one means picking the folder first.
+    @State private var starting: WorkspaceSection?
 
     /// A machine with no desktop app, which changes what "it is not answering"
     /// means and what somebody can do about it. Read from what the machine
@@ -170,28 +174,6 @@ struct ClientHostWorkspacesView: View {
                     }
                 }
 
-                ClientRecentChatsSection(
-                    peer: peerKey,
-                    hostName: hostName,
-                    folders: model.folders,
-                    chats: model.recentChats
-                )
-
-                if !model.sessions.isEmpty {
-                    ClientSectionTitle(title: "Sessions", mark: "mark_terminal")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 2)
-                        .padding(.top, Theme.Space.s)
-                    ForEach(model.sessions) { session in
-                        Button {
-                            model.open(session, peer: peerKey)
-                        } label: {
-                            ClientSessionRow(session: session)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
                 if !model.folders.isEmpty {
                     ClientSectionTitle(title: "Folders", mark: "mark_archive")
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -208,6 +190,44 @@ struct ClientHostWorkspacesView: View {
                             ClientFolderRow(folder: folder)
                         }
                         .buttonStyle(.plain)
+                    }
+                }
+
+                ClientRecentChatsSection(
+                    peer: peerKey,
+                    hostName: hostName,
+                    folders: model.folders,
+                    chats: model.recentChats,
+                    onNewChat: { starting = .chat }
+                )
+                .padding(.top, Theme.Space.s)
+
+                if !model.sessions.isEmpty || !model.folders.isEmpty {
+                    HStack(alignment: .center) {
+                        ClientSectionTitle(title: "Sessions", mark: "mark_terminal")
+                        Spacer(minLength: Theme.Space.s)
+                        if !model.folders.isEmpty {
+                            Button("New session", .create) { starting = .sessions }
+                                .font(ClientType.caption.weight(.semibold))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
+                    .padding(.top, Theme.Space.s)
+                    ForEach(model.sessions) { session in
+                        Button {
+                            model.open(session, peer: peerKey)
+                        } label: {
+                            ClientSessionRow(session: session)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if model.sessions.isEmpty {
+                        Text("Nothing running. Start one from a folder.")
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 2)
                     }
                 }
 
@@ -232,6 +252,22 @@ struct ClientHostWorkspacesView: View {
                 onClose: { model.activeTerminal = nil }
             )
         }
+        .sheet(item: $starting) { section in
+            ClientFolderChooserSheet(
+                hostName: hostName,
+                folders: model.folders,
+                title: section == .chat ? "New chat in…" : "New session in…"
+            ) { folder in
+                open(folder, section: section)
+            }
+        }
+    }
+
+    /// Open a folder's section to start something there. The launch tiles and
+    /// the chat composer already live in the folder; this only gets there.
+    private func open(_ folder: WorkspaceFolder, section: WorkspaceSection) {
+        let raw = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
+        navigation.open(folderID: "remote:\(peerKey):\(raw)", section: section)
     }
 
 }

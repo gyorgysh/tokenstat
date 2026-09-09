@@ -105,6 +105,9 @@ ALLOWED = [
     # site, because one component draws every step.
     ("Design/GettingStartedRail.swift", "Button(title, icon, action: action)"),
     ("Client/ClientSecurityCard.swift", "UIPasteboard.general.string = key"),
+    # A folder row in the host-level chooser sheet. The whole card is the
+    # label, like the folder rows it reuses, and it already ends in a chevron.
+    ("Client/ClientRecentChats.swift", "onChoose(folder)"),
     # A machine row on Home. The whole row is the label and it ends in a
     # chevron, like the device rows it resembles.
     ("Client/ClientHomeMachinesSection.swift", "navigation.openDevice"),

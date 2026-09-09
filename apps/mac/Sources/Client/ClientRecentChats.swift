@@ -86,12 +86,24 @@ final class ClientChatReadState {
     }
 }
 
-/// The short path back into work, shown above folders on a connected host.
+/// The short path back into work, shown below folders on a connected host.
+///
+/// Five newest fit without pushing sessions off screen; the rest wait behind
+/// "Show more" rather than making the page an archive.
 struct ClientRecentChatsSection: View {
     let peer: String
     let hostName: String
     let folders: [WorkspaceFolder]
     let chats: [ChatRecentConversation]
+    /// When set and there is a folder to start in, a "New chat" button sits
+    /// beside the title. Chats live inside folders, so starting one means
+    /// picking the folder first; the caller owns that sheet.
+    var onNewChat: (() -> Void)? = nil
+
+    /// How many rows show before "Show more".
+    private static let collapsedLimit = 5
+
+    @State private var expanded = false
 
     private var receipts: ClientChatReadState { .shared }
 
@@ -115,14 +127,25 @@ struct ClientRecentChatsSection: View {
         return ranked.compactMap { byID[$0.id] }
     }
 
+    private var shown: [ChatRecentConversation] {
+        expanded ? visible : Array(visible.prefix(Self.collapsedLimit))
+    }
+
     var body: some View {
         if !visible.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Recent chats", mark: "mark_activity")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 2)
+                HStack(alignment: .center) {
+                    ClientSectionTitle(title: "Recent chats", mark: "mark_activity")
+                    Spacer(minLength: Theme.Space.s)
+                    if onNewChat != nil, !folders.isEmpty {
+                        Button("New chat", .create) { onNewChat?() }
+                            .font(ClientType.caption.weight(.semibold))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 2)
 
-                ForEach(visible) { chat in
+                ForEach(shown) { chat in
                     NavigationLink {
                         ClientRecentChatView(
                             peer: peer,
@@ -139,6 +162,26 @@ struct ClientRecentChatsSection: View {
                         )
                     }
                     .buttonStyle(.plain)
+                }
+
+                if visible.count > Self.collapsedLimit {
+                    Button {
+                        expanded.toggle()
+                    } label: {
+                        Label(
+                            expanded
+                                ? "Show less"
+                                : "Show more (\(visible.count - Self.collapsedLimit) more)",
+                            systemImage: expanded ? "chevron.up" : "chevron.down"
+                        )
+                        .font(ClientType.caption.weight(.semibold))
+                    }
+                    .tint(Theme.accent)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 2)
+                    .accessibilityHint(expanded
+                        ? "Shows only the five newest chats"
+                        : "Shows every recent chat")
                 }
             }
         }
@@ -291,6 +334,49 @@ struct ClientRecentChatView: View {
         }
         await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
         loaded = true
+    }
+}
+
+/// Pick one of a host's folders to start something in.
+///
+/// Chats and sessions live inside folders, so a host-level "New chat" or
+/// "New session" button cannot act until it knows which folder. This sheet is
+/// that question, shared by both host screens. The caller navigates into the
+/// folder's section, where the launch tiles and the chat composer already are.
+struct ClientFolderChooserSheet: View {
+    let hostName: String
+    let folders: [WorkspaceFolder]
+    /// What starting means once a folder is picked, in the sheet's own words.
+    let title: String
+    let onChoose: (WorkspaceFolder) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: Theme.Space.s) {
+                    ForEach(folders) { folder in
+                        Button {
+                            onChoose(folder)
+                            dismiss()
+                        } label: {
+                            ClientFolderRow(folder: folder)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(Theme.Space.m)
+            }
+            .background(Theme.background)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel) { dismiss() }
+                }
+            }
+        }
     }
 }
 

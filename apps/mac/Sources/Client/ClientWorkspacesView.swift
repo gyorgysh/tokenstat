@@ -26,6 +26,9 @@ struct ClientWorkspacesView: View {
     @State private var notificationOpen = NotificationOpen.shared
     @State private var showSetup = false
     @State private var showSample = false
+    /// Which folder chooser is showing, if any. Same question as the device
+    /// page: chats and sessions live inside folders.
+    @State private var starting: WorkspaceSection?
     // Per-host, not global: each host card owns its row. A global key would
     // make every toggle move together, which is the extra card in the
     // screenshot. The rule itself lives on the model, because the iPad's
@@ -146,64 +149,77 @@ struct ClientWorkspacesView: View {
                     if model.connectedKey != nil {
                         if let peer = model.connectedKey,
                            let host = model.hosts.first(where: { $0.peerKey == peer }) {
-                            ClientRecentChatsSection(
-                                peer: peer,
-                                hostName: host.name,
-                                folders: model.folders,
-                                chats: model.recentChats
-                            )
-                        }
-
-                        if !model.sessions.isEmpty {
-                            Text("All sessions")
-                                .font(ClientType.sectionTitle)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 2)
-                                .padding(.top, Theme.Space.s)
-                            List {
-                                ForEach(model.sessions) { session in
-                                    Button {
-                                        model.openSession(session)
-                                    } label: {
-                                        ClientSessionRow(session: session)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0))
-                                    .listRowSeparator(.hidden)
-                                    .listRowBackground(Color.clear)
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                        Button("Close", role: .destructive) {
-                                            pendingClose = session
-                                        }
-                                    }
-                                }
-                            }
-                            .listStyle(.plain)
-                            .scrollDisabled(true)
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: CGFloat(model.sessions.count) * 78)
-                        }
-
-                        if !model.folders.isEmpty {
-                            ClientSectionTitle(title: "Folders", mark: "mark_archive")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 2)
-                                .padding(.top, Theme.Space.s)
-                            ForEach(model.folders) { folder in
-                                NavigationLink {
-                                    if let peer = model.connectedKey,
-                                       let host = model.hosts.first(where: { $0.peerKey == peer })
-                                    {
+                            if !model.folders.isEmpty {
+                                ClientSectionTitle(title: "Folders", mark: "mark_archive")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 2)
+                                    .padding(.top, Theme.Space.s)
+                                ForEach(model.folders) { folder in
+                                    NavigationLink {
                                         ClientWorkspaceDetailView(
                                             peer: peer,
                                             hostName: host.name,
                                             folder: folder
                                         )
+                                    } label: {
+                                        ClientFolderRow(folder: folder)
                                     }
-                                } label: {
-                                    ClientFolderRow(folder: folder)
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
+                            }
+
+                            ClientRecentChatsSection(
+                                peer: peer,
+                                hostName: host.name,
+                                folders: model.folders,
+                                chats: model.recentChats,
+                                onNewChat: { starting = .chat }
+                            )
+                            .padding(.top, Theme.Space.s)
+
+                            if !model.sessions.isEmpty || !model.folders.isEmpty {
+                                HStack(alignment: .center) {
+                                    Text("All sessions")
+                                        .font(ClientType.sectionTitle)
+                                    Spacer(minLength: Theme.Space.s)
+                                    if !model.folders.isEmpty {
+                                        Button("New session", .create) { starting = .sessions }
+                                            .font(ClientType.caption.weight(.semibold))
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 2)
+                                .padding(.top, Theme.Space.s)
+                                if model.sessions.isEmpty {
+                                    Text("Nothing running. Start one from a folder.")
+                                        .font(ClientType.caption)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 2)
+                                } else {
+                                    List {
+                                        ForEach(model.sessions) { session in
+                                            Button {
+                                                model.openSession(session)
+                                            } label: {
+                                                ClientSessionRow(session: session)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0))
+                                            .listRowSeparator(.hidden)
+                                            .listRowBackground(Color.clear)
+                                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                                Button("Close", role: .destructive) {
+                                                    pendingClose = session
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .listStyle(.plain)
+                                    .scrollDisabled(true)
+                                    .scrollContentBackground(.hidden)
+                                    .frame(minHeight: CGFloat(model.sessions.count) * 78)
+                                }
                             }
                         }
                     }
@@ -214,6 +230,19 @@ struct ClientWorkspacesView: View {
             }
             .background(Theme.background)
             .sheet(isPresented: $showSample) { ClientSampleWorkspace() }
+            .sheet(item: $starting) { section in
+                if let peer = model.connectedKey,
+                   let host = model.hosts.first(where: { $0.peerKey == peer }) {
+                    ClientFolderChooserSheet(
+                        hostName: host.name,
+                        folders: model.folders,
+                        title: section == .chat ? "New chat in…" : "New session in…"
+                    ) { folder in
+                        let raw = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
+                        navigation.open(folderID: "remote:\(peer):\(raw)", section: section)
+                    }
+                }
+            }
             .fullScreenCover(isPresented: $showSetup) {
                 ClientSetupWizard()
             }
@@ -358,6 +387,9 @@ struct ClientWorkspacesView: View {
     /// never drawn as offline: the app asking the question is running on it.
     @ViewBuilder
     private var thisDeviceRow: some View {
+        // Deliberately not a card. The host cards above open a device when
+        // tapped, and this row opens nothing, so wearing the same surface
+        // taught people it could be entered too.
         if let name = model.thisDeviceName {
             HStack(spacing: Theme.Space.s) {
                 Circle()
@@ -376,9 +408,9 @@ struct ClientWorkspacesView: View {
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.accent)
             }
-            .padding(Theme.Space.m)
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.s)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .cardSurface()
             .accessibilityElement(children: .combine)
         }
     }
@@ -402,23 +434,38 @@ struct ClientWorkspacesView: View {
                     Button("Disconnect", .disconnect) {
                         model.disconnect()
                     }
-                    .font(ClientType.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 } else {
                     Button(model.isConnecting == host.peerKey ? "Connecting…" : "Connect", .connect) {
                         Task { await model.connect(host) }
                     }
-                    .font(ClientType.caption.weight(.semibold))
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(Theme.accent)
                     .disabled(model.isConnecting != nil || host.online == false)
                 }
-                // Inline, after the button. As a bottom-trailing overlay this
-                // landed on top of Connect whenever the card was a single row,
-                // which is every card that is not the connected one.
-                if host.machineID != nil {
-                    Image(systemName: "chevron.right")
-                        .font(ClientType.caption)
-                        .foregroundStyle(.tertiary)
-                        .accessibilityHidden(true)
+            }
+            // Opening the device used to hide behind a bare chevron, so the
+            // card never said it could be entered. It says so now, as its own
+            // row. The card tap stays for the same action.
+            if host.machineID != nil {
+                Button {
+                    navigation.openDevice(machineID: host.machineID)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Open device")
+                            .font(ClientType.caption.weight(.semibold))
+                        Image(systemName: "chevron.right")
+                            .font(ClientType.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .tint(Theme.accent)
+                .foregroundStyle(Theme.accent)
             }
             if model.connectedKey == host.peerKey {
                 // What the machine is doing, rather than a sentence saying it
@@ -445,15 +492,13 @@ struct ClientWorkspacesView: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
-        // The whole card, minus the button, opens that machine on Devices.
+        // The whole card, minus the buttons, opens that machine on Devices.
         // `contentShape` so the padding is part of the target, and a plain
-        // background gesture rather than a `NavigationLink` because Connect
-        // and Disconnect live inside this card and a link would swallow them.
+        // background gesture rather than a `NavigationLink` because Connect,
+        // Disconnect and Open live inside this card and a link would swallow
+        // them. The Open row above says the same thing in words.
         .contentShape(Rectangle())
         .onTapGesture { navigation.openDevice(machineID: host.machineID) }
-        .accessibilityAction(named: "Show this device") {
-            navigation.openDevice(machineID: host.machineID)
-        }
     }
 }
 
