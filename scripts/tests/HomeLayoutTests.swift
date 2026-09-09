@@ -12,7 +12,7 @@ import Foundation
         // which is the order Home has always drawn.
         let fresh = HomeLayout(defaults: defaults)
         assert(fresh.order == HomePreset.balanced.order)
-        assert(fresh.sections == [.continueWork, .machines, .usage, .activity, .limits])
+        assert(fresh.sections == [.continueWork, .pinnedWork, .machines, .usage, .activity, .limits])
         assert(fresh.hidden.isEmpty)
         // And says so: a device nobody has arranged is balanced, not "none of
         // these three".
@@ -20,9 +20,9 @@ import Foundation
 
         // Moving a card and switching one off survives a relaunch, and stops
         // claiming to be a preset.
-        fresh.move(from: IndexSet(integer: 3), to: 0)
+        fresh.move(from: IndexSet(integer: 4), to: 0)
         fresh.setVisible(false, section: .machines)
-        assert(fresh.sections == [.activity, .continueWork, .usage, .limits])
+        assert(fresh.sections == [.activity, .continueWork, .pinnedWork, .usage, .limits])
         assert(fresh.preset == nil)
         let relaunched = HomeLayout(defaults: defaults)
         assert(relaunched.order == fresh.order)
@@ -50,8 +50,16 @@ import Foundation
             order: [.limits, .limits, .activity],
             hidden: [.limits, .machines]
         )
-        assert(messy.order == [.limits, .activity, .continueWork, .machines, .usage])
+        assert(messy.order == [.limits, .activity, .continueWork, .pinnedWork, .machines, .usage])
         assert(messy.hidden == [.limits, .machines])
+
+        // An arrangement stored before pins existed gains the card at the
+        // end, leaving every chosen position alone.
+        let prePins = HomeLayout.normalize(
+            order: [.continueWork, .machines, .usage, .activity, .limits],
+            hidden: []
+        )
+        assert(prePins.order == [.continueWork, .machines, .usage, .activity, .limits, .pinnedWork])
 
         // Hiding something that is not in the order is not a thing.
         let stray = HomeLayout.normalize(order: [.usage], hidden: [.activity])
@@ -62,13 +70,13 @@ import Foundation
         // Moving matches what a drag does: the destination is an index in the
         // list before the rows are lifted out of it.
         let five = HomePreset.balanced.order
-        assert(HomeLayout.moved(five, from: IndexSet(integer: 4), to: 0)
-            == [.limits, .continueWork, .machines, .usage, .activity])
-        assert(HomeLayout.moved(five, from: IndexSet(integer: 0), to: 5)
-            == [.machines, .usage, .activity, .limits, .continueWork])
+        assert(HomeLayout.moved(five, from: IndexSet(integer: 5), to: 0)
+            == [.limits, .continueWork, .pinnedWork, .machines, .usage, .activity])
+        assert(HomeLayout.moved(five, from: IndexSet(integer: 0), to: 6)
+            == [.pinnedWork, .machines, .usage, .activity, .limits, .continueWork])
         assert(HomeLayout.moved(five, from: IndexSet(integer: 1), to: 1) == five)
         assert(HomeLayout.moved(five, from: IndexSet([0, 1]), to: 4)
-            == [.usage, .activity, .continueWork, .machines, .limits])
+            == [.machines, .usage, .continueWork, .pinnedWork, .activity, .limits])
         // An offset nothing is at leaves the order alone rather than crashing.
         assert(HomeLayout.moved(five, from: IndexSet(integer: 9), to: 0) == five)
 

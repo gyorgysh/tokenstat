@@ -24,12 +24,21 @@ struct ClientContinueSection: View {
                 ClientSectionTitle(title: "Pick up where you left off", mark: "mark_activity")
                 VStack(spacing: 0) {
                     ForEach(places) { place in
-                        NavigationLink {
-                            ClientSavedPlaceView(place: place)
-                        } label: {
-                            row(place)
+                        HStack(spacing: 0) {
+                            NavigationLink {
+                                ClientSavedPlaceView(place: place)
+                            } label: {
+                                row(place)
+                            }
+                            .buttonStyle(.plain)
+                            if let reference = reference(for: place) {
+                                PinToggleButton(
+                                    reference: reference, label: place.title,
+                                    folderName: place.workspaceName
+                                )
+                                .padding(.trailing, Theme.Space.xs)
+                            }
                         }
-                        .buttonStyle(.plain)
                         if place.id != places.last?.id {
                             ThemeRule().padding(.horizontal, Theme.Space.m)
                         }
@@ -39,6 +48,31 @@ struct ClientContinueSection: View {
             }
             .accessibilityIdentifier("home.continue")
         }
+    }
+
+    /// What a pin files this row under. Terminal sessions end, so they are
+    /// not pinnable: keeping a link to a dead shell is worse than no pin.
+    private func reference(for place: ClientRecentPlaces.Place) -> WorkReference? {
+        guard let scope = account.account?.pinnedWorkScope,
+              let workspaceID = place.id.workspaceID, !workspaceID.isEmpty
+        else { return nil }
+        let kind: WorkReference.Kind
+        switch place.id.kind {
+        case .workspace: kind = .workspace
+        case .chat: kind = .conversation
+        case .terminal: return nil
+        }
+        let itemID: String?
+        switch kind {
+        case .workspace: itemID = nil
+        case .conversation, .terminal, .commit, .savedDiff:
+            guard let item = place.id.itemID, !item.isEmpty else { return nil }
+            itemID = item
+        }
+        return WorkReference(
+            scope: scope, hostIdentity: place.id.peer, workspaceID: workspaceID,
+            kind: kind, itemID: itemID
+        )
     }
 
     private func row(_ place: ClientRecentPlaces.Place) -> some View {

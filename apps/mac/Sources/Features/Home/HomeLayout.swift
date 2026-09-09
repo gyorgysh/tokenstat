@@ -14,6 +14,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
     /// The work worth going back to. First by default: it is the reason to
     /// open the app on a phone.
     case continueWork = "continue"
+    case pinnedWork = "pinned"
     case machines
     case usage
     case activity
@@ -24,6 +25,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
     var label: String {
         switch self {
         case .continueWork: "Continue"
+        case .pinnedWork: "Pinned work"
         case .machines: "Machines"
         case .usage: "Today and this week"
         case .activity: "Activity"
@@ -36,6 +38,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
     var detail: String {
         switch self {
         case .continueWork: "The folders and conversations you were last in"
+        case .pinnedWork: "The work you kept. Always here, even offline"
         case .machines: "Which of your machines are awake"
         case .usage: "What today and this week came to"
         case .activity: "The year, a square a day"
@@ -46,6 +49,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
     var symbol: String {
         switch self {
         case .continueWork: "arrow.uturn.backward.circle.fill"
+        case .pinnedWork: "pin.fill"
         case .machines: "desktopcomputer"
         case .usage: "sum"
         case .activity: "square.grid.3x3.fill"
@@ -77,9 +81,9 @@ enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var order: [HomeSection] {
         switch self {
-        case .balanced: [.continueWork, .machines, .usage, .activity, .limits]
-        case .work: [.continueWork, .machines, .limits, .usage, .activity]
-        case .usage: [.usage, .limits, .activity, .continueWork, .machines]
+        case .balanced: [.continueWork, .pinnedWork, .machines, .usage, .activity, .limits]
+        case .work: [.continueWork, .pinnedWork, .machines, .limits, .usage, .activity]
+        case .usage: [.usage, .limits, .activity, .continueWork, .pinnedWork, .machines]
         }
     }
 }

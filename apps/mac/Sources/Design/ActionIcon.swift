@@ -55,6 +55,8 @@ enum ActionIcon {
     case move
     case archive
     case restore
+    case pin
+    case pinned
     case browser
     case collapse
     case commit
@@ -148,6 +150,8 @@ enum ActionIcon {
         case .move: return "arrow.right.circle"
         case .archive: return "archivebox"
         case .restore: return "arrow.uturn.backward"
+        case .pin: return "pin"
+        case .pinned: return "pin.fill"
         case .browser: return "globe"
         case .collapse: return "chevron.up"
         // The two arrows every platform draws for this, rather than the

@@ -68,4 +68,14 @@ final class WorkCacheStore {
         guard let recordID = WorkCache.recordID(for: reference) else { return }
         _ = try? await Bridge.cacheRemove(scope: WorkCache.scope(for: reference.scope), id: recordID)
     }
+
+    /// Keep or release a conversation's copy. Pinning survives age eviction
+    /// inside the hard budget; unpinning hands the copy back to the ordinary
+    /// quota. Folder pins carry no copy and answer nothing here.
+    func setPinned(_ pinned: Bool, for reference: WorkReference) async {
+        guard let recordID = WorkCache.recordID(for: reference) else { return }
+        _ = try? await Bridge.cachePin(
+            scope: WorkCache.scope(for: reference.scope), id: recordID, pinned: pinned
+        )
+    }
 }

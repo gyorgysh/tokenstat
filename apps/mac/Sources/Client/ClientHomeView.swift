@@ -102,6 +102,8 @@ struct ClientHomeView: View {
         switch section {
         case .continueWork:
             ClientContinueSection()
+        case .pinnedWork:
+            ClientPinnedWorkSection()
         case .machines:
             ClientHomeMachinesSection()
         case .usage:

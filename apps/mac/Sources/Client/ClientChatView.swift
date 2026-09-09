@@ -341,6 +341,19 @@ struct ClientChatThread: View {
         model.chats.first { $0.id == chatID } ?? model.selected
     }
 
+    /// What a pin files this conversation under. Nothing without an account
+    /// scope, a verified peer and the folder it belongs to.
+    private var pinReference: WorkReference? {
+        guard let scope = account.account?.pinnedWorkScope,
+              let peer = model.peer, !peer.isEmpty,
+              let workspace = model.workspaceID, !workspace.isEmpty
+        else { return nil }
+        return WorkReference(
+            scope: scope, hostIdentity: peer, workspaceID: workspace,
+            kind: .conversation, itemID: chatID
+        )
+    }
+
     /// One explicit round trip on return. The poll loop restarts on its own
     /// but sleeps first, so without this the transcript sits a full interval
     /// stale with no strip to say so. Never a re-select: that empties the
@@ -429,7 +442,14 @@ struct ClientChatThread: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if chat != nil {
-                    Button("Setup", .settings) { showingSetup = true }
+                    HStack(spacing: 0) {
+                        PinToggleButton(
+                            reference: pinReference,
+                            label: chat?.title ?? "Chat",
+                            folderName: folderName
+                        )
+                        Button("Setup", .settings) { showingSetup = true }
+                    }
                 }
             }
         }

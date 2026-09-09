@@ -14,6 +14,7 @@ struct SavedWorkSettings: View {
     @State private var enabled = WorkCacheSettings.shared.enabled
     @State private var bytes: UInt64?
     @State private var records: UInt64?
+    @State private var pinned: UInt64?
     @State private var clearing = false
     @State private var cleared = false
     @State private var message: String?
@@ -147,17 +148,19 @@ struct SavedWorkSettings: View {
         guard let bytes, let records else { return "Saved conversations on this device" }
         if records == 0 { return "Nothing saved on this device" }
         let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        let kept = pinned.map { $0 > 0 ? ", \($0) kept" : "" } ?? ""
         return records == 1
-            ? "1 saved conversation (\(size)) on this device"
-            : "\(records) saved conversations (\(size)) on this device"
+            ? "1 saved conversation (\(size)\(kept)) on this device"
+            : "\(records) saved conversations (\(size)\(kept)) on this device"
     }
 
     private func refresh() async {
-        guard let scope else { bytes = nil; records = nil; return }
+        guard let scope else { bytes = nil; records = nil; pinned = nil; return }
         do {
             let stats = try await Bridge.cacheStats(scope: WorkCache.scope(for: scope))
             bytes = stats.bytes
             records = stats.records
+            pinned = stats.pinned
             cleared = false
             message = nil
         } catch {
@@ -166,6 +169,7 @@ struct SavedWorkSettings: View {
             }
             bytes = nil
             records = nil
+            pinned = nil
         }
     }
 
