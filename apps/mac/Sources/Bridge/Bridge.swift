@@ -392,20 +392,56 @@ enum Bridge {
     }
 
     #if os(macOS)
+    /// Whether the footer has been told the host is in trouble.
+    ///
+    /// A successful call used to post "recovered" unconditionally, and calls
+    /// succeed constantly: nine notifications a second for the life of the
+    /// app, every one of them saying what the last one said. Only the call
+    /// that actually clears a card has anything to say.
+    private static let hostStateLock = NSLock()
+    nonisolated(unsafe) private static var hostTroubled = false
+
+    /// Tell the footer about the host, from the main thread.
+    ///
+    /// `call` runs on `calls`, so every one of these starts on a background
+    /// thread. `NotificationCenter` delivers on the thread that posted, and
+    /// the observer is `HostStatusCard` writing `@State`, so posting from
+    /// here wrote SwiftUI's view graph off the main thread. That is a race
+    /// whatever the value written, and it did not surface as a crash: it
+    /// surfaced as the chat transcript stopping, with the main thread inside
+    /// a lazy-stack layout pass that never drained its transactions.
+    ///
+    /// Nothing else may post these four names. A notification that drives a
+    /// view is posted on the thread that view runs on.
+    private static func postHostState(_ name: Notification.Name) {
+        hostStateLock.lock()
+        let troubled = name != .hostRecoveryFinished
+        let changed = hostTroubled != troubled
+        hostTroubled = troubled
+        hostStateLock.unlock()
+        // A repeated failure keeps reporting, because a card that arrived
+        // after the first one still has to be filled in. Only the healthy
+        // path, which is nearly every call, is silenced.
+        guard troubled || changed else { return }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: name, object: nil)
+        }
+    }
+
     private static func postHostRecoveryStarted() {
-        NotificationCenter.default.post(name: .hostRecoveryStarted, object: nil)
+        postHostState(.hostRecoveryStarted)
     }
 
     private static func postHostRecoveryFinished() {
-        NotificationCenter.default.post(name: .hostRecoveryFinished, object: nil)
+        postHostState(.hostRecoveryFinished)
     }
 
     private static func postHostBecameSilent() {
-        NotificationCenter.default.post(name: .hostBecameSilent, object: nil)
+        postHostState(.hostBecameSilent)
     }
 
     private static func postHostBecameUnreachable() {
-        NotificationCenter.default.post(name: .hostBecameUnreachable, object: nil)
+        postHostState(.hostBecameUnreachable)
     }
     #else
     private static func postHostRecoveryStarted() {}

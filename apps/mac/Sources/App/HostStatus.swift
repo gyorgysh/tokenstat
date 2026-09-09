@@ -4,6 +4,7 @@
 // redistribute, publish, or ship a build are granted. Read it, study it, run
 // your own build of it.
 
+import Combine
 import SwiftUI
 
 #if os(macOS)
@@ -43,22 +44,36 @@ struct HostStatusCard: View {
                 )
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .hostRecoveryStarted)) { _ in
+        .onReceive(signal(.hostRecoveryStarted)) { _ in
             isRecovering = true
             issue = nil
         }
-        .onReceive(NotificationCenter.default.publisher(for: .hostRecoveryFinished)) { _ in
+        .onReceive(signal(.hostRecoveryFinished)) { _ in
             isRecovering = false
             issue = nil
         }
-        .onReceive(NotificationCenter.default.publisher(for: .hostBecameSilent)) { _ in
+        .onReceive(signal(.hostBecameSilent)) { _ in
             guard !isRecovering else { return }
             issue = .silent
         }
-        .onReceive(NotificationCenter.default.publisher(for: .hostBecameUnreachable)) { _ in
+        .onReceive(signal(.hostBecameUnreachable)) { _ in
             isRecovering = false
             issue = .down
         }
+    }
+
+    /// The host's own notifications, on the thread this card is drawn on.
+    ///
+    /// `NotificationCenter` delivers on whichever thread posted, and these
+    /// four are raised by the bridge from its call queue. `Bridge` hops to
+    /// the main thread before posting; this is the same rule stated on the
+    /// side that would be damaged if it ever stopped doing so. Writing
+    /// `@State` off the main thread hung the app for ten minutes once.
+    private func signal(_ name: Notification.Name) -> AnyPublisher<Notification, Never> {
+        NotificationCenter.default
+            .publisher(for: name)
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
     }
 
     private func status(title: String, subtitle: String, spinner: Bool = false) -> some View {

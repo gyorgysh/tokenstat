@@ -61,6 +61,19 @@ with a server that runs agents.
 - Devices leads with setting a machine up rather than listing the ones that
   already exist.
 
+### Fixed
+
+- A chat that has been open for a while no longer stops responding. The local
+  helper told the window it was healthy after every call it answered, several
+  times a second, from whatever thread had just answered one. Sooner or later
+  one of those arrived in the middle of the transcript laying itself out, and
+  the layout never finished. It reports once per change now, on the thread
+  that draws.
+- The message field no longer answers its own writes. Putting the draft and
+  the caret back where the app said they were made the field report that same
+  position as news, mid-draw, which asked for another draw. It is quiet while
+  it is being set, and it reports a caret only when the caret actually moved.
+
 ## [0.9.2] - 2026-09-08
 
 Three ways a chat could stop working: a tool that never finished, a transcript

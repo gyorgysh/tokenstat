@@ -81,6 +81,11 @@ struct ChatDraftView: NSViewRepresentable {
         textView.pasteAttachments = onPasteAttachments
         textView.placeholder = placeholder
         textView.isEditable = enabled
+        // Everything below writes into the text view, and AppKit answers a
+        // write by calling the delegate back on the same turn. See
+        // `applyingUpdate`.
+        context.coordinator.applyingUpdate = true
+        defer { context.coordinator.applyingUpdate = false }
         if textView.string != text {
             textView.string = text
             textView.needsDisplay = true
@@ -103,6 +108,17 @@ struct ChatDraftView: NSViewRepresentable {
         var onStop: () -> Void
         weak var textView: ChatDraftTextView?
         private var sendQueued = false
+        /// True while `updateNSView` is writing into the text view.
+        ///
+        /// Setting `string` moves the insertion point, and setting the
+        /// selected range is a selection change, so AppKit calls the delegate
+        /// back before the assignment returns. The delegate writes SwiftUI
+        /// state, and doing that inside a view update is undefined behaviour
+        /// that SwiftUI logs as such: the write invalidates the view being
+        /// updated, so the update runs again, and the pair can trade the same
+        /// range back and forth. The values being applied are the ones
+        /// SwiftUI just handed over, so there is nothing to report back.
+        var applyingUpdate = false
 
         init(
             text: Binding<String>,
@@ -130,15 +146,23 @@ struct ChatDraftView: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? ChatDraftTextView else { return }
+            guard !applyingUpdate,
+                  let textView = notification.object as? ChatDraftTextView
+            else { return }
             text.wrappedValue = textView.string
             textView.invalidateIntrinsicContentSize()
             textView.enclosingScrollView?.invalidateIntrinsicContentSize()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let textView = notification.object as? ChatDraftTextView else { return }
-            selection.wrappedValue = textView.selectedRange()
+            guard !applyingUpdate,
+                  let textView = notification.object as? ChatDraftTextView
+            else { return }
+            // Observation does not compare before it notifies, and a caret
+            // that landed where it already was is most of this traffic.
+            let range = textView.selectedRange()
+            guard selection.wrappedValue != range else { return }
+            selection.wrappedValue = range
         }
 
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
