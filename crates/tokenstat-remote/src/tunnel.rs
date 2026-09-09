@@ -38,19 +38,27 @@ type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 /// agree on rather than a string somebody typed. Anything the relay does not
 /// recognise is counted as `unknown` rather than refused, so an older client
 /// keeps working.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChannelPurpose {
     /// A desktop being streamed. The expensive one, and the only metered one.
     Screen,
-    /// A terminal on the far machine.
+    /// A terminal on the far machine: pty.subscribe output and keystrokes,
+    /// and pty.* RPC. The bulk of interactive use after screen.
+    Pty,
+    /// A conversation with a remote agent: chat.* RPC. Small per call, but
+    /// it is the traffic a person means when they say "I was chatting".
+    Chat,
+    /// An SSH terminal session on the far machine, or a localhost proxy
+    /// stream to one of its ports. Both are interactive shells' traffic.
     Ssh,
     /// File transfer over the same remote path. Own label so it does not hide
     /// inside ssh once that lands.
     Sftp,
     /// A one-off file payload that is not a session.
     Files,
-    /// Anything else the app relays. Honest rather than flattering: these are
-    /// a mix, and none of them is big enough yet to be worth splitting.
+    /// Anything else the app relays. Honest rather than flattering: the
+    /// leftover RPC after the call sites above named theirs, plus channels
+    /// from clients old enough to send no label at all.
     Unknown,
 }
 
@@ -58,6 +66,8 @@ impl ChannelPurpose {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Screen => "screen",
+            Self::Pty => "pty",
+            Self::Chat => "chat",
             Self::Ssh => "ssh",
             Self::Sftp => "sftp",
             Self::Files => "files",
@@ -1432,10 +1442,29 @@ mod tests {
     #[test]
     fn a_purpose_is_a_word_from_the_fixed_list() {
         assert_eq!(ChannelPurpose::Screen.as_str(), "screen");
+        assert_eq!(ChannelPurpose::Pty.as_str(), "pty");
+        assert_eq!(ChannelPurpose::Chat.as_str(), "chat");
         assert_eq!(ChannelPurpose::Ssh.as_str(), "ssh");
         assert_eq!(ChannelPurpose::Sftp.as_str(), "sftp");
         assert_eq!(ChannelPurpose::Files.as_str(), "files");
         assert_eq!(ChannelPurpose::Unknown.as_str(), "unknown");
+        // Every variant is one lowercase word: the relay matches the label
+        // against its own vocabulary and anything else meters as `unknown`.
+        for purpose in [
+            ChannelPurpose::Screen,
+            ChannelPurpose::Pty,
+            ChannelPurpose::Chat,
+            ChannelPurpose::Ssh,
+            ChannelPurpose::Sftp,
+            ChannelPurpose::Files,
+            ChannelPurpose::Unknown,
+        ] {
+            let label = purpose.as_str();
+            assert!(
+                label.bytes().all(|b| b.is_ascii_lowercase()),
+                "{label} must stay a single lowercase word"
+            );
+        }
     }
 
     #[test]

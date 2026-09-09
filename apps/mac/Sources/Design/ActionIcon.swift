@@ -131,12 +131,12 @@ enum ActionIcon {
         case .theme: return "paintpalette"
         case .layout: return "square.grid.2x2"
 
-        // A plug, not the USB-C connector outline this used to be: that
-        // glyph is a thin cable end, it reads as a port rather than as an
-        // action, and it was carrying every Connect in the app. The website's
-        // vocabulary already says "plug" for this key, so the two products
-        // show the same picture now.
-        case .connect: return "powerplug.fill"
+        // A link for every connection action. A mains plug says cables.
+        // Android already draws this key as its Link icon and Windows as
+        // its Link symbol, so all three clients now show the same picture.
+        // The website still draws a plug for this key; that is its own
+        // change to make.
+        case .connect: return "link"
         case .disconnect: return "xmark.circle"
         case .refresh: return "arrow.clockwise"
         case .revoke: return "minus.circle"

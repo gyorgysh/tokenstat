@@ -158,9 +158,14 @@ struct ClientTabEditor: View {
                         refusedTab = nil
                     }
                     .tint(Theme.accent)
+                    .listRowBackground(Color.clear)
                 }
             }
             .environment(\.editMode, .constant(.active))
+            // The platform's grouped grey is not our dark. Rows paint
+            // themselves; the list is only the scroll behind them.
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
             .navigationTitle("Tabs")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -219,6 +224,7 @@ struct ClientTabEditor: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .listRowBackground(Color.clear)
         .disabled(lastStanding)
         .accessibilityLabel("\(tab.label) tab")
         .accessibilityValue(on ? "On" : "Off")

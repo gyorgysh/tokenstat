@@ -57,6 +57,27 @@ enum EmptyArtKind {
     /// doors and "nothing connected yet" states: the thing missing is the
     /// connection being made, not a machine waiting.
     case connect
+    /// Door one: the computer. A laptop with the download coming down onto
+    /// it, because that is the whole job of the screen below it.
+    case macDoor
+    /// Door three: a cloud machine. Servers are read out of the provider
+    /// into the rack, which is what importing means here.
+    case cloudDoor
+    /// The renting guide. A price tag next to a rack: renting is the one
+    /// setup screen about money, so it is the one that draws it.
+    case rentServer
+    /// The install line, run by hand. A terminal with a pasted command and
+    /// a caret, distinct from the empty terminal on the sessions screen.
+    case byHand
+    /// Insights with nothing on the account yet. Bars rising, the last one
+    /// still a dashed slot: the first counters are arriving, not absent.
+    case firstBars
+    /// Getting started. This device ready with its check, the machine still
+    /// a quiet outline beside it: step one done, step two pending.
+    case getCounting
+    /// A paid gate. The phone reaches a folder and a lock sits on the path:
+    /// seeing usage is shared, opening work is not.
+    case remoteGate
 }
 
 /// The picture over an empty state.
@@ -82,6 +103,13 @@ struct ClientEmptyArt: View {
             case .serverReady: ServerScene(reduceMotion: reduceMotion, state: .ready)
             case .connect:
                 Image("SetupConnection").resizable().scaledToFit()
+            case .macDoor: MacDoorScene(reduceMotion: reduceMotion)
+            case .cloudDoor: CloudDoorScene(reduceMotion: reduceMotion)
+            case .rentServer: RentScene(reduceMotion: reduceMotion)
+            case .byHand: ByHandScene(reduceMotion: reduceMotion)
+            case .firstBars: FirstBarsScene(reduceMotion: reduceMotion)
+            case .getCounting: GetCountingScene(reduceMotion: reduceMotion)
+            case .remoteGate: RemoteGateScene(reduceMotion: reduceMotion)
             case .sessions: SessionsScene(reduceMotion: reduceMotion)
             case .tasks: TasksScene(reduceMotion: reduceMotion)
             case .notes: NotesScene(reduceMotion: reduceMotion)
@@ -242,7 +270,404 @@ private struct ServerScene: View {
     }
 }
 
-// MARK: - Connect
+// MARK: - Setup doors
+
+/// A four-point spark, the accent that makes a scene pop. Static by design:
+/// each scene already carries its one loop.
+private struct Sparkle: View {
+    var size: CGFloat = 10
+
+    var body: some View {
+        Path { path in
+            let half = size / 2
+            let inner = size * 0.16
+            path.move(to: CGPoint(x: half, y: 0))
+            path.addQuadCurve(
+                to: CGPoint(x: size, y: half),
+                control: CGPoint(x: half + inner, y: half - inner)
+            )
+            path.addQuadCurve(
+                to: CGPoint(x: half, y: size),
+                control: CGPoint(x: half + inner, y: half + inner)
+            )
+            path.addQuadCurve(
+                to: CGPoint(x: 0, y: half),
+                control: CGPoint(x: half - inner, y: half + inner)
+            )
+            path.addQuadCurve(
+                to: CGPoint(x: half, y: 0),
+                control: CGPoint(x: half - inner, y: half - inner)
+            )
+        }
+        .fill(Ink.lead)
+        .frame(width: size, height: size)
+    }
+}
+
+/// Door one: the computer. A laptop with the download coming down onto it.
+///
+/// The arrow bobs above the screen. The app lands on the computer.
+private struct MacDoorScene: View {
+    var reduceMotion: Bool
+    @State private var lowered = false
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 5) {
+                Image(systemName: "arrow.down")
+                    .font(Theme.fixed(13, weight: .semibold))
+                    .foregroundStyle(Ink.lead)
+                    .offset(y: reduceMotion || !lowered ? 0 : 4)
+                VStack(spacing: 0) {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Ink.quiet, style: Ink.style)
+                        .frame(width: 56, height: 36)
+                        .overlay { Ghost(width: 22, color: Ink.second) }
+                    Capsule()
+                        .fill(Ink.quiet)
+                        .frame(width: 72, height: 2)
+                }
+            }
+            Sparkle(size: 11)
+                .offset(x: -34, y: -20)
+            Sparkle(size: 7)
+                .offset(x: 34, y: 16)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                lowered = true
+            }
+        }
+    }
+}
+
+/// Door three: a cloud machine. Servers are read out of the provider into
+/// the rack below, which is what importing means on this screen.
+///
+/// Three drops fall in turn and the loop restarts as one arrives, so the
+/// movement reads as a steady intake.
+private struct CloudDoorScene: View {
+    var reduceMotion: Bool
+    @State private var fall: CGFloat = 0
+
+    private let drops = 3
+    private let height: CGFloat = 18
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 6) {
+                cloud
+                ZStack(alignment: .top) {
+                    Color.clear.frame(width: 60, height: height)
+                    ForEach(0..<drops, id: \.self) { drop in
+                        Circle()
+                            .fill(Ink.lead.opacity(opacity(drop)))
+                            .frame(width: 4, height: 4)
+                            .offset(y: y(drop))
+                    }
+                }
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .strokeBorder(Ink.lead.opacity(0.6), style: Ink.style)
+                    .frame(width: 56, height: 16)
+                    .overlay(alignment: .leading) {
+                        Circle()
+                            .fill(Ink.lead)
+                            .frame(width: 4, height: 4)
+                            .padding(.leading, 6)
+                    }
+                    .overlay(alignment: .trailing) {
+                        Ghost(width: 20, color: Ink.second)
+                            .padding(.trailing, 7)
+                    }
+            }
+            Sparkle(size: 9)
+                .offset(x: -38, y: -20)
+            Sparkle(size: 7)
+                .offset(x: 34, y: 22)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                fall = 1
+            }
+        }
+    }
+
+    /// A cloud the drops fall out of: a round body with a bump on top. The
+    /// bump is filled, so it covers the body's line where the two meet and
+    /// the silhouette stays one shape.
+    private var cloud: some View {
+        Capsule()
+            .fill(Theme.background)
+            .frame(width: 62, height: 22)
+            .overlay {
+                Capsule().strokeBorder(Ink.quiet, style: Ink.style)
+            }
+            .overlay(alignment: .topLeading) {
+                Circle()
+                    .fill(Theme.background)
+                    .frame(width: 24, height: 24)
+                    .overlay {
+                        Circle().strokeBorder(Ink.quiet, style: Ink.style)
+                    }
+                    .offset(x: 9, y: -9)
+            }
+    }
+
+    /// Each drop trails the one before by a third of the loop, so they fall
+    /// in turn. Reduce Motion parks them mid-fall.
+    private func progress(_ drop: Int) -> CGFloat {
+        guard !reduceMotion else { return 0.5 }
+        return (fall + CGFloat(drop) / CGFloat(drops)).truncatingRemainder(dividingBy: 1)
+    }
+
+    private func y(_ drop: Int) -> CGFloat {
+        progress(drop) * height
+    }
+
+    /// A drop lands by fading, which is what keeps the loop restart from
+    /// reading as a blink.
+    private func opacity(_ drop: Int) -> CGFloat {
+        let progress = progress(drop)
+        return progress > 0.8 ? max(0, 1 - (progress - 0.8) / 0.2) : 1
+    }
+}
+
+/// The renting guide. A price tag next to a rack: renting is the one setup
+/// screen about money, so it is the one that draws it.
+///
+/// The tag hangs off upright and sways, the way a tag on a string does.
+private struct RentScene: View {
+    var reduceMotion: Bool
+    @State private var swayed = false
+
+    var body: some View {
+        ZStack {
+            HStack(spacing: 12) {
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Ink.lead.opacity(0.7), style: Ink.style)
+                        .frame(width: 34, height: 24)
+                    Circle()
+                        .fill(Ink.lead)
+                        .frame(width: 4, height: 4)
+                        .padding(.leading, 6)
+                        .padding(.top, 10)
+                    Ghost(width: 13, color: Ink.second)
+                        .padding(.leading, 13)
+                        .padding(.top, 11)
+                }
+                .rotationEffect(.degrees(reduceMotion || !swayed ? -12 : -4))
+                VStack(spacing: 3) {
+                    ForEach(0..<2, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .strokeBorder(Ink.quiet, style: Ink.style)
+                            .frame(width: 44, height: 13)
+                    }
+                }
+            }
+            Sparkle(size: 9)
+                .offset(x: -40, y: -14)
+            Sparkle(size: 6)
+                .offset(x: 36, y: 16)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                swayed = true
+            }
+        }
+    }
+}
+
+/// The install line, run by hand. A terminal holding a pasted command, with
+/// the caret blinking at its end. Two command lines and a paste badge tell
+/// it apart from the empty terminal on the sessions screen.
+private struct ByHandScene: View {
+    var reduceMotion: Bool
+    @State private var on = false
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: .topLeading) {
+                ArtFrame()
+                VStack(alignment: .leading, spacing: 8) {
+                    Ghost(width: 40, color: Ink.lead.opacity(0.7))
+                    HStack(spacing: 5) {
+                        Ghost(width: 30)
+                        RoundedRectangle(cornerRadius: 1, style: .continuous)
+                            .fill(Ink.lead)
+                            .frame(width: 6, height: 11)
+                            .opacity(reduceMotion || on ? 1 : 0.15)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 14)
+            }
+            .frame(width: 84, height: 56)
+            ZStack {
+                Circle().fill(Theme.background)
+                Circle().strokeBorder(Ink.lead, style: Ink.style)
+                Image(systemName: "arrow.down.to.line")
+                    .font(Theme.fixed(8, weight: .semibold))
+                    .foregroundStyle(Ink.lead)
+            }
+            .frame(width: 20, height: 20)
+            .offset(x: 6, y: 6)
+            Sparkle(size: 8)
+                .offset(x: -50, y: -24)
+            Sparkle(size: 6)
+                .offset(x: 52, y: 28)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                on = true
+            }
+        }
+    }
+}
+
+/// Insights with nothing on the account yet. Bars rising, the last one
+/// still a dashed slot: the first counters are arriving, not absent.
+private struct FirstBarsScene: View {
+    var reduceMotion: Bool
+    @State private var filling = false
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 5) {
+                HStack(alignment: .bottom, spacing: 9) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Ink.lead.opacity(0.85))
+                        .frame(width: 16, height: 20)
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Ink.lead.opacity(0.85))
+                        .frame(width: 16, height: 34)
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .strokeBorder(
+                            Ink.lead,
+                            style: StrokeStyle(lineWidth: Ink.width, lineCap: .round, dash: [4, 4])
+                        )
+                        .frame(width: 16, height: 48)
+                        .opacity(reduceMotion ? 0.6 : (filling ? 0.9 : 0.35))
+                }
+                Capsule()
+                    .fill(Ink.quiet)
+                    .frame(width: 66, height: 2)
+            }
+            Sparkle(size: 9)
+                .offset(x: -36, y: -22)
+            Sparkle(size: 6)
+                .offset(x: 36, y: 20)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
+                filling = true
+            }
+        }
+    }
+}
+
+/// Getting started. This device ready with its check, the machine still a
+/// quiet outline beside it: step one done, step two pending. The rack's
+/// light breathes while the machine is missing.
+private struct GetCountingScene: View {
+    var reduceMotion: Bool
+    @State private var waiting = false
+
+    var body: some View {
+        ZStack {
+            HStack(spacing: 14) {
+                ZStack(alignment: .bottomTrailing) {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Ink.lead.opacity(0.6), style: Ink.style)
+                        .frame(width: 24, height: 40)
+                        .overlay { Ghost(width: 11, color: Ink.second) }
+                    ZStack {
+                        Circle().fill(Ink.lead).frame(width: 15, height: 15)
+                        Image(systemName: "checkmark")
+                            .font(Theme.fixed(8, weight: .bold))
+                            .foregroundStyle(Theme.background)
+                    }
+                    .offset(x: 6, y: 6)
+                }
+                VStack(spacing: 3) {
+                    ForEach(0..<2, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .strokeBorder(Ink.quiet, style: Ink.style)
+                            .frame(width: 40, height: 12)
+                            .overlay(alignment: .leading) {
+                                Circle()
+                                    .fill(Ink.lead.opacity(reduceMotion ? 0.5 : (waiting ? 0.9 : 0.25)))
+                                    .frame(width: 4, height: 4)
+                                    .padding(.leading, 5)
+                            }
+                    }
+                }
+            }
+            Sparkle(size: 9)
+                .offset(x: -40, y: -20)
+            Sparkle(size: 6)
+                .offset(x: 40, y: 18)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                waiting = true
+            }
+        }
+    }
+}
+
+/// A paid gate. The phone reaches a folder and a lock sits on the path.
+/// The badge swells gently, so the closed gate still moves.
+private struct RemoteGateScene: View {
+    var reduceMotion: Bool
+    @State private var closed = false
+
+    var body: some View {
+        ZStack {
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(Ink.quiet, style: Ink.style)
+                    .frame(width: 20, height: 34)
+                    .overlay { Ghost(width: 9, color: Ink.second) }
+                ZStack {
+                    Circle().fill(Ink.lead).frame(width: 20, height: 20)
+                    Image(systemName: "lock.fill")
+                        .font(Theme.fixed(9, weight: .medium))
+                        .foregroundStyle(Theme.background)
+                }
+                .scaleEffect(reduceMotion || !closed ? 1 : 1.12)
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Ink.lead.opacity(0.7), style: Ink.style)
+                        .frame(width: 44, height: 30)
+                    Circle()
+                        .fill(Theme.background)
+                        .frame(width: 20, height: 12)
+                        .overlay {
+                            Capsule().strokeBorder(Ink.lead.opacity(0.7), style: Ink.style)
+                        }
+                        .offset(x: 5, y: -5)
+                }
+            }
+            Sparkle(size: 9)
+                .offset(x: -44, y: -22)
+            Sparkle(size: 6)
+                .offset(x: 44, y: 20)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                closed = true
+            }
+        }
+    }
+}
 
 // MARK: - Sessions
 

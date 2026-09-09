@@ -353,6 +353,11 @@ pub struct AccountDto {
     /// The id of the machine this process is running on, so a client can mark
     /// which row in `machines` is the one in front of the user.
     pub this_machine_id: Option<String>,
+    /// The account's own id, as the server states it. Absent against a server
+    /// old enough not to send one. The stable identity for an account that
+    /// has not claimed a handle yet. A new account has no handle, and setup
+    /// scopes its drafts to this instead.
+    pub account_id: Option<String>,
     pub machines: Vec<MachineDto>,
     pub schema_current: Option<u32>,
     /// How many devices this plan may link. A computer, phone, or tablet each uses one.

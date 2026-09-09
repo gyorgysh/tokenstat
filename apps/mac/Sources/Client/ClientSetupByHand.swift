@@ -38,7 +38,7 @@ struct ClientSetupByHand: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(spacing: Theme.Space.s) {
-                    ClientEmptyArt(kind: .connect)
+                    ClientEmptyArt(kind: .byHand)
                     Text("Run it yourself")
                         .font(Theme.title.weight(.semibold))
                     Text(

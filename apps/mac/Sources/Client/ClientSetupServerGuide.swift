@@ -27,7 +27,7 @@ struct ClientSetupServerGuide: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(spacing: Theme.Space.s) {
-                    ClientEmptyArt(kind: .connect)
+                    ClientEmptyArt(kind: .rentServer)
                     Text("Renting a server")
                         .font(Theme.title.weight(.semibold))
                     Text(
@@ -43,16 +43,13 @@ struct ClientSetupServerGuide: View {
                 .frame(maxWidth: .infinity)
 
                 section("What it has to be") {
-                    requirement("Linux with systemd", "Setup installs a service that starts "
-                        + "the helper again after a reboot.")
-                    requirement("64-bit Intel or ARM", "Both are built and both are tested "
-                        + "in the same way. Either is fine.")
-                    requirement("curl installed", "The installer is fetched with it.")
-                    requirement("A user you can reach over SSH", "Root or an ordinary "
-                        + "account, as long as it can write to its own home directory.")
-                    requirement("Room to work", "tokenstat itself needs about 200 MB free. "
-                        + "Your projects and the coding agent need more than that, and how "
-                        + "much depends on them rather than on us.")
+                    requirement("Linux", "Any mainstream distribution. Setup keeps the "
+                        + "helper running, including after a reboot.")
+                    requirement("64-bit Intel or AMD", "The standard server image at "
+                        + "any provider.")
+                    requirement("SSH access", "A login setup can use: a password or an "
+                        + "SSH key. Root works, and so does an ordinary user that can "
+                        + "write to its own home directory.")
                 }
 
                 section("What size is enough") {

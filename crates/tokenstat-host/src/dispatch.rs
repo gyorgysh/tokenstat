@@ -675,6 +675,7 @@ fn account_dto_from_status(s: tokenstat_sync::StatusResult) -> AccountDto {
         tier: s.tier,
         last_sync_at: s.last_sync_at.clone().or_else(|| latest_sync(&s.machines)),
         this_machine_id: tokenstat_sync::config::ensure_machine_id().ok(),
+        account_id: s.account_id,
         machines: s.machines.iter().map(MachineDto::from_value).collect(),
         schema_current: s.schema_current,
         machine_limit: s
@@ -1449,6 +1450,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     signed_in: false,
                     host,
                     handle: None,
+                    account_id: None,
                     display_name: None,
                     tier: None,
                     avatar: None,

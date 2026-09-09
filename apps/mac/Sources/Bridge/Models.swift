@@ -1435,6 +1435,10 @@ struct Account: Codable, Sendable, Hashable {
     /// The machine this app is running on, so the list below can say which row
     /// is the one you are sitting at.
     var thisMachineID: String?
+    /// The account's own id, as the server states it. The stable identity for
+    /// an account that has not claimed a handle yet. A new account has no
+    /// handle, and setup scopes its drafts to this instead.
+    var accountId: String?
     /// Server-side machine records. The shape belongs to the API, so this
     /// decodes the few fields the UI shows and ignores the rest.
     var machines: [Machine]
@@ -1455,6 +1459,7 @@ struct Account: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case signedIn, host, handle, displayName, tier, avatar, lastSyncAt
         case thisMachineID = "thisMachineId"
+        case accountId = "accountId"
         case machines, schemaCurrent
         case machineLimit, hostsLinked, canRemote, syncInterval
         case billing, relayUsage

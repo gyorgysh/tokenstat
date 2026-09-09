@@ -1341,13 +1341,21 @@ fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str) -> String {
 
 // MARK: - Reaching another machine
 
-/// Connections held open per peer, keyed by public key hex.
+/// Connections held open per peer, keyed by public key hex and the purpose
+/// they were dialled for.
 ///
 /// A handshake is three round trips and a Diffie-Hellman, which is far too much
 /// to pay per call when a remote terminal polls for output. Held open and
 /// reused, exactly like the unix socket pool on the client side.
-fn pool() -> &'static Mutex<HashMap<String, Vec<Idle>>> {
-    static POOL: OnceLock<Mutex<HashMap<String, Vec<Idle>>>> = OnceLock::new();
+///
+/// The purpose is part of the key on purpose: the relay meters a channel under
+/// the label it opened with, so a pooled terminal channel reused for a chat
+/// call would bill the chat's bytes to the terminal. One small pool per label
+/// keeps the attribution honest.
+type PeerPool = HashMap<(String, ChannelPurpose), Vec<Idle>>;
+
+fn pool() -> &'static Mutex<PeerPool> {
+    static POOL: OnceLock<Mutex<PeerPool>> = OnceLock::new();
     static REAPER: Once = Once::new();
     let pool = POOL.get_or_init(|| Mutex::new(HashMap::new()));
     REAPER.call_once(|| {
@@ -1378,10 +1386,11 @@ const REAP_INTERVAL: Duration = Duration::from_secs(15);
 /// A connection waiting to be used again, and when it stopped being used.
 ///
 /// The timestamp is the whole point. Without it a pooled connection was held
-/// open for the life of the process: four per peer, a map key for every peer
-/// ever dialled, and nothing anywhere that ever closed one. That is not a leak
-/// in the sense of a lost handle, and it is still a descriptor count that only
-/// goes up, which is the same thing to a process that has run out of them.
+/// open for the life of the process: a few per peer and purpose, a map key
+/// for every peer ever dialled, and nothing anywhere that ever closed one.
+/// That is not a leak in the sense of a lost handle, and it is still a
+/// descriptor count that only goes up, which is the same thing to a process
+/// that has run out of them.
 struct Idle {
     connection: tokenstat_remote::Connection,
     since: Instant,
@@ -1514,7 +1523,10 @@ fn traffic_json() -> Value {
             keys.extend(live_map.keys().cloned());
         }
         if let Some(ref pool_map) = pool_map {
-            keys.extend(pool_map.keys().cloned());
+            // The pool is keyed by peer and purpose; `info` reports per peer,
+            // so purposes fold together here. The relay still meters them
+            // apart: that split lives in the open frame, not in this count.
+            keys.extend(pool_map.keys().map(|(peer, _)| peer.clone()));
         }
         keys.into_iter()
             .map(|peer| {
@@ -1524,7 +1536,12 @@ fn traffic_json() -> Value {
                     .unwrap_or(0);
                 let idle = pool_map
                     .as_ref()
-                    .and_then(|held| held.get(&peer).map(Vec::len))
+                    .map(|held| {
+                        held.iter()
+                            .filter(|((key, _), _)| key == &peer)
+                            .map(|(_, idle)| idle.len())
+                            .sum()
+                    })
                     .unwrap_or(0);
                 let route = routes
                     .as_ref()
@@ -1535,15 +1552,18 @@ fn traffic_json() -> Value {
                         // may describe the wrong channel. Prefer a direct one:
                         // it is the route traffic actually takes.
                         pool_map.as_ref().and_then(|held| {
-                            held.get(&peer).and_then(|idle| {
-                                idle.iter()
-                                    .map(|held| Route::from_connection(&held.connection))
-                                    .find(|route| matches!(route, Route::Direct))
-                                    .or_else(|| {
-                                        idle.last()
-                                            .map(|held| Route::from_connection(&held.connection))
-                                    })
-                            })
+                            held.iter()
+                                .filter(|((key, _), _)| key == &peer)
+                                .flat_map(|(_, idle)| idle.iter())
+                                .map(|held| Route::from_connection(&held.connection))
+                                .find(|route| matches!(route, Route::Direct))
+                                .or_else(|| {
+                                    held.iter()
+                                        .filter(|((key, _), _)| key == &peer)
+                                        .flat_map(|(_, idle)| idle.iter())
+                                        .last()
+                                        .map(|held| Route::from_connection(&held.connection))
+                                })
                         })
                     });
                 (peer, live, idle, route)
@@ -2442,15 +2462,18 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     }
 
     // One retry on a pooled connection, for a peer daemon that restarted. A
-    // fresh connection failing is a real failure and is reported.
-    if let Some(mut pooled) = checkout(peer_hex)
+    // fresh connection failing is a real failure and is reported. The pool is
+    // keyed by purpose, so a chat call never borrows a terminal channel and
+    // bills its bytes to the wrong label on the relay.
+    let purpose = purpose_for_method(method);
+    if let Some(mut pooled) = checkout(peer_hex, purpose)
         && let Ok(answer) = round_trip(&mut pooled, request.as_bytes())
     {
-        checkin(peer_hex, pooled);
+        checkin(peer_hex, purpose, pooled);
         return Ok(answer);
     }
 
-    let mut fresh = dial_peer(peer_hex)?;
+    let mut fresh = dial_peer_as(peer_hex, purpose)?;
     let answer = round_trip(&mut fresh, request.as_bytes());
     // A freshly dialled connection that closes before the first answer usually
     // means the far daemon was just replacing its listener, the same reconnect
@@ -2459,14 +2482,14 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     if answer
         .as_ref()
         .is_err_and(|e| matches!(e, tokenstat_remote::RemoteError::Closed))
-        && let Ok(mut connection) = dial_peer(peer_hex)
+        && let Ok(mut connection) = dial_peer_as(peer_hex, purpose)
         && let Ok(second) = round_trip(&mut connection, request.as_bytes())
     {
-        checkin(peer_hex, connection);
+        checkin(peer_hex, purpose, connection);
         return Ok(second);
     }
     let answer = answer.map_err(|e| e.to_string())?;
-    checkin(peer_hex, fresh);
+    checkin(peer_hex, purpose, fresh);
     Ok(answer)
 }
 
@@ -2474,23 +2497,35 @@ fn is_attachment_transfer(method: &str) -> bool {
     matches!(method, "chat.attach" | "chat.attachment")
 }
 
+/// The relay label for one forwarded call.
+///
+/// The relay meters a whole channel under the label it opened with, so the
+/// label has to be chosen before the dial, from the method. Terminal and chat
+/// traffic names itself here; everything else stays `unknown`, which is the
+/// right answer for an old client and the wrong one for a call site in this
+/// binary that simply forgot (see `dial_peer_for`).
+fn purpose_for_method(method: &str) -> ChannelPurpose {
+    if method.starts_with("chat.") {
+        ChannelPurpose::Chat
+    } else if method.starts_with("pty.") {
+        ChannelPurpose::Pty
+    } else if method.starts_with("ssh.") {
+        // Every ssh.* method is an ssh.session terminal call. The proxy
+        // stream shares the label; both are a shell on the far machine.
+        ChannelPurpose::Ssh
+    } else {
+        ChannelPurpose::Unknown
+    }
+}
+
 /// Open a fresh, authenticated connection to a peer: direct when the record
 /// has an address, through the tunnel otherwise. The same ladder `call_peer`
 /// climbs, exposed so a stream can claim its own connection.
-pub(crate) fn dial_peer(peer_hex: &str) -> Result<tokenstat_remote::Connection, String> {
-    // Through the labelled one rather than beside it. The screen and stream
-    // call sites are behind platform gates, so on a build where those compile
-    // out the labelled dial had no callers at all and the Linux lint job
-    // rejected it as dead. Routing the unlabelled case through it keeps one
-    // path for every platform and means the label is the only difference.
-    dial_peer_as(peer_hex, ChannelPurpose::Unknown)
-}
-
-/// The same dial, saying what the connection is for.
 ///
-/// The label reaches the relay on the channel open. It is what lets a desktop
-/// stream be metered and capped without touching a shell, so the call sites
-/// that know which they are saying it is the whole point.
+/// There is no unlabelled variant: every call site names its purpose, and a
+/// channel that does not name itself is metered as `unknown`, which is the
+/// right answer for an old client and the wrong one for a call site in this
+/// binary that simply forgot.
 pub(crate) fn dial_peer_as(
     peer_hex: &str,
     purpose: ChannelPurpose,
@@ -2839,13 +2874,13 @@ fn round_trip(
     Ok(String::from_utf8_lossy(&answer).to_string())
 }
 
-fn checkout(peer: &str) -> Option<tokenstat_remote::Connection> {
+fn checkout(peer: &str, purpose: ChannelPurpose) -> Option<tokenstat_remote::Connection> {
     let mut map = pool().lock().ok()?;
     reap(&mut map);
     // Not `get_mut(peer)?`: a peer nobody has dialled yet would return before
     // the empty keys the reap above left behind were dropped.
     let taken = map
-        .get_mut(peer)
+        .get_mut(&(peer.to_string(), purpose))
         .and_then(Vec::pop)
         .map(|idle| idle.connection);
     map.retain(|_, idle| !idle.is_empty());
@@ -2856,10 +2891,10 @@ fn checkout(peer: &str) -> Option<tokenstat_remote::Connection> {
     taken
 }
 
-fn checkin(peer: &str, connection: tokenstat_remote::Connection) {
+fn checkin(peer: &str, purpose: ChannelPurpose, connection: tokenstat_remote::Connection) {
     if let Ok(mut map) = pool().lock() {
         reap(&mut map);
-        let idle = map.entry(peer.to_string()).or_default();
+        let idle = map.entry((peer.to_string(), purpose)).or_default();
         if idle.len() < MAX_IDLE_PER_PEER {
             idle.push(Idle {
                 connection,
@@ -2876,7 +2911,7 @@ fn checkin(peer: &str, connection: tokenstat_remote::Connection) {
 /// closed even if nothing ever calls that peer again, and on the way past
 /// each call, which keeps a burst of traffic from letting anything idle out
 /// from under the next caller.
-fn reap(map: &mut HashMap<String, Vec<Idle>>) {
+fn reap(map: &mut HashMap<(String, ChannelPurpose), Vec<Idle>>) {
     let now = Instant::now();
     for idle in map.values_mut() {
         // Dropping the connection closes it.
@@ -3183,6 +3218,28 @@ mod tests {
     }
 
     #[test]
+    fn chat_and_terminal_calls_name_their_relay_label() {
+        // What the relay meters a channel under is decided here, from the
+        // method, before the dial. Attachments never reach this: they bypass
+        // the pool on dedicated Files channels above.
+        assert_eq!(purpose_for_method("chat.send"), ChannelPurpose::Chat);
+        assert_eq!(purpose_for_method("chat.events"), ChannelPurpose::Chat);
+        assert_eq!(purpose_for_method("chat.list"), ChannelPurpose::Chat);
+        assert_eq!(purpose_for_method("pty.read"), ChannelPurpose::Pty);
+        assert_eq!(purpose_for_method("pty.write"), ChannelPurpose::Pty);
+        assert_eq!(purpose_for_method("pty.spawn"), ChannelPurpose::Pty);
+        assert_eq!(purpose_for_method("pty.list"), ChannelPurpose::Pty);
+        assert_eq!(purpose_for_method("ssh.session.read"), ChannelPurpose::Ssh);
+        assert_eq!(purpose_for_method("ssh.session.list"), ChannelPurpose::Ssh);
+        assert_eq!(
+            purpose_for_method("workspace.list"),
+            ChannelPurpose::Unknown
+        );
+        assert_eq!(purpose_for_method("stream.open"), ChannelPurpose::Unknown);
+        assert_eq!(purpose_for_method(""), ChannelPurpose::Unknown);
+    }
+
+    #[test]
     fn one_bad_candidate_does_not_discard_the_list() {
         let value = json!({"candidates": [
             {"kind": "lan", "address": "192.168.1.2:7878", "priority": 100},
@@ -3245,7 +3302,7 @@ mod tests {
             for result in [
                 forward("{}").map(|_| String::new()),
                 call_peer("invalid", "workspace.list", "{}"),
-                dial_peer("invalid").map(|_| String::new()),
+                dial_peer_as("invalid", ChannelPurpose::Unknown).map(|_| String::new()),
             ] {
                 assert!(result.err().unwrap().contains("local-only"));
             }

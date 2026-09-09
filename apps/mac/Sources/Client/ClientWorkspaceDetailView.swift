@@ -794,8 +794,14 @@ struct ClientFilesView: View {
                         }
                     }
                 }
+                .buttonStyle(.plain)
+                .listRowBackground(Color.clear)
             }
         }
+        // The platform's grouped grey is not our dark. Rows paint
+        // themselves; the list is only the scroll behind them.
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
         .navigationTitle(currentPath.isEmpty ? folderName : (currentPath as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

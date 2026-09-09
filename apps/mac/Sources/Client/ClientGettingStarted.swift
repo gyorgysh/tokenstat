@@ -53,6 +53,9 @@ struct ClientGettingStarted: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            ClientEmptyArt(kind: .getCounting)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 2)
             ClientSectionTitle(title: "Get tokenstat counting", mark: "mark_activity")
             Text(
                 "tokenstat counts on the computers you work on. This device shows "

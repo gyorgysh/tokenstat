@@ -545,14 +545,16 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
             forget(&cache);
             return;
         };
-        let mut connection = match crate::remote::dial_peer(&peer) {
-            Ok(connection) => connection,
-            Err(error) => {
-                eprintln!("remote pty: dial for {session} failed: {error}");
-                forget(&cache);
-                return;
-            }
-        };
+        let mut connection =
+            match crate::remote::dial_peer_as(&peer, tokenstat_remote::tunnel::ChannelPurpose::Pty)
+            {
+                Ok(connection) => connection,
+                Err(error) => {
+                    eprintln!("remote pty: dial for {session} failed: {error}");
+                    forget(&cache);
+                    return;
+                }
+            };
         let handshake = json!({"stream": token});
         if connection.send(handshake.to_string().as_bytes()).is_err() {
             forget(&cache);

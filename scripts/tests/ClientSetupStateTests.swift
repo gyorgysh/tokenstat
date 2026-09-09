@@ -27,6 +27,7 @@ struct ClientSetupStateTests {
         identities()
         drafts()
         failures()
+        scopes()
         print("ClientSetupStateTests passed")
     }
 
@@ -119,6 +120,21 @@ struct ClientSetupStateTests {
         do { try draft.validate(); return false } catch { return true }
     }
 
+    static func scopes() {
+        // The handle wins when the account has claimed one, so every existing
+        // draft keeps scoping exactly as before.
+        precondition(ClientSetupScope.accountIdentity(handle: "someone", id: "acc_1") == "someone")
+        // A new account has no handle. The server's id scopes it instead of
+        // refusing it setup.
+        precondition(ClientSetupScope.accountIdentity(handle: nil, id: "acc_1") == "acc_1")
+        precondition(ClientSetupScope.accountIdentity(handle: "", id: "acc_1") == "acc_1")
+        precondition(ClientSetupScope.accountIdentity(handle: "  ", id: "acc_1") == "acc_1")
+        // Neither is not an identity. The caller must not persist under it,
+        // or one account resumes another's.
+        precondition(ClientSetupScope.accountIdentity(handle: nil, id: nil).isEmpty)
+        precondition(ClientSetupScope.accountIdentity(handle: "", id: " ").isEmpty)
+    }
+
     static func failures() {
         // The action comes from the code, never from the words. Rewording any
         // of these messages must not change where somebody is sent.
@@ -132,6 +148,8 @@ struct ClientSetupStateTests {
             ("identity_mismatch", .reviewFingerprint),
             ("pairing_expired", .newCode),
             ("account_changed", .signInToAccount),
+            ("signed_out", .signInToAccount),
+            ("auth", .signInToAccount),
             ("unknown_method", .updateMachine),
         ]
         for (code, expected) in cases {

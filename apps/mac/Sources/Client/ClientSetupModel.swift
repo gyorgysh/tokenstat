@@ -97,11 +97,16 @@ final class ClientSetupModel {
             let account = try await Bridge.account()
             if !library.loaded { await library.load() }
             try Task.checkCancellation()
-            guard account.signedIn, let handle = account.handle, !handle.isEmpty else {
+            guard account.signedIn else {
                 throw BridgeError.core(code: "signed_out", message: "Sign in before setting up a machine.")
             }
             myKey = key
-            let scope = ClientSetupScope(origin: account.host, account: handle, deviceKey: key)
+            // A new account has no handle. The scope falls back to the server
+            // id for the account. When that is missing too, the draft goes
+            // unpersisted: an empty scope is shared, so it must never be
+            // written (see checkpoint).
+            let identity = ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId)
+            let scope = ClientSetupScope(origin: account.host, account: identity, deviceKey: key)
             self.scope = scope
             coordinator.load(scope: scope)
             if machineName.isEmpty { machineName = "server" }
@@ -119,7 +124,10 @@ final class ClientSetupModel {
     func accountChanged(_ account: Account?) -> Bool {
         guard prepared, let scope else { return false }
         if let account, account.signedIn,
-           account.host == scope.origin, account.handle == scope.account { return false }
+           account.host == scope.origin,
+           ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId) == scope.account {
+            return false
+        }
         coordinator.clearAccount()
         self.scope = nil
         prepared = false
@@ -128,6 +136,22 @@ final class ClientSetupModel {
         expectedPeer = nil
         finished = nil
         resetServer()
+        return true
+    }
+
+    /// Whether a fresh account is worth another prepare.
+    ///
+    /// prepare() runs once when the wizard opens. When it fails for sign-in
+    /// reasons the wizard stays unprepared and nothing retries it. The device
+    /// identity can still have been arriving, since it trails sign-in by
+    /// moments, so a newly signed-in account gets one more attempt. Anything
+    /// else stays put. Each attempt either succeeds, which ends this, or
+    /// fails without touching the account, so a change of account is the only
+    /// thing that can run it again.
+    func shouldReprepare(for account: Account?) -> Bool {
+        if accountChanged(account) { return true }
+        guard !prepared, failure?.action == .signInToAccount,
+              let account, account.signedIn else { return false }
         return true
     }
 
@@ -181,7 +205,10 @@ final class ClientSetupModel {
     /// being able to write it costs the resume, and nothing else.
     func checkpoint(_ milestone: ClientSetupMilestone) {
         resumingInstallation = milestone.needsReconciliation
-        guard let scope else { return }
+        // An empty scope is shared by every account without one, so it is
+        // never written. Setup proceeds without a saved draft, which only
+        // costs coming back to it.
+        guard let scope, !scope.account.isEmpty else { return }
         try? coordinator.save(ClientSetupDraft(
             id: draftID, scope: scope, hostID: pickedHostID, fingerprint: fingerprint,
             machineName: machineName, agents: agents, manualInstall: manualInstall,
@@ -271,7 +298,8 @@ final class ClientSetupModel {
     func chooseAvailableMachineName() async throws {
         let account = try await Bridge.account()
         try Task.checkCancellation()
-        guard account.signedIn, account.host == scope?.origin, account.handle == scope?.account else {
+        guard account.signedIn, account.host == scope?.origin,
+              ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId) == scope?.account else {
             throw BridgeError.core(code: "account_changed", message: "Your account changed. Close setup and open it again.")
         }
         let labels = Set(account.machines.compactMap(\.label))
@@ -425,7 +453,8 @@ final class ClientSetupModel {
                 // Use a fresh response, not AccountModel's retained offline snapshot.
                 let fresh = try await Bridge.account()
                 try Task.checkCancellation()
-                guard fresh.signedIn, fresh.host == self.scope?.origin, fresh.handle == self.scope?.account else {
+                guard fresh.signedIn, fresh.host == self.scope?.origin,
+                      ClientSetupScope.accountIdentity(handle: fresh.handle, id: fresh.accountId) == self.scope?.account else {
                     throw BridgeError.core(code: "account_changed", message: "Your account changed. Close setup and open it again.")
                 }
                 if fresh.machines.contains(where: {

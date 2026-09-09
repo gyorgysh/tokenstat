@@ -107,7 +107,8 @@ struct ClientWorkspacesView: View {
                             actionIcon: .plans,
                             action: {
                                 store.showPaywall = true
-                            }
+                            },
+                            art: .remoteGate
                         )
                     } else if model.hosts.isEmpty {
                         // Not "no hosts". The hole is a machine, and the thing

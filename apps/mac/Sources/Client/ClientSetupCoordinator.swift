@@ -44,7 +44,9 @@ final class ClientSetupCoordinator {
     /// Forget local progress only. Never stop or remove a remote installation.
     func discard() throws {
         cancel()
-        if let scope { try store.remove(scope: scope) }
+        // An empty scope is shared and never written (see checkpoint), so
+        // there is nothing of this account's to remove.
+        if let scope, !scope.account.isEmpty { try store.remove(scope: scope) }
         savedDraft = nil
         failure = nil
     }

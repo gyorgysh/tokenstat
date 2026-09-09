@@ -85,7 +85,7 @@ struct ClientInsightsView: View {
                     actionTitle: "How to start",
                     actionIcon: .home,
                     action: { navigation.destination = .home },
-                    mark: "mark_insights"
+                    art: .firstBars
                 )
             } else {
                 summary(rows)

@@ -23,6 +23,10 @@ struct ClientSetupWizard: View {
     @State private var model = ClientSetupModel()
     @State private var library = SSHLibraryModel()
     @State private var path: [SetupStep] = []
+    /// Set when a picked door fails to start. The doors show no failure until
+    /// then. prepare() runs on open and stays silent; the check reruns on
+    /// entry instead.
+    @State private var entryAttempted = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -50,9 +54,14 @@ struct ClientSetupWizard: View {
         }
         .onChange(of: account.account) { _, now in
             // A different account is a different setup. Land back on the doors
-            // and load that account's own draft, if it has one.
-            guard model.accountChanged(now) else { return }
+            // and load that account's own draft, if it has one. An account
+            // arriving after a failure is also worth another prepare: the
+            // identity trails sign-in by moments. Silent either way. A fresh
+            // account event is not an entry attempt, so a failure still waits
+            // for a picked door before it gets a card.
+            guard model.shouldReprepare(for: now) else { return }
             path = []
+            entryAttempted = false
             Task { await model.prepare(library: library) }
         }
         .onDisappear { model.cancelWork() }
@@ -65,14 +74,41 @@ struct ClientSetupWizard: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 header
-                // The doors had nowhere to say anything, so a refused resume
-                // or a failed prepare was a button that did nothing.
-                if let failure = model.failure {
-                    SetupFailureBanner(
-                        failure: failure,
-                        onDismiss: { model.failure = nil },
-                        onRecover: { recover($0, model: model, path: $path) }
-                    )
+                // Failures show here only once setup is underway. Prepared and
+                // failing answers a tap. Unprepared with an entry attempt
+                // answers the picked door. A prepare that fails on open stays
+                // silent and reruns on entry.
+                if let failure = model.failure, model.prepared || entryAttempted {
+                    // Genuinely signed out gets sign-in words; anything else,
+                    // including a signed-in app whose account answered setup
+                    // differently, gets a retry and never sign-in advice.
+                    if !model.prepared,
+                       failure.action == .signInToAccount || failure.action == .retry {
+                        if failure.action == .signInToAccount, !account.signedIn {
+                            SetupSignInCard(
+                                onRetry: {
+                                    Task { await model.prepare(library: library) }
+                                },
+                                onDismiss: clearEntryFailure
+                            )
+                        } else {
+                            SetupRetryCard(
+                                onRetry: {
+                                    Task {
+                                        await account.load()
+                                        await model.prepare(library: library)
+                                    }
+                                },
+                                onDismiss: clearEntryFailure
+                            )
+                        }
+                    } else {
+                        SetupFailureBanner(
+                            failure: failure,
+                            onDismiss: { model.failure = nil },
+                            onRecover: { recover($0, model: model, path: $path) }
+                        )
+                    }
                 }
                 if let draft = model.savedDraft { resumeCard(draft) }
                 // The computer first: no token, no rental, nothing to buy.
@@ -84,7 +120,7 @@ struct ClientSetupWizard: View {
                     requirement: nil,
                     symbol: "laptopcomputer"
                 ) {
-                    path = [.mac]
+                    enter([.mac])
                 }
                 door(
                     title: "On a server I have",
@@ -93,7 +129,7 @@ struct ClientSetupWizard: View {
                     requirement: paywalled ? "Reaching it needs patron" : nil,
                     symbol: "server.rack"
                 ) {
-                    path = [.where]
+                    enter([.where])
                 }
                 door(
                     title: "On a cloud machine",
@@ -102,7 +138,7 @@ struct ClientSetupWizard: View {
                     requirement: paywalled ? "Reaching it needs patron" : nil,
                     symbol: "cloud.fill"
                 ) {
-                    path = [.cloud]
+                    enter([.cloud])
                 }
                 // Leaving, without pretending it is a setup choice. A fourth card
                 // wore the same surface as the three doors and read as a fourth
@@ -135,6 +171,72 @@ struct ClientSetupWizard: View {
             .setupColumn()
         }
         .background(Theme.background)
+    }
+
+    /// A picked door setup could not walk through. prepare() runs on open so
+    /// the resume card and the install line are warm. Its failure stays
+    /// silent until a door is picked, and a success clears the attempt on
+    /// the way in.
+    private func enter(_ steps: [SetupStep]) {
+        if model.prepared {
+            path = steps
+            return
+        }
+        Task { @MainActor in
+            await model.prepare(library: library)
+            if model.prepared {
+                entryAttempted = false
+                path = steps
+            } else {
+                entryAttempted = true
+            }
+        }
+    }
+
+    /// Forget a failed entry. The doors go back to saying nothing, and the
+    /// next picked door runs the check again.
+    private func clearEntryFailure() {
+        entryAttempted = false
+        model.failure = nil
+    }
+
+    /// A picked door opened with no signed-in account. Not the failure's own
+    /// wording about "the account that started this setup", which confused
+    /// somebody who had started nothing. No art: the header above already
+    /// carries the connection scene, and repeating it here made one picture
+    /// do two jobs.
+    private func SetupSignInCard(onRetry: @escaping () -> Void, onDismiss: @escaping () -> Void) -> some View {
+        ClientEmptyState(
+            kind: .needsAccount,
+            title: "Sign in to set up a machine",
+            message: "Setup needs a signed-in account. If you just signed in, "
+                + "give it a moment and check again.",
+            actionTitle: "Check again",
+            actionIcon: .refresh,
+            action: onRetry,
+            secondaryActionTitle: "Not now",
+            secondaryActionIcon: .dismiss,
+            secondaryAction: onDismiss
+        )
+    }
+
+    /// Setup could not start, although the app itself may look signed in.
+    /// Sign-in advice would send somebody in circles here, so this retries
+    /// instead. Unreachable grey, not the sign-in tile and not the header
+    /// scene, so the three states read apart.
+    private func SetupRetryCard(onRetry: @escaping () -> Void, onDismiss: @escaping () -> Void) -> some View {
+        ClientEmptyState(
+            kind: .unreachable,
+            title: "Setup could not start",
+            message: "Nothing was started, so there is nothing to fix. "
+                + "Check again and setup retries.",
+            actionTitle: "Check again",
+            actionIcon: .refresh,
+            action: onRetry,
+            secondaryActionTitle: "Not now",
+            secondaryActionIcon: .dismiss,
+            secondaryAction: onDismiss
+        )
     }
 
     /// Setup left half-finished is the normal case on a phone, not an error.

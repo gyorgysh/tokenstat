@@ -22,7 +22,6 @@ import UIKit
 struct ClientSetupMacDoor: View {
     @Environment(AccountModel.self) private var account
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
 
     @State private var sharing = false
     @State private var arrived: Machine?
@@ -33,7 +32,7 @@ struct ClientSetupMacDoor: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(spacing: Theme.Space.s) {
-                    ClientEmptyArt(kind: .connect)
+                    ClientEmptyArt(kind: .macDoor)
                     Text("Your computer")
                         .font(Theme.title.weight(.semibold))
                     Text(
@@ -47,15 +46,9 @@ struct ClientSetupMacDoor: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 GettingStartedRail(steps: steps)
-                // The address as a real link, beside the share sheet. Opening
-                // it leaves the app for the browser on purpose: a download
-                // page is used there, and an in-app view of one is the worse
-                // place to be signed in.
-                Button("tokenstat.ai/download", .external) {
-                    if let url = URL(string: Self.address) { openURL(url) }
-                }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("setup.mac.download")
+                // No link button beside the share sheet: the address leaves
+                // the phone through "Send it to my computer", and a second
+                // copy of it was dead weight on the screen.
                 if arrived != nil {
                     Text(
                         "One step is left and it happens on the computer: when this device asks "
@@ -86,8 +79,8 @@ struct ClientSetupMacDoor: View {
             GettingStartedStep(
                 number: 1,
                 title: "Install tokenstat on the computer",
-                body: "Nobody installs a desktop app from an iPhone or iPad, so this step sends the "
-                    + "address to it instead. \(Self.address)",
+                body: "Send the download link to the computer. AirDrop it or message it to "
+                    + "yourself, then open it there.",
                 state: arrived == nil ? .now : .done,
                 actionTitle: arrived == nil ? "Send it to my computer" : nil,
                 actionIcon: .send,
@@ -162,7 +155,7 @@ struct ClientSetupCloudDoor: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(spacing: Theme.Space.s) {
-                    ClientEmptyArt(kind: .connect)
+                    ClientEmptyArt(kind: .cloudDoor)
                     Text("A cloud machine")
                         .font(Theme.title.weight(.semibold))
                     Text(
