@@ -1897,6 +1897,11 @@ func harnessCanonicalID(_ id: String) -> String {
     // `antigravity`, so normalize before lookup.
     if id == "agy" { return "antigravity" }
     if id.hasPrefix("antigravity") { return "antigravity" }
+    // Chat backends store the raw CLI name `claude`; the brand catalog is
+    // `claude_code`. Without this the tile falls back to the letter "C".
+    if id == "claude" { return "claude_code" }
+    // Same story for the `opencode2` binary: one brand, `opencode`.
+    if id == "opencode2" { return "opencode" }
     return id
 }
 
@@ -1918,6 +1923,8 @@ func harnessToolKey(_ id: String) -> String {
 /// step: a user reading their profile on the web and their app should not see
 /// two names for one tool.
 func harnessName(_ id: String) -> String {
+    // The second binary keeps its own name even though it shares the mark.
+    if id == "opencode2" { return "OpenCode 2" }
     let canonical = harnessCanonicalID(id)
     switch canonical {
     case "claude_code": return "Claude Code"

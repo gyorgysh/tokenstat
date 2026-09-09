@@ -172,7 +172,6 @@ private struct ClientAccountContent: View {
                 .frame(maxWidth: .infinity)
                 .padding(Theme.Space.xl)
         }
-        sampleHelp
         dangerZone
     }
 
@@ -181,7 +180,7 @@ private struct ClientAccountContent: View {
             Text("Help").font(ClientType.sectionTitle)
             Button { showSample = true } label: {
                 HStack(spacing: Theme.Space.m) {
-                    Image(systemName: ActionIcon.preview.symbol).foregroundStyle(Theme.accent)
+                    Image(systemName: ActionIcon.run.symbol).foregroundStyle(Theme.accent)
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         Text("See a sample").font(ClientType.label.weight(.semibold))
                         Text("Explore a workspace with invented data, right on this device.")
@@ -283,6 +282,7 @@ private struct ClientAccountContent: View {
 
     @ViewBuilder
     private var legalPane: some View {
+        sampleHelp
         legalCard
         licensesCard
         privacyNote

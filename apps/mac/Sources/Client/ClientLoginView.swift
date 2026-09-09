@@ -35,7 +35,7 @@ struct ClientLoginView: View {
             VStack(spacing: Theme.Space.m) {
                 LogoMark(size: 52)
                 Wordmark(size: 28, fills: false, showsMark: false)
-                Text("Your usage across every device on your account, wherever you are.")
+                Text("Your coding agents, projects, and AI usage. Together, wherever you are.")
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
