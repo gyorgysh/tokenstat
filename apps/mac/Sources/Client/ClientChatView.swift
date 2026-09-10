@@ -377,16 +377,17 @@ struct ClientChatThread: View {
         guard let reference = model.currentReference else { return }
         await model.checkSavedCopyForUpdates {
             guard let peer = model.peer else { return }
-            await ClientDeviceName.publish()
-            guard reference.scope == WorkSessionContext.shared.scope else { throw CancellationError() }
-            _ = try await Bridge.pair(key: peer, label: hostName, address: "")
-            guard reference.scope == WorkSessionContext.shared.scope else { throw CancellationError() }
-            _ = try await Bridge.setTunnel(true)
-            let allowed = try await Bridge.workspaceAccessAllowed(peer: peer)
-            guard allowed else {
-                throw BridgeError.core(code: "workspace_access_denied",
-                    message: "Allow workspace access on \(hostName) to return to the live conversation.")
+            @MainActor func requireCurrent() throws {
+                guard !Task.isCancelled, reference.scope == WorkSessionContext.shared.scope,
+                      model.currentReference == reference else { throw CancellationError() }
             }
+            await ClientDeviceName.publish()
+            try requireCurrent()
+            _ = try await Bridge.pair(key: peer, label: hostName, address: "")
+            try requireCurrent()
+            _ = try await Bridge.setTunnel(true)
+            try requireCurrent()
+            // Access and protocol checks are shared with desktop in ChatModel.
         }
     }
 

@@ -1961,15 +1961,33 @@ final class ChatModel {
             return
         }
         let generation = selectionGeneration
+        let targetPeer = peer
+        func stillCurrent() -> Bool {
+            !Task.isCancelled && reference.scope == WorkSessionContext.shared.scope
+                && selectionMatches(id: chat.id, generation: generation)
+                && currentReference == reference
+        }
         checkingSavedCopy = true
         defer { checkingSavedCopy = false }
         do {
             try await prepareConnection?()
-            guard selectionMatches(id: chat.id, generation: generation),
-                  currentReference == reference else { return }
-            let liveChats = try await Bridge.chats(workspaceID: workspaceID, peer: peer)
-            guard selectionMatches(id: chat.id, generation: generation),
-                  currentReference == reference else { return }
+            guard stillCurrent() else { return }
+            if let targetPeer {
+                let allowed = try await Bridge.workspaceAccessAllowed(peer: targetPeer)
+                guard stillCurrent() else { return }
+                guard allowed else {
+                    error = "Allow workspace access on the other computer before returning to the live conversation. Your draft stays on this device."
+                    return
+                }
+                let version = try await Bridge.peerProtocolVersion(targetPeer)
+                guard stillCurrent() else { return }
+                guard version >= RemoteHostFeature.chat.minimumProtocol else {
+                    error = "Update tokenstat on the other computer before checking for live messages. You can still read this saved copy."
+                    return
+                }
+            }
+            let liveChats = try await Bridge.chats(workspaceID: workspaceID, peer: targetPeer)
+            guard stillCurrent() else { return }
             guard let live = liveChats.first(where: { $0.id == chat.id && $0.workspaceID == workspaceID }) else {
                 error = "This conversation is no longer on the machine. You can still read this saved copy."
                 return
@@ -1977,7 +1995,7 @@ final class ChatModel {
             replace(live)
             await select(live)
         } catch {
-            guard selectionMatches(id: chat.id, generation: generation) else { return }
+            guard stillCurrent() else { return }
             self.error = error.localizedDescription
         }
     }
