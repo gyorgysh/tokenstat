@@ -195,9 +195,17 @@ pub(crate) fn last_error() -> Dword {
 }
 
 pub(crate) fn try_lock_exclusive(file: &std::fs::File, wait: bool) -> bool {
+    try_lock(file, wait, true)
+}
+
+pub(crate) fn try_lock(file: &std::fs::File, wait: bool, exclusive: bool) -> bool {
     use std::os::windows::io::AsRawHandle;
     let mut overlapped = Overlapped::zero();
-    let mut flags = LOCKFILE_EXCLUSIVE_LOCK;
+    let mut flags = if exclusive {
+        LOCKFILE_EXCLUSIVE_LOCK
+    } else {
+        0
+    };
     if !wait {
         flags |= LOCKFILE_FAIL_IMMEDIATELY;
     }

@@ -27,11 +27,17 @@ struct ChatAttachment: Codable, Equatable, Sendable { let id: String; let name: 
         try second.update(ref()) { $0[0].text = "Edited in another window" }
         let checked4 = try first.items(for: ref())[0].text == "Edited in another window"
         assert(checked4)
-        try first.update(ref()) { $0[0].delivery = .sending; $0[0].attemptedAt = Date(timeIntervalSince1970: 42) }
+        try first.update(ref()) { $0[0].delivery = .sending; $0[0].firstAttemptAt = Date(timeIntervalSince1970: 40); $0[0].attemptedAt = Date(timeIntervalSince1970: 42) }
         let reopened = ChatOutboxStore(directory: root)
         let held = try reopened.items(for: ref())[0]
         assert(held.id == message.id && held.needsReceipt && !held.canEdit)
         assert(held.attemptedAt == Date(timeIntervalSince1970: 42))
+        assert(held.firstAttemptAt == Date(timeIntervalSince1970: 40))
+        // Existing persisted messages have no firstAttemptAt. They remain
+        // readable and retain attemptedAt for the protocol migration.
+        let legacy = Data(#"{"id":"legacy","text":"keep me","attachments":[],"delivery":"failed","attemptedAt":42,"whenConnected":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(ChatQueuedMessage.self, from: legacy)
+        assert(decoded.firstAttemptAt == nil && decoded.attemptedAt != nil)
         assert(first.beginDelivery(ref()))
         assert(!first.beginDelivery(ref()))
         first.endDelivery(ref())

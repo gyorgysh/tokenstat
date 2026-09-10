@@ -515,7 +515,14 @@ enum Bridge {
     /// Different from unreachable, which never arrived and can be repeated
     /// without a thought. A send that timed out has to be reconciled before
     /// anybody claims it failed.
-    static func isDeliveryUnknown(_ error: Error) -> Bool { isTimeout(error) }
+    static func isDeliveryUnknown(_ error: Error) -> Bool {
+        if isTimeout(error) { return true }
+        guard let bridge = error as? BridgeError else { return false }
+        switch bridge {
+        case .decoding: return true
+        case let .core(code, _): return ["delivery_unknown", "unknown", "null"].contains(code)
+        }
+    }
 
     /// Whether an error means the host was unreachable or silent, which is
     /// worth retrying once it is back.
@@ -1168,18 +1175,25 @@ extension Bridge {
     ///
     /// With a `clientMessageID` the host keeps a receipt, so the same message
     /// arriving twice is answered rather than run twice. Only pass one to a
-    /// machine that speaks protocol 10 (`RemoteHostFeature.confirmedSend`):
-    /// an older host ignores the field, which would turn a repeat into a
-    /// second agent turn.
+    /// machine that speaks protocol 13 (`RemoteHostFeature.confirmedSend`):
+    /// older hosts do not provide the crash and retention guarantees needed
+    /// to keep an uncertain send from starting a second turn.
     static func sendChat(
         id: String,
         text: String,
         attachmentIDs: [String] = [],
         clientMessageID: String? = nil,
+        clientMessageCreatedAt: Date? = nil,
         peer: String? = nil
     ) async throws -> ChatConversation {
         var params: [String: Any] = ["id": id, "text": text, "attachmentIds": attachmentIDs]
         if let clientMessageID { params["clientMessageId"] = clientMessageID }
+        if let clientMessageCreatedAt {
+            guard let milliseconds = Int64(exactly: (clientMessageCreatedAt.timeIntervalSince1970 * 1000).rounded(.towardZero)) else {
+                throw BridgeError.core(code: "invalid_message_time", message: "The saved message time could not be read. Your pending copy stays here.")
+            }
+            params["clientMessageCreatedAtMs"] = milliseconds
+        }
         return try await chatInvoke(
             peer: peer,
             "chat.send",
@@ -2906,9 +2920,8 @@ extension Bridge {
 
     /// Whether this device may open that computer's work.
     ///
-    /// Asked before anything loads. `remote.call` flattens a peer's error to
-    /// its message and drops the code, so reading this off a failure would
-    /// have meant matching on a sentence.
+    /// Asked before anything loads. A positive access answer lets the client
+    /// resolve its destination before asking for any private work.
     static func workspaceAccessAllowed(peer: String) async throws -> Bool {
         struct Answer: Codable, Sendable { var allowed: Bool }
         let scope = await WorkSessionContext.shared.scope

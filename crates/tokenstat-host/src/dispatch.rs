@@ -505,6 +505,7 @@ struct ChatParams {
     /// so a send whose answer went missing can be repeated without running
     /// the agent twice. See `chat_receipts`.
     client_message_id: Option<String>,
+    client_message_created_at_ms: Option<i64>,
     attachment_id: Option<String>,
     name: Option<String>,
     data: Option<String>,
@@ -1938,6 +1939,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             &p.text.ok_or("chat.send needs text")?,
             &p.attachment_ids.unwrap_or_default(),
             p.client_message_id.as_deref(),
+            p.client_message_created_at_ms,
         )?)
         .envelope(),
         // What the host already knows about one message. Reporting only: a
@@ -2962,7 +2964,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
     // a call being forwarded to an idle machine must not queue behind a scan
     // running on this one.
     if let Some(answer) = crate::remote::call(method, params) {
-        return Some(answer.map_err(DispatchError::from));
+        return Some(answer);
     }
 
     // The tasks board. Its own store behind its own lock, and it never touches

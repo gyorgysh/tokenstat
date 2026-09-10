@@ -2894,6 +2894,7 @@ struct ChatSendReceipt: Codable, Sendable, Hashable {
     enum State: String, Codable, Sendable {
         case accepted
         case pending
+        case needsRecovery
         case unknown
     }
 

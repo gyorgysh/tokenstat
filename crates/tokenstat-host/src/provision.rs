@@ -25,7 +25,8 @@ fn status() -> Result<Value, String> {
         .transpose()?
         .unwrap_or(Value::Null);
     let remote = crate::remote::call("remote.status", "{}")
-        .transpose()?
+        .transpose()
+        .map_err(|e| e.to_string())?
         .unwrap_or(Value::Null);
     let account = match tokenstat_sync::sync_status(None) {
         Ok(status) => json!({

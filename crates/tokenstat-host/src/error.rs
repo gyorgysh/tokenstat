@@ -24,6 +24,10 @@ use std::fmt;
 /// The general failure. What a call returns when nothing more specific applies.
 pub const CALL_FAILED: &str = "call_failed";
 
+/// A send may have started. Clients must keep its pending copy and reconcile
+/// delivery instead of treating this as a refusal that is safe to retry.
+pub const DELIVERY_UNKNOWN: &str = "delivery_unknown";
+
 /// This build has no archive of its own, so the method cannot be answered here.
 ///
 /// Not a fault and not a transient condition: a mobile client is a client of a
@@ -59,6 +63,11 @@ impl DispatchError {
             code: code.into(),
             message: message.into(),
         }
+    }
+
+    /// Preserve an uncertain send for a receipt check rather than an ordinary retry.
+    pub fn delivery_unknown(message: impl Into<String>) -> Self {
+        Self::new(DELIVERY_UNKNOWN, message)
     }
 
     /// Said the same way everywhere, because a front end may show it verbatim.

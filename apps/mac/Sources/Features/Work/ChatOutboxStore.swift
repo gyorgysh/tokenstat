@@ -8,6 +8,8 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     var text: String
     var attachments: [ChatAttachment]
     var delivery: Delivery = .waiting
+    /// Fixed at the first attempt, including retries of a refused send.
+    var firstAttemptAt: Date? = nil
     var attemptedAt: Date? = nil
     var whenConnected = false
     var sourceDraftText: String? = nil

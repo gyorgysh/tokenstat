@@ -2466,11 +2466,17 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     // keyed by purpose, so a chat call never borrows a terminal channel and
     // bills its bytes to the wrong label on the relay.
     let purpose = purpose_for_method(method);
-    if let Some(mut pooled) = checkout(peer_hex, purpose)
-        && let Ok(answer) = round_trip(&mut pooled, request.as_bytes())
-    {
-        checkin(peer_hex, purpose, pooled);
-        return Ok(answer);
+    if let Some(mut pooled) = checkout(peer_hex, purpose) {
+        match round_trip(&mut pooled, request.as_bytes()) {
+            Ok(answer) => {
+                checkin(peer_hex, purpose, pooled);
+                return Ok(answer);
+            }
+            // The request may have reached the host. Its receipt, not a
+            // transport redial, decides what a send may do next.
+            Err(error) if method == "chat.send" => return Err(error.to_string()),
+            Err(_) => {}
+        }
     }
 
     let mut fresh = dial_peer_as(peer_hex, purpose)?;
@@ -2479,9 +2485,10 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     // means the far daemon was just replacing its listener, the same reconnect
     // window `tunnel_dial` retries through. One redial rides over it; anything
     // more is a real failure and should be reported as one.
-    if answer
-        .as_ref()
-        .is_err_and(|e| matches!(e, tokenstat_remote::RemoteError::Closed))
+    if method != "chat.send"
+        && answer
+            .as_ref()
+            .is_err_and(|e| matches!(e, tokenstat_remote::RemoteError::Closed))
         && let Ok(mut connection) = dial_peer_as(peer_hex, purpose)
         && let Ok(second) = round_trip(&mut connection, request.as_bytes())
     {
@@ -2945,19 +2952,27 @@ fn parse_params(params: &str) -> Value {
 /// Sessionless, like the machine methods: none of these read the archive, and
 /// `remote.call` forwarding a request must not queue behind a local scan when
 /// the remote machine is idle.
-pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
-    Some(match method {
-        "remote.status" => status(),
-        "remote.serve" => serve(params),
-        "remote.call" => forward(params),
-        "remote.nudge" => nudge(params),
-        "remote.reconsiderPlan" => reconsider_plan(),
-        // Authenticated peers ask this of the machine they are reaching, so
-        // terminals, files and screen can all try a current LAN address before
-        // the relay. It is not a `remote.*` owner method: those stay local.
-        "direct.candidates" => advertised_direct_candidates(),
-        _ => return None,
-    })
+pub(crate) fn call(
+    method: &str,
+    params: &str,
+) -> Option<Result<Value, crate::error::DispatchError>> {
+    if method == "remote.call" {
+        return Some(forward(params));
+    }
+    Some(
+        (match method {
+            "remote.status" => status(),
+            "remote.serve" => serve(params),
+            "remote.nudge" => nudge(params),
+            "remote.reconsiderPlan" => reconsider_plan(),
+            // Authenticated peers ask this of the machine they are reaching, so
+            // terminals, files and screen can all try a current LAN address before
+            // the relay. It is not a `remote.*` owner method: those stay local.
+            "direct.candidates" => advertised_direct_candidates(),
+            _ => return None,
+        })
+        .map_err(crate::error::DispatchError::from),
+    )
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -3195,7 +3210,7 @@ fn serve(params: &str) -> Result<Value, String> {
     Ok(json!({"tunnel": settings.tunnel}))
 }
 
-fn forward(params: &str) -> Result<Value, String> {
+fn forward(params: &str) -> Result<Value, crate::error::DispatchError> {
     crate::request_context::refuse_remote("remote forwarding")?;
     let p: ForwardParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     if p.peer.is_empty() || p.method.is_empty() {
@@ -3209,7 +3224,49 @@ fn forward(params: &str) -> Result<Value, String> {
         return Err("a remote call cannot ask a peer to make another remote call".into());
     }
 
-    call_peer_result(&p.peer, &p.method, &p.params.to_string())
+    forwarded_result(
+        &p.method,
+        call_peer(&p.peer, &p.method, &p.params.to_string()),
+    )
+}
+
+/// Preserve the far host's error code. A lost or malformed send response is
+/// uncertain delivery, not a refusal that a client may edit and retry.
+fn forwarded_result(
+    method: &str,
+    answer: Result<String, String>,
+) -> Result<Value, crate::error::DispatchError> {
+    use crate::error::DispatchError;
+    let unreadable = |message: String| {
+        if method == "chat.send" {
+            DispatchError::delivery_unknown(message)
+        } else {
+            DispatchError::from(message)
+        }
+    };
+    let answer = answer.map_err(unreadable)?;
+    let value: Value = serde_json::from_str(&answer).map_err(|e| unreadable(e.to_string()))?;
+    match value.get("ok").and_then(Value::as_bool) {
+        Some(true) => value
+            .get("result")
+            .cloned()
+            .ok_or_else(|| unreadable("The computer returned no result.".into())),
+        Some(false) => {
+            let error = value.get("error");
+            match (
+                error.and_then(|e| e.get("code")).and_then(Value::as_str),
+                error.and_then(|e| e.get("message")).and_then(Value::as_str),
+            ) {
+                (Some(code), Some(message)) => Err(DispatchError::new(code, message)),
+                _ => Err(unreadable(
+                    "The computer's response could not be read.".into(),
+                )),
+            }
+        }
+        _ => Err(unreadable(
+            "The computer's response could not be read.".into(),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -3452,7 +3509,43 @@ mod tests {
     fn a_remote_call_cannot_chain_through_a_peer() {
         let params = json!({"peer": "ab".repeat(32), "method": "remote.call", "params": {}});
         let refused = forward(&params.to_string()).expect_err("must refuse");
-        assert!(refused.contains("another remote call"), "{refused}");
+        assert!(refused.message.contains("another remote call"), "{refused}");
+    }
+
+    #[test]
+    fn forwarding_preserves_send_uncertainty_and_explicit_refusals() {
+        for code in ["delivery_unknown", "not_approved", "send_upgrade_required"] {
+            let reply =
+                json!({"ok":false,"error":{"code":code,"message":"Keep these words"}}).to_string();
+            let error = forwarded_result("chat.send", Ok(reply)).unwrap_err();
+            assert_eq!(error.code, code);
+            assert_eq!(error.message, "Keep these words");
+        }
+        for answer in [
+            Err("connection closed".into()),
+            Ok("{broken".into()),
+            Ok(r#"{"ok":true}"#.into()),
+            Ok(r#"{"ok":false}"#.into()),
+        ] {
+            assert_eq!(
+                forwarded_result("chat.send", answer).unwrap_err().code,
+                crate::error::DELIVERY_UNKNOWN
+            );
+        }
+        assert_eq!(
+            forwarded_result(
+                "chat.receipt",
+                Ok(r#"{"ok":true,"result":{"state":"needsRecovery"}}"#.into())
+            )
+            .unwrap()["state"],
+            "needsRecovery"
+        );
+        assert_eq!(
+            forwarded_result("protocol", Err("connection closed".into()))
+                .unwrap_err()
+                .code,
+            crate::error::CALL_FAILED
+        );
     }
 
     #[test]
@@ -3467,7 +3560,9 @@ mod tests {
     fn inbound_forwarding_is_refused_before_parsing_or_dialing() {
         crate::request_context::with_remote_peer("untrusted-phone", || {
             for result in [
-                forward("{}").map(|_| String::new()),
+                forward("{}")
+                    .map(|_| String::new())
+                    .map_err(|error| error.to_string()),
                 call_peer("invalid", "workspace.list", "{}"),
                 dial_peer_as("invalid", ChannelPurpose::Unknown).map(|_| String::new()),
             ] {

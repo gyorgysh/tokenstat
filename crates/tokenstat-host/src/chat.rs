@@ -8,7 +8,7 @@
 //! token is what joins those processes into a conversation.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +18,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::error::DispatchError;
 use crate::transcript::{Event, Parser};
 
 const EVENTS_CAP: u64 = 1024 * 1024;
@@ -1134,6 +1135,8 @@ impl Store {
     }
 
     pub fn update(&self, id: &str, changes: Update) -> Result<Conversation, String> {
+        validate_record_id(id)?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         self.edit_conversation(id, |chat| {
             if chat.running
                 && (changes.backend.is_some()
@@ -1201,6 +1204,7 @@ impl Store {
         if !self.root.exists() {
             return Ok(false);
         }
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         if self
             .active
@@ -1363,6 +1367,7 @@ impl Store {
         if !self.root.exists() {
             return Ok(0);
         }
+        let _acceptance = crate::chat_receipts::Operation::removal(&self.root)?;
         let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         let _transcript = self.transcript_guard()?;
         let active: HashSet<String> = self
@@ -1728,15 +1733,25 @@ impl Store {
     ) -> Result<(), String> {
         // Read back before writing: two sends into the same conversation
         // would otherwise write the file over each other's entries.
-        let mut ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms());
-        ledger.put(key.to_string(), receipt);
-        ledger.save()
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let directory = self.verified_append_directory(id)?;
+        fs::create_dir_all(directory).map_err(|e| e.to_string())?;
+        let mut ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())?;
+        ledger.put(key.to_string(), receipt)?;
+        ledger.save()?;
+        // A first send may have created the conversation directory. Persist
+        // that parent entry too, before allowing the agent to start.
+        #[cfg(unix)]
+        File::open(&self.root)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
-    fn drop_receipt(&self, id: &str, key: &str) {
-        let mut ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms());
+    fn drop_receipt(&self, id: &str, key: &str) -> Result<(), String> {
+        let mut ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())?;
         ledger.remove(key);
-        let _ = ledger.save();
+        ledger.save()
     }
 
     /// What the host already knows about one client's message.
@@ -1751,41 +1766,43 @@ impl Store {
         if !crate::chat_receipts::valid_id(client_message_id) {
             return Err("that clientMessageId is not usable".into());
         }
-        self.get(id)?;
+        validate_record_id(id)?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        self.current_send_conversation(id)?;
         let key = crate::chat_receipts::key(
             crate::request_context::remote_peer().as_deref(),
             client_message_id,
         );
-        let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms());
-        Ok(ledger.get(&key).cloned())
+        let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())?;
+        let mut receipt = ledger.get(&key).cloned();
+        if let Some(receipt) = &mut receipt {
+            if receipt.state == crate::chat_receipts::ReceiptState::Pending
+                && !self
+                    .active
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains_key(id)
+            {
+                receipt.state = crate::chat_receipts::ReceiptState::NeedsRecovery;
+            }
+        }
+        Ok(receipt)
     }
 
-    /// Whether the message this receipt was written for reached the timeline.
-    ///
-    /// A pending receipt means the host started the work and did not get to
-    /// record the end of it. The answer is on the timeline or it is not, and
-    /// looking is the only honest way to tell a launched turn from a send
-    /// that fell over before it did anything.
-    fn pending_reached_the_timeline(&self, id: &str, prompt: &str, at_ms: i64) -> bool {
-        let Ok(file) = fs::File::open(self.events_path(id)) else {
-            return false;
-        };
-        BufReader::new(file)
-            .lines()
-            .map_while(Result::ok)
-            .any(|line| {
-                let Ok(StoredEvent::User {
-                    text,
-                    at_ms: event_at,
-                }) = serde_json::from_str::<StoredEvent>(&line)
-                else {
-                    return false;
-                };
-                // The stored row is the composed turn, which begins with what
-                // the person typed and can carry the names of their files
-                // after it. A prefix is the honest comparison.
-                text.starts_with(prompt) && event_at + 1 >= at_ms
-            })
+    /// Send setup uses the current durable conversation after acquiring the
+    /// acceptance lock, not a snapshot from a different Store or before deletion.
+    fn current_send_conversation(&self, id: &str) -> Result<Conversation, String> {
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let chats = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let selected = chats
+            .iter()
+            .find(|chat| chat.id == id)
+            .ok_or("no chat with that id")?;
+        self.verified_conversation(&selected.workspace_id, id, &chats)
+            .map(|(_, chat)| chat)
     }
 
     pub fn send(
@@ -1794,7 +1811,10 @@ impl Store {
         text: &str,
         attachment_ids: &[String],
         client_message_id: Option<&str>,
-    ) -> Result<Conversation, String> {
+        client_message_created_at_ms: Option<i64>,
+    ) -> Result<Conversation, DispatchError> {
+        validate_record_id(id)?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         let typed = text.trim();
         if typed.is_empty() && attachment_ids.is_empty() {
             return Err("chat.send needs text or an attachment".into());
@@ -1809,7 +1829,7 @@ impl Store {
         } else {
             typed
         };
-        let chat = self.get(id)?;
+        let chat = self.current_send_conversation(id)?;
         // Before the running guard, deliberately. The case this exists for is
         // a send whose answer went missing, and the turn it started is
         // usually still going: "this chat is already responding" would be a
@@ -1831,33 +1851,40 @@ impl Store {
         };
         let digest = crate::chat_receipts::digest(text, attachment_ids);
         if let Some(key) = &receipt_key {
-            let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms());
+            let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())
+                .map_err(DispatchError::delivery_unknown)?;
             if let Some(receipt) = ledger.get(key) {
+                if !receipt.digest.starts_with("v2:") {
+                    return Err(DispatchError::delivery_unknown(
+                        "This older send needs a delivery check. Its receipt is still available; do not resend it.",
+                    ));
+                }
                 if receipt.digest != digest {
                     return Err("that message id was already used for a different message".into());
                 }
                 match receipt.state {
                     crate::chat_receipts::ReceiptState::Accepted => return Ok(chat),
-                    // The host got as far as starting this and not as far as
-                    // recording the end of it. The timeline is the evidence:
-                    // the message is on it, so the turn ran and this is a
-                    // repeat, or it is not, so nothing was delivered and this
-                    // send proceeds.
-                    crate::chat_receipts::ReceiptState::Pending => {
-                        if self.pending_reached_the_timeline(id, prompt, receipt.at_ms) {
-                            let settled = crate::chat_receipts::Receipt {
-                                state: crate::chat_receipts::ReceiptState::Accepted,
-                                ..receipt.clone()
-                            };
-                            self.write_receipt(id, key, settled)?;
-                            return Ok(chat);
-                        }
-                        self.drop_receipt(id, key);
+                    // A missing transcript row cannot prove that spawn never
+                    // happened. Preserve this receipt for explicit review.
+                    crate::chat_receipts::ReceiptState::Pending
+                    | crate::chat_receipts::ReceiptState::NeedsRecovery => {
+                        return Err(DispatchError::delivery_unknown(
+                            "This message may already have started. Check the conversation before copying it into a new draft.",
+                        ));
                     }
                 }
             }
         }
-        if chat.running {
+        if client_message_id.is_some() {
+            crate::chat_receipts::validate_created_at(client_message_created_at_ms, now_ms())?;
+        }
+        if chat.running
+            || self
+                .active
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(id)
+        {
             return Err("this chat is already responding".into());
         }
         let attachments = self.attachment_paths(id, attachment_ids)?;
@@ -1937,7 +1964,7 @@ impl Store {
                 Ok(file) => Some((token, file)),
                 Err(error) => {
                     self.revoke_turn_token(&token);
-                    return Err(error);
+                    return Err(error.into());
                 }
             }
         } else {
@@ -2060,85 +2087,94 @@ impl Store {
                 // Nothing was delivered, so the receipt has to go with it or
                 // the next attempt would be refused as a repeat.
                 if let Some(key) = &receipt_key {
-                    self.drop_receipt(id, key);
+                    let _ = self.drop_receipt(id, key);
                 }
-                return Err(error);
+                return Err(error.into());
             }
         };
-        // Only once the process exists. A spawn that failed delivered nothing,
-        // and marking it sent would silently drop this conversation's rules
-        // from every later turn on that backend.
-        if standing_due {
-            self.mark_standing_sent(id, &chat.backend, &composed.standing_fingerprint)?;
-        }
-        // The handover goes on the timeline, brief and all. It is text
-        // tokenstat put in front of somebody's agent, so their conversation is
-        // where it should be readable. Only when the conversation actually
-        // changed hands, though: the same agent being handed its own history
-        // again is plumbing, and a row saying so after every reply reads as
-        // the chat talking to itself. `brain.md` is still written either way,
-        // so what the agent was told is always on disk.
-        if let Some(handover) = &handover {
-            self.write_brain(id, &handover.brief)?;
-            if handover.announce {
-                self.append(
-                    id,
-                    &StoredEvent::Handoff {
-                        to: chat.backend.clone(),
-                        brief: handover.brief.clone(),
-                        at_ms: now_ms(),
-                    },
-                )?;
-            }
-        }
-        let user_at = now_ms();
-        self.append(
-            id,
-            &StoredEvent::User {
-                text: prompt.into(),
-                at_ms: user_at,
-            },
-        )?;
-        // The turn is running and the message is on the timeline. A repeat of
-        // this id now gets the conversation back and starts nothing.
-        if let Some(key) = &receipt_key {
-            self.write_receipt(
-                id,
-                key,
-                crate::chat_receipts::Receipt {
-                    state: crate::chat_receipts::ReceiptState::Accepted,
-                    digest,
-                    at_ms: accepted_at,
-                    event_at_ms: Some(user_at),
-                },
-            )?;
-        }
-        // What the person attached rides the timeline as its own rows, so a
-        // sent image stays visible instead of vanishing into the turn. The
-        // bytes already live beside the chat; these records are only the
-        // names the rows render and the ids they fetch by.
-        debug_assert_eq!(
-            attachment_ids.len(),
-            attachments.len(),
-            "attachment ids and staged paths travel 1:1"
-        );
-        for (attachment_id, path) in attachment_ids.iter().zip(attachments.iter()) {
-            self.append(
-                id,
-                &StoredEvent::Agent {
-                    event: attachment_event(attachment_id, path),
-                    at_ms: now_ms(),
-                    backend: chat.backend.clone(),
-                },
-            )?;
-        }
-        self.mark_last_message(id, user_at, "user")?;
-        self.retitle_if_untitled(id, prompt)?;
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id.into(), info.id.clone());
-        let running = self.set_running(id, true)?;
+        let recorded = (|| -> Result<Conversation, String> {
+            let running = self.set_running(id, true)?;
+            // Only once the process exists. A spawn that failed delivered nothing,
+            // and marking it sent would silently drop this conversation's rules
+            // from every later turn on that backend.
+            if standing_due {
+                self.mark_standing_sent(id, &chat.backend, &composed.standing_fingerprint)?;
+            }
+            // The handover goes on the timeline, brief and all. It is text
+            // tokenstat put in front of somebody's agent, so their conversation is
+            // where it should be readable. Only when the conversation actually
+            // changed hands, though: the same agent being handed its own history
+            // again is plumbing, and a row saying so after every reply reads as
+            // the chat talking to itself. `brain.md` is still written either way,
+            // so what the agent was told is always on disk.
+            if let Some(handover) = &handover {
+                self.write_brain(id, &handover.brief)?;
+                if handover.announce {
+                    self.append(
+                        id,
+                        &StoredEvent::Handoff {
+                            to: chat.backend.clone(),
+                            brief: handover.brief.clone(),
+                            at_ms: now_ms(),
+                        },
+                    )?;
+                }
+            }
+            let user_at = now_ms();
+            self.append(
+                id,
+                &StoredEvent::User {
+                    text: prompt.into(),
+                    at_ms: user_at,
+                },
+            )?;
+            // What the person attached rides the timeline as its own rows, so a
+            // sent image stays visible instead of vanishing into the turn. The
+            // bytes already live beside the chat; these records are only the
+            // names the rows render and the ids they fetch by.
+            debug_assert_eq!(
+                attachment_ids.len(),
+                attachments.len(),
+                "attachment ids and staged paths travel 1:1"
+            );
+            for (attachment_id, path) in attachment_ids.iter().zip(attachments.iter()) {
+                self.append(
+                    id,
+                    &StoredEvent::Agent {
+                        event: attachment_event(attachment_id, path),
+                        at_ms: now_ms(),
+                        backend: chat.backend.clone(),
+                    },
+                )?;
+            }
+            self.mark_last_message(id, user_at, "user")?;
+            self.retitle_if_untitled(id, prompt)?;
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(self.events_path(id))
+                .and_then(|file| file.sync_all())
+                .map_err(|e| e.to_string())?;
+            // The turn is running and the message is on the timeline. A repeat of
+            // this id now gets the conversation back and starts nothing.
+            if let Some(key) = &receipt_key {
+                self.write_receipt(
+                    id,
+                    key,
+                    crate::chat_receipts::Receipt {
+                        state: crate::chat_receipts::ReceiptState::Accepted,
+                        digest,
+                        at_ms: accepted_at,
+                        event_at_ms: Some(user_at),
+                    },
+                )?;
+            }
+            Ok(running)
+        })();
         let store = Arc::clone(self);
         let chat_id = id.to_string();
         let backend = chat.backend;
@@ -2177,10 +2213,12 @@ impl Store {
                 let _ = fs::remove_dir_all(home);
             }
         });
-        Ok(running)
+        recorded.map_err(DispatchError::delivery_unknown)
     }
 
     pub fn stop(&self, id: &str) -> Result<(), String> {
+        validate_record_id(id)?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         let pty = self
             .active
             .lock()
@@ -4863,22 +4901,22 @@ mod tests {
         // Returns the conversation without reaching the workspace lookup,
         // which is the first thing a real send needs and does not exist here.
         let chat = store
-            .send("chat-receipt", "hello", &[], Some("m-1"))
+            .send("chat-receipt", "hello", &[], Some("m-1"), None)
             .unwrap();
         assert_eq!(chat.id, "chat-receipt");
         assert!(!store.events_path("chat-receipt").exists());
 
         // The same name for different words is a mistake, not a repeat.
         let conflict = store
-            .send("chat-receipt", "something else", &[], Some("m-1"))
+            .send("chat-receipt", "something else", &[], Some("m-1"), None)
             .unwrap_err();
-        assert!(conflict.contains("different message"), "{conflict}");
+        assert!(conflict.message.contains("different message"), "{conflict}");
 
         // And a name that could shape a key in the ledger is refused.
         let bad = store
-            .send("chat-receipt", "hello", &[], Some("../escape"))
+            .send("chat-receipt", "hello", &[], Some("../escape"), None)
             .unwrap_err();
-        assert!(bad.contains("not usable"), "{bad}");
+        assert!(bad.message.contains("not usable"), "{bad}");
     }
 
     #[test]
@@ -4888,8 +4926,10 @@ mod tests {
         conversation_for_receipts(&store, "chat-running");
         store.set_running("chat-running", true).unwrap();
         // Without a receipt this is the ordinary refusal.
-        let busy = store.send("chat-running", "hello", &[], None).unwrap_err();
-        assert!(busy.contains("already responding"), "{busy}");
+        let busy = store
+            .send("chat-running", "hello", &[], None, None)
+            .unwrap_err();
+        assert!(busy.message.contains("already responding"), "{busy}");
         // With one it is the answer the client was waiting for. The case this
         // exists for is a send whose reply went missing while its turn ran.
         let key = crate::chat_receipts::key(None, "m-4");
@@ -4906,13 +4946,13 @@ mod tests {
             )
             .unwrap();
         let chat = store
-            .send("chat-running", "hello", &[], Some("m-4"))
+            .send("chat-running", "hello", &[], Some("m-4"), None)
             .unwrap();
         assert!(chat.running);
     }
 
     #[test]
-    fn a_pending_receipt_is_settled_by_the_timeline_and_not_by_guesswork() {
+    fn a_pending_receipt_never_guesses_delivery_from_matching_words() {
         let root = tempfile::tempdir().unwrap();
         let store = Arc::new(Store::at(root.path().join("chat")));
         conversation_for_receipts(&store, "chat-pending");
@@ -4924,45 +4964,126 @@ mod tests {
             at_ms,
             event_at_ms: None,
         };
-        store
-            .write_receipt("chat-pending", &key, pending.clone())
-            .unwrap();
-
-        // Nothing on the timeline: the attempt delivered nothing, so this is
-        // a fresh send. It gets as far as the workspace, which is missing.
-        let error = store
-            .send("chat-pending", "hello", &[], Some("m-2"))
-            .unwrap_err();
-        assert!(!error.contains("different message"), "{error}");
-        let ledger =
-            crate::chat_receipts::Ledger::load(store.receipts_path("chat-pending"), now_ms());
-        assert!(
-            ledger.get(&key).is_none(),
-            "a dead attempt keeps no receipt"
-        );
-
-        // The message on the timeline: the turn ran, so the repeat is
-        // answered rather than run.
         store.write_receipt("chat-pending", &key, pending).unwrap();
+        for has_similar_row in [false, true] {
+            if has_similar_row {
+                store
+                    .append(
+                        "chat-pending",
+                        &StoredEvent::User {
+                            text: "hello again".into(),
+                            at_ms,
+                        },
+                    )
+                    .unwrap();
+            }
+            let error = store
+                .send("chat-pending", "hello", &[], Some("m-2"), None)
+                .unwrap_err();
+            assert_eq!(error.code, crate::error::DELIVERY_UNKNOWN);
+            let ledger =
+                crate::chat_receipts::Ledger::load(store.receipts_path("chat-pending"), now_ms())
+                    .unwrap();
+            assert_eq!(
+                ledger.get(&key).unwrap().state,
+                crate::chat_receipts::ReceiptState::Pending
+            );
+            assert_eq!(
+                store.receipt("chat-pending", "m-2").unwrap().unwrap().state,
+                crate::chat_receipts::ReceiptState::NeedsRecovery
+            );
+        }
+    }
+
+    #[test]
+    fn corrupt_receipts_refuse_sends_and_checks_without_replacing_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&store, "corrupt");
+        fs::create_dir_all(store.root.join("corrupt")).unwrap();
+        let path = store.receipts_path("corrupt");
+        fs::write(&path, b"{broken").unwrap();
+        let error = store
+            .send("corrupt", "hello", &[], Some("m-1"), None)
+            .unwrap_err();
+        assert_eq!(error.code, crate::error::DELIVERY_UNKNOWN);
+        assert!(store.receipt("corrupt", "m-1").is_err());
+        assert_eq!(fs::read(path).unwrap(), b"{broken");
+    }
+
+    #[test]
+    #[ignore = "child process for the interrupted acceptance regression"]
+    fn receipt_interrupted_process() {
+        let root = PathBuf::from(std::env::var_os("TOKENSTAT_RECEIPT_TEST_ROOT").unwrap());
+        let store = Arc::new(Store::at(root));
+        conversation_for_receipts(&store, "interrupted-send");
+        let _acceptance =
+            crate::chat_receipts::Operation::conversation(&store.root, "interrupted-send").unwrap();
         store
-            .append(
-                "chat-pending",
-                &StoredEvent::User {
-                    text: "hello".into(),
-                    at_ms,
+            .write_receipt(
+                "interrupted-send",
+                &crate::chat_receipts::key(None, "crashed"),
+                crate::chat_receipts::Receipt {
+                    state: crate::chat_receipts::ReceiptState::Pending,
+                    digest: crate::chat_receipts::digest("original words", &[]),
+                    at_ms: now_ms(),
+                    event_at_ms: None,
                 },
             )
             .unwrap();
-        let chat = store
-            .send("chat-pending", "hello", &[], Some("m-2"))
+        // Abruptly exit at the durable acceptance boundary. No destructors
+        // run, and absence of a transcript must not grant a second launch.
+        std::process::exit(23);
+    }
+
+    #[test]
+    fn interrupted_acceptance_survives_process_exit_and_does_not_replay() {
+        let root = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "chat::tests::receipt_interrupted_process",
+                "--ignored",
+            ])
+            .env("TOKENSTAT_RECEIPT_TEST_ROOT", root.path().join("chat"))
+            .status()
             .unwrap();
-        assert_eq!(chat.id, "chat-pending");
-        let settled =
-            crate::chat_receipts::Ledger::load(store.receipts_path("chat-pending"), now_ms());
+        assert_eq!(status.code(), Some(23));
+        let store = Arc::new(Store::load_at(root.path().join("chat")));
+        let error = store
+            .send(
+                "interrupted-send",
+                "original words",
+                &[],
+                Some("crashed"),
+                Some(now_ms()),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, crate::error::DELIVERY_UNKNOWN);
         assert_eq!(
-            settled.get(&key).map(|receipt| receipt.state),
-            Some(crate::chat_receipts::ReceiptState::Accepted)
+            store
+                .receipt("interrupted-send", "crashed")
+                .unwrap()
+                .unwrap()
+                .state,
+            crate::chat_receipts::ReceiptState::NeedsRecovery
         );
+        assert!(!store.events_path("interrupted-send").exists());
+    }
+
+    #[test]
+    fn stale_store_cannot_replay_a_deleted_conversation() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&store, "removed-send");
+        let stale = Arc::new(Store::load_at(store.root.clone()));
+        store.remove("removed-send").unwrap();
+        assert!(
+            stale
+                .send("removed-send", "hello", &[], Some("new"), Some(now_ms()))
+                .is_err()
+        );
+        assert!(!store.root.join("removed-send").exists());
     }
 
     #[test]

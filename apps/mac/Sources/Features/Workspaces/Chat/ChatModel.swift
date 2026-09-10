@@ -430,16 +430,13 @@ final class ChatModel {
     }
 
     private(set) var unconfirmedSend: UnconfirmedSend?
-    /// Whether this conversation's machine keeps receipts. Asked once per
-    /// machine: a host does not grow a method while a conversation is open.
-    private var confirmedSendSupport: [String: Bool] = [:]
-
-    private func machineConfirmsSends(peer: String?) async -> Bool {
+    /// Probe when acting. An unavailable computer is not an older host, and
+    /// a failed probe must not remain cached after reconnection or an update.
+    private func machineConfirmsSends(peer: String?, checkingReceipt: Bool) async throws -> Bool {
         guard let peer, !peer.isEmpty else { return true }
-        if let known = confirmedSendSupport[peer] { return known }
-        let supported = await RemoteHostFeature.confirmedSend.isSupported(peer: peer)
-        confirmedSendSupport[peer] = supported
-        return supported
+        let version = try await Bridge.peerProtocolVersion(peer)
+        // Reading an older receipt is safe. New sends require durable protocol 13.
+        return version >= (checkingReceipt ? 10 : RemoteHostFeature.confirmedSend.minimumProtocol)
     }
 
     /// Send what is in the composer.
@@ -1182,6 +1179,7 @@ final class ChatModel {
                 if items[index].attemptedAt != nil {
                     items[index].id = UUID().uuidString
                     items[index].attemptedAt = nil
+                    items[index].firstAttemptAt = nil
                     items[index].delivery = .waiting
                 }
                 items[index].text = text
@@ -1264,12 +1262,14 @@ final class ChatModel {
         func publish(_ items: [ChatQueuedMessage]) {
             if currentReference == reference { queued = items }
         }
-        guard await machineConfirmsSends(peer: targetPeer), current() else {
-            if current() { error = "Update this machine before sending queued messages. Its host must be able to confirm delivery." }
-            authorizedQueueItems.remove(candidate.id)
-            return false
-        }
         do {
+            guard try await machineConfirmsSends(peer: targetPeer, checkingReceipt: candidate.needsReceipt), current() else {
+                if current() { error = candidate.needsReceipt
+                    ? "Update this computer to check message delivery. Your pending copy stays here."
+                    : "Update this computer before sending. It needs the latest message confirmation support. Your draft stays here." }
+                authorizedQueueItems.remove(candidate.id)
+                return false
+            }
             if let targetPeer {
                 guard try await Bridge.workspaceAccessAllowed(peer: targetPeer), current() else {
                     authorizedQueueItems.remove(candidate.id)
@@ -1298,7 +1298,9 @@ final class ChatModel {
                     if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].delivery = .deliveryUnknown }
                 })
                 authorizedQueueItems.remove(item.id)
-                if current() { error = "Delivery is not confirmed. Check the conversation before copying this message into a new draft. An unknown receipt is not proof it was never sent." }
+                if current() { error = receipt.state == .needsRecovery
+                    ? "The computer could not confirm whether this message started. Review the conversation before copying it into a new draft. Your pending copy stays here."
+                    : "Delivery is not confirmed. Check the conversation before copying this message into a new draft. An unknown receipt is not proof it was never sent." }
                 return false
             }
             guard current(), !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !item.attachments.isEmpty else { return false }
@@ -1314,18 +1316,21 @@ final class ChatModel {
             guard current(), !busy else { return false }
             let resolved = try await resolveDraftAttachments(item.attachments, reference: reference, peer: targetPeer)
             guard current(), !busy else { return false }
+            let firstAttemptAt = item.firstAttemptAt ?? item.attemptedAt ?? Date()
             publish(try ChatOutboxStore.shared.update(reference) { items in
                 guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item else {
                     throw ChatOutboxStore.Failure.conflict
                 }
                 items[index].delivery = .sending
+                items[index].firstAttemptAt = firstAttemptAt
                 items[index].attemptedAt = Date()
             })
             let staged = stageOutgoing(item.text)
             var accepted = false
             do {
                 let updated = try await Bridge.sendChat(id: conversationID, text: item.text,
-                    attachmentIDs: resolved.map(\.id), clientMessageID: item.id, peer: targetPeer)
+                    attachmentIDs: resolved.map(\.id), clientMessageID: item.id,
+                    clientMessageCreatedAt: firstAttemptAt, peer: targetPeer)
                 accepted = true
                 let remaining = try ChatOutboxStore.shared.update(reference) { $0.removeAll { $0.id == item.id } }
                 publish(remaining)

@@ -200,4 +200,7 @@ pub use tokenstat_pty::warm_shell_pool;
 /// read beside it, so a send whose answer went missing can be repeated
 /// without running the agent twice. An older host ignores the field, so a
 /// client must not repeat a send against one.
-pub const PROTOCOL_VERSION: &str = "12";
+/// Version 13 makes acceptance durable and serialized, reports unresolved
+/// launches as `needsRecovery`, and requires `clientMessageCreatedAtMs` for
+/// previously unseen message IDs so expired receipts cannot authorize replay.
+pub const PROTOCOL_VERSION: &str = "13";
