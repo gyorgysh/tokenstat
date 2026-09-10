@@ -149,24 +149,36 @@ enum Bridge {
         // archive before SwiftUI could show its first frame. ProjectDirs uses
         // this same standard Application Support location on macOS.
         if let path = Self.localHostSocketPath,
-           let hosted = SocketTransport.connecting(to: path)
+           let hosted = SocketTransport.connecting(to: path, expectedProtocolVersion: expectedProtocolVersion)
         {
             adopt(Route(transport: hosted, isHosted: true))
-            if !hostSpeaksThisProtocol(hosted) {
+            let spoken = hostProtocolVersion(hosted)
+            if !expectedProtocolVersion.isEmpty, spoken != expectedProtocolVersion {
+                // Opening an older app must not downgrade a newer helper.
+                // Its guarded route explains the mismatch without restarting
+                // the process that owns the user's current work.
+                if let spoken, let actual = Int(spoken),
+                   let expected = Int(expectedProtocolVersion), actual > expected {
+                    return
+                }
                 // The daemon outlives the app that installed it, so an old
                 // helper can be answering a new app. Everything added since it
                 // was built is then "unknown method", which is true and
                 // useless: it surfaced as raw protocol text on the SSH screen.
-                // Replace the helper, and only fall back in process if the
-                // replacement still does not agree.
+                // Replace the helper. If that fails, keep the socket route:
+                // starting an in-process host beside an older helper would
+                // recover work that the older process may still be running.
                 try? HostAgentInstaller.installAndStart()
-                if let repaired = SocketTransport.connecting(to: path),
+                if let repaired = SocketTransport.connecting(to: path, expectedProtocolVersion: expectedProtocolVersion),
                    hostSpeaksThisProtocol(repaired)
                 {
                     adopt(Route(transport: repaired, isHosted: true))
                     return
                 }
-                adopt(Route(transport: InProcessTransport(), isHosted: false))
+                // Each new connection verifies its contract before sending
+                // work. A mismatch stays actionable, and a later successful
+                // helper replacement is picked up without changing owners.
+                adopt(Route(transport: SocketTransport(path: path, expectedProtocolVersion: expectedProtocolVersion), isHosted: true))
             }
             return
         }
@@ -182,17 +194,18 @@ enum Bridge {
     /// method at all fails the same way as one that answers with a different
     /// number, which is the correct reading of both.
     private static func hostSpeaksThisProtocol(_ transport: Transport) -> Bool {
+        expectedProtocolVersion.isEmpty || hostProtocolVersion(transport) == expectedProtocolVersion
+    }
+
+    private static func hostProtocolVersion(_ transport: Transport) -> String? {
         guard let response = try? transport.call(
             method: "protocol", params: "{}", patience: Patience.interactive
-        ) else { return false }
+        ) else { return nil }
         struct Spoken: Decodable { let protocolVersion: String }
         guard let envelope = try? JSONDecoder().decode(
             Envelope<Spoken>.self, from: Data(response.utf8)
-        ), envelope.ok, let spoken = envelope.result else { return false }
-        // Nothing to compare against means nothing to conclude. Leave the
-        // daemon alone rather than reinstalling it on a guess.
-        guard !expectedProtocolVersion.isEmpty else { return true }
-        return spoken.protocolVersion == expectedProtocolVersion
+        ), envelope.ok, let spoken = envelope.result else { return nil }
+        return spoken.protocolVersion
     }
 
     /// The contract this build speaks, read straight from the library rather

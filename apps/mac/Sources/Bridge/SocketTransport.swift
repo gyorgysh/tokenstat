@@ -61,11 +61,13 @@ final class SocketTransport: Transport, @unchecked Sendable {
     private var remoteLive = 0
 
     let path: String
+    private let expectedProtocolVersion: String?
 
     var describedAs: String { "daemon at \(path)" }
 
-    init(path: String) {
+    init(path: String, expectedProtocolVersion: String? = nil) {
         self.path = path
+        self.expectedProtocolVersion = expectedProtocolVersion
     }
 
     /// Open a connection, or nil when nothing is listening.
@@ -73,9 +75,9 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// This is the probe as well as the constructor: a socket file left behind
     /// by a killed daemon exists but refuses connections, so the only honest
     /// test of "is a host running" is connecting to it.
-    static func connecting(to path: String) -> SocketTransport? {
+    static func connecting(to path: String, expectedProtocolVersion: String? = nil) -> SocketTransport? {
         guard let probe = try? Connection(path: path) else { return nil }
-        let transport = SocketTransport(path: path)
+        let transport = SocketTransport(path: path, expectedProtocolVersion: expectedProtocolVersion)
         transport.idle.append(probe)
         transport.live = 1
         return transport
@@ -102,12 +104,15 @@ final class SocketTransport: Transport, @unchecked Sendable {
         if let pooled = try acquire(patience: patience) {
             do {
                 pooled.patience = patience
-                let response = try pooled.roundTrip(request)
+                let response = try roundTrip(request, method: method, on: pooled)
                 // A refusal at the daemon's ceiling is a well-formed answer on
                 // a socket the daemon has already closed. Keeping it would
                 // hand the next caller a dead connection to discover.
                 release(pooled, reusable: !Self.isBusyRefusal(response))
                 return response
+            } catch let error as ProtocolMismatch {
+                release(pooled, reusable: false)
+                throw error.failure
             } catch TransportFailure.timedOut {
                 release(pooled, reusable: false)
                 throw Self.silence(path: path, patience: patience)
@@ -125,9 +130,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
         }
         do {
             fresh.patience = patience
-            let response = try fresh.roundTrip(request)
+            let response = try roundTrip(request, method: method, on: fresh)
             release(fresh, reusable: !Self.isBusyRefusal(response))
             return response
+        } catch let error as ProtocolMismatch {
+            release(fresh, reusable: false)
+            throw error.failure
         } catch TransportFailure.timedOut {
             release(fresh, reusable: false)
             throw Self.silence(path: path, patience: patience)
@@ -158,9 +166,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
         }
         do {
             fresh.patience = patience
-            let response = try fresh.roundTrip(request)
+            let response = try roundTrip(request, method: method, on: fresh)
             release(fresh, reusable: false)
             return response
+        } catch let error as ProtocolMismatch {
+            release(fresh, reusable: false)
+            throw error.failure
         } catch TransportFailure.timedOut {
             release(fresh, reusable: false)
             throw Self.silence(path: path, patience: patience)
@@ -168,6 +179,35 @@ final class SocketTransport: Transport, @unchecked Sendable {
             release(fresh, reusable: false)
             if Self.isMessageSend(method, params), fresh.wroteRequestBytes { throw Self.uncertainSend() }
             throw Self.unreachable(path: path)
+        }
+    }
+
+    /// Check the actual connection, including every replacement after a host
+    /// restart. A launch-time probe cannot authorize a later socket's writes.
+    private func roundTrip(_ request: Data, method: String, on connection: Connection) throws -> String {
+        if method != "protocol", !connection.verifiedProtocol,
+           let expectedProtocolVersion, !expectedProtocolVersion.isEmpty {
+            let response = try connection.probeProtocol(Self.line(method: "protocol", params: "{}"))
+            // A busy host has already closed this connection. Let the bridge
+            // apply its ordinary bounded backoff without claiming an upgrade.
+            if Self.isBusyRefusal(response) { return response }
+            struct Reply: Decodable {
+                struct Spoken: Decodable { let protocolVersion: String }
+                let ok: Bool
+                let result: Spoken?
+            }
+            guard let reply = try? JSONDecoder().decode(Reply.self, from: Data(response.utf8)),
+                  reply.ok, reply.result?.protocolVersion == expectedProtocolVersion else {
+                throw ProtocolMismatch()
+            }
+            connection.verifiedProtocol = true
+        }
+        return try connection.roundTrip(request)
+    }
+
+    private struct ProtocolMismatch: Error {
+        var failure: BridgeError {
+            .core(code: "host_incompatible", message: "The local helper does not match this version of tokenstat. Reopen the latest version of tokenstat to update it, then try again.")
         }
     }
 
@@ -329,6 +369,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
 /// Not thread safe. `SocketTransport` hands one to a single call at a time.
 private final class Connection {
     private let fd: Int32
+    var verifiedProtocol = false
     /// Bytes read past the end of a response line. There should never be any
     /// while one call uses one connection, but a stream is a stream: keeping
     /// them costs a few bytes and losing them would corrupt the next response.
@@ -400,6 +441,12 @@ private final class Connection {
 
     /// A lost answer after any write cannot be classified as a refused connect.
     private(set) var wroteRequestBytes = false
+
+    /// Handshake bytes are never evidence that a message was submitted.
+    func probeProtocol(_ request: Data) throws -> String {
+        defer { wroteRequestBytes = false }
+        return try roundTrip(request)
+    }
 
     /// Write one request line and read one response line.
     func roundTrip(_ request: Data) throws -> String {
