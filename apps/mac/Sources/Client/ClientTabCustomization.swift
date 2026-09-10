@@ -35,6 +35,13 @@ final class ClientTabCustomization {
         return shown.isEmpty ? [.home] : shown
     }
 
+    /// A direct action may open a destination whose shortcut is hidden.
+    /// Keep that destination in the bar while selected, without changing
+    /// this device's preferences or introducing another modal navigation flow.
+    func tabs(including selected: ClientTab) -> [ClientTab] {
+        ClientTabVisibility.displayed(order: order, visible: visibleTabs, selected: selected)
+    }
+
     init(defaults: UserDefaults = .standard) {
         let storedOrder = defaults.object(forKey: Self.orderKey) == nil
             ? nil
@@ -121,7 +128,7 @@ struct ClientTabEditor: View {
                     if customization.hidden.isEmpty {
                         Text("Every tab is on.")
                     } else {
-                        Text("Off: \(offSummary). At least one tab always stays on.")
+                        Text("Off: \(offSummary). A hidden tab appears temporarily when you open it from another screen. At least one tab always stays on.")
                     }
                 }
                 Section {
@@ -204,3 +211,11 @@ struct ClientTabEditor: View {
 }
 
 #endif
+
+/// Pure selection policy shared by the tab renderer and its regression suite.
+enum ClientTabVisibility {
+    static func displayed<T: Hashable>(order: [T], visible: [T], selected: T) -> [T] {
+        guard !visible.contains(selected) else { return visible }
+        return order.filter { visible.contains($0) || $0 == selected }
+    }
+}

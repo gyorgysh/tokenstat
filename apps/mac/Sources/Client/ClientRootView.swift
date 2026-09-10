@@ -334,7 +334,7 @@ struct ClientRootView: View {
         @Bindable var navigation = navigation
         if #available(iOS 18, *) {
             TabView(selection: $navigation.destination) {
-                ForEach(tabCustomization.visibleTabs) { tab in
+                ForEach(tabCustomization.tabs(including: navigation.destination)) { tab in
                     Tab(tab.label, systemImage: tab.symbol, value: tab) {
                         NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                             tab.content
@@ -353,7 +353,7 @@ struct ClientRootView: View {
             .clientCompactTabBarOnPad()
         } else {
             TabView(selection: $navigation.destination) {
-                ForEach(tabCustomization.visibleTabs) { tab in
+                ForEach(tabCustomization.tabs(including: navigation.destination)) { tab in
                     NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                         tab.content
                             .clientChrome(showAccount: $showAccount)
