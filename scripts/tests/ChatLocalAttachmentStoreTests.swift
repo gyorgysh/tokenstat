@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with WorkReference.swift ChatLocalAttachmentStore.swift.
+// Compile with WorkReference.swift ChatLocalAttachmentStore.swift ChatDraftStore.swift.
 import Foundation
 struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
     var id: String; var name: String; var mediaType: String?; var size: UInt64?
@@ -13,7 +13,7 @@ actor UploadCounter {
     }
 }
 @main struct ChatLocalAttachmentStoreTests {
-    static func main() async throws {
+    @MainActor static func main() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         @Sendable func ref(_ account: String = "one", host: String = "host", folder: String = "folder") -> WorkReference {
@@ -53,13 +53,31 @@ actor UploadCounter {
         let unuploaded = try await relaunched.stage(data: bytes, name: "other.txt", mediaType: "text/plain", reference: ref())
         let beforeUpload = try await relaunched.retained(in: ref().scope).files.first { $0.attachment.id == unuploaded.id }!
         _ = try await relaunched.resolve(unuploaded, reference: ref()) { try await counter.upload($0) }
-        do { try await relaunched.remove(beforeUpload); assertionFailure("Stale removal deleted changed file") } catch {}
+        do { try await relaunched.remove(beforeUpload, ifUnused: { true }); assertionFailure("Stale removal deleted changed file") } catch {}
         let current = try await relaunched.retained(in: ref().scope).files.first { $0.attachment.id == unuploaded.id }!
-        try await relaunched.remove(current)
+        // Reproduce the old sheet race: its initial reference snapshot is
+        // empty, then another window saves a draft before actor deletion runs.
+        let drafts = ChatDraftStore(directory: root.appendingPathComponent("draft-state"))
+        let initiallyUsed = try drafts.referencedAttachmentIDs(for: ref()).contains(unuploaded.id)
+        assert(!initiallyUsed)
+        let removal = Task {
+            try await relaunched.remove(current) {
+                try !drafts.referencedAttachmentIDs(for: ref()).contains(unuploaded.id)
+            }
+        }
+        drafts.save(text: "Keep this file", attachments: [unuploaded], for: ref())
+        do {
+            try await removal.value
+            assertionFailure("Removed an original newly referenced by another window")
+        } catch ChatLocalAttachmentStore.Failure.inUse {}
+        let protectedBytes = try await relaunched.read(unuploaded, reference: ref())
+        assert(protectedBytes == bytes)
+        drafts.clear(for: ref())
+        try await relaunched.remove(current) { try !drafts.referencedAttachmentIDs(for: ref()).contains(unuploaded.id) }
         let stillThere = try await relaunched.read(attachment, reference: ref())
         assert(stillThere == bytes)
         assert(entry.attachment == attachment)
-        let file = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)[0]
+        let file = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first { $0.pathExtension == "json" }!
         try Data("corrupt".utf8).write(to: file)
         do { _ = try await relaunched.read(attachment, reference: ref()); assertionFailure("Corrupt source accepted") } catch {}
         let brokenListing = try await relaunched.retained(in: ref().scope)

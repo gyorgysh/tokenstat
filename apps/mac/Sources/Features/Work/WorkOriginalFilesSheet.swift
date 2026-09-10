@@ -103,10 +103,6 @@ struct WorkOriginalFilesSheet: View {
             .buttonStyle(SecondaryButtonStyle(small: true)).disabled(inUse.contains(file.id))
     }
 
-    private func isUsed(_ file: ChatLocalAttachmentStore.RetainedFile) throws -> Bool {
-        if try ChatDraftStore.shared.referencedAttachmentIDs(for: file.reference).contains(file.attachment.id) { return true }
-        return try ChatOutboxStore.shared.items(for: file.reference).contains { $0.attachments.contains { $0.id == file.attachment.id } }
-    }
     private func refresh() async {
         loading = true
         defer { loading = false }
@@ -132,9 +128,18 @@ struct WorkOriginalFilesSheet: View {
         defer { busy = false }
         do {
             guard scope == WorkSessionContext.shared.readingScope else { return }
-            guard try !isUsed(file) else { message = "This file is now used by a draft or pending message. It has been kept."; await refresh(); return }
-            try await ChatLocalAttachmentStore.shared.remove(file)
+            let selectedScope = scope
+            try await ChatLocalAttachmentStore.shared.remove(file) {
+                guard selectedScope == WorkSessionContext.shared.readingScope else { throw CancellationError() }
+                if try ChatDraftStore.shared.referencedAttachmentIDs(for: file.reference).contains(file.attachment.id) { return false }
+                return try !ChatOutboxStore.shared.items(for: file.reference).contains {
+                    $0.attachments.contains { $0.id == file.attachment.id }
+                }
+            }
             message = "Retained original removed from this device."
+            await refresh()
+        } catch ChatLocalAttachmentStore.Failure.inUse {
+            message = "This file is now used by a draft or pending message. It has been kept."
             await refresh()
         } catch { message = "The file changed or could not be removed. It has been kept; reopen this sheet to review it again." }
     }

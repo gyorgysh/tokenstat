@@ -15,11 +15,13 @@ actor ChatLocalAttachmentStore {
         var uploaded: ChatAttachment? = nil
     }
     private var uploads: [URL: Task<ChatAttachment, Error>] = [:]
+    private var removals: Set<URL> = []
     enum Failure: LocalizedError {
-        case invalid, missing
+        case invalid, missing, inUse
         var errorDescription: String? {
             switch self {
             case .invalid: "This attachment could not be saved on this device. Files can be up to 12 MB."
+            case .inUse: "This file is now used by a draft or pending message. It has been kept."
             case .missing: "An original draft file is unavailable. Remove it and attach the original again before sending."
             }
         }
@@ -61,6 +63,7 @@ actor ChatLocalAttachmentStore {
         var owner = reference
         owner.anchor = nil
         let url = try location(attachment.id, reference: owner)
+        guard !removals.contains(url), uploads[url] == nil else { throw Failure.invalid }
         let encoded = try JSONEncoder().encode(File(reference: owner, attachment: attachment, data: data, uploaded: attachment))
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         #if os(macOS)
@@ -76,6 +79,7 @@ actor ChatLocalAttachmentStore {
     func resolve(_ attachment: ChatAttachment, reference: WorkReference,
                  upload: @escaping @Sendable (Data) async throws -> ChatAttachment) async throws -> ChatAttachment {
         let url = try location(attachment.id, reference: reference)
+        guard !removals.contains(url) else { throw Failure.invalid }
         if let existing = uploads[url] { return try await existing.value }
         let file = try load(attachment, reference: reference)
         if let uploaded = file.uploaded { return uploaded }
@@ -133,16 +137,25 @@ actor ChatLocalAttachmentStore {
         result.files.sort { $0.attachment.name.localizedStandardCompare($1.attachment.name) == .orderedAscending }
         return result
     }
-    /// Explicit removal rechecks the selected disk copy. A changed upload
-    /// mapping or an active upload requires a fresh review.
-    func remove(_ retained: RetainedFile) throws {
+    /// Check live draft references and unlink in one main-actor operation.
+    /// Reserving the file first keeps an upload from starting during the hop.
+    func remove(_ retained: RetainedFile,
+                ifUnused check: @escaping @MainActor @Sendable () throws -> Bool) async throws {
         let url = try location(retained.attachment.id, reference: retained.reference)
-        guard uploads[url] == nil else { throw Failure.invalid }
-        let file = try load(retained.attachment, reference: retained.reference)
-        let encoded = try Data(contentsOf: url, options: .mappedIfSafe)
-        guard encoded.count < 17 * 1024 * 1024, file.reference.scope == retained.reference.scope,
-              Data(SHA256.hash(data: encoded)) == retained.fingerprint else { throw Failure.invalid }
-        try FileManager.default.removeItem(at: url)
+        guard uploads[url] == nil, removals.insert(url).inserted else { throw Failure.invalid }
+        defer { removals.remove(url) }
+        _ = try load(retained.attachment, reference: retained.reference)
+        try await MainActor.run {
+            guard try check() else { throw Failure.inUse }
+            // No await after checking the references. Every live window writes
+            // draft/outbox intent on this same actor, including unsaved drafts.
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let encoded = try handle.read(upToCount: 17 * 1024 * 1024) ?? Data()
+            guard encoded.count < 17 * 1024 * 1024,
+                  Data(SHA256.hash(data: encoded)) == retained.fingerprint else { throw Failure.invalid }
+            try FileManager.default.removeItem(at: url)
+        }
     }
     func read(_ attachment: ChatAttachment, reference: WorkReference) throws -> Data {
         try load(attachment, reference: reference).data
