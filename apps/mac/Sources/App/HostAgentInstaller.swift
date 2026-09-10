@@ -8,12 +8,15 @@ import Foundation
 enum HostAgentInstaller {
     enum InstallerError: LocalizedError {
         case helperMissing
+        case newerHelper
         case commandFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .helperMissing:
                 return "The bundled tokenstat-hostd helper is not present in this build. Install the packaged app or build the host helper first."
+            case .newerHelper:
+                return "A newer version of tokenstat manages the local helper. Open the latest app to change it."
             case let .commandFailed(message):
                 return message
             }
@@ -32,8 +35,13 @@ enum HostAgentInstaller {
     /// the loaded job (or bootstrapping the existing plist once) is enough,
     /// and it avoids thrashing a daemon that owns live terminals.
     static func ensureRunning() throws {
+        guard !hasNewerHelper else { throw InstallerError.newerHelper }
         let fileManager = FileManager.default
         guard let helper = installedHelper, fileManager.isExecutableFile(atPath: helper.path) else {
+            try installAndStart()
+            return
+        }
+        if fileManager.fileExists(atPath: restartMarker(for: helper).path) {
             try installAndStart()
             return
         }
@@ -70,6 +78,7 @@ enum HostAgentInstaller {
     /// is reserved for a first install, a changed plist, or a job definition
     /// launchd is still running from an older install at another path.
     static func installAndStart() throws {
+        guard !hasNewerHelper else { throw InstallerError.newerHelper }
         let fileManager = FileManager.default
         let applicationSupport = try fileManager.url(
             for: .applicationSupportDirectory,
@@ -82,7 +91,9 @@ enum HostAgentInstaller {
         try fileManager.createDirectory(at: binDirectory, withIntermediateDirectories: true)
 
         guard let bundled = bundledHelper else { throw InstallerError.helperMissing }
-        let helperChanged = replaceHelperIfNeeded(from: bundled, to: helper, fileManager: fileManager)
+        let helperChanged = try replaceHelperIfNeeded(from: bundled, to: helper, fileManager: fileManager)
+        let marker = restartMarker(for: helper)
+        let needsRestart = helperChanged || fileManager.fileExists(atPath: marker.path)
 
         let launchAgents = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
@@ -116,7 +127,7 @@ enum HostAgentInstaller {
             "StandardOutPath": logs.appendingPathComponent("hostd.out.log").path,
             "StandardErrorPath": logs.appendingPathComponent("hostd.err.log").path
         ]
-        let plistChanged = writePlistIfNeeded(contents, to: plist)
+        let plistChanged = try writePlistIfNeeded(contents, to: plist)
 
         let domain = "gui/\(getuid())"
         let service = "\(domain)/\(label)"
@@ -125,15 +136,16 @@ enum HostAgentInstaller {
         let loadedRunsManagedHelper = printed?.contains(helper.path) == true
 
         if alreadyLoaded && !plistChanged && loadedRunsManagedHelper {
-            if helperChanged {
+            if needsRestart {
                 // Same job definition, new binary: `-k` replaces the process
                 // without unloading the job, which is gentler than bootout and
                 // keeps the KeepAlive policy intact.
-                _ = try? run("/bin/launchctl", ["kickstart", "-k", service])
+                try run("/bin/launchctl", ["kickstart", "-k", service])
             } else {
                 // Same binary, same job definition: just make sure it is running.
-                _ = try? run("/bin/launchctl", ["kickstart", service])
+                try run("/bin/launchctl", ["kickstart", service])
             }
+            try? fileManager.removeItem(at: marker)
             return
         }
 
@@ -147,12 +159,14 @@ enum HostAgentInstaller {
             // bootstrap does not start the process on a laptop.
             _ = try? run("/bin/launchctl", ["bootout", service])
             try run("/bin/launchctl", ["bootstrap", domain, plist.path])
-            _ = try? run("/bin/launchctl", ["kickstart", service])
+            try run("/bin/launchctl", ["kickstart", service])
+            try? fileManager.removeItem(at: marker)
             return
         }
 
         try run("/bin/launchctl", ["bootstrap", domain, plist.path])
-        _ = try? run("/bin/launchctl", ["kickstart", service])
+        try run("/bin/launchctl", ["kickstart", service])
+        try? fileManager.removeItem(at: marker)
     }
 
     /// Reinstall the helper when this build carries a different one.
@@ -164,9 +178,14 @@ enum HostAgentInstaller {
     /// nothing at all in the ordinary case where the two already match: same
     /// bytes, same version, and launchd running the copy this app manages.
     static func refreshIfStale() {
+        guard !hasNewerHelper else { return }
         guard let bundled = bundledHelper, let installed = installedHelper else { return }
         let manager = FileManager.default
         guard manager.fileExists(atPath: installed.path) else { return }
+        if manager.fileExists(atPath: restartMarker(for: installed).path) {
+            try? installAndStart()
+            return
+        }
         guard helpersDiffer(bundled, installed, manager: manager) else {
             // Same binary, but launchd may still be running an old job
             // definition that points somewhere else (an earlier install at
@@ -209,40 +228,40 @@ enum HostAgentInstaller {
         return candidates.compactMap { $0 }.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
-    /// Copy the bundled helper over the installed one only when they differ.
+    /// Prepare the whole executable beside its destination before replacing
+    /// anything. A failed copy or rename leaves the installed helper intact
+    /// and throws before the caller can restart its launch agent.
     @discardableResult
-    private static func replaceHelperIfNeeded(
+    static func replaceHelperIfNeeded(
         from bundled: URL,
         to helper: URL,
         fileManager: FileManager
-    ) -> Bool {
+    ) throws -> Bool {
         if fileManager.fileExists(atPath: helper.path),
            !helpersDiffer(bundled, helper, manager: fileManager)
         {
             return false
         }
-        if fileManager.fileExists(atPath: helper.path) {
-            try? fileManager.removeItem(at: helper)
+        let staged = helper.deletingLastPathComponent()
+            .appendingPathComponent(".tokenstat-hostd-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: staged) }
+        try fileManager.copyItem(at: bundled, to: staged)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staged.path)
+        // If the later plist write or launchctl fails, an identical binary
+        // on the next attempt must still restart the old running process.
+        try Data().write(to: restartMarker(for: helper), options: .atomic)
+        guard rename(staged.path, helper.path) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
-        do {
-            try fileManager.copyItem(at: bundled, to: helper)
-            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-            return true
-        } catch {
-            return true
-        }
+        return true
     }
 
-    /// Size and modification date first, then the binaries' own versions:
-    /// free on every launch, and the two files are either the same copy or
-    /// they are not.
-    ///
-    /// The filesystem check is trusted when it disagrees. When it reports the
-    /// files are identical, a rebuild can still have reproduced both (same
-    /// size, or packaging that copied a timestamp), so the binaries are asked
-    /// for their version before two files are declared the same copy. Only a
-    /// *newer* bundled helper counts as different. An older bundle must not
-    /// roll a newer daemon back.
+    static func restartMarker(for helper: URL) -> URL {
+        helper.appendingPathExtension("restart-required")
+    }
+
+    /// A newer installed release always wins, even when its size or date
+    /// differs. Equal releases can still be different development builds.
     private static func helpersDiffer(_ a: URL, _ b: URL, manager: FileManager) -> Bool {
         let attributes: (URL) -> (Int, Date)? = { url in
             guard let values = try? manager.attributesOfItem(atPath: url.path),
@@ -252,8 +271,29 @@ enum HostAgentInstaller {
             return (size, modified)
         }
         guard let left = attributes(a), let right = attributes(b) else { return true }
+        let bundledVersion = version(of: a)
+        let installedVersion = version(of: b)
+        if isVersionNewer(installedVersion, than: bundledVersion) { return false }
         if left.0 != right.0 || left.1 != right.1 { return true }
-        return isVersionNewer(version(of: a), than: version(of: b))
+        return isVersionNewer(bundledVersion, than: installedVersion)
+    }
+
+    /// All lifecycle entry points honor this, including launch-time refresh
+    /// and quit. Guarding only Bridge.connect would still let an older app
+    /// replace or stop the newer helper immediately afterwards.
+    private static var hasNewerHelper: Bool {
+        let socketPath = identityDirectory.deletingLastPathComponent().appendingPathComponent("host.sock").path
+        if let transport = SocketTransport.connecting(to: socketPath),
+           let response = try? transport.call(method: "protocol", params: "{}", patience: 5),
+           let object = try? JSONSerialization.jsonObject(with: Data(response.utf8)) as? [String: Any],
+           object["ok"] as? Bool == true,
+           let result = object["result"] as? [String: Any],
+           let raw = result["protocolVersion"] as? String,
+           let actual = Int(raw), let expected = Int(InProcessTransport.protocolVersion), actual > expected {
+            return true
+        }
+        guard let bundled = bundledHelper, let installed = installedHelper else { return false }
+        return isVersionNewer(version(of: installed), than: version(of: bundled))
     }
 
     /// Last policy this process applied, so quit does not reread a stale file.
@@ -312,7 +352,7 @@ enum HostAgentInstaller {
     /// app launch can kickstart it. KeepAlive must already be false on the
     /// loaded job, or launchd will start it again.
     static func stopIfNotAlwaysOn() {
-        guard !resolvedAlwaysOn() else { return }
+        guard !resolvedAlwaysOn(), !hasNewerHelper else { return }
         let service = "gui/\(getuid())/\(label)"
         _ = try? run("/bin/launchctl", ["kill", "SIGTERM", service])
     }
@@ -328,10 +368,8 @@ enum HostAgentInstaller {
 
     /// True when `a` names a newer release than `b` (`0.2.8` > `0.2.7`).
     ///
-    /// Numeric comparison of dotted parts, padded with zeros on the short
-    /// side. A prerelease suffix compares by its numeric part, so a release
-    /// is never replaced by an older build that merely claims the same
-    /// numbers.
+    /// Numeric release parts, padded with zeros on the short side. A stable
+    /// release follows its prereleases; build metadata does not change order.
     private static func isVersionNewer(_ a: String?, than b: String?) -> Bool {
         guard let a, let b else { return false }
         let left = versionNumbers(a)
@@ -341,7 +379,17 @@ enum HostAgentInstaller {
             let y = index < right.count ? right[index] : 0
             if x != y { return x > y }
         }
-        return false
+        let leftSuffix = prerelease(a)
+        let rightSuffix = prerelease(b)
+        guard let leftSuffix else { return rightSuffix != nil }
+        guard let rightSuffix else { return false }
+        return leftSuffix.compare(rightSuffix, options: [.literal, .numeric]) == .orderedDescending
+    }
+
+    private static func prerelease(_ raw: String) -> String? {
+        let release = raw.split(separator: "+", maxSplits: 1).first ?? ""
+        let parts = release.split(separator: "-", maxSplits: 1)
+        return parts.count == 2 ? String(parts[1]) : nil
     }
 
     private static func versionNumbers(_ raw: String) -> [UInt64] {
@@ -349,18 +397,20 @@ enum HostAgentInstaller {
         let withoutV = trimmed.first == "v" || trimmed.first == "V"
             ? String(trimmed.dropFirst())
             : trimmed
-        let numeric = withoutV.split(separator: "-").first.map(String.init) ?? withoutV
+        let release = withoutV.split(separator: "+", maxSplits: 1).first.map(String.init) ?? withoutV
+        let numeric = release.split(separator: "-", maxSplits: 1).first.map(String.init) ?? release
         return numeric.split(separator: ".").map { UInt64($0) ?? 0 }
     }
 
     /// Write the plist only when its contents actually changed, so a no-op
     /// install does not touch the file and re-trigger launchd bookkeeping.
-    private static func writePlistIfNeeded(_ contents: [String: Any], to plist: URL) -> Bool {
+    static func writePlistIfNeeded(_ contents: [String: Any], to plist: URL) throws -> Bool {
         let next = contents as NSDictionary
         if let existing = NSDictionary(contentsOf: plist), existing.isEqual(to: next) {
             return false
         }
-        next.write(to: plist, atomically: true)
+        let data = try PropertyListSerialization.data(fromPropertyList: contents, format: .xml, options: 0)
+        try data.write(to: plist, options: .atomic)
         return true
     }
 
