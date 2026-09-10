@@ -16,19 +16,9 @@ struct CommitView: View {
     let detail: CommitDetail
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                header
-                if detail.diffs.isEmpty {
-                    empty
-                } else {
-                    ForEach(detail.diffs, id: \.path) { diff in
-                        fileHeader(diff)
-                        DiffBody(diff: diff)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        DiffDocumentView(diffs: detail.diffs) {
+            header
+            if detail.diffs.isEmpty { empty }
         }
         .background(Theme.background)
     }

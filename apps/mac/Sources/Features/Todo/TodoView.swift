@@ -126,7 +126,7 @@ struct TodoView: View {
                 .disabled(model.archivedCount == 0 && !model.showingArchive)
             }
             if let error = model.errorMessage {
-                Banner(text: error, severity: .warning)
+                ErrorBanner(message: error) { Task { await model.load() } }
                     .padding(Theme.Space.m)
             }
             GeometryReader { proxy in
@@ -214,7 +214,7 @@ struct TodoView: View {
             }
 
             ScrollView {
-                VStack(spacing: Theme.Space.s) {
+                LazyVStack(spacing: Theme.Space.s) {
                     ForEach(model.cards(in: id)) { card in
                         if dropTarget == id && dropBeforeID == card.id {
                             insertionLine

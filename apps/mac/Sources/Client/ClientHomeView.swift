@@ -18,6 +18,8 @@ import SwiftUI
 struct ClientHomeView: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(AccountModel.self) private var account
+    @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(\.openClientAccount) private var openAccount
     @State private var model = HomeModel()
     @State private var layout = HomeLayout.shared
     /// The day whose detail sheet is open. A sheet rather than the Mac's hover
@@ -36,8 +38,6 @@ struct ClientHomeView: View {
                 // somebody chose to keep, and hiding Activity must not hide
                 // "you are offline".
                 status
-                ClientWorkSearchButton()
-                    .buttonStyle(SecondaryButtonStyle())
                 // In the order this device was arranged in. A card with
                 // nothing to say draws nothing and keeps its place.
                 ForEach(layout.sections) { section in
@@ -64,6 +64,18 @@ struct ClientHomeView: View {
         // which is when somebody most wants to pull it.
         .scrollBounceBehavior(.always, axes: .vertical)
         .scrollDisabled(pickingADay)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded { value in
+                    // A deliberate rightward edge swipe opens the same sheet
+                    // as the avatar, leaving vertical scroll and card gestures alone.
+                    guard !pickingADay, selectedDay == nil, !customizing,
+                          value.startLocation.x <= 44,
+                          value.translation.width >= 80,
+                          value.translation.width > abs(value.translation.height) * 2 else { return }
+                    openAccount()
+                }
+        )
         .refreshable {
             await ClientRefresh.pull("home") {
                 await account.load()
@@ -97,6 +109,14 @@ struct ClientHomeView: View {
         }
         .sheet(isPresented: $customizing) {
             ClientHomeEditor(layout: layout, emptyReason: emptyReason)
+        }
+        // Search asked for the editor by name. `initial` because Home may
+        // have been the screen behind search all along, in which case nothing
+        // changes here except the flag.
+        .onChange(of: navigation.homeEditorRequested, initial: true) { _, requested in
+            guard requested else { return }
+            navigation.homeEditorRequested = false
+            customizing = true
         }
     }
 

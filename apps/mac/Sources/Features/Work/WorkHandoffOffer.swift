@@ -32,6 +32,8 @@ struct WorkHandoffOffer: View {
         }
         .task(id: chat.readingIdentity) {
             offered = nil
+            connection = nil
+            dismissedRequest = nil
             let peer = chat.peer
             guard let connection = WorkHandoffConnection(chat: chat, hostIsLinked: {
                 account.account?.signedIn == true

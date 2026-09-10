@@ -258,7 +258,7 @@ final class ChatModel {
         guard WorkDestinationResolver.sameConversation(reference, currentReference),
               reference.scope == WorkSessionContext.shared.readingScope,
               let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) else { return false }
-        ChatReadingStore.shared.remember(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
+        ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
         readingRestorationPulse &+= 1
         return true
     }
@@ -268,9 +268,9 @@ final class ChatModel {
               savedCopy == nil, anchor.fraction <= 10_000,
               ChatReadingMark.isStable(eventID: anchor.eventID) else { return false }
         if anchor.followsLatest {
-            ChatReadingStore.shared.forget(for: reference)
+            ChatReadingStore.shared.requestLatest(for: reference)
         } else {
-            ChatReadingStore.shared.remember(ChatReadingMark(eventID: anchor.eventID, offset: 0,
+            ChatReadingStore.shared.request(ChatReadingMark(eventID: anchor.eventID, offset: 0,
                 updatedAt: Date(), within: Double(anchor.fraction) / 10_000), for: reference)
         }
         readingRestorationPulse &+= 1
@@ -538,6 +538,41 @@ final class ChatModel {
         } catch { self.error = "Pending delivery could not be read. Your draft remains on this device." }
     }
 
+    @ObservationIgnored private var recentMessages = ChatRecentMessages<ChatDisplayItem>()
+    private(set) var recentMessagePreview: [ChatDisplayItem] = []
+
+    var isShowingCachedTranscript: Bool { openingConversation && !recentMessagePreview.isEmpty }
+    var transcriptItems: [ChatDisplayItem] { isShowingCachedTranscript ? recentMessagePreview : displayItems }
+
+    private func rememberRecentMessages() {
+        guard savedCopy == nil, let reference = currentReference,
+              reference.scope == WorkSessionContext.shared.scope,
+              chats.contains(where: { $0.id == selected?.id }),
+              let key = WorkReferenceKey.conversation(reference), !events.isEmpty else { return }
+        // Preserve every row kind and its identity, including reasoning,
+        // failures, tools and edits. No downloaded attachment bytes are held.
+        let rows = Array(displayItems.suffix(TranscriptSlice.length))
+        recentMessages.store(rows, for: key) { row in
+            // Include nested tool output and patch strings in the budget.
+            String(reflecting: row).utf8.count
+        }
+    }
+
+    private func restoreRecentMessages() {
+        recentMessagePreview = []
+        guard let reference = currentReference,
+              reference.scope == WorkSessionContext.shared.scope,
+              let key = WorkReferenceKey.conversation(reference) else { return }
+        recentMessagePreview = recentMessages.messages(for: key)
+    }
+
+    /// Adjacent conversation in the same order as the sidebar, without wrapping.
+    func adjacentConversation(_ step: Int) -> ChatConversation? {
+        guard let index = chats.firstIndex(where: { $0.id == selected?.id }),
+              step == -1 || step == 1, chats.indices.contains(index + step) else { return nil }
+        return chats[index + step]
+    }
+
     /// Conversation lists read earlier this session, keyed by the folder id
     /// the sidebar knows (`remote:<peer>:<id>` for a folder on another
     /// machine). The model holds one folder's live list, while the cache lets
@@ -611,6 +646,8 @@ final class ChatModel {
                 loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
             chatListCache = [:]
+            recentMessages.removeAll()
+            recentMessagePreview = []
             chats = []
             selected = nil
             folderID = nil
@@ -618,6 +655,8 @@ final class ChatModel {
         }
         let draftHost = route.peer ?? WorkSessionContext.shared.localHostIdentity
         if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
+            rememberRecentMessages()
+            recentMessagePreview = []
             if self.peer != route.peer { pagingUnavailable = false }
             // The folder is changing. Remember which conversation was open
             // before the clear below drops it, or coming back can only ever
@@ -674,6 +713,7 @@ final class ChatModel {
         folderID = workspaceID
         self.workspaceID = route.workspaceID
         self.peer = route.peer
+        if events.isEmpty { restoreRecentMessages() }
         loadQueue(for: selected?.id)
         do {
             async let loadedBackends = Bridge.chatBackends(peer: route.peer)
@@ -690,6 +730,10 @@ final class ChatModel {
             defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
             chats = Self.uniqued(loaded.2)
             storeChatListCache(chats, folderID: workspaceID)
+            if let owner = continuityOwner(folderID: workspaceID) {
+                let prefix = WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host, workspaceID: owner.workspace)
+                recentMessages.retain(Set(chats.map { prefix + WorkReferenceKey.encode($0.id) }), in: prefix)
+            }
             if let pending = pendingRevealID,
                pendingRevealFolderID == nil || pendingRevealFolderID == workspaceID {
                 if let found = chats.first(where: { $0.id == pending }) {
@@ -789,6 +833,9 @@ final class ChatModel {
         guard let copy = await WorkCacheStore.shared.savedConversation(for: reference),
               !Task.isCancelled, generation == loadGeneration,
               reference.scope == WorkSessionContext.shared.readingScope else { return false }
+        if let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) {
+            ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
+        }
         continuityScope = reference.scope
         peer = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity ? nil : reference.hostIdentity
         workspaceID = reference.workspaceID
@@ -801,6 +848,11 @@ final class ChatModel {
     }
 
     private func select(_ chat: ChatConversation?, savedPage: CachedRecordPayload?) async {
+        if savedPage == nil, let chat, chat.id == selected?.id, !events.isEmpty {
+            await refreshOpen(id: chat.id)
+            return
+        }
+        rememberRecentMessages()
         selectionGeneration &+= 1
         let generation = selectionGeneration
         selected = chat
@@ -819,6 +871,7 @@ final class ChatModel {
         outgoingWatermark = [:]
         savedCopy = nil
         forgetWindow()
+        restoreRecentMessages()
         loadQueue(for: chat?.id)
         loadDraft(for: chat?.id)
         #if os(macOS)
@@ -841,6 +894,11 @@ final class ChatModel {
             // The live open failed with nothing on screen. A sealed copy
             // opens instead of an error, when one was kept.
             await openSavedCopy(id: chat.id, generation: generation)
+        }
+        // The transcript is ready once its page lands. Secondary status
+        // requests must not hold the message preview over already-loaded rows.
+        if selectionMatches(id: chat.id, generation: generation) {
+            openingConversation = false
         }
         // Approvals and instructions are live state. Against a saved copy
         // they are refused rather than read stale: an approval resolved from
@@ -922,14 +980,15 @@ final class ChatModel {
 
     @discardableResult
     func create() async -> ChatConversation? {
-        guard let workspaceID else { return nil }
+        guard !Task.isCancelled, let workspaceID, let scope = continuityScope,
+              scope == WorkSessionContext.shared.scope else { return nil }
         let context = loadGeneration
         let selection = selectionGeneration
         let targetPeer = peer
         do {
             if backends.isEmpty {
                 let loaded = try await Bridge.chatBackends(peer: targetPeer)
-                guard context == loadGeneration else { return nil }
+                guard !Task.isCancelled, context == loadGeneration, scope == WorkSessionContext.shared.scope else { return nil }
                 backends = loaded
             }
             let saved = lastLaunchChoice
@@ -957,13 +1016,13 @@ final class ChatModel {
                 personaID: rememberedPersonaID(saved),
                 peer: targetPeer
             )
-            guard context == loadGeneration else { return nil }
+            guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return nil }
             chats.insert(chat, at: 0)
             if let folderID { storeChatListCache(chats, folderID: folderID) }
-            if selection == selectionGeneration { await select(chat) }
+            if !Task.isCancelled, selection == selectionGeneration { await select(chat) }
             return chat
         } catch {
-            if context == loadGeneration { self.error = error.localizedDescription }
+            if !Task.isCancelled, context == loadGeneration, scope == WorkSessionContext.shared.scope { self.error = error.localizedDescription }
             return nil
         }
     }
@@ -1091,6 +1150,8 @@ final class ChatModel {
         let context = loadGeneration
         do {
             try await Bridge.removeChat(id: chat.id, peer: targetPeer)
+            recentMessages.removeAll()
+            recentMessagePreview = []
             guard context == loadGeneration else { return }
             if let folderID { forgetDraft(chatID: chat.id, folderID: folderID) }
             if let folderID, folderID != self.folderID {
@@ -1123,6 +1184,8 @@ final class ChatModel {
             // currently loaded in this model. Let the bridge route the folder
             // itself instead of borrowing the current conversation's peer.
             _ = try await Bridge.removeAllChats(workspaceID: folderID)
+            recentMessages.removeAll()
+            recentMessagePreview = []
             guard context == loadGeneration else { return }
             storeChatListCache([], folderID: folderID)
             forgetLastSelected(folderID: folderID)
@@ -1987,10 +2050,8 @@ final class ChatModel {
     /// they scroll back, so opening a long chat costs one bounded read
     /// whatever is behind it.
     ///
-    /// A backend that streams in small pieces can spend a page of records on
-    /// a handful of rows, so a page that coalesces into almost nothing pulls
-    /// the one before it, up to a small bound. Nobody should open a chat and
-    /// find one paragraph in it.
+    /// One latest page on ordinary open. Older pages are requested only by
+    /// scrolling back or following an explicit reading/search destination.
     @discardableResult
     private func openEvents(id: String, generation: UInt64) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
@@ -2023,14 +2084,6 @@ final class ChatModel {
             warmMarkdown()
             settleNotifications()
             keepOfflineCopy(id: id, title: selected?.title, page: page, sendRevision: requestedRevision)
-            var pulled = 0
-            while displayItems.count < Self.openDisplayItems,
-                  hasEarlier,
-                  pulled < Self.openExtraPages {
-                pulled += 1
-                await loadEarlier(id: id, generation: generation, quiet: true)
-                guard selectionMatches(id: id, generation: generation) else { return false }
-            }
             await loadResponseAttachments(id: id, generation: generation)
             return true
         } catch {
@@ -2067,6 +2120,9 @@ final class ChatModel {
                 loadingEarlier = false
             }
             if restoreAfterReplacement, selectionMatches(id: id, generation: generation) {
+                if let reference = currentReference, let mark = ChatReadingStore.shared.mark(for: reference) {
+                    ChatReadingStore.shared.request(mark, for: reference)
+                }
                 readingRestorationPulse &+= 1
             }
         }
@@ -2150,15 +2206,6 @@ final class ChatModel {
     /// read back in dozens of insertions, each one a walk over the rows and a
     /// correction of the reader's place.
     private static let pageEvents = 400
-    /// The rows an opening window aims to hold before it stops pulling.
-    ///
-    /// A conversation should open with something to read behind it, not with
-    /// the last answer alone. Two dozen was a screen at best and, on a
-    /// backend that folds a whole page into one turn, a single row.
-    private static let openDisplayItems = 60
-    /// How many extra pages one opening may pull to reach that.
-    private static let openExtraPages = 6
-
     @discardableResult
     private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
@@ -2175,6 +2222,9 @@ final class ChatModel {
                     // A replacement can move the current row or leave it in
                     // an older page. Restore the reader after the new window
                     // lands, just as on a deliberate return to this chat.
+                    if let reference = currentReference, let mark = ChatReadingStore.shared.mark(for: reference) {
+                        ChatReadingStore.shared.request(mark, for: reference)
+                    }
                     readingRestorationPulse &+= 1
                 }
                 return opened

@@ -144,9 +144,10 @@ final class TodoModel {
     ///
     /// `workspaceID` is empty for an unassigned (global) note, or a folder id
     /// when the note belongs to a project.
-    func addNote(_ text: String, workspaceID: String) async {
+    @discardableResult
+    func addNote(_ text: String, workspaceID: String) async -> Bool {
         let title = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
+        guard !title.isEmpty else { return false }
         do {
             _ = try await Bridge.todoCreate(
                 title: title, kind: .note, notes: "", column: "backlog",
@@ -154,8 +155,10 @@ final class TodoModel {
             )
             errorMessage = nil
             await load()
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -274,13 +277,20 @@ final class TodoModel {
         selectionGeneration += 1
     }
 
+    private var loadGeneration: UInt64 = 0
+
     func load() async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         do {
             async let c = Bridge.todoCards(includeArchived: true)
             async let b = Bridge.automationBackends()
-            cards = try await c
-            backends = try await b
-            if let queue = try? await Bridge.automationQueue() {
+            let (freshCards, freshBackends) = try await (c, b)
+            let freshQueue = try? await Bridge.automationQueue()
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            cards = freshCards
+            backends = freshBackends
+            if let queue = freshQueue {
                 defaultNoLimit = queue.defaultBudgetSeconds == 0
                 if queue.defaultBudgetSeconds > 0 {
                     defaultBudgetMinutes = String(max(1, queue.defaultBudgetSeconds / 60))
@@ -290,6 +300,7 @@ final class TodoModel {
             errorMessage = nil
             syncPolling()
         } catch {
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }

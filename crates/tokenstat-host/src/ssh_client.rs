@@ -2,20 +2,22 @@
 
 //! Interactive SSH sessions shared by desktop and mobile clients.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use russh::client;
 use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{ChannelMsg, Disconnect};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::error::DispatchError;
 use tokio::sync::mpsc;
 
 const MAX_BUFFER: usize = 4 * 1024 * 1024;
+const MAX_READ: usize = 64 * 1024;
+const CLOSED_RETENTION: Duration = Duration::from_secs(60);
 
 /// How much of a directory listing is read before the rest is dropped.
 ///
@@ -75,9 +77,10 @@ enum Command {
 }
 
 struct Output {
-    bytes: Vec<u8>,
+    bytes: VecDeque<u8>,
     base: u64,
     closed: bool,
+    closed_at: Option<Instant>,
     error: Option<String>,
 }
 
@@ -337,16 +340,11 @@ fn call_inner(method: &str, params: &str) -> Result<Value, crate::error::Dispatc
             // had just closed was gone before the read that would have carried
             // its `closed` flag, so every ordinary logout surfaced as "SSH
             // session no longer exists". A closed session is cleared by the
-            // next open or list instead.
+            // retention timer, or an open/list after the grace period instead.
             let guard = sessions().lock().map_err(|e| e.to_string())?;
             let live = guard.get(&p.id).ok_or("SSH session no longer exists")?;
             let output = live.output.lock().map_err(|e| e.to_string())?;
-            let start = p.offset.saturating_sub(output.base) as usize;
-            let data = output.bytes.get(start..).unwrap_or_default();
-            Ok(
-                json!({"data": data, "nextOffset": output.base + output.bytes.len() as u64,
-                "dropped": p.offset < output.base, "closed": output.closed, "error": output.error}),
-            )
+            Ok(read_output(&output, p.offset))
         }
         "ssh.session.write" => command(params, |p| Command::Write(p.data)).map_err(Into::into),
         "ssh.session.resize" => {
@@ -949,9 +947,10 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
     history.opened_in(if directory.is_empty() { "~" } else { directory });
     let (tx, mut rx) = mpsc::unbounded_channel();
     let output = Arc::new(Mutex::new(Output {
-        bytes: Vec::new(),
+        bytes: VecDeque::new(),
         base: 0,
         closed: false,
+        closed_at: None,
         error: None,
     }));
     let handle = Arc::new(handle);
@@ -972,13 +971,20 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
                 }
             }
         }
+        // Keep the final bytes available to a reader racing the list poll.
+        // Explicit Close still removes the session immediately.
+        {
+            let mut output = task_output.lock().unwrap_or_else(|e| e.into_inner());
+            output.closed = true;
+            output.closed_at = Some(Instant::now());
+        }
+        tokio::spawn(async move {
+            tokio::time::sleep(CLOSED_RETENTION).await;
+            sessions().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        });
         let _ = task_handle
             .disconnect(Disconnect::ByApplication, "closed", "en")
             .await;
-        task_output.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
-        if let Ok(mut map) = sessions().lock() {
-            map.remove(&id);
-        }
     });
     Ok(LiveSession {
         commands: tx,
@@ -1035,14 +1041,41 @@ async fn authenticate_agent(
     Err("SSH agent authentication is not available on this platform".into())
 }
 
+fn read_output(output: &Output, offset: u64) -> Value {
+    let start = usize::try_from(offset.saturating_sub(output.base))
+        .unwrap_or(usize::MAX)
+        .min(output.bytes.len());
+    let data: Vec<u8> = output
+        .bytes
+        .iter()
+        .skip(start)
+        .take(MAX_READ)
+        .copied()
+        .collect();
+    let next = output.base + (start + data.len()) as u64;
+    let closed = output.closed && start + data.len() == output.bytes.len();
+    json!({"data": data, "nextOffset": next, "dropped": offset < output.base,
+           "closed": closed, "error": if closed { output.error.as_deref() } else { None }})
+}
+
 fn append(output: &Mutex<Output>, data: &[u8]) {
     let mut output = output.lock().unwrap_or_else(|e| e.into_inner());
-    output.bytes.extend_from_slice(data);
-    if output.bytes.len() > MAX_BUFFER {
-        let remove = output.bytes.len() - MAX_BUFFER;
-        output.bytes.drain(..remove);
-        output.base += remove as u64;
-    }
+    let remove = output
+        .bytes
+        .len()
+        .saturating_add(data.len())
+        .saturating_sub(MAX_BUFFER);
+    let old = remove.min(output.bytes.len());
+    output.bytes.drain(..old);
+    output.bytes.extend(data[remove - old..].iter().copied());
+    output.base += remove as u64;
+}
+
+fn expired(output: &Output, now: Instant) -> bool {
+    output.closed
+        && output
+            .closed_at
+            .is_some_and(|at| now.saturating_duration_since(at) >= CLOSED_RETENTION)
 }
 
 fn now_ms() -> i64 {
@@ -1062,7 +1095,7 @@ fn reap_closed(map: &mut HashMap<String, LiveSession>) {
     map.retain(|_, live| {
         live.output
             .lock()
-            .map(|output| !output.closed)
+            .map(|output| !expired(&output, Instant::now()))
             .unwrap_or(false)
     });
 }
@@ -1077,61 +1110,95 @@ mod tests {
         let mut status = None;
         assert!(!provision_message(ChannelMsg::Eof, &mut out, &mut status).unwrap());
         assert!(provision_result(&out, status).is_err());
-        assert!(
-            !provision_message(
-                ChannelMsg::ExitStatus { exit_status: 23 },
-                &mut out,
-                &mut status
-            )
-            .unwrap()
-        );
+        assert!(!provision_message(
+            ChannelMsg::ExitStatus { exit_status: 23 },
+            &mut out,
+            &mut status
+        )
+        .unwrap());
         assert!(provision_message(ChannelMsg::Close, &mut out, &mut status).unwrap());
-        assert!(
-            provision_result(&out, status)
-                .unwrap_err()
-                .message
-                .contains("exit 23")
-        );
+        assert!(provision_result(&out, status)
+            .unwrap_err()
+            .message
+            .contains("exit 23"));
         assert!(provision_message(ChannelMsg::Failure, &mut out, &mut status).is_err());
 
         status = Some(0);
-        assert!(
-            !provision_message(
-                ChannelMsg::Data {
-                    data: b"ready".to_vec().into()
-                },
-                &mut out,
-                &mut status
-            )
-            .unwrap()
-        );
+        assert!(!provision_message(
+            ChannelMsg::Data {
+                data: b"ready".to_vec().into()
+            },
+            &mut out,
+            &mut status
+        )
+        .unwrap());
         assert_eq!(provision_result(&out, status).unwrap(), "ready");
         let before = out.clone();
-        assert!(
-            provision_message(
-                ChannelMsg::Data {
-                    data: vec![b'x'; 16 * 1024].into()
-                },
-                &mut out,
-                &mut status
-            )
-            .is_err()
-        );
+        assert!(provision_message(
+            ChannelMsg::Data {
+                data: vec![b'x'; 16 * 1024].into()
+            },
+            &mut out,
+            &mut status
+        )
+        .is_err());
         assert_eq!(out, before, "a truncated result must not look successful");
     }
 
     #[test]
     fn output_is_bounded_and_reports_its_new_base() {
         let output = Mutex::new(Output {
-            bytes: vec![],
+            bytes: VecDeque::new(),
             base: 0,
             closed: false,
+            closed_at: None,
             error: None,
         });
         append(&output, &vec![b'x'; MAX_BUFFER + 41]);
         let output = output.lock().unwrap();
         assert_eq!(output.bytes.len(), MAX_BUFFER);
         assert_eq!(output.base, 41);
+    }
+
+    #[test]
+    fn closed_output_drains_in_bounded_batches_before_reporting_eof() {
+        let now = Instant::now();
+        let output = Output {
+            bytes: (0..MAX_READ + 17).map(|n| (n % 251) as u8).collect(),
+            base: 99,
+            closed: true,
+            closed_at: Some(now),
+            error: None,
+        };
+        let first = read_output(&output, 0);
+        assert_eq!(first["data"].as_array().unwrap().len(), MAX_READ);
+        assert_eq!(first["dropped"], true);
+        assert_eq!(first["closed"], false);
+        let second = read_output(&output, first["nextOffset"].as_u64().unwrap());
+        assert_eq!(second["data"].as_array().unwrap().len(), 17);
+        assert_eq!(second["data"][0], (MAX_READ % 251) as u8);
+        assert_eq!(second["closed"], true);
+        assert!(!expired(&output, now));
+        assert!(expired(&output, now + CLOSED_RETENTION));
+    }
+
+    #[test]
+    fn ring_wrap_preserves_latest_output_and_offsets() {
+        let output = Mutex::new(Output {
+            bytes: VecDeque::new(),
+            base: 0,
+            closed: false,
+            closed_at: None,
+            error: None,
+        });
+        append(&output, &vec![1; MAX_BUFFER]);
+        append(&output, &[2; 37]);
+        let output = output.lock().unwrap();
+        assert_eq!(output.bytes.len(), MAX_BUFFER);
+        assert_eq!(output.base, 37);
+        assert_eq!(output.bytes.back(), Some(&2));
+        let tail = read_output(&output, MAX_BUFFER as u64);
+        assert_eq!(tail["data"], json!(vec![2; 37]));
     }
 
     #[test]

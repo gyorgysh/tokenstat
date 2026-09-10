@@ -110,6 +110,8 @@ final class HomeModel {
     private var hostRetryCount = 0
     /// When the archive was last successfully read. Used to skip redundant
     /// quiet refreshes when the user bounces between destinations.
+    private var calendarGeneration: UInt64 = 0
+    private var lastLimitsLoadedAt: Date?
     private var lastLoadedAt: Date?
     /// Minimum age before an automatic quiet refresh will hit the host again.
     private static let quietRefreshStale: TimeInterval = 45
@@ -175,9 +177,14 @@ final class HomeModel {
         } else {
             isLoading = true
         }
+        calendarGeneration &+= 1
+        let generation = calendarGeneration
+        let requestedScope = scope
         defer {
-            isLoading = false
-            isRefreshing = false
+            if generation == calendarGeneration {
+                isLoading = false
+                isRefreshing = false
+            }
         }
         hasConfirmedEmptyActivity = false
         do {
@@ -188,6 +195,7 @@ final class HomeModel {
             // The shared calendar drives the greeting, profile and summaries.
             // Plan-card queries run separately, only while that section is shown.
             let grid = try await calendar
+            guard !Task.isCancelled, generation == calendarGeneration, scope == requestedScope else { return }
             self.calendar = grid
             // Only null means the account/archive has no records. A grid
             // with zero active days can be a quiet or locked history window.
@@ -230,6 +238,7 @@ final class HomeModel {
             hostRetryCount = 0
             hostRetryTask?.cancel()
         } catch {
+            guard !Task.isCancelled, generation == calendarGeneration, scope == requestedScope else { return }
             hasConfirmedEmptyActivity = false
             // Host recovery is expected to resolve through the retry loop. The
             // footer reports it quietly, so Home does not replace useful data
@@ -346,6 +355,8 @@ final class HomeModel {
     /// cell asks for nothing: the grid only lights priced days, and a day with
     /// no value has nothing to show.
     func hover(day: HeatCell?) {
+        let date = day.flatMap { $0.value > 0 && !$0.isLocked ? $0.date : nil }
+        guard date != hoveredDay else { return }
         hoverDetailTask?.cancel()
         guard let day, day.value > 0, !day.isLocked else {
             hoveredDay = nil
@@ -546,7 +557,8 @@ final class HomeModel {
     ///
     /// These queries belong to the limits section. Archive plan usage can
     /// publish before a slower provider reply, without delaying the calendar.
-    func loadPlanLimits() async {
+    func loadPlanLimits(force: Bool = true) async {
+        if !force, let last = lastLimitsLoadedAt, Date().timeIntervalSince(last) < 60 { return }
         guard !layout.hidden.contains(.limits), !Task.isCancelled, !isLoadingLimits else { return }
         limitsGeneration &+= 1
         let generation = limitsGeneration
@@ -566,6 +578,7 @@ final class HomeModel {
             let skip = Set(settings.skip)
             planLimits = all.filter { !skip.contains($0.source) }
             hasLoadedPlanLimits = true
+            lastLimitsLoadedAt = Date()
             planLimitsError = nil
         } catch {
             guard current() else { return }

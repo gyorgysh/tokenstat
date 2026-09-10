@@ -97,6 +97,28 @@ final class ChatReadingStore {
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
+    /// One explicit navigation request, separate from passive reading history.
+    /// Ordinary conversation selection always starts at the latest page.
+    private var requested: (key: String, mark: ChatReadingMark)?
+
+    func request(_ mark: ChatReadingMark, for reference: WorkReference) {
+        guard let key = WorkReferenceKey.conversation(reference),
+              ChatReadingMark.isStable(eventID: mark.eventID) else { return }
+        remember(mark, for: reference)
+        requested = (key, mark)
+    }
+
+    func requestLatest(for reference: WorkReference) {
+        if requested?.key == WorkReferenceKey.conversation(reference) { requested = nil }
+        forget(for: reference)
+    }
+
+    func takeRequest(for reference: WorkReference) -> ChatReadingMark? {
+        guard let key = WorkReferenceKey.conversation(reference), requested?.key == key else { return nil }
+        defer { requested = nil }
+        return requested?.mark
+    }
+
     func mark(for reference: WorkReference) -> ChatReadingMark? {
         guard let key = WorkReferenceKey.conversation(reference) else { return nil }
         return read()[key]
@@ -126,6 +148,7 @@ final class ChatReadingStore {
     func remove(scope: WorkReference.Scope, hostIdentity: String, workspaceID: String) {
         let prefix = WorkReferenceKey.folder(scope: scope, hostIdentity: hostIdentity,
                                              workspaceID: workspaceID)
+        if requested?.key.hasPrefix(prefix) == true { requested = nil }
         let marks = read().filter { !$0.key.hasPrefix(prefix) }
         write(marks)
     }
@@ -133,6 +156,7 @@ final class ChatReadingStore {
     func remove(scope: WorkReference.Scope) {
         let prefix = [scope.kind.rawValue, scope.origin, scope.identity]
             .map(WorkReferenceKey.encode).joined(separator: "|") + "|"
+        if requested?.key.hasPrefix(prefix) == true { requested = nil }
         write(read().filter { !$0.key.hasPrefix(prefix) })
     }
 

@@ -11,8 +11,8 @@ import Observation
 /// of it can be off at once. A Home with nothing on it is a real answer for
 /// somebody who opens the app to go straight to a folder.
 enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
-    /// The work worth going back to. First by default: it is the reason to
-    /// open the app on a phone.
+    /// The work worth going back to. Under the two figures by default, and
+    /// the first thing anybody actually opens.
     case continueWork = "continue"
     case pinnedWork = "pinned"
     case machines
@@ -60,10 +60,10 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
 
 /// A starting arrangement, not a mode.
 ///
-/// Picking one changes the order and what is switched on, and nothing else:
-/// no feature turns off, no number is counted differently, nothing is billed
-/// another way. That is why they are named after what is at the top rather
-/// than after a kind of person.
+/// Picking one changes the order of the cards and nothing else: no feature
+/// turns off, no number is counted differently, nothing is billed another
+/// way. That is why they are named after what is at the top rather than after
+/// a kind of person.
 enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
     case balanced
     case work
@@ -79,13 +79,21 @@ enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// The default puts work and activity first. The separate usage summary
-    /// stays available; Usage first explicitly brings it forward.
-    var hidden: Set<HomeSection> { self == .balanced ? [.usage] : [] }
+    /// Every preset switches everything on. A card is switched off by the
+    /// person holding the device, not by the arrangement they picked: an
+    /// arrangement that quietly hides one is a feature somebody never learns
+    /// exists. Kept as a property because a later preset may want to.
+    var hidden: Set<HomeSection> { [] }
 
+    /// Balanced answers the two questions the app is opened for, in order:
+    /// what it cost, and what you were doing. The two figures are one line
+    /// deep and read at a glance, so they lead without pushing the work down
+    /// the screen. Machines sits under Continue because "can I even reach it"
+    /// is the next question after "where was I", and the year grid and the
+    /// plan windows are what somebody scrolls to rather than opens for.
     var order: [HomeSection] {
         switch self {
-        case .balanced: [.continueWork, .pinnedWork, .activity, .limits, .machines, .usage]
+        case .balanced: [.usage, .continueWork, .machines, .pinnedWork, .activity, .limits]
         case .work: [.continueWork, .pinnedWork, .machines, .limits, .usage, .activity]
         case .usage: [.usage, .limits, .activity, .continueWork, .pinnedWork, .machines]
         }

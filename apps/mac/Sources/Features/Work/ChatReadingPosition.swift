@@ -52,3 +52,9 @@ struct ChatReadingIdentity: Hashable {
     let generation: UInt64
     var restoration: UInt64 = 0
 }
+
+/// Retained desktop panes must settle again when they become visible.
+struct ChatPresentationIdentity: Hashable {
+    let reading: ChatReadingIdentity
+    let active: Bool
+}

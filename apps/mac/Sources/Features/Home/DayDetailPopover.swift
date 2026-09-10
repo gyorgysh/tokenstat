@@ -42,7 +42,8 @@ struct DayDetailPopover: View {
             x: clampedX,
             y: clampedY
         )
-        .animation(.easeOut(duration: 0.14), value: anchor)
+        // Track the pointer/scroll directly; animated anchors trail behind it.
+        .animation(nil, value: anchor)
         .allowsHitTesting(false)
     }
 
@@ -267,5 +268,24 @@ struct DayDetailPopover: View {
 
     private static func int(_ n: UInt64) -> String {
         n.formatted(.number)
+    }
+}
+
+/// Moving the pointer must invalidate only the popover, not the window shell.
+@Observable final class HeatmapHoverState {
+    private(set) var anchor: HoveredCellFrame?
+    func update(_ next: HoveredCellFrame?) {
+        if anchor != next { anchor = next }
+    }
+}
+
+struct HeatmapPopoverOverlay: View {
+    let model: HomeModel
+    let hover: HeatmapHoverState
+    let windowSize: CGSize
+    var body: some View {
+        DayDetailPopover(detail: model.hoveredDetail,
+                         isLoading: model.isLoadingDayDetail,
+                         anchor: hover.anchor, windowSize: windowSize)
     }
 }

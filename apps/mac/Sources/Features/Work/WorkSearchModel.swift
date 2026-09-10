@@ -163,9 +163,14 @@ final class WorkSearchModel {
 
     private let liveFetch: WorkSearchLiveScheduler.Fetch?
     private let scope: WorkReference.Scope
-    private let folders: [WorkSearchIndex.Folder: String]
+    /// Folders this index will answer for. Widened when a connected machine
+    /// lists what it holds, see `adopt(folders:live:)`.
+    private var folders: [WorkSearchIndex.Folder: String]
     private let metadata: [WorkSearchIndex.Document]
-    private let includesSavedText: Bool
+    /// Whether saved conversation text is part of the index, which decides
+    /// whether an empty result means "nothing matches" or "only folder names
+    /// were searched".
+    private(set) var includesSavedText: Bool
     private let ownsSession: () -> Bool
     private let cache: WorkSearchCache
     private var subscription: WorkSearchCache.Subscription?
@@ -236,6 +241,57 @@ final class WorkSearchModel {
         guard isCurrent() else { return }
         if localHost != nil { selectLiveHosts([]) }
         if includesSavedText { await refresh() } else { await search() }
+    }
+
+    /// Folders a connected machine listed after the sheet opened.
+    ///
+    /// Finding a folder by name must not require having opened it on this
+    /// device first: the pins and recent places a phone knows are a fraction
+    /// of what is on the machine. The names come from the machine that owns
+    /// them, once when search opens rather than once per keystroke, and they
+    /// are labels only, no conversation text.
+    ///
+    /// Access is not granted here. A host is asked only when it is already
+    /// verified, so this widens what the index will answer for within
+    /// permission that was established before.
+    func adopt(folders newFolders: [WorkSearchCatalog.KnownFolder], live: Set<String>) async {
+        guard isCurrent(), let subscription else { return }
+        var labels = folders
+        var documents: [WorkSearchIndex.Document] = []
+        for folder in newFolders {
+            let reference = folder.reference
+            let name = folder.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard reference.scope == scope, machines[reference.hostIdentity] != nil,
+                  !reference.workspaceID.isEmpty, !name.isEmpty else { continue }
+            let key = WorkSearchIndex.Folder(hostIdentity: reference.hostIdentity,
+                                             workspaceID: reference.workspaceID)
+            guard labels[key] == nil else { continue }
+            labels[key] = name
+            documents.append(.init(
+                reference: WorkReference(scope: scope, hostIdentity: reference.hostIdentity,
+                                         workspaceID: reference.workspaceID, kind: .workspace, itemID: nil),
+                revision: "metadata", title: name, text: "", folderName: name,
+                machineName: machines[reference.hostIdentity] ?? "", updatedAt: folder.updatedAt, partial: false))
+        }
+        if !documents.isEmpty {
+            folders = labels
+            await subscription.index.setAccess(Set(labels.keys))
+            for document in documents {
+                guard isCurrent(), !Task.isCancelled else { return }
+                if let ticket = await cache.beginRead(subscription, reference: document.reference) {
+                    _ = await cache.finishRead(ticket, documents: [document])
+                }
+            }
+            guard isCurrent() else { return }
+            loader = WorkSearchSavedLoader(cache: cache, subscription: subscription, scope: scope,
+                                          folders: folders, machines: machines)
+        }
+        let hosts = live.intersection(Set(liveMachines.keys)).subtracting(liveHosts)
+        // A machine that answered is a machine that is reachable and still
+        // letting this device in, which is exactly the one worth searching as
+        // it is now. `selectLiveHosts` runs the query again on its own.
+        if !hosts.isEmpty { selectLiveHosts(liveHosts.union(hosts)) }
+        else if !documents.isEmpty { await search() }
     }
 
     func refresh() async {

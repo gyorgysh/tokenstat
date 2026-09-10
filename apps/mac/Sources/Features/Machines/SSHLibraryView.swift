@@ -623,7 +623,7 @@ struct SSHHostRow: View {
     /// reaching a server.
     var onConnect: (() -> Void)?
 
-    @State private var hovering = false
+    private var platform: String? { SSHHostPlatformCache.shared.label(for: host) }
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -634,7 +634,8 @@ struct SSHHostRow: View {
                 #else
                 .frame(width: 4)
                 #endif
-            VStack(alignment: .leading, spacing: 1) {
+            SSHHostPlatformMark(label: platform)
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Theme.Space.xs) {
                     Text(host.label)
                         .font(SSHRowType.name)
@@ -645,34 +646,24 @@ struct SSHHostRow: View {
                             .foregroundStyle(Theme.warning)
                     }
                 }
-                HStack(spacing: Theme.Space.xs) {
-                    Text(host.address)
-                        .font(SSHRowType.detail)
+                if searching, let folder {
+                    Text(folder)
+                        .font(Theme.caption2)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Theme.rowHighlight, in: Capsule())
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if searching, let folder {
-                        Text(folder)
-                            .font(Theme.caption2)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Theme.rowHighlight, in: Capsule())
-                            .foregroundStyle(.secondary)
-                    }
+                }
+                if let platform {
+                    Text(platform).font(Theme.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
             if let onConnect {
-                // The Mac has a pointer, so the button waits for it, stays
-                // quiet and lets the list read as a list. A phone has no hover
-                // to wait for and no pointer to aim with: this is the reason
-                // the screen exists, it has to be the one obviously pressable
-                // thing on the row, and it has to be big enough to hit with a
-                // thumb. Two platforms, two answers, one button.
+                // Keep the primary action visible for pointer and keyboard use.
                 #if os(macOS)
                 Button("Connect", .connect, action: onConnect)
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                    .opacity(hovering ? 1 : 0)
-                    .allowsHitTesting(hovering)
+                    .accessibilityLabel("Connect to \(host.label)")
                 #else
                 Button("Connect", .connect, action: onConnect)
                     .buttonStyle(AccentButtonStyle())
@@ -684,8 +675,7 @@ struct SSHHostRow: View {
         // Dynamic Type and a tap target that shrinks with the text. A floor
         // instead, so the row grows and never goes under 44.
         #if os(macOS)
-        .frame(height: Theme.Control.rowHeight)
-        .onHover { hovering = $0 }
+        .frame(minHeight: platform == nil ? 48 : 62)
         #else
         .frame(minHeight: 44)
         #endif

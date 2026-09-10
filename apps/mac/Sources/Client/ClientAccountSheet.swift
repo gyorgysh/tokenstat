@@ -52,7 +52,10 @@ struct ClientAccountSheet: View {
 
 /// Phone-sized account settings, split the same way the Mac pane is: who
 /// you are, what this device keeps, and the legal end.
-private enum ClientAccountPane: String, CaseIterable, Hashable {
+///
+/// Not private: search names these panes so it can send somebody to a setting
+/// by name rather than to the sheet's front page. See `ClientAppPlaces`.
+enum ClientAccountPane: String, CaseIterable, Hashable {
     case account
     case thisDevice
     case legal
@@ -70,6 +73,7 @@ private enum ClientAccountPane: String, CaseIterable, Hashable {
 private struct ClientAccountContent: View {
     @Environment(AccountModel.self) private var model
     @Environment(ClientTabCustomization.self) private var tabCustomization
+    @Environment(ClientNavigationModel.self) private var navigation
 
     @State private var showSample = false
     @State private var showLicenses = false
@@ -154,6 +158,20 @@ private struct ClientAccountContent: View {
         .task {
             if model.account == nil { await model.load() }
         }
+        // Search sent somebody to a setting by name. Land on its pane, and
+        // open the screen it lives on when it is one screen deeper.
+        .onChange(of: navigation.accountRequest, initial: true) { _, request in
+            guard let request else { return }
+            navigation.accountRequest = nil
+            pane = request.pane
+            switch request.detail {
+            case .tabs: showTabs = true
+            case .plans: showPaywall = true
+            case .sample: showSample = true
+            case .licenses: showLicenses = true
+            case nil: break
+            }
+        }
     }
 
     @ViewBuilder
@@ -235,6 +253,7 @@ private struct ClientAccountContent: View {
         LocalTrafficCard(traffic: model.remoteStatus?.traffic) {
             await model.loadTraffic()
         }
+        LaunchSettings()
         ChatCacheSettings()
         SavedWorkSettings()
         layoutCard

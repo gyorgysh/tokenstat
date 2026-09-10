@@ -70,15 +70,7 @@ struct RootView: View {
     /// rather than as a chip, because it has the room.
     @State private var connection = ConnectionModel()
     @State private var isInspectorPresented = true
-    /// What the user chose for the sidebar, kept separate from the fit.
-    ///
-    /// The split view is handed `sidebarVisibility`, which forces `.detailOnly`
-    /// below the width where the sidebar cannot hold a column and restores this
-    /// value above it. Written only by an explicit toggle above the fit edge,
-    /// or an explicit reopen below it: the split view writes its collapsed
-    /// state back to the binding itself when the window narrows, and that
-    /// write must not be recorded as the user's choice, or the sidebar would
-    /// stay shut after the window widened again.
+    /// Explicit sidebar preference, preserved when a narrow window uses a peek.
     @State private var columnVisibilityChoice: NavigationSplitViewVisibility = .all
     /// Whether the window is wide enough to carry the inspector at all.
     ///
@@ -86,10 +78,7 @@ struct RootView: View {
     /// Conflating them would spend the user's choice on a window resize: narrow
     /// the window once and the pane would stay shut after widening it again.
     ///
-    /// Starts false. The default window is 1260 wide and the three-column
-    /// edge is 1450, so a true start would mount `.inspector` as a column
-    /// and tear it off on the first measured width. On macOS 27 that
-    /// add/remove runs inside NSSplitView's constraint pass and aborts.
+    /// Wait for the first width measurement before docking the inspector.
     @State private var inspectorFits = false
     /// Whether the floating inspector overlay is on screen.
     ///
@@ -119,11 +108,10 @@ struct RootView: View {
     /// resize notifications rather than measured inside the split view.
     @State private var windowContentWidth: CGFloat = 0
     #if os(macOS)
-    /// Full screen sits the content below a real titlebar. Windowed chrome
-    /// still pulls into the traffic-light row. Owned by `WindowScreenObserver`.
+    /// Window geometry reported by `WindowScreenObserver`. The shell lets
+    /// SwiftUI apply the system safe area in both windowed and full-screen mode.
     @State private var isFullScreen = false
-    /// Measured titlebar band above contentLayoutRect. Detail chrome pulls up
-    /// by this amount so it shares the traffic-light row. Zero in full screen.
+    /// Retained for the window observer's geometry reporting.
     @State private var titlebarInset: CGFloat = 0
     #endif
     /// A run a delegated task asked to show: set when navigating from Tasks,
@@ -131,7 +119,7 @@ struct RootView: View {
     @State private var pendingRunID: String?
     /// The hovered heatmap cell's window-space frame, fed up from the grid by
     /// preference. Nil means nothing is hovered and the popover hides.
-    @State private var hoveredCell: HoveredCellFrame?
+    @State private var heatmapHover = HeatmapHoverState()
     /// The window's content size, for popover placement.
     @State private var windowSize: CGSize = .zero
     #if os(macOS)
@@ -193,7 +181,7 @@ struct RootView: View {
         // for the Release type checker (it times out and fails the build).
         liveSession
             // View menu shortcuts post here so a focused editor cannot swallow ⌘B
-            // as "bold". Toolbar items live on the NavigationSplitView above.
+            // as "bold". Each destination owns its chrome buttons.
             .onReceive(NotificationCenter.default.publisher(for: .toggleLeftSidebar)) { _ in
                 guard launch.hostReady else { return }
                 toggleLeftSidebar()
@@ -267,19 +255,19 @@ struct RootView: View {
             // adds the next one. The AppKit half of the same decision is the
             // AccentColor colorset in the asset catalogue.
             .tint(Theme.accent)
+            // Shared destinations (including Chat's handoff banner and sheet)
+            // read the same account as the desktop shell. Supply it above all
+            // presenters so both retained panes and modal content inherit it.
+            .environment(account)
     }
 
     /// Splash or chrome, plus window geometry and the pointer peeks.
     private var sizedWindow: some View {
-        // Do not keep NavigationSplitView in the tree under the splash. Even at
-        // opacity 0 it still installs the system sidebar toggle on the window
-        // toolbar. Mount the chrome only after the host is ready; traffic
-        // lights stay because the window itself is already up with the splash.
+        // Mount the chrome after the host is ready; the window keeps its
+        // traffic lights while the splash is visible.
         ZStack {
             if launch.hostReady, placeSettled {
-                // Same NavigationSplitView chrome in both modes. Full screen
-                // parks the content below a real titlebar. Windowed chrome
-                // still shares the traffic-light row.
+                // Both modes use the system content safe area for every column.
                 mainChrome
             } else {
                 LaunchSplashView()
@@ -315,7 +303,7 @@ struct RootView: View {
         // (coordinateSpace stays on the outer ZStack so Home's heatmap and
         // popover share one space once the splash is gone.)
         .coordinateSpace(name: HeatmapView.coordinateSpace)
-        .onPreferenceChange(HoveredCellFrameKey.self) { hoveredCell = $0 }
+        .onPreferenceChange(HoveredCellFrameKey.self) { heatmapHover.update($0) }
         // The inspector decision follows the window's width, published by the
         // observer from resize notifications. That source is outside any layout
         // pass; a GeometryReader inside the split view is not, and a width
@@ -360,12 +348,7 @@ struct RootView: View {
             )
         }
         .overlay {
-            DayDetailPopover(
-                detail: home.hoveredDetail,
-                isLoading: home.isLoadingDayDetail,
-                anchor: hoveredCell,
-                windowSize: windowSize
-            )
+            HeatmapPopoverOverlay(model: home, hover: heatmapHover, windowSize: windowSize)
         }
         .task(id: WorkSessionContext.shared.scope) {
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
@@ -611,44 +594,20 @@ struct RootView: View {
             // ensureHosted here: that would race the splash and reinstall thrash.
     }
 
-    /// Shared chrome: NavigationSplitView.
-    ///
-    /// Sidebar and inspector marks live in each screen's `DetailChromeBar`
-    /// (leading), with destination actions on the trailing side. The system
-    /// toolbar is empty on purpose so the titlebar is only traffic lights and
-    /// every destination shares one content chrome row.
+    /// Fixed columns share the window's content safe area. Keeping the shell
+    /// in one SwiftUI layout avoids native split-divider constraint updates
+    /// during resize, and gives both header bars the same vertical origin.
     private var mainChrome: some View {
-        NavigationSplitView(columnVisibility: sidebarVisibility) {
-            sidebar
-                // Also on the column. `.toolbar(removing:)` on the split view
-                // alone misses the stock toggle that comes back when the
-                // sidebar collapses on a narrow window.
-                .toolbar(removing: .sidebarToggle)
-        } detail: {
+        HStack(spacing: 0) {
+            if showsSidebar {
+                sidebar
+                    .frame(width: Self.sidebarMinimumWidth)
+                Rectangle().fill(Theme.border).frame(width: 1)
+            }
             detailColumn
                 .environment(\.detailChromeToggles, detailChromeToggles)
-                // Pull DetailChromeBar into the measured titlebar band (same
-                // vertical row as traffic lights). Value comes from AppKit
-                // contentLayoutRect, not a faked compact chrome height.
-                //
-                // Full screen uses a real titlebar above the content, so the
-                // pull is skipped there. macOS 27 aborts if this padding
-                // animates, or if it changes the hosted column's min/max
-                // during NSSplitView's own constraint pass. Keep the inset,
-                // do not animate it.
-                .padding(.top, isFullScreen ? 0 : -chromeTopInset)
-                .animation(nil, value: chromeTopInset)
-                .animation(nil, value: isFullScreen)
-                .toolbar(removing: .sidebarToggle)
         }
-        .navigationSplitViewStyle(.balanced)
-        // Drop the stock NavigationSplitView toggle (glyph + "Hide
-        // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help, and live
-        // in DetailChromeBar rather than here. AppKit still strips any
-        // item that SwiftUI re-inserts (WindowScreenObserver).
         .toolbar(removing: .sidebarToggle)
-        // No app items. Background hidden; AppKit also hides the empty host
-        // so it does not own a content band (WindowScreenObserver).
         .toolbarBackground(.hidden, for: .windowToolbar)
     }
 
@@ -795,9 +754,9 @@ struct RootView: View {
     /// both columns overflows a tiled half-screen.
     static var detailMinimumWidth: CGFloat { DisplayFit.box(480) }
 
-    /// The narrowest the sidebar column may be, matching
-    /// `navigationSplitViewColumnWidth(min:)` on the sidebar.
-    static var sidebarMinimumWidth: CGFloat { DisplayFit.box(200) }
+    /// A comfortable fixed width for nested workspace rows and account controls.
+    /// Keep a readable floor on compact displays; narrow windows use the peek.
+    static var sidebarMinimumWidth: CGFloat { max(240, DisplayFit.box(260)) }
 
     /// The narrowest the window may get.
     ///
@@ -818,8 +777,7 @@ struct RootView: View {
     /// worth the room it costs the sidebar. So the fit edge is 1450 — below
     /// it the pane stops being a column and floats instead (see the overlay
     /// below), with no band where the sidebar gets pushed for its sake.
-    /// `.inspector` does not enforce any of this itself: given less room it
-    /// keeps its width and lets the trailing edge run off the window.
+    /// The fixed pane switches to an overlay before the detail becomes cramped.
     private static var widthForThreeColumns: CGFloat { DisplayFit.box(1450) }
 
     /// Below this the sidebar collapses instead of being squeezed. Above it,
@@ -852,14 +810,12 @@ struct RootView: View {
     }
 
     /// Applies a measured width to the decisions that depend on it: the
-    /// inspector fit below, and (through `sidebarVisibility`, which reads the
+    /// inspector fit below, and (through `showsSidebar`, which reads the
     /// same width) whether the sidebar keeps its column. Out of the layout pass
     /// that produced it; the width itself arrives from a resize notification,
     /// so the hop below is belt and braces rather than the whole fix.
     ///
-    /// The hop is the point. Adding or removing the inspector column from
-    /// inside layout is what AppKit refuses to do, and `.inspector`'s presence
-    /// is driven straight off this value.
+    /// Keep presentation updates outside the geometry notification cycle.
     private func applyWidth(for width: CGFloat) {
         // Above the sidebar fit edge the popup is moot. The column can exist
         // again. A popup pinned below the edge is the user saying "keep the
@@ -887,109 +843,14 @@ struct RootView: View {
         }
     }
 
-    /// The sidebar visibility handed to the split view.
-    ///
-    /// The user's choice, forced to `.detailOnly` below the width where the
-    /// sidebar cannot hold a column. Same guarded-write shape as
-    /// `showsInspector`: a resize must not be recorded as a decision, so the
-    /// user's value lives in its own state and the fit only overrides the
-    /// getter.
-    private var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
-        Binding(
-            get: {
-                // Until the observer has reported a real width, treat the
-                // window as wide enough: a fresh launch must not start with
-                // the sidebar shut.
-                guard windowContentWidth > 0 else { return columnVisibilityChoice }
-                if windowContentWidth < Self.widthForSidebar {
-                    // Below the fit edge the column is never shown: the
-                    // sidebar exists there as a floating popup, pinned or
-                    // peeking. Asking the split view for a column it cannot
-                    // lay out is what crashed a narrow window on ⌘B.
-                    return .detailOnly
-                }
-                return columnVisibilityChoice
-            },
-            set: { requested in
-                if windowContentWidth < Self.widthForSidebar {
-                    // Below the fit edge the split view is forced closed. Its
-                    // write-back is a layout consequence, not a user choice.
-                    // Ignore it so widening restores the embedded sidebar.
-                } else {
-                    columnVisibilityChoice = requested
-                    if requested == .all {
-                        isSidebarPinned = false
-                    }
-                }
-            },
-        )
+    /// Window fit affects presentation without changing the user's preference.
+    private var showsSidebar: Bool {
+        columnVisibilityChoice != .detailOnly &&
+            (windowContentWidth <= 0 || windowContentWidth >= Self.widthForSidebar)
     }
 
-    /// Whether the right pane is on screen, and the only place that is decided.
-    ///
-    /// The write-back is guarded. Without the guard, moving to a destination
-    /// with no inspector made the getter return false, SwiftUI wrote that false
-    /// straight back into `isInspectorPresented`, and the pane was then closed
-    /// for the rest of the session: selecting a workspace showed no Changes
-    /// panel and nothing the user did had asked for that. Width is guarded for
-    /// the same reason, one step further: a resize would otherwise spend the
-    /// user's choice.
-    private var showsInspector: Binding<Bool> {
-        Binding(
-            get: { isInspectorPresented && route.hasInspector && inspectorFits },
-            // A resize must not be recorded as a decision. Only a press of the
-            // toolbar button changes what the user asked for, so widening the
-            // window brings the pane back exactly as they left it.
-            set: { open in
-                guard route.hasInspector, inspectorFits else { return }
-                isInspectorPresented = open
-            }
-        )
-    }
-
-    /// Height of the titlebar band the detail column is lifted into.
-    ///
-    /// `mainChrome` pulls the whole detail column up by `titlebarInset` so
-    /// `DetailChromeBar` shares the traffic-light row. Everything mounted on
-    /// that column rises with it, including the inspector and the two floating
-    /// panels, and that is wrong for all three: the sidebar's wordmark lands
-    /// under the traffic lights, and the inspector's tab strip lands in a strip
-    /// where **AppKit's titlebar owns the mouse**, so the tabs and the close
-    /// button are not merely cramped, they are unclickable. Panes add the band
-    /// back and start where the window's content actually starts.
-    private var chromeTopInset: CGFloat {
-        #if os(macOS)
-        // AppKit occasionally reports zero for a full-size-content window
-        // after the SwiftUI inspector column is mounted, even though the
-        // traffic-light band is still present. The centre bar is offset by
-        // that band, so keep the inspector on the same baseline with the
-        // normal 30pt window-chrome fallback. Full screen has a real titlebar
-        // outside our content and needs no replacement strip.
-        isFullScreen ? 0 : max(ceil(titlebarInset), 31)
-        #else
-        0
-        #endif
-    }
-
-    /// Puts a pane mounted on the detail column back below the titlebar band.
-    ///
-    /// The band stays free of controls: AppKit's titlebar owns the mouse there,
-    /// and a tab or close button drawn into it cannot be pressed. It is not
-    /// left unpainted. `Color.clear` showed the window's liquid glass (or the
-    /// unfocused grey titlebar) through the inspector, while the left sidebar
-    /// fills the same strip with `Theme.sidebar`. Paint the same colour here,
-    /// and never take a click.
-    private func belowTitlebar<Content: View>(
-        @ViewBuilder _ content: () -> Content
-    ) -> some View {
-        VStack(spacing: 0) {
-            if chromeTopInset > 0 {
-                Theme.sidebar
-                    .frame(height: chromeTopInset)
-                    .allowsHitTesting(false)
-            }
-            content()
-        }
+    private var showsInspector: Bool {
+        isInspectorPresented && route.hasInspector && inspectorFits
     }
 
     /// The inspector's content, held to the height it has been given.
@@ -1007,20 +868,8 @@ struct RootView: View {
         @ViewBuilder _ content: @escaping () -> Content
     ) -> some View {
         GeometryReader { proxy in
-            // The detail column is lifted into the traffic-light band when a
-            // normal window is used. The inspector is not. Give its actual
-            // content exactly the room below that band; previously the inner
-            // view received the full height *and* the replacement titlebar
-            // strip was added on top, producing the visibly mismatched pane.
-            belowTitlebar {
-                content()
-                    .frame(
-                        width: proxy.size.width,
-                        height: max(0, proxy.size.height - chromeTopInset),
-                        alignment: .top
-                    )
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+            content()
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
                 .clipped()
         }
     }
@@ -1185,47 +1034,17 @@ struct RootView: View {
     /// The detail column: the destination, its fixed inspector column, and the
     /// floating overlay that replaces the column below the fit edge.
     private var detailColumn: some View {
-        detail
-            // The destination views paint `Theme.background` themselves, but
-            // the column behind them does not: while a destination swaps (the
-            // inspector column appearing or leaving on the same frame), the
-            // column can show the window's default surface for a moment. A
-            // solid backing here closes that gap so the swap paints the app's
-            // backdrop, not a light flash.
-            .background(Theme.background)
-            // The detail column has a declared minimum, so an overflow is
-            // never absorbed by the sidebar: the split view cannot take
-            // the difference from the leading column to satisfy the
-            // detail's demand.
-            .frame(minWidth: Self.detailMinimumWidth)
-            .inspector(isPresented: showsInspector) {
-                // The pane keeps its own troubles. Three times now a child of
-                // this column has reported an enormous intrinsic height and
-                // the hosted column has grown to satisfy it, at which point
-                // NSSplitView pushes the rest of the window out of place: the
-                // sidebar rides up under the traffic lights and stays wrong
-                // until another destination remounts the column.
-                //
-                // A definite maximum, taken from the room the pane actually
-                // has, is what stops that. `clipped` alone was not enough and
-                // was a mistake: it restricts drawing and does nothing to the
-                // size a child asks for, so the demand still travelled and the
-                // window still came apart. The clip stays for the drawing; the
-                // frame is what holds the layout.
+        HStack(spacing: 0) {
+            detail
+                .background(Theme.background)
+                .frame(minWidth: Self.detailMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
+            if showsInspector {
+                Rectangle().fill(Theme.border).frame(width: 1)
                 boundedInspector { inspectorContent }
-                    // Opaque, like the leading sidebar. `.inspector` on a
-                    // transparent titlebar otherwise composites the column
-                    // against liquid glass, which is what made the Files /
-                    // Changes / History strip look see-through or unfocused.
+                    .frame(width: DisplayFit.box(400))
                     .background(Theme.sidebar)
-                    // Fixed, on purpose. A min/ideal/max triplet left 30 points
-                    // of drag travel, and dragging that divider ran the hosted
-                    // column's constraint update inside NSSplitView's own
-                    // constraint pass, which AppKit throws on. A single value
-                    // installs no divider drag at all: the pane opens and
-                    // closes, and is never dragged.
-                    .inspectorColumnWidth(DisplayFit.box(400))
             }
+        }
             // Below the fit edge the inspector stops being a column and floats
             // instead: a thin hover strip at the trailing edge, the pane
             // sliding in over the detail. It pushes nothing, so the sidebar
@@ -1254,8 +1073,8 @@ struct RootView: View {
     private var sidebarFloatLayer: some View {
         if showsSidebarOverlay {
             HStack(spacing: 0) {
-                belowTitlebar { sidebar }
-                    .frame(width: DisplayFit.box(240))
+                sidebar
+                    .frame(width: Self.sidebarMinimumWidth)
                     .frame(maxHeight: .infinity)
                     .background(Theme.sidebar)
                     .overlay(alignment: .trailing) {
@@ -1370,7 +1189,7 @@ struct RootView: View {
             }
 
             if usesOverlaySidebar {
-                let width = showsSidebarOverlay ? DisplayFit.box(240) : Self.edgeStrip
+                let width = showsSidebarOverlay ? Self.sidebarMinimumWidth : Self.edgeStrip
                 let inside = Self.pointerIsNear(.leading, within: width)
                 if inside {
                     leadingLeftAt = nil
@@ -1447,9 +1266,7 @@ struct RootView: View {
 
     /// Shuts the pane on the user's behalf.
     ///
-    /// Not `showsInspector.wrappedValue = false`: that setter refuses to run
-    /// when the window is too narrow, which is right for reopening and wrong
-    /// for closing. Closing is always allowed.
+    /// Closing is always allowed, whether the pane is docked or floating.
     private func closeInspector() {
         isInspectorPresented = false
         isOverlayVisible = false
@@ -1633,26 +1450,6 @@ struct RootView: View {
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                // The brand sits where the heading used to. A sidebar's top
-                // left is where an app says what it is, and this one had a
-                // section label there saying "WORKSPACE", which is what it is
-                // not.
-                Wordmark()
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.top, Theme.Space.m)
-                    .padding(.bottom, Theme.Space.m)
-
-                // No heading over these three. They are the whole machine,
-                // they are labelled with their own names, and a word above
-                // them was a word that had to be picked and then not read.
-                ForEach(GlobalSection.standalone) { item in
-                    SidebarRow(
-                        label: item.label,
-                        symbol: item.symbol,
-                        isSelected: route.isGlobal(item)
-                    ) { navigate(to: .global(item)) }
-                }
-
                 // Tasks, workflows and automations belong to a folder, and the
                 // rows for them here are the every-folder view. That is the
                 // weekly question rather than the daily one, so it is one
@@ -1984,11 +1781,35 @@ struct RootView: View {
             Theme.sidebar.ignoresSafeArea(edges: [.top, .leading, .bottom])
         }
         .scrollContentBackground(.hidden)
-        .navigationSplitViewColumnWidth(
-            min: Self.sidebarMinimumWidth,
-            ideal: DisplayFit.box(228),
-            max: DisplayFit.box(300)
-        )
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                // The brand sits where the heading used to. A sidebar's top
+                // left is where an app says what it is, and this one had a
+                // section label there saying "WORKSPACE", which is what it is
+                // not.
+                Wordmark()
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.top, Theme.Space.m)
+                    .padding(.bottom, Theme.Space.m)
+
+                // No heading over these three. They are the whole machine,
+                // they are labelled with their own names, and a word above
+                // them was a word that had to be picked and then not read.
+                ForEach(GlobalSection.standalone) { item in
+                    SidebarRow(
+                        label: item.label,
+                        symbol: item.symbol,
+                        isSelected: route.isGlobal(item)
+                    ) { navigate(to: .global(item)) }
+                }
+
+            }
+            .padding(.bottom, Theme.Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                Theme.sidebar.ignoresSafeArea(edges: .top)
+            }
+        }
         .safeAreaInset(edge: .bottom) { accountFooter }
         // Confirm lives on the sidebar column, not RootView's outer body chain,
         // so the type checker can still finish the main chrome expression.
@@ -2899,7 +2720,7 @@ struct RootView: View {
             // availability gate may otherwise decline this request silently.
             guard workAvailabilityMessage(reference) == nil else { return false }
             if let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) {
-                ChatReadingStore.shared.remember(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
+                ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
             }
             chat.restoreSearchReadingPosition(reference)
             openHomeWork(reference)
@@ -3047,7 +2868,7 @@ struct RootView: View {
     /// window that is already up stays where it is.
     private func settleLaunchPlace() async {
         defer { placeSettled = true }
-        guard WorkPlaceLaunch.claim(), let stored = WorkContinuityStore.shared.place() else { return }
+        guard WorkPlaceLaunch.claim(), LaunchPreferences.restoresLocation, let stored = WorkContinuityStore.shared.place() else { return }
         if let section = stored.globalSection {
             if let global = GlobalSection(rawValue: section), global != .account {
                 navigate(to: .global(global))
@@ -3516,7 +3337,7 @@ struct NativeMenuTrigger: NSViewRepresentable {
 private struct SidebarRow: View {
     var label: String
     var symbol: String
-    var symbolSize: CGFloat = 11
+    var symbolSize: CGFloat = 13
     var trailing: String?
     var isSelected: Bool
     /// How many steps in from the group's own rows this one sits. Nested SSH
@@ -3535,9 +3356,9 @@ private struct SidebarRow: View {
                 Image(systemName: symbol)
                     .font(Theme.fit(symbolSize))
                     .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
-                    .frame(width: 14)
+                    .frame(width: 18)
                 Text(label)
-                    .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
+                    .font(Theme.fit(14, weight: isSelected ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: Theme.Space.xs)
@@ -3549,7 +3370,7 @@ private struct SidebarRow: View {
                 }
             }
             .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, 5)
+            .padding(.vertical, 7)
             .background(background)
             .contentShape(.rect)
         }
@@ -3984,14 +3805,24 @@ private struct ChatSidebarConversationRow: View {
         HStack(spacing: Theme.Space.xs) {
             Button(action: select) {
                 HStack(spacing: Theme.Space.s) {
-                    Image(systemName: conversation.running ? "ellipsis.message.fill" : "message")
+                    HarnessMark(id: conversation.backend, size: DisplayFit.dp(26))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
+                            .font(Theme.fit(12, weight: isSelected ? .semibold : .medium))
+                            .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
+                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text(harnessName(conversation.backend))
+                                .lineLimit(1)
+                            if conversation.running {
+                                Text("· Working")
+                                    .foregroundStyle(Theme.accent)
+                                    .fixedSize()
+                            }
+                        }
                         .font(Theme.fit(10))
-                        .foregroundStyle(conversation.running || isSelected ? Theme.accent : Color.secondary)
-                        .frame(width: 14)
-                    Text(conversation.title)
-                        .font(Theme.fit(11.5, weight: isSelected ? .medium : .regular))
-                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                    }
                     Spacer(minLength: 0)
                     ChatDraftMark(reference: draft)
                     if conversation.running {
@@ -4029,12 +3860,12 @@ private struct ChatSidebarConversationRow: View {
         }
         .padding(.leading, Theme.Space.xl + Theme.Space.s)
         .padding(.trailing, Theme.Space.s)
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
         // The height the row has when the trash is showing, held at all
         // times, so the list cannot move under the pointer.
-        .frame(minHeight: 24)
+        .frame(minHeight: DisplayFit.dp(48))
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(
                     isSelected
                         ? Theme.rowSelectedNested
@@ -4060,7 +3891,7 @@ private struct ChatSidebarConversationRow: View {
         } message: {
             Text("This permanently deletes the transcript.")
         }
-        .help(conversation.title)
+        .help("\(conversation.title) · \(harnessName(conversation.backend))")
     }
 }
 
@@ -4093,11 +3924,11 @@ private struct WorkspaceSectionRow: View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: section.symbol)
-                    .font(Theme.fit(10.5))
+                    .font(Theme.fit(12))
                     .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
-                    .frame(width: 14)
+                    .frame(width: 18)
                 Text(section.label)
-                    .font(Theme.fit(12, weight: isSelected ? .medium : .regular))
+                    .font(Theme.fit(13.5, weight: isSelected ? .medium : .regular))
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .lineLimit(1)
                 Spacer(minLength: Theme.Space.xs)
@@ -4110,7 +3941,7 @@ private struct WorkspaceSectionRow: View {
             }
             .padding(.leading, Self.railInset + Theme.Space.s)
             .padding(.trailing, Theme.Space.m)
-            .padding(.vertical, 3)
+            .padding(.vertical, 6)
             .background(background)
             .contentShape(.rect)
         }

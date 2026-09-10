@@ -267,9 +267,11 @@ struct ClientRootView: View {
         )) { owner in
             ClientSavedWorkView(owner: owner)
         }
-        .sheet(isPresented: Binding(get: { navigation.showWorkSearch }, set: { navigation.showWorkSearch = $0 })) {
+        .sheet(isPresented: Binding(get: { navigation.showWorkSearch }, set: { navigation.showWorkSearch = $0 }),
+               onDismiss: openPendingPlace) {
             ClientWorkSearchPresentation()
         }
+        .environment(\.openClientAccount, { showAccount = true })
         .sheet(isPresented: $showAccount) {
             ClientAccountSheet()
         }
@@ -327,6 +329,30 @@ struct ClientRootView: View {
         .environment(navigation)
         .environment(tabCustomization)
         .environment(editors)
+    }
+
+    /// Go where search was asked to go, now that search has closed.
+    ///
+    /// On dismissal rather than on the tap, because the account sheet is
+    /// presented from this same view: two sheets on one view queue instead of
+    /// stacking, and the second one arrives minutes later or not at all. Tabs
+    /// wait for the same reason, so the app is not seen rearranging itself
+    /// behind a sheet that is still on screen.
+    private func openPendingPlace() {
+        guard let place = navigation.pendingPlace else { return }
+        navigation.pendingPlace = nil
+        switch place {
+        case .tab(let tab):
+            navigation.destination = tab
+        case .customizeHome:
+            navigation.destination = .home
+            navigation.homeEditorRequested = true
+        case .account(let pane, let detail):
+            navigation.accountRequest = ClientAccountRequest(pane: pane, detail: detail)
+            showAccount = true
+        case .device(let machineID):
+            navigation.openDevice(machineID: machineID)
+        }
     }
 
     @ViewBuilder
@@ -531,7 +557,7 @@ private extension View {
                 // The one global word about the network, and only when there
                 // is one to say. See `ClientConnectionChip`.
                 ToolbarItem(placement: .topBarTrailing) {
-                    ClientWorkSearchButton(compact: true)
+                    ClientWorkSearchButton()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     ClientConnectionChip()

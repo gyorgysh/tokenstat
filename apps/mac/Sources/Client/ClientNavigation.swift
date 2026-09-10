@@ -22,6 +22,21 @@ import SwiftUI
 @Observable
 final class ClientNavigationModel {
     var showWorkSearch = false
+
+    /// A screen or setting search picked, held until search has closed.
+    ///
+    /// Two sheets presented from one view queue rather than stack, so a result
+    /// that opens the account sheet has to wait for search to go, or the
+    /// account never appears. `ClientRootView` delivers this on dismissal.
+    var pendingPlace: ClientAppDestination?
+
+    /// Where the account sheet should land, when something outside it asked
+    /// for a setting by name. Consumed once, by the sheet.
+    var accountRequest: ClientAccountRequest?
+
+    /// Home's editor was asked for from elsewhere. Home opens it and clears
+    /// this.
+    var homeEditorRequested = false
     /// The destination: a tab in tab mode, a sidebar row in sidebar mode.
     var destination: ClientTab = .home {
         didSet {
@@ -59,7 +74,7 @@ final class ClientNavigationModel {
         guard !restorationFinished, let scope = WorkSessionContext.shared.scope,
               scope.kind == .account else { return }
         restorationFinished = true
-        guard !notificationPending, routeLaunch.claim(ticket: 0),
+        guard LaunchPreferences.restoresLocation, !notificationPending, routeLaunch.claim(ticket: 0),
               let route = WorkMobileRouteStore.shared.route(for: scope) else { return }
         let tab = ClientTab(rawValue: route.tab) ?? .home
         destination = visibleTabs.contains(tab) ? tab : (visibleTabs.first ?? .home)
@@ -155,6 +170,9 @@ final class ClientNavigationModel {
 
     /// Remove the old account's entire navigation state before showing another.
     func reset() {
+        pendingPlace = nil
+        accountRequest = nil
+        homeEditorRequested = false
         restoredRoute = nil
         visibleTerminal = nil
         rememberedWorkspaceOwner = nil

@@ -270,7 +270,7 @@ struct SSHSectionView: View {
                 .font(Theme.caption).foregroundStyle(.secondary)
         }
         .padding(.leading, CGFloat(depth) * 14)
-        .frame(height: Theme.Control.rowHeight)
+        .frame(minHeight: 48)
         .contentShape(.rect)
         .onTapGesture {
             if expanded.contains(folder.id) { expanded.remove(folder.id) } else { expanded.insert(folder.id) }
@@ -302,6 +302,7 @@ struct SSHSectionView: View {
             // single one swallows every click before it can count to two.
             .onTapGesture(count: 2) { model.connectRequest = host }
             .onTapGesture { model.selection = .host(host.id) }
+        .accessibilityAction(named: "Open details") { model.selection = .host(host.id) }
             .contextMenu {
                 Button("Connect") { model.connectRequest = host }
                 Button(host.favorite ? "Remove from favourites" : "Add to favourites") {
@@ -326,10 +327,11 @@ struct SSHSectionView: View {
             Image(systemName: key.hardwareBacked ? "key.radiowaves.forward" : "key.fill")
                 .foregroundStyle(Theme.accent)
         }
-        .frame(height: Theme.Control.rowHeight)
+        .frame(minHeight: 48)
         .listRowBackground(rowBackground(selected: model.selection == .key(key.id)))
         .contentShape(.rect)
         .onTapGesture { model.selection = .key(key.id) }
+        .accessibilityAction(named: "Open details") { model.selection = .key(key.id) }
         .contextMenu {
             Button("Delete", role: .destructive) { Task { await model.delete(key: key) } }
         }
@@ -341,10 +343,11 @@ struct SSHSectionView: View {
             Text(snippet.command)
                 .font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(1)
         }
-        .frame(height: Theme.Control.rowHeight)
+        .frame(minHeight: 48)
         .listRowBackground(rowBackground(selected: model.selection == .snippet(snippet.id)))
         .contentShape(.rect)
         .onTapGesture { model.selection = .snippet(snippet.id) }
+        .accessibilityAction(named: "Open details") { model.selection = .snippet(snippet.id) }
         .contextMenu {
             Button("Delete", role: .destructive) { Task { await model.delete(snippet: snippet) } }
         }
@@ -356,10 +359,11 @@ struct SSHSectionView: View {
             Text("\(known.hostname):\(known.port)")
                 .font(Theme.caption).foregroundStyle(.secondary)
         }
-        .frame(height: Theme.Control.rowHeight)
+        .frame(minHeight: 48)
         .listRowBackground(rowBackground(selected: model.selection == .knownHost(known.id)))
         .contentShape(.rect)
         .onTapGesture { model.selection = .knownHost(known.id) }
+        .accessibilityAction(named: "Open details") { model.selection = .knownHost(known.id) }
         .contextMenu {
             Button("Forget", role: .destructive) {
                 Task { await model.forgetKnownHost(known) }

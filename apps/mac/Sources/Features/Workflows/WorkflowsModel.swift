@@ -86,19 +86,25 @@ final class WorkflowsModel {
         backends.visibleForPicker(keeping: id)
     }
 
+    private var loadGeneration: UInt64 = 0
+
     func load() async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         do {
             async let g = Bridge.workflows()
             async let r = Bridge.workflowRuns()
             async let b = Bridge.automationBackends()
             async let a = Bridge.automations()
-            graphs = try await g
-            runs = try await r
+            let (freshGraphs, freshRuns, freshBackends, freshJobs) = try await (g, r, b, a)
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            graphs = freshGraphs
+            runs = freshRuns
             #if os(macOS)
             RunNotifications.shared.settle(workflows: runs)
             #endif
-            backends = try await b
-            jobs = try await a
+            backends = freshBackends
+            jobs = freshJobs
             hasLoaded = true
             errorMessage = nil
             if let id = working?.id, !id.isEmpty, !isDirty, let fresh = graphs.first(where: { $0.id == id }) {
@@ -106,6 +112,7 @@ final class WorkflowsModel {
             }
             syncWatching()
         } catch {
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }

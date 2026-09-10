@@ -123,6 +123,23 @@ import Foundation
         let revived = try! JSONDecoder().decode([String: ChatReadingMark].self, from: legacyJSON)
         assert(revived["k"] == ChatReadingMark(eventID: "s3", offset: 0.2, updatedAt: when))
 
+        let target = chat(id: "explicit")
+        store.remember(mark("s100"), for: target)
+        assert(store.takeRequest(for: target) == nil, "passive history must not move a normal open")
+        store.request(mark("s110"), for: target)
+        assert(store.takeRequest(for: chat(bob, id: "explicit")) == nil)
+        assert(store.takeRequest(for: target)?.eventID == "s110")
+        assert(store.takeRequest(for: target) == nil, "explicit navigation is consumed once")
+        store.request(mark("s115"), for: target)
+        store.forget(for: target)
+        assert(store.takeRequest(for: target)?.eventID == "s115", "passive geometry must not erase explicit navigation")
+        store.request(mark("s120"), for: target)
+        store.remove(scope: alice)
+        assert(store.takeRequest(for: target) == nil, "sign-out clears pending navigation")
+        store.request(mark("s130"), for: target)
+        store.requestLatest(for: target)
+        assert(store.takeRequest(for: target) == nil, "latest cancels a pending anchor")
+
         print("Chat reading: per-conversation places, stable rows only, scope removal, bounds, corruption and geometry passed")
     }
 }

@@ -29,6 +29,17 @@ import SwiftUI
 /// Signed out it is a person glyph inside an accent ring, which is the state
 /// most in need of an affordance: an empty app with no visible way in is an app
 /// people delete.
+private struct OpenClientAccountKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
+
+extension EnvironmentValues {
+    var openClientAccount: () -> Void {
+        get { self[OpenClientAccountKey.self] }
+        set { self[OpenClientAccountKey.self] = newValue }
+    }
+}
+
 struct AvatarButton: View {
     @Environment(AccountModel.self) private var account
 

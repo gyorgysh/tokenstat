@@ -108,7 +108,7 @@ struct HomeView: View {
             await Self.waitForHost()
             guard !Task.isCancelled else { return }
             // Archive first: heatmap and streaks. Vendor limits load after.
-            await model.load()
+            await model.refreshIfStale()
         }
         .onChange(of: layout.hidden.contains(.limits)) { _, hidden in
             if hidden { model.hidePlanLimits() }
@@ -118,7 +118,7 @@ struct HomeView: View {
             await Self.waitForHost()
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            await model.loadPlanLimits()
+            await model.loadPlanLimits(force: false)
         }
         // App came back to the front: quiet re-read if the last load is old.
         .onChange(of: scenePhase) { _, phase in

@@ -169,14 +169,19 @@ final class InsightsModel {
         loadTask = Task { await refresh() }
     }
 
+    private var refreshGeneration: UInt64 = 0
+
     private func refresh() async {
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer { if generation == refreshGeneration { isLoading = false } }
 
         let q = query
         do {
             let snapshot = try await Bridge.insightsSnapshot(q)
+            guard !Task.isCancelled, generation == refreshGeneration, query == q else { return }
             self.info = snapshot.info
             self.totals = snapshot.totals
             self.daily = snapshot.daily
@@ -197,6 +202,7 @@ final class InsightsModel {
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled, generation == refreshGeneration, query == q else { return }
             errorMessage = error.localizedDescription
         }
     }

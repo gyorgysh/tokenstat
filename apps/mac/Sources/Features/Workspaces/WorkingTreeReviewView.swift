@@ -12,20 +12,22 @@ struct WorkingTreeReviewView: View {
     @State private var diffs: [FileDiff] = []
     @State private var loading = true
     @State private var error: String?
+    @State private var loadGeneration = 0
 
     private var files: [FileChange] { folder.git?.files ?? [] }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            if let error {
+            if let error, diffs.isEmpty {
+                ErrorBanner(message: error) { Task { await load() } }
                 InspectorEmptyState(
                     systemImage: "exclamationmark.circle",
                     title: "Could not load changes",
                     subtitle: error,
                     tint: Theme.danger
                 )
-            } else if loading {
+            } else if loading, diffs.isEmpty {
                 ProgressView("Reading working tree")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if diffs.isEmpty {
@@ -35,15 +37,9 @@ struct WorkingTreeReviewView: View {
                     subtitle: "The working tree is clean."
                 )
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(diffs, id: \.path) { diff in
-                            fileHeader(diff)
-                            DiffBody(diff: diff)
-                                .task(id: diff) {
-                                    await WorkViewedChange.save(owner: WorkViewedChange.owner(folderID: folder.id), diff: diff)
-                                }
-                        }
+                DiffDocumentView(diffs: diffs) {
+                    if let error {
+                        ErrorBanner(message: error) { Task { await load() } }
                     }
                 }
             }
@@ -86,33 +82,43 @@ struct WorkingTreeReviewView: View {
         .background(Theme.panel)
     }
 
-    private func fileHeader(_ diff: FileDiff) -> some View {
-        HStack(spacing: Theme.Space.s) {
-            Image(systemName: "doc.text")
-                .font(Theme.font(11))
-                .foregroundStyle(.tertiary)
-            Text(diff.path)
-                .font(Theme.mono(12))
-                .lineLimit(1)
-                .truncationMode(.head)
-            Spacer()
-        }
-        .padding(.horizontal, Theme.Space.m)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.sidebar)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
-    }
-
     private func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         loading = true
         error = nil
-        do {
-            for file in files {
-                await model.loadDiff(file.path, in: folder.id)
+        let paths = files.map(\.path)
+        let folderID = folder.id
+        let failures = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
+            var next = 0
+            var failures = 0
+            // Bound parallel work: a large review should neither pay one RTT
+            // per file nor flood the bridge with hundreds of requests.
+            for _ in 0..<min(4, paths.count) {
+                let path = paths[next]
+                next += 1
+                group.addTask { await model.loadDiff(path, in: folderID) }
             }
-            diffs = files.compactMap { model.diff(for: $0.path, in: folder.id) }
+            for await loaded in group {
+                if !loaded { failures += 1 }
+                if !Task.isCancelled, next < paths.count {
+                    let path = paths[next]
+                    next += 1
+                    group.addTask { await model.loadDiff(path, in: folderID) }
+                }
+            }
+            return failures
+        }
+        guard !Task.isCancelled, generation == loadGeneration else { return }
+        diffs = paths.compactMap { model.diff(for: $0, in: folderID) }
+        if failures > 0 {
+            error = "Could not refresh \(failures) file(s). Available changes are still shown. Try again."
         }
         loading = false
+        let owner = WorkViewedChange.owner(folderID: folderID)
+        for diff in diffs {
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            await WorkViewedChange.save(owner: owner, diff: diff)
+        }
     }
 }

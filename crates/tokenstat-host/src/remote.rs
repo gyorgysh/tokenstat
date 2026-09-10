@@ -2520,20 +2520,15 @@ fn is_attachment_transfer(method: &str) -> bool {
 ///
 /// The relay meters a whole channel under the label it opened with, so the
 /// label has to be chosen before the dial, from the method. Terminal and chat
-/// traffic names itself here; everything else stays `unknown`, which is the
+/// traffic and workspace navigation name themselves here; other RPC stays `unknown`, which is the
 /// right answer for an old client and the wrong one for a call site in this
 /// binary that simply forgot (see `dial_peer_for`).
 fn purpose_for_method(method: &str) -> ChannelPurpose {
-    if method.starts_with("chat.")
-        || matches!(
-            method,
-            "work.search"
-                | "work.continuity.get"
-                | "work.continuity.put"
-                | "work.continuity.attachments"
-        )
-    {
+    if method.starts_with("chat.") {
         ChannelPurpose::Chat
+    } else if ["workspace.", "work.", "todo.", "note.", "workflow.", "automation.", "pulls."]
+        .iter().any(|prefix| method.starts_with(prefix)) {
+        ChannelPurpose::Workspace
     } else if method.starts_with("pty.") {
         ChannelPurpose::Pty
     } else if method.starts_with("ssh.") {
@@ -3507,14 +3502,14 @@ mod tests {
         assert_eq!(purpose_for_method("chat.send"), ChannelPurpose::Chat);
         assert_eq!(purpose_for_method("chat.events"), ChannelPurpose::Chat);
         assert_eq!(purpose_for_method("chat.list"), ChannelPurpose::Chat);
-        assert_eq!(purpose_for_method("work.search"), ChannelPurpose::Chat);
+        assert_eq!(purpose_for_method("work.search"), ChannelPurpose::Workspace);
         assert_eq!(
             purpose_for_method("work.continuity.get"),
-            ChannelPurpose::Chat
+            ChannelPurpose::Workspace
         );
         assert_eq!(
             purpose_for_method("work.continuity.put"),
-            ChannelPurpose::Chat
+            ChannelPurpose::Workspace
         );
         assert_eq!(purpose_for_method("pty.read"), ChannelPurpose::Pty);
         assert_eq!(purpose_for_method("pty.write"), ChannelPurpose::Pty);
@@ -3524,8 +3519,11 @@ mod tests {
         assert_eq!(purpose_for_method("ssh.session.list"), ChannelPurpose::Ssh);
         assert_eq!(
             purpose_for_method("workspace.list"),
-            ChannelPurpose::Unknown
+            ChannelPurpose::Workspace
         );
+        for method in ["workspace.log", "workspace.show", "workspace.diff", "workspace.summary", "work.continuity.attachments", "workflow.list", "automation.runs", "todo.list"] {
+            assert_eq!(purpose_for_method(method), ChannelPurpose::Workspace, "{method}");
+        }
         assert_eq!(purpose_for_method("stream.open"), ChannelPurpose::Unknown);
         assert_eq!(purpose_for_method(""), ChannelPurpose::Unknown);
     }

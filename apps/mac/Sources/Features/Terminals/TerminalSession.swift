@@ -751,6 +751,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// should stop (process exited).
     @MainActor
     private func applyChunk(_ chunk: PtyChunk, plan: PollPlan) -> Bool {
+        guard !Task.isCancelled, !removed else { return true }
         if outputPaused != chunk.paused { outputPaused = chunk.paused }
         // Guarded. This is observed, and a session the reader cannot
         // keep up with reports a drop on every single poll: an

@@ -710,17 +710,29 @@ final class WorkspacesModel {
         }
     }
 
-    func loadDiff(_ path: String, in workspaceID: String) async {
+    private var nextDiffLoad: UInt64 = 0
+    private var pendingDiffLoads: [String: UInt64] = [:]
+
+    @discardableResult
+    func loadDiff(_ path: String, in workspaceID: String) async -> Bool {
         let key = Self.treeKey(workspaceID, path)
+        nextDiffLoad &+= 1
+        let request = nextDiffLoad
+        pendingDiffLoads[key] = request
+        defer {
+            if pendingDiffLoads[key] == request { pendingDiffLoads[key] = nil }
+        }
         do {
             let diff = try await Bridge.workspaceDiff(id: workspaceID, path: path)
+            guard !Task.isCancelled, pendingDiffLoads[key] == request else { return false }
             diffs[key] = diff
-            // The editor's gutter marks come from the same diff the Changes
-            // panel shows, so the two cannot disagree about what changed.
             documents[key]?.applyDiff(diff)
             errorMessage = nil
+            return true
         } catch {
+            guard !Task.isCancelled, pendingDiffLoads[key] == request else { return false }
             errorMessage = error.localizedDescription
+            return false
         }
     }
 

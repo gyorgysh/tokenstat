@@ -158,11 +158,14 @@ struct ClientChatView: View {
         }
         .task {
             await reload()
+            guard !Task.isCancelled, model.error == nil,
+                  model.isReady(for: workspaceID), model.peer == peer else { return }
             if await openRequestedChat() { return }
             if openConversationOnAppear, !didOpenConversation {
                 didOpenConversation = true
                 if let recent = model.mostRecent {
                     await model.select(recent)
+                    guard !Task.isCancelled else { return }
                     opened = recent
                 } else {
                     await create()
@@ -240,7 +243,7 @@ struct ClientChatView: View {
     }
 
     private func create() async {
-        guard let created = await model.create(), model.selected?.id == created.id,
+        guard let created = await model.create(), !Task.isCancelled, model.selected?.id == created.id,
               model.folderID == workspaceID else { return }
         opened = created
     }
@@ -321,6 +324,7 @@ struct ClientChatThread: View {
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
     @State private var settleMood: PersonaMood?
+    @State private var settleTaskID = UUID()
     /// Bumped on send so the transcript scrolls to the end synchronously,
     /// instead of waiting for the first streamed token to trigger a pin.
     @State private var followPulse = 0
@@ -517,7 +521,7 @@ struct ClientChatThread: View {
             // transcript and read it back, which is this screen blanking and
             // re-scrolling every time it is pushed, including straight after
             // the launcher picked the conversation for you.
-            if model.savedCopy == nil && (model.selected?.id != chat.id || model.displayItems.isEmpty) {
+            if model.savedCopy == nil && (model.selected?.id != chat.id || model.transcriptItems.isEmpty) {
                 await model.select(chat)
             }
             guard !Task.isCancelled else { return }
@@ -713,8 +717,8 @@ struct ClientChatThread: View {
                             },
                             openAttachment: open(_:data:),
                             faceSeed: model.faceSeed,
-                            isLive: model.busy && item.id == model.displayItems.last?.id,
-                            animatesRunning: item.id == spinning
+                            isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
+                            animatesRunning: !model.isShowingCachedTranscript && item.id == spinning
                         )
                         .equatable()
                         // No geometry readers mid-fling: each one reports per
@@ -732,7 +736,7 @@ struct ClientChatThread: View {
                         )
                     }
                     if sliceOffset == 0 {
-                        if let mood = liveMood {
+                        if !model.isShowingCachedTranscript, let mood = liveMood {
                             ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
                         }
                         TranscriptBottomSentinel()
@@ -744,7 +748,7 @@ struct ClientChatThread: View {
                 // One gate for the whole stack, not one per row: hit testing
                 // sleeps mid-fling and wakes 0.35s after the last moved frame.
                 // The pill rides outside this stack and never loses taps.
-                .allowsHitTesting(!follow.scrolling)
+                .allowsHitTesting(!follow.scrolling && !model.isShowingCachedTranscript)
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.top, Theme.Space.m)
                 .padding(.bottom, Theme.Space.l)
@@ -762,7 +766,7 @@ struct ClientChatThread: View {
             // lazy stack skipped measuring the last prompt until a later
             // layout (leave and come back) forced the real height.
             .overlay {
-                if !transcriptReady {
+                if !transcriptReady, model.recentMessagePreview.isEmpty {
                     TranscriptSkeleton()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Theme.background)
@@ -847,17 +851,17 @@ struct ClientChatThread: View {
                 scrollTo(target, proxy, animated: true)
                 scrollTarget = nil
             }
-            .onChange(of: model.displayItems.count, initial: true) { _, _ in
+            .onChange(of: model.transcriptItems.count, initial: true) { _, _ in
                 follow.sliceHidesNewest = sliceOffset > 0
                 #if DEBUG
-                TranscriptProbe.shared.rows = model.displayItems.count
+                TranscriptProbe.shared.rows = model.transcriptItems.count
                 TranscriptProbe.shared.built = visibleItems.count
                 #endif
             }
             #if DEBUG
             .onAppear {
                 TranscriptProbe.shared.install()
-                TranscriptProbe.shared.rows = model.displayItems.count
+                TranscriptProbe.shared.rows = model.transcriptItems.count
                 TranscriptProbe.shared.built = visibleItems.count
             }
             #endif
@@ -873,22 +877,36 @@ struct ClientChatThread: View {
                 // Hold the end across the frames the real heights take to
                 // arrive: every one of those says the end is far below, and
                 // believing one is how a long chat opened in its middle.
+                let ticket = UUID()
+                settleTaskID = ticket
+                follow.settle(true)
+                window.followingEnd = true
+                showNewest()
+                pinToLatest(proxy, animated: false)
+                defer {
+                    if settleTaskID == ticket { follow.settle(false) }
+                }
+                // Fetch time does not spend the layout-settling budget. Slow
+                // hosts used to exhaust every correction before rows arrived.
+                while model.openingConversation {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    guard !Task.isCancelled else { return }
+                }
+                guard !Task.isCancelled else { return }
                 if await restoreReadingPlace(proxy) != .unavailable { return }
                 guard !Task.isCancelled else { return }
                 showNewest()
-                follow.settle(true)
-                defer { follow.settle(false) }
                 // Same as the Mac: hold the end until the conversation has
                 // stopped arriving, not for a fixed count of frames.
                 var quiet = 0
                 var correctionPins = 0
                 for _ in 0..<40 {
                     try? await Task.sleep(for: .milliseconds(50))
-                    guard !Task.isCancelled, model.approvals.isEmpty else { return }
+                    guard !Task.isCancelled, !follow.abandoned else { return }
                     // A lazy-stack scroll walks every row between here and
                     // the end. Limit settling corrections; geometry-based
                     // repinning handles later height changes.
-                    if !follow.atEnd, correctionPins < 3 {
+                    if !follow.atEnd, correctionPins < 8 {
                         correctionPins += 1
                         pinToLatest(proxy, animated: false)
                     }
@@ -975,7 +993,7 @@ struct ClientChatThread: View {
 
     private var liveMood: PersonaMood? {
         TranscriptFollow.liveMood(
-            items: model.displayItems,
+            items: model.transcriptItems,
             busy: model.busy,
             runningTool: model.isRunningTool,
             waiting: !model.approvals.isEmpty,
@@ -985,7 +1003,7 @@ struct ClientChatThread: View {
 
     private var structureToken: String {
         TranscriptFollow.structureToken(
-            items: model.displayItems,
+            items: model.transcriptItems,
             busy: model.busy,
             runningTool: model.isRunningTool,
             settle: settleMood
@@ -998,7 +1016,7 @@ struct ClientChatThread: View {
             return
         }
         guard was else { return }
-        if case .failed = model.displayItems.last?.kind {
+        if case .failed = model.transcriptItems.last?.kind {
             settleMood = nil
         } else {
             settleMood = .ok
@@ -1027,7 +1045,7 @@ struct ClientChatThread: View {
     /// and the event list, not the walk.
     private func returnToLatest(_ proxy: ScrollViewProxy) async {
         showNewest()
-        if model.displayItems.count > TranscriptWindow.reopenAbove {
+        if model.transcriptItems.count > TranscriptWindow.reopenAbove {
             await model.reopenAtLatest()
         }
         await chaseLatest(proxy)
@@ -1055,21 +1073,21 @@ struct ClientChatThread: View {
 
     /// Rows the transcript builds this pass. Same slice as the Mac.
     private var visibleItems: [ChatDisplayItem] {
-        TranscriptSlice.items(model.displayItems, olderOffset: sliceOffset)
+        TranscriptSlice.items(model.transcriptItems, olderOffset: sliceOffset)
     }
 
     /// Rows above the built slice. Zero while the whole conversation fits.
     private var hiddenAboveCount: Int {
-        TranscriptSlice.hiddenAbove(count: model.displayItems.count, olderOffset: sliceOffset)
+        TranscriptSlice.hiddenAbove(count: model.transcriptItems.count, olderOffset: sliceOffset)
     }
 
     /// `olderOffset` counted from the live end, or the offset that still
     /// starts on `sliceAnchor` after rows arrived above or below.
     private var sliceOffset: Int {
         if olderOffset > 0, let anchor = sliceAnchor {
-            return TranscriptSlice.holding(anchor, in: model.displayItems, current: olderOffset)
+            return TranscriptSlice.holding(anchor, in: model.transcriptItems, current: olderOffset)
         }
-        return TranscriptSlice.clampOffset(olderOffset, count: model.displayItems.count)
+        return TranscriptSlice.clampOffset(olderOffset, count: model.transcriptItems.count)
     }
 
     private func showNewest() {
@@ -1080,7 +1098,7 @@ struct ClientChatThread: View {
         follow.stopFollowing()
         applySlice(
             TranscriptSlice.revealingEarlier(
-                count: model.displayItems.count, olderOffset: sliceOffset
+                count: model.transcriptItems.count, olderOffset: sliceOffset
             )
         )
     }
@@ -1088,11 +1106,11 @@ struct ClientChatThread: View {
     /// Slide the built window and remember its first row so later inserts
     /// cannot replace what is on screen.
     private func applySlice(_ offset: Int) {
-        let clamped = TranscriptSlice.clampOffset(offset, count: model.displayItems.count)
+        let clamped = TranscriptSlice.clampOffset(offset, count: model.transcriptItems.count)
         olderOffset = clamped
         if clamped > 0 {
             sliceAnchor = TranscriptSlice.items(
-                model.displayItems, olderOffset: clamped
+                model.transcriptItems, olderOffset: clamped
             ).first?.id
             follow.sliceHidesNewest = true
         } else {
@@ -1137,11 +1155,11 @@ struct ClientChatThread: View {
         scrollTo(TranscriptFollow.bottomID, proxy, animated: animated)
     }
 
-    /// Open this conversation where it was left, when it was left above the
-    /// latest turn. Navigation or scrolling interrupts restoration.
+    /// Only an explicit search/shared-reading request overrides opening at
+    /// the latest turn. Passive reading history does not move a new selection.
     private func restoreReadingPlace(_ proxy: ScrollViewProxy) async -> TranscriptReading.Restoration {
         guard let reference = model.currentReference,
-              let mark = ChatReadingStore.shared.mark(for: reference) else { return .unavailable }
+              let mark = ChatReadingStore.shared.takeRequest(for: reference) else { return .unavailable }
         return await TranscriptReading.restore(mark, reference: reference, model: model, follow: follow) { id, point in
             placeRow(id, proxy, at: point)
         }
@@ -1150,7 +1168,7 @@ struct ClientChatThread: View {
     /// Put one row where the reader had it, with the rest of the conversation
     /// below it and the earlier part one button above.
     private func placeRow(_ id: String, _ proxy: ScrollViewProxy, at point: UnitPoint) {
-        applySlice(TranscriptSlice.holding(id, in: model.displayItems, current: 0))
+        applySlice(TranscriptSlice.holding(id, in: model.transcriptItems, current: 0))
         follow.markDrivenInstant()
         var transaction = Transaction()
         transaction.disablesAnimations = true
@@ -1166,7 +1184,7 @@ struct ClientChatThread: View {
         // The end always exists. Anything else may sit outside the built
         // slice: slide to it first, or the scroll lands nowhere.
         if id != TranscriptFollow.bottomID {
-            applySlice(TranscriptSlice.revealing(id, in: model.displayItems))
+            applySlice(TranscriptSlice.revealing(id, in: model.transcriptItems))
         } else {
             showNewest()
         }

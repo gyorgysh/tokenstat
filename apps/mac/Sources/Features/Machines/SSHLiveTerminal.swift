@@ -197,6 +197,8 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         while !Task.isCancelled && !closed {
             do {
                 let chunk = try await Bridge.readSSHSession(id: handle, offset: offset)
+                guard !Task.isCancelled, !closed else { return }
+                self.error = nil
                 if !chunk.data.isEmpty { noteEcho(chunk.data) }
                 // A gap in the stream says nothing about where the cursor is,
                 // so there is nothing to reconcile a guess against and every
@@ -227,6 +229,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 }
                 try? await Task.sleep(for: .milliseconds(chunk.data.isEmpty ? 50 : 16))
             } catch {
+                guard !Task.isCancelled, !closed else { return }
                 self.error = error.localizedDescription
                 try? await Task.sleep(for: .milliseconds(500))
             }

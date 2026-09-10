@@ -37,7 +37,14 @@ SKIP_STARTERS = (
 # Snippet must uniquely identify that one button, not every Button in the file.
 ALLOWED = [
     ("Features/Work/WorkSearchSheet.swift", "model.selected = hit.reference"),
+    # A place in the app, offered beside the work. Whole-surface rows like the
+    # work results above them, and each one already leads with the glyph of the
+    # screen it opens, handed in as an ActionIcon by `WorkSearchPlace`.
+    ("Features/Work/WorkSearchSheet.swift", "openPlace(place)"),
+    ("Client/ClientWorkSearch.swift", "openPlace(place)"),
     ("App/RootView.swift", "Button(action: action) {"),
+    # Conversation rows lead with the selected backend's HarnessMark.
+    ("App/RootView.swift", "Button(action: select) {"),
     ("App/TokenstatApp.swift", 'Button("About tokenstat")'),
     ("Features/Home/HeatmapView.swift", "onSelect?(item.day)"),
     ("Features/Terminals/TerminalPane.swift", "Button(action: onBegin)"),

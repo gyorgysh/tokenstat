@@ -268,6 +268,15 @@ enum ClientRemote {
         )
     }
 
+    /// The folders registered on another machine, with that machine's own ids.
+    ///
+    /// `Bridge.remoteWorkspaces` needs a paired `Peer` and re-prefixes every
+    /// id for the folder screens. Search wants the plain host-local id a
+    /// `WorkReference` carries, and wants to ask without pairing first.
+    static func folderList(peer: String) async throws -> [WorkspaceFolder] {
+        try await Bridge.onPeer(peer, "workspace.list", as: [WorkspaceFolder].self)
+    }
+
     /// Every badge on the folder screen, in one call instead of five lists.
     static func summaries(peer: String) async throws -> [WorkspaceSummary] {
         try await Bridge.onPeer(peer, "workspace.summary", as: [WorkspaceSummary].self)

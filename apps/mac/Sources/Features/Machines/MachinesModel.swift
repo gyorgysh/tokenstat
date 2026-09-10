@@ -229,12 +229,16 @@ final class MachinesModel {
     /// the other screen.
     var words: String? { identity?.words ?? status?.words }
 
+    private var loadGeneration: UInt64 = 0
+
     func load() async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         // Already warm from Home's post-heatmap pass: do not flip the loading
         // banner for a refresh that will paint the same content.
         let quiet = identity != nil
         if !quiet { loading = true }
-        defer { loading = false }
+        defer { if generation == loadGeneration { loading = false } }
         do {
             // These four do not depend on each other. Sequential awaits made
             // the first Machines open pay four host RTTs; in parallel it is
@@ -244,15 +248,17 @@ final class MachinesModel {
             async let peersResult = Bridge.peers()
             async let accountResult = Bridge.account()
 
-            identity = try await identityResult
-            status = try await statusResult
-            peers = try await peersResult
-            if let accountResult = try? await accountResult, accountResult.signedIn {
-                account = accountResult
-                accountMachines = accountResult.machines
-            } else {
-                account = nil
-                accountMachines = []
+            let values = try await (identityResult, statusResult, peersResult)
+            let freshAccount = try? await accountResult
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            identity = values.0
+            status = values.1
+            peers = values.2
+            // A transient account read failure is not a sign-out. Keep the
+            // last successful account until the server explicitly replaces it.
+            if let freshAccount {
+                account = freshAccount.signedIn ? freshAccount : nil
+                accountMachines = freshAccount.signedIn ? freshAccount.machines : []
             }
             errorMessage = nil
             #if os(macOS)
@@ -260,6 +266,7 @@ final class MachinesModel {
             #endif
             await reconsiderPlanIfNeeded()
         } catch {
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }

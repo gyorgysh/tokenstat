@@ -103,25 +103,33 @@ final class AutomationsModel {
         backends.defaultForPicker(keeping: id)
     }
 
+    private var loadGeneration: UInt64 = 0
+
     func load() async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         do {
             async let j = Bridge.automations()
             async let r = Bridge.automationRuns()
             async let b = Bridge.automationBackends()
             async let q = Bridge.automationQueue()
-            jobs = try await j
-            runs = try await r
+            let (freshJobs, freshRuns, freshBackends) = try await (j, r, b)
+            let freshQueue = try? await q
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            jobs = freshJobs
+            runs = freshRuns
             #if os(macOS)
             RunNotifications.shared.settle(automations: runs)
             #endif
-            backends = try await b
-            if let queue = try? await q {
+            backends = freshBackends
+            if let queue = freshQueue {
                 applyQueue(queue)
             }
             hasLoaded = true
             errorMessage = nil
             syncWatching()
         } catch {
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }

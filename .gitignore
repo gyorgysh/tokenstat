@@ -119,3 +119,7 @@ xcuserdata/
 # Play upload keystore. The real file lives in ~/.tokenstat/android/.
 *.jks
 *.keystore
+
+# Temporary continuity render QA (depends on generated files in target/)
+/apps/mac/ContinuityQA.xcodeproj/
+/apps/mac/ContinuityQA.yml

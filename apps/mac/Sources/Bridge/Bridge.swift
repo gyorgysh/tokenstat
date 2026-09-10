@@ -3174,9 +3174,12 @@ extension Bridge {
     static func probeServerForSetup(
         _ host: SSHHost, auth: [String: Any], jump: [String: Any]? = nil
     ) async throws -> ServerCheck {
-        try await background("ssh.provision.check", sessionParams(
+        let check = try await background("ssh.provision.check", sessionParams(
             host, rows: 24, cols: 100, auth: auth, jump: jump
         ), as: ServerCheck.self)
+        try Task.checkCancellation()
+        await MainActor.run { SSHHostPlatformCache.shared.remember(check, for: host) }
+        return check
     }
 
     /// Bind setup to the daemon reached through the trusted SSH connection.

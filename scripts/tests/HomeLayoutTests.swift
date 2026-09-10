@@ -9,11 +9,11 @@ import Foundation
         defer { defaults.removePersistentDomain(forName: name) }
 
         // A device that has never been arranged gets the balanced order,
-        // with a separate usage summary available under Hidden.
+        // with usage first and every section discoverable.
         let fresh = HomeLayout(defaults: defaults)
         assert(fresh.order == HomePreset.balanced.order)
-        assert(fresh.sections == [.continueWork, .pinnedWork, .activity, .limits, .machines])
-        assert(fresh.hidden == [.usage])
+        assert(fresh.sections == [.usage, .continueWork, .machines, .pinnedWork, .activity, .limits])
+        assert(fresh.hidden.isEmpty)
         // And says so: a device nobody has arranged is balanced, not "none of
         // these three".
         assert(fresh.preset == .balanced)
@@ -22,11 +22,11 @@ import Foundation
         // claiming to be a preset.
         fresh.move(from: IndexSet(integer: 2), to: 0)
         fresh.setVisible(false, section: .machines)
-        assert(fresh.sections == [.activity, .continueWork, .pinnedWork, .limits])
+        assert(fresh.sections == [.usage, .continueWork, .pinnedWork, .activity, .limits])
         assert(fresh.preset == nil)
         let relaunched = HomeLayout(defaults: defaults)
         assert(relaunched.order == fresh.order)
-        assert(relaunched.hidden == [.machines, .usage])
+        assert(relaunched.hidden == [.machines])
 
         // Every card can be off. A clear Home is an answer, not a failure.
         for section in HomeSection.allCases { relaunched.setVisible(false, section: section) }
@@ -50,7 +50,7 @@ import Foundation
             order: [.limits, .limits, .activity],
             hidden: [.limits, .machines]
         )
-        assert(messy.order == [.limits, .activity, .continueWork, .pinnedWork, .machines, .usage])
+        assert(messy.order == [.limits, .activity, .usage, .continueWork, .machines, .pinnedWork])
         assert(messy.hidden == [.limits, .machines])
 
         // An arrangement stored before pins existed gains the card at the
@@ -96,6 +96,7 @@ import Foundation
         // Every preset is a complete arrangement. One that dropped a card
         // would hide it with no way to say so.
         for preset in HomePreset.allCases {
+            assert(preset.hidden.isEmpty)
             assert(Set(preset.order) == Set(HomeSection.allCases))
             assert(preset.order.count == HomeSection.allCases.count)
         }

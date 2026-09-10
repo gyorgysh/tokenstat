@@ -105,6 +105,7 @@ struct AccountView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, Theme.Space.l)
                     }
+                    LaunchSettings()
                     ChatCacheSettings()
                     SavedWorkSettings()
                     notificationsCard
@@ -248,6 +249,7 @@ struct AccountView: View {
             await model.loadTraffic()
         }
         notificationsCard
+        LaunchSettings()
         ChatCacheSettings()
         SavedWorkSettings()
         terminalCard

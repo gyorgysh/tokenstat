@@ -298,7 +298,7 @@ struct ClientSidebarRoot: View {
                     .accessibilityAddTraits(.isHeader)
             }
             ToolbarItem(placement: .topBarTrailing) {
-                ClientWorkSearchButton(compact: true)
+                ClientWorkSearchButton()
             }
             ToolbarItem(placement: .topBarTrailing) {
                 ClientConnectionChip(compact: true)

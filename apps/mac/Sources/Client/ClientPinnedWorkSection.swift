@@ -34,42 +34,60 @@ struct ClientPinnedWorkSection: View {
     /// without leaving Home and coming back.
     @State private var pinsStore = PinnedWorkStore.shared
 
-    private var pins: [PinnedWorkStore.Pin] {
-        pinsStore.pins(in: account.account?.pinnedWorkScope)
+    /// One row, with the identity it is drawn under.
+    ///
+    /// **Never a position.** The shelf is rebuilt from the store on every
+    /// read, and a row keyed by index can be asked to draw itself after that
+    /// store has changed: pinning from a thread and unpinning from this card
+    /// both do it, and `pins[index]` then reaches past the end of a shorter
+    /// list, which crashes rather than drawing a stale row. Rows keyed by the
+    /// pin's own key simply disappear instead.
+    private struct Row: Identifiable {
+        let id: String
+        let pin: PinnedWorkStore.Pin
+        let place: ClientRecentPlaces.Place
+    }
+
+    private var rows: [Row] {
+        pinsStore.pins(in: account.account?.pinnedWorkScope).compactMap { pin in
+            guard let id = pin.key, let place = pin.place else { return nil }
+            return Row(id: id, pin: pin, place: place)
+        }
     }
 
     var body: some View {
-        if !pins.isEmpty {
+        // Read once for the whole pass. The store decodes on every access, and
+        // reading it again inside the loop is what let the list change shape
+        // underneath the rows being built from it.
+        let shelf = rows
+        if !shelf.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ClientSectionTitle(title: "Pinned", mark: "mark_pin")
                 VStack(spacing: 0) {
-                    ForEach(pins.indices, id: \.self) { index in
-                        let pin = pins[index]
-                        if let place = pin.place {
-                            HStack(spacing: 0) {
-                                NavigationLink {
-                                    ClientSavedPlaceView(place: place)
-                                } label: {
-                                    content(pin)
-                                }
-                                .buttonStyle(.plain)
-                                Button {
-                                    Task { await PinnedWorkActions.unpin(pin.reference) }
-                                } label: {
-                                    ActionIcon.pinned.label("Unpin \(pin.label)")
-                                        .labelStyle(.iconOnly)
-                                        .font(ClientType.body)
-                                        .foregroundStyle(Theme.accent)
-                                        .frame(width: 44, height: 44)
-                                        .contentShape(.rect)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Unpin \(pin.label)")
-                                .accessibilityHint("Removes this from Home. The conversation stays where it is.")
+                    ForEach(shelf) { row in
+                        HStack(spacing: 0) {
+                            NavigationLink {
+                                ClientSavedPlaceView(place: row.place)
+                            } label: {
+                                content(row.pin)
                             }
-                            if index != pins.indices.last {
-                                ThemeRule().padding(.horizontal, Theme.Space.m)
+                            .buttonStyle(.plain)
+                            Button {
+                                Task { await PinnedWorkActions.unpin(row.pin.reference) }
+                            } label: {
+                                ActionIcon.pinned.label("Unpin \(row.pin.label)")
+                                    .labelStyle(.iconOnly)
+                                    .font(ClientType.body)
+                                    .foregroundStyle(Theme.accent)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(.rect)
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Unpin \(row.pin.label)")
+                            .accessibilityHint("Removes this from Home. The conversation stays where it is.")
+                        }
+                        if row.id != shelf.last?.id {
+                            ThemeRule().padding(.horizontal, Theme.Space.m)
                         }
                     }
                 }

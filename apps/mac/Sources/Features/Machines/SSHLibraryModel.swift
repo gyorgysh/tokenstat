@@ -76,22 +76,33 @@ final class SSHLibraryModel {
     /// than showing them nothing at all.
     private(set) var loaded = false
 
+    private var loadGeneration: UInt64 = 0
+
     func load(vaultTier: String? = nil) async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         self.vaultTier = vaultTier
         do {
             async let hosts = Bridge.sshHosts()
             async let folders = Bridge.sshFolders()
             async let keys = Bridge.sshKeys()
             async let snippets = Bridge.sshSnippets()
-            self.hosts = try await hosts
-            self.folders = try await folders
-            self.keys = try await keys
-            self.snippets = try await snippets
+            let (freshHosts, freshFolders, freshKeys, freshSnippets) = try await (hosts, folders, keys, snippets)
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            self.hosts = freshHosts
+            self.folders = freshFolders
+            self.keys = freshKeys
+            self.snippets = freshSnippets
             error = nil
             loaded = true
             if let vaultTier { await syncVault(tier: vaultTier) }
-            knownHosts = (try? await Bridge.sshKnownHosts()) ?? []
-        } catch { self.error = error.localizedDescription }
+            if let fresh = try? await Bridge.sshKnownHosts(), !Task.isCancelled, generation == loadGeneration {
+                knownHosts = fresh
+            }
+        } catch {
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            self.error = error.localizedDescription
+        }
     }
 
     /// Re-read every list without touching which tier may write to the vault.

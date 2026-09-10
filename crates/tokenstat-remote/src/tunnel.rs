@@ -40,7 +40,7 @@ type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 /// keeps working.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChannelPurpose {
-    /// A desktop being streamed. The expensive one, and the only metered one.
+    /// A desktop being streamed. The highest-bandwidth category.
     Screen,
     /// A terminal on the far machine: pty.subscribe output and keystrokes,
     /// and pty.* RPC. The bulk of interactive use after screen.
@@ -48,6 +48,8 @@ pub enum ChannelPurpose {
     /// A conversation with a remote agent: chat.* RPC. Small per call, but
     /// it is the traffic a person means when they say "I was chatting".
     Chat,
+    /// Workspace browsing, Git history, search, and saved-work navigation.
+    Workspace,
     /// An SSH terminal session on the far machine, or a localhost proxy
     /// stream to one of its ports. Both are interactive shells' traffic.
     Ssh,
@@ -68,6 +70,7 @@ impl ChannelPurpose {
             Self::Screen => "screen",
             Self::Pty => "pty",
             Self::Chat => "chat",
+            Self::Workspace => "workspace",
             Self::Ssh => "ssh",
             Self::Sftp => "sftp",
             Self::Files => "files",
@@ -1444,6 +1447,7 @@ mod tests {
         assert_eq!(ChannelPurpose::Screen.as_str(), "screen");
         assert_eq!(ChannelPurpose::Pty.as_str(), "pty");
         assert_eq!(ChannelPurpose::Chat.as_str(), "chat");
+        assert_eq!(ChannelPurpose::Workspace.as_str(), "workspace");
         assert_eq!(ChannelPurpose::Ssh.as_str(), "ssh");
         assert_eq!(ChannelPurpose::Sftp.as_str(), "sftp");
         assert_eq!(ChannelPurpose::Files.as_str(), "files");
@@ -1454,6 +1458,7 @@ mod tests {
             ChannelPurpose::Screen,
             ChannelPurpose::Pty,
             ChannelPurpose::Chat,
+            ChannelPurpose::Workspace,
             ChannelPurpose::Ssh,
             ChannelPurpose::Sftp,
             ChannelPurpose::Files,

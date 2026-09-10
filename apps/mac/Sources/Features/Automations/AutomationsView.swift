@@ -46,7 +46,7 @@ struct AutomationsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let error = model.errorMessage {
-                        Banner(text: error, severity: .warning)
+                        ErrorBanner(message: error) { Task { await model.load() } }
                     }
                     intro
                     schedulerCard
@@ -123,6 +123,7 @@ struct AutomationsView: View {
             // moments ago can land a tick later; give it a beat before giving
             // up rather than dropping the request silently.
             for _ in 0..<6 {
+                guard !Task.isCancelled else { return }
                 if let run = model.runs.first(where: { $0.id == id }) {
                     pendingRunID = nil
                     model.selectRun(run)
@@ -933,7 +934,7 @@ struct NewAutomationSheet: View {
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 if let error = model.errorMessage {
-                    Banner(text: error, severity: .warning)
+                    ErrorBanner(message: error) { Task { await model.load() } }
                 }
                 stepHeader
                 fields

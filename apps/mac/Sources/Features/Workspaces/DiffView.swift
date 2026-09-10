@@ -16,14 +16,6 @@ import SwiftUI
 struct DiffView: View {
     let diff: FileDiff
 
-    /// Width of the pane, so a row can be at least that wide.
-    ///
-    /// Inside a horizontally scrolling container `maxWidth: .infinity` means
-    /// *unbounded*, not "fill the pane", so rows grow to an enormous width and
-    /// the content ends up somewhere off to the side. The pane has to be
-    /// measured and used as a minimum instead.
-    @State private var paneWidth: CGFloat = 0
-
     var body: some View {
         Group {
             if diff.binary {
@@ -33,25 +25,12 @@ struct DiffView: View {
                      ? "This file is not tracked yet and is empty."
                      : "No changes against HEAD.")
             } else {
-                ScrollView([.vertical, .horizontal]) {
-                    DiffBody(diff: diff, minWidth: paneWidth)
-                }
+                DiffDocumentView(diffs: [diff], fileHeaders: false) { EmptyView() }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
-        .background(
-            GeometryReader { proxy in
-                Color.clear
-                    // Quantised, because `minWidth` relays every row in the
-                    // diff and a drag otherwise delivers a new width, and so a
-                    // full relayout, on every frame.
-                    .onAppear { paneWidth = quantised(proxy.size.width, step: 8) }
-                    .onChange(of: quantised(proxy.size.width, step: 8)) { _, new in
-                        paneWidth = new
-                    }
-            }
-        )
+
     }
 
     private func note(_ text: String) -> some View {
@@ -126,7 +105,7 @@ struct DiffBody: View {
 /// A dash where a number does not exist, not a blank: on an added line there is
 /// no old number, and leaving the column empty reads as a number that failed to
 /// load rather than one that does not apply.
-private struct DiffRow: View {
+struct DiffRow: View {
     let line: DiffLine
     /// At least the pane's width, so the tint behind a short line still spans
     /// the pane instead of stopping at the last character.

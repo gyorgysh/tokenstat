@@ -174,21 +174,9 @@ struct HeatmapView: View {
         let heat = Theme.heat
         let corner = cellCorner
         return ZStack(alignment: .topLeading) {
-            Canvas { context, _ in
-                for (rowIndex, row) in calendar.rows.enumerated() {
-                    for (colIndex, day) in row.enumerated() {
-                        guard let day else { continue }
-                        let rect = layout.cellRect(row: rowIndex, column: colIndex)
-                        let path = Path(
-                            roundedRect: rect,
-                            cornerRadius: corner
-                        )
-                        let level = min(max(day.level, 0), heat.count - 1)
-                        let fill = heat[level].opacity(day.isLocked ? 0.28 : 1)
-                        context.fill(path, with: .color(fill))
-                    }
-                }
-            }
+            HeatmapCellsCanvas(rows: calendar.rows, cell: layout.cell,
+                               gap: layout.gap, corner: corner, palette: heat)
+                .equatable()
             .allowsHitTesting(false)
 
             // One ring for the hovered day. Drawn as a real view so it stays
@@ -430,5 +418,33 @@ struct HoveredCellFrameKey: PreferenceKey {
     static var defaultValue: HoveredCellFrame?
     static func reduce(value: inout HoveredCellFrame?, nextValue: () -> HoveredCellFrame?) {
         value = nextValue() ?? value
+    }
+}
+
+/// Static cells are independent of hover/selection. Equatable prevents pointer
+/// state from rebuilding the canvas while retaining the original cell rendering.
+struct HeatmapCellsCanvas: View, Equatable {
+    let rows: [[HeatCell?]]
+    let cell: CGFloat
+    let gap: CGFloat
+    let corner: CGFloat
+    let palette: [Color]
+
+    var body: some View {
+        Canvas { context, _ in
+            guard !palette.isEmpty else { return }
+            for (rowIndex, row) in rows.enumerated() {
+                for (column, day) in row.enumerated() {
+                    guard let day else { continue }
+                    let level = min(max(day.level, 0), palette.count - 1)
+                    let rect = CGRect(x: CGFloat(column) * (cell + gap),
+                                      y: CGFloat(rowIndex) * (cell + gap),
+                                      width: cell, height: cell)
+                    context.fill(Path(roundedRect: rect, cornerRadius: corner),
+                                 with: .color(palette[level].opacity(day.isLocked ? 0.28 : 1)))
+                }
+            }
+
+        }
     }
 }

@@ -189,14 +189,14 @@ struct PhoneHeatmap: View {
     ///
     /// Only step zero changes. The four active steps stay the brand's own, so
     /// a busy week on the phone is the same colour as a busy week on the site.
-    private var heat: [Color] {
+    private static let heatPalette: [Color] = {
         var ramp = Theme.heat
         ramp[0] = Color.adaptive(
             light: Color(red: 0xDE / 255, green: 0xDA / 255, blue: 0xEA / 255),
             dark: Color(red: 0x22 / 255, green: 0x1E / 255, blue: 0x36 / 255)
         )
         return ramp
-    }
+    }()
 
     private var weekdayLabels: some View {
         // Monday, Wednesday, Friday only. Seven letters at this size is a
@@ -236,35 +236,19 @@ struct PhoneHeatmap: View {
     }
 
     private var grid: some View {
-        let ramp = heat
+        let ramp = Self.heatPalette
         let marked = focus
-        return Canvas { context, _ in
-            for (rowIndex, row) in calendar.rows.enumerated() {
-                for (colIndex, day) in row.enumerated() {
-                    guard let day else { continue }
-                    let rect = CGRect(
-                        x: CGFloat(colIndex) * step,
-                        y: CGFloat(rowIndex) * step,
-                        width: cell,
-                        height: cell
-                    )
-                    let level = min(max(day.level, 0), ramp.count - 1)
-                    context.fill(
-                        Path(roundedRect: rect, cornerRadius: corner),
-                        with: .color(ramp[level].opacity(day.isLocked ? 0.28 : 1))
-                    )
-                }
-            }
-            // The ring is drawn last so it sits over its neighbours, and it is
-            // drawn outside the square so it does not hide the colour it is
-            // pointing at.
+        return ZStack(alignment: .topLeading) {
+            HeatmapCellsCanvas(rows: calendar.rows, cell: cell, gap: gap,
+                               corner: corner, palette: ramp)
+                .equatable()
             if let marked {
                 let ring = marked.rect.insetBy(dx: -2, dy: -2)
-                context.stroke(
-                    Path(roundedRect: ring, cornerRadius: corner + 2),
-                    with: .color(Theme.accent),
-                    lineWidth: 2
-                )
+                RoundedRectangle(cornerRadius: corner + 2)
+                    .stroke(Theme.accent, lineWidth: 2)
+                    .frame(width: ring.width, height: ring.height)
+                    .offset(x: ring.minX, y: ring.minY)
+                    .allowsHitTesting(false)
             }
         }
         .frame(width: gridWidth, height: gridHeight, alignment: .topLeading)

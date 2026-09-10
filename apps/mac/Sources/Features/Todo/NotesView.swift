@@ -19,6 +19,7 @@ struct NotesView: View {
     var workspaceID: String?
 
     @State private var draft = ""
+    @State private var saving = false
     @State private var showingArchive = false
     @State private var picked: TodoModel.NoteScope = .all
     @State private var converting: TodoCard?
@@ -51,7 +52,7 @@ struct NotesView: View {
                 .disabled(archivedCount == 0 && !showingArchive)
             }
             if let error = model.errorMessage {
-                Banner(text: error, severity: .warning)
+                ErrorBanner(message: error) { Task { await model.load() } }
                     .padding(Theme.Space.m)
             }
             composer
@@ -119,7 +120,7 @@ struct NotesView: View {
                     .onSubmit { save() }
                 Button("Add", .create) { save() }
                     .buttonStyle(AccentButtonStyle())
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(saving || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             Text("Saves to \(destinationName).")
                 .font(Theme.caption)
@@ -267,6 +268,8 @@ struct NotesView: View {
         // pane has to be the ordinary thing pressing a note does.
         .contentShape(.rect)
         .onTapGesture { model.selectCard(note.id) }
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Open note") { model.selectCard(note.id) }
     }
 
     private func placeName(for note: TodoCard) -> String {
@@ -275,10 +278,17 @@ struct NotesView: View {
     }
 
     private func save() {
+        guard !saving, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let text = draft
-        draft = ""
-        writing = true
-        Task { await model.addNote(text, workspaceID: destinationID) }
+        let folderID = destinationID
+        saving = true
+        Task {
+            let saved = await model.addNote(text, workspaceID: folderID)
+            // Keep edits made while saving; a failed save keeps the whole draft.
+            if saved, draft == text { draft = "" }
+            saving = false
+            writing = true
+        }
     }
 }
 

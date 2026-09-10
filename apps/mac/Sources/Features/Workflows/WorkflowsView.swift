@@ -100,7 +100,7 @@ struct WorkflowsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let error = model.errorMessage {
-                        Banner(text: error, severity: .warning)
+                        ErrorBanner(message: error) { Task { await model.load() } }
                     }
                     intro
                     builderCard
@@ -701,7 +701,7 @@ struct RunWorkflowSheet: View {
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 if let error = model.errorMessage {
-                    Banner(text: error, severity: .warning)
+                    ErrorBanner(message: error) { Task { await model.load() } }
                 }
                 TextField("Starting prompt", text: $input, axis: .vertical)
                     .textFieldStyle(.themed)
