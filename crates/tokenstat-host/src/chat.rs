@@ -2196,22 +2196,24 @@ impl Store {
                 &raw_path,
                 &response_output_dir,
             );
-            let _ = fs::remove_dir_all(&response_output_dir);
-            if let Some(token) = turn_token {
-                store.revoke_turn_token(&token);
-            }
-            if let Some(file) = turn_file {
-                let _ = fs::remove_file(file);
-            }
-            if let Some(home) = codex_hook_home {
-                let _ = fs::remove_dir_all(home);
-            }
-            if let Some(home) = agy_hook_home {
-                let _ = fs::remove_dir_all(home);
-            }
-            if let Some(home) = opencode_hook_home {
-                let _ = fs::remove_dir_all(home);
-            }
+            let _ = store.finish_turn(&chat_id, &info.id, || {
+                let _ = fs::remove_dir_all(&response_output_dir);
+                if let Some(token) = turn_token {
+                    store.revoke_turn_token(&token);
+                }
+                if let Some(file) = turn_file {
+                    let _ = fs::remove_file(file);
+                }
+                if let Some(home) = codex_hook_home {
+                    let _ = fs::remove_dir_all(home);
+                }
+                if let Some(home) = agy_hook_home {
+                    let _ = fs::remove_dir_all(home);
+                }
+                if let Some(home) = opencode_hook_home {
+                    let _ = fs::remove_dir_all(home);
+                }
+            });
         });
         recorded.map_err(DispatchError::delivery_unknown)
     }
@@ -2333,11 +2335,28 @@ impl Store {
         }
         manager.forget_reader(pty, &reader);
         let _ = manager.close(pty);
+    }
+
+    // A following send must not reuse turn directories until their previous
+    // owner has finished cleanup. A late drainer cannot retire a newer turn.
+    fn finish_turn(&self, id: &str, pty: &str, cleanup: impl FnOnce()) -> Result<(), String> {
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        if self
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .is_none_or(|current| current != pty)
+        {
+            return Ok(());
+        }
+        cleanup();
+        self.set_running(id, false)?;
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
-        let _ = self.set_running(id, false);
+        Ok(())
     }
 
     fn record_events(&self, id: &str, backend: &str, events: Vec<Event>) {
@@ -4368,6 +4387,43 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn turn_cleanup_precedes_idle_and_cannot_retire_another_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "cleanup");
+        store.set_running("cleanup", true).unwrap();
+        store
+            .active
+            .lock()
+            .unwrap()
+            .insert("cleanup".into(), "current-pty".into());
+        let output = store.response_output_dir("cleanup");
+        fs::create_dir_all(&output).unwrap();
+        fs::write(output.join("result.txt"), "turn output").unwrap();
+
+        store
+            .finish_turn("cleanup", "previous-pty", || {
+                panic!("stale owner cleaned current files")
+            })
+            .unwrap();
+        assert!(output.exists());
+        assert!(store.get("cleanup").unwrap().running);
+        store
+            .finish_turn("cleanup", "current-pty", || {
+                assert!(store.get("cleanup").unwrap().running);
+                assert_eq!(
+                    store.active.lock().unwrap().get("cleanup").unwrap(),
+                    "current-pty"
+                );
+                fs::remove_dir_all(&output).unwrap();
+            })
+            .unwrap();
+        assert!(!output.exists());
+        assert!(!store.get("cleanup").unwrap().running);
+        assert!(!store.active.lock().unwrap().contains_key("cleanup"));
     }
 
     #[test]
