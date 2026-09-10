@@ -24,15 +24,18 @@ struct ClientChatComposer: View {
     var onSendNow: () -> Void = {}
     var onStop: () -> Void
     var onKeyboardDidHide: () -> Void = {}
-    var onAttach: (ChatInboxItem) async -> Void
+    var onAttach: (ChatInboxItem, WorkReference) async -> Void
     var onRemove: (ChatAttachment) -> Void
     var onOpenSetup: () -> Void
+    var onImportURLs: ([URL], WorkReference) -> Void
     var onDropURLs: ([URL]) -> Void
     var onDropText: ([String]) -> Void
     var onDropData: ([Data]) -> Void
     var onDropTargeted: (Bool) -> Void
 
+    @State private var importOwner: WorkReference?
     @State private var importing = false
+    @State private var photoOwner: WorkReference?
     @State private var pickingPhotos = false
     @State private var urlDropTargeted = false
     @State private var textDropTargeted = false
@@ -151,8 +154,8 @@ struct ClientChatComposer: View {
             allowedContentTypes: [.item],
             allowsMultipleSelection: true
         ) { result in
-            if case let .success(urls) = result {
-                onDropURLs(urls)
+            if case let .success(urls) = result, let owner = importOwner {
+                onImportURLs(urls, owner)
             }
         }
         .photosPicker(
@@ -162,8 +165,9 @@ struct ClientChatComposer: View {
             matching: .images
         )
         .onChange(of: photos) { _, items in
-            guard !items.isEmpty else { return }
-            Task { await ingest(photos: items) }
+            guard !items.isEmpty, let owner = photoOwner else { return }
+            photos = []
+            Task { await ingest(photos: items, owner: owner) }
         }
         // Paste is offered from the attach menu. `onPasteCommand` is Mac-only.
     }
@@ -185,8 +189,14 @@ struct ClientChatComposer: View {
 
     private var attachControl: some View {
         Menu {
-            Button("Choose files", .attach) { importing = true }
-            Button("Choose photos", .attach) { pickingPhotos = true }
+            Button("Choose files", .attach) {
+                importOwner = model.currentReference
+                importing = true
+            }
+            Button("Choose photos", .attach) {
+                photoOwner = model.currentReference
+                pickingPhotos = true
+            }
             if ChatInbox.pasteboardHasAttachment() {
                 Button("Paste from clipboard", .attach) {
                     ingest(items: ChatInbox.pasteboardItems())
@@ -301,7 +311,7 @@ struct ClientChatComposer: View {
         onDropTargeted(dropTargeted)
     }
 
-    private func ingest(photos items: [PhotosPickerItem]) async {
+    private func ingest(photos items: [PhotosPickerItem], owner: WorkReference) async {
         var staged: [ChatInboxItem] = []
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty else {
@@ -315,15 +325,19 @@ struct ClientChatComposer: View {
                 )
             )
         }
-        photos = []
-        ingest(items: staged)
+        ingest(items: staged, owner: owner)
     }
 
     private func ingest(items: [ChatInboxItem]) {
+        guard let owner = model.currentReference else { return }
+        ingest(items: items, owner: owner)
+    }
+
+    private func ingest(items: [ChatInboxItem], owner: WorkReference) {
         guard !items.isEmpty else { return }
         Task {
             for item in items {
-                await onAttach(item)
+                await onAttach(item, owner)
             }
         }
     }

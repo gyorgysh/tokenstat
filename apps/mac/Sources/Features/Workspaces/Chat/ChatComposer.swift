@@ -20,11 +20,12 @@ struct ChatComposer: View {
     var onSend: () -> Void
     var onSendNow: () -> Void = {}
     var onStop: () -> Void
-    var onAttach: (ChatInboxItem) async -> Void
+    var onAttach: (ChatInboxItem, WorkReference) async -> Void
     var onRemove: (ChatAttachment) -> Void
     var onDropProviders: ([NSItemProvider]) -> Void
     var onDropTargeted: (Bool) -> Void
 
+    @State private var importOwner: WorkReference?
     @State private var importing = false
     @State private var dropTargeted = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -46,8 +47,8 @@ struct ChatComposer: View {
             allowedContentTypes: [.item],
             allowsMultipleSelection: true
         ) { result in
-            if case let .success(urls) = result {
-                ingest(urls: urls)
+            if case let .success(urls) = result, let owner = importOwner {
+                ingest(items: urls.compactMap(ChatInbox.item(from:)), owner: owner)
             }
         }
     }
@@ -121,7 +122,8 @@ struct ChatComposer: View {
         }
         #if os(macOS)
         .onPasteCommand(of: [.image, .fileURL, .png, .jpeg, .pdf]) { providers in
-            Task { await ingest(providers: providers) }
+            guard let owner = model.currentReference else { return }
+            Task { await ingest(providers: providers, owner: owner) }
         }
         #endif
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropTargeted)
@@ -151,7 +153,10 @@ struct ChatComposer: View {
 
     private var attachControl: some View {
         Menu {
-            Button("Choose files", .attach) { importing = true }
+            Button("Choose files", .attach) {
+                importOwner = model.currentReference
+                importing = true
+            }
             if ChatInbox.pasteboardHasAttachment() {
                 Button("Paste from clipboard", .attach) {
                     ingest(items: ChatInbox.pasteboardItems())
@@ -235,19 +240,20 @@ struct ChatComposer: View {
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
     }
 
-    private func ingest(urls: [URL]) {
-        ingest(items: urls.compactMap(ChatInbox.item(from:)))
-    }
-
-    private func ingest(providers: [NSItemProvider]) async {
-        ingest(items: await ChatInbox.items(from: providers))
+    private func ingest(providers: [NSItemProvider], owner: WorkReference) async {
+        ingest(items: await ChatInbox.items(from: providers), owner: owner)
     }
 
     private func ingest(items: [ChatInboxItem]) {
+        guard let owner = model.currentReference else { return }
+        ingest(items: items, owner: owner)
+    }
+
+    private func ingest(items: [ChatInboxItem], owner: WorkReference) {
         guard !items.isEmpty else { return }
         Task {
             for item in items {
-                await onAttach(item)
+                await onAttach(item, owner)
             }
         }
     }

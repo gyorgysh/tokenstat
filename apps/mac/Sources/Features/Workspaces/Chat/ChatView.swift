@@ -179,10 +179,10 @@ struct ChatView: View {
                         onSend: { submit(from: chat) },
                         onSendNow: { submit(from: chat, sendNow: true) },
                         onStop: { Task { await model.stop() } },
-                        onAttach: { item in await model.attach(item) },
+                        onAttach: { item, owner in await model.attach(item, to: owner) },
                         onRemove: { model.removeAttachment($0) },
                         onDropProviders: { providers in
-                            Task { await receive(providers) }
+                            receive(providers)
                         },
                         onDropTargeted: { composerDropTargeted = $0 }
                     )
@@ -217,7 +217,7 @@ struct ChatView: View {
         }
         .background(Theme.background)
         .onDrop(of: ChatInbox.dropTypes, isTargeted: $paneDropTargeted) { providers in
-            Task { await receive(providers) }
+            receive(providers)
             return true
         }
         .overlay(alignment: .topTrailing) {
@@ -867,21 +867,39 @@ struct ChatView: View {
         ChatDropExperience()
     }
 
-    private func receive(_ providers: [NSItemProvider]) async {
-        await receive(ChatInbox.drops(from: providers))
+    private func receive(_ providers: [NSItemProvider]) {
+        let owner = model.currentReference
+        let folder = model.folderID
+        let peer = model.peer
+        let scope = WorkSessionContext.shared.readingScope
+        Task {
+            let drops = await ChatInbox.drops(from: providers)
+            guard !drops.isEmpty else { return }
+            var destination = owner
+            if destination == nil {
+                guard model.currentReference == nil, model.folderID == folder, model.peer == peer,
+                      WorkSessionContext.shared.readingScope == scope else { return }
+                await model.create()
+                guard model.folderID == folder, model.peer == peer,
+                      WorkSessionContext.shared.readingScope == scope else { return }
+                destination = model.currentReference
+            }
+            guard let destination else { return }
+            await receive(drops, owner: destination)
+        }
     }
 
-    private func receive(_ drops: [ChatInboxDrop]) async {
-        guard !drops.isEmpty else { return }
-        if model.selected == nil {
-            await model.create()
-        }
+    private func receive(_ drops: [ChatInboxDrop], owner: WorkReference) async {
         for drop in drops {
             switch drop {
             case let .attachment(item):
-                await model.attach(item)
+                await model.attach(item, to: owner)
             case let .text(text):
-                insertInDraft(text)
+                if model.currentReference == owner {
+                    insertInDraft(text)
+                } else {
+                    model.appendImportedText(text, to: owner)
+                }
             case .folder:
                 showDropNotice("Attach files, not folders")
             }

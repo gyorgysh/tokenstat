@@ -1455,27 +1455,35 @@ final class ChatModel {
     }
 
     func attach(_ item: ChatInboxItem) async {
-        guard let selected, !sending else { return }
-        guard attachments.count + stagingAttachments < 20 else {
+        guard let reference = currentReference else { return }
+        await attach(item, to: reference)
+    }
+
+    /// Imports retain the conversation chosen before file preparation begins.
+    /// Later files in a batch must not follow navigation to another draft.
+    func attach(_ item: ChatInboxItem, to reference: WorkReference) async {
+        guard WorkReferenceKey.conversation(reference) != nil,
+              WorkCacheAccess.canRead(reference) else { return }
+        let isCurrent = currentReference == reference
+        guard !isCurrent || !sending else { return }
+        let existing = isCurrent ? attachments : (ChatDraftStore.shared.draft(for: reference)?.attachments ?? [])
+        guard existing.count + stagingAttachments < 20 else {
             error = "A draft can include up to 20 files. Remove a file before adding another."
             return
         }
-        let generation = selectionGeneration
         if item.data.count > ChatInbox.maxBytes {
             error = "An attachment is limited to 12 MB."
             return
         }
-        guard let reference = currentReference, WorkCacheAccess.canRead(reference) else { return }
-        saveDraftNow()
+        if isCurrent { saveDraftNow() }
         stagingAttachments += 1
         defer { stagingAttachments -= 1 }
         do {
             let attachment = try await ChatLocalAttachmentStore.shared.stage(data: item.data,
                 name: item.name, mediaType: item.mediaType, reference: reference)
-            guard selectionMatches(id: selected.id, generation: generation), currentReference == reference,
-                  WorkCacheAccess.canRead(reference) else {
-                // The person picked this file for the original conversation.
-                // Navigation changes where it is displayed, never its owner.
+            guard currentReference == reference, WorkCacheAccess.canRead(reference) else {
+                // Keep an import that completed after navigation in its own
+                // draft, alongside any writing saved while it was loading.
                 let original = ChatDraftStore.shared.draft(for: reference)
                 ChatDraftStore.shared.save(text: original?.text ?? "", attachments: (original?.attachments ?? []) + [attachment], for: reference)
                 return
@@ -1484,12 +1492,22 @@ final class ChatModel {
             if let preview = ChatThumbnail.make(from: item.data) {
                 attachmentPreviews[attachment.id] = preview
             }
-            // A file staged for an unsent message is part of that draft.
             saveDraftNow()
         } catch {
-            if selectionMatches(id: selected.id, generation: generation) {
+            if currentReference == reference {
                 self.error = error.localizedDescription
             }
+        }
+    }
+
+    func appendImportedText(_ text: String, to reference: WorkReference) {
+        guard WorkCacheAccess.canRead(reference) else { return }
+        if currentReference == reference {
+            draft.append(text)
+        } else {
+            let original = ChatDraftStore.shared.draft(for: reference)
+            ChatDraftStore.shared.save(text: (original?.text ?? "") + text,
+                attachments: original?.attachments ?? [], for: reference)
         }
     }
 

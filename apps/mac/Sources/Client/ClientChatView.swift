@@ -443,17 +443,17 @@ struct ClientChatThread: View {
         // that system gets nothing from us. Below 26 there is no bar to fight.
         .clientNavigationBarBackground()
         .dropDestination(for: String.self) { items, _ in
-            Task { await receive(items.map(ChatInboxDrop.text)) }
+            receive(items.map(ChatInboxDrop.text))
             return !items.isEmpty
         } isTargeted: { textDropTargeted = $0 }
         .dropDestination(for: Data.self) { items, _ in
             let drops = items.compactMap(ChatInbox.imageDrop(from:))
-            Task { await receive(drops) }
+            receive(drops)
             return !drops.isEmpty
         } isTargeted: { dataDropTargeted = $0 }
         .dropDestination(for: URL.self) { items, _ in
             let drops = ChatInbox.drops(from: items)
-            Task { await receive(drops) }
+            receive(drops)
             return !drops.isEmpty
         } isTargeted: { urlDropTargeted = $0 }
         .overlay(alignment: .topTrailing) {
@@ -635,17 +635,21 @@ struct ClientChatThread: View {
                         guard follow.pinned else { return }
                         followPulse += 1
                     },
-                    onAttach: { item in await model.attach(item) },
+                    onAttach: { item, owner in await model.attach(item, to: owner) },
                     onRemove: { model.removeAttachment($0) },
                     onOpenSetup: { if model.savedCopy == nil { showingSetup = true } },
+                    onImportURLs: { urls, owner in
+                        let drops = ChatInbox.drops(from: urls)
+                        Task { await receive(drops, owner: owner) }
+                    },
                     onDropURLs: { urls in
-                        Task { await receive(ChatInbox.drops(from: urls)) }
+                        receive(ChatInbox.drops(from: urls))
                     },
                     onDropText: { items in
-                        Task { await receive(items.map(ChatInboxDrop.text)) }
+                        receive(items.map(ChatInboxDrop.text))
                     },
                     onDropData: { items in
-                        Task { await receive(items.compactMap(ChatInbox.imageDrop(from:))) }
+                        receive(items.compactMap(ChatInbox.imageDrop(from:)))
                     },
                     onDropTargeted: { composerDropTargeted = $0 }
                 )
@@ -1219,13 +1223,18 @@ struct ClientChatThread: View {
         urlDropTargeted || textDropTargeted || dataDropTargeted || composerDropTargeted
     }
 
-    private func receive(_ drops: [ChatInboxDrop]) async {
+    private func receive(_ drops: [ChatInboxDrop]) {
+        guard let owner = model.currentReference else { return }
+        Task { await receive(drops, owner: owner) }
+    }
+
+    private func receive(_ drops: [ChatInboxDrop], owner: WorkReference) async {
         for drop in drops {
             switch drop {
             case let .attachment(item):
-                await model.attach(item)
+                await model.attach(item, to: owner)
             case let .text(text):
-                model.draft.append(text)
+                model.appendImportedText(text, to: owner)
             case .folder:
                 showDropNotice("Attach files, not folders")
             }
