@@ -23,7 +23,7 @@ struct ChatDraftNotice: View {
                 text: "Not saved on this device. Your words are here until you close the app."
             ) {
                 Button("Try again", .refresh, action: retrySave)
-                    .modifier(NoticeAction())
+                    .buttonStyle(NoticeActionButtonStyle())
             }
         } else if let unconfirmed {
             row(
@@ -31,11 +31,11 @@ struct ChatDraftNotice: View {
                 tint: unconfirmed.checking ? Theme.accent : Theme.warning,
                 text: unconfirmed.checking
                     ? "Checking whether the machine took this message…"
-                    : "The machine did not answer. Sending again is safe: it will not run twice."
+                    : "Delivery is not confirmed. Check again before starting another message."
             ) {
                 if !unconfirmed.checking, let checkAgain {
                     Button("Check again", .refresh, action: checkAgain)
-                        .modifier(NoticeAction())
+                        .buttonStyle(NoticeActionButtonStyle())
                 }
             }
         }
@@ -60,19 +60,5 @@ struct ChatDraftNotice: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityElement(children: .contain)
-    }
-}
-
-/// The quiet control in a notice: a word and a glyph, no filled shape. The
-/// notice is already tinted, and a button on top of it would compete with the
-/// Send button a row below.
-private struct NoticeAction: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .buttonStyle(.plain)
-            .environment(\.compactActions, true)
-            .font(Theme.font(11, weight: .medium))
-            .foregroundStyle(Theme.accent)
-            .frame(minWidth: 44, minHeight: 28)
     }
 }

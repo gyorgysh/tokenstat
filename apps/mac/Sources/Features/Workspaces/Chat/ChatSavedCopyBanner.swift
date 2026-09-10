@@ -44,7 +44,7 @@ struct ChatSavedCopyBanner: View {
                 .accessibilityLabel("Checking for updates")
             } else if canCheck {
                 Button("Check for updates", .refresh, action: onCheck)
-                    .modifier(NoticeActionButtonStyle())
+                    .buttonStyle(NoticeActionButtonStyle())
             }
         }
         .padding(.horizontal, Theme.Space.s)
@@ -67,13 +67,18 @@ struct ChatSavedCopyBanner: View {
 /// The quiet control in a banner: a word and a glyph, no filled shape. The
 /// banner is already tinted, and a button on top of it would compete with the
 /// Send button a row below.
-struct NoticeActionButtonStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .buttonStyle(.plain)
+struct NoticeActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
             .environment(\.compactActions, true)
             .font(Theme.font(11, weight: .medium))
             .foregroundStyle(Theme.accent)
+            #if os(macOS)
             .frame(minWidth: 44, minHeight: 28)
+            #else
+            .frame(minWidth: 44, minHeight: 44)
+            #endif
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.65 : 1)
     }
 }
