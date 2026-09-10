@@ -68,12 +68,16 @@ final class ClientNavigationModel {
 
     var currentRoute: WorkMobileRoute? {
         guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return nil }
+        // A presented conversation is above the underlying terminal or folder,
+        // whose disappearance may arrive after the app saves its background route.
+        if let chat = presentedChat?.reference, chat.scope == scope {
+            return WorkMobileRoute(scope: scope, tab: destination.rawValue, reference: chat, section: "chat")
+        }
         if let terminal = visibleTerminal, terminal.scope == scope {
             return WorkMobileRoute(scope: scope, tab: destination.rawValue,
                                    reference: terminal, section: "sessions")
         }
-        let chat = presentedChat?.reference ?? visibleChat
-        if let chat, chat.scope == scope {
+        if let chat = visibleChat, chat.scope == scope {
             return WorkMobileRoute(scope: scope, tab: destination.rawValue, reference: chat, section: "chat")
         }
         if let folder = rememberedWorkspace, folder.scope == scope {
