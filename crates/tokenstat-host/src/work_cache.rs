@@ -91,6 +91,48 @@ struct Store {
     scopes: HashMap<String, HashMap<String, Record>>,
 }
 
+// Validate encoded lengths without decoding every encrypted record on each list.
+fn encoded_size(value: &str) -> Option<usize> {
+    if value.is_empty() || value.len() % 4 != 0 {
+        return None;
+    }
+    let padding = value.bytes().rev().take_while(|byte| *byte == b'=').count();
+    if padding > 2
+        || !value.as_bytes()[..value.len() - padding]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/'))
+    {
+        return None;
+    }
+    Some(value.len() / 4 * 3 - padding)
+}
+
+fn validate_store(store: &Store) -> Result<(), String> {
+    let mut total = 0_u64;
+    for (scope, records) in &store.scopes {
+        if !valid_token(scope, MAX_SCOPE_LEN) {
+            return Err("invalid saved work metadata".into());
+        }
+        for (id, record) in records {
+            let ciphertext_bytes = encoded_size(&record.ciphertext)
+                .filter(|size| (16..=MAX_RECORD_BYTES + 16).contains(size))
+                .ok_or("invalid saved work ciphertext size")?;
+            if record.id != *id
+                || !valid_token(id, MAX_ID_LEN)
+                || !valid_token(&record.item_id, MAX_ID_LEN)
+                || encoded_size(&record.nonce) != Some(24)
+                || record.bytes != (ciphertext_bytes + 24) as u64
+            {
+                return Err("invalid saved work metadata".into());
+            }
+            total = total
+                .checked_add(record.bytes)
+                .ok_or("saved work size overflow")?;
+        }
+    }
+    Ok(())
+}
+
 fn lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -136,6 +178,7 @@ fn load() -> Result<(Store, bool), String> {
             if store.schema_version == 1
                 || (store.schema_version == 0 && store.scopes.is_empty()) =>
         {
+            validate_store(&store)?;
             Ok((store, take_marker()))
         }
         Ok(_) => Err("unsupported work cache version".into()),
@@ -1138,6 +1181,49 @@ mod tests {
             assert_eq!(listed["repaired"], json!(true));
             assert_eq!(listed["records"].as_array().unwrap().len(), 0);
         });
+    }
+
+    #[test]
+    fn invalid_accounting_cannot_bypass_quotas_or_replace_stored_work() {
+        with_path(fresh_path(), || {
+            put(&params("s", "kept")).unwrap();
+            let original = fs::read(path()).unwrap();
+            for claimed in [0, u64::MAX] {
+                let mut damaged: Store = serde_json::from_slice(&original).unwrap();
+                damaged
+                    .scopes
+                    .get_mut("s")
+                    .unwrap()
+                    .get_mut("kept")
+                    .unwrap()
+                    .bytes = claimed;
+                let bytes = serde_json::to_vec(&damaged).unwrap();
+                fs::write(path(), &bytes).unwrap();
+                assert!(stats(None).is_err());
+                assert!(put(&params("s", "new")).is_err());
+                assert_eq!(fs::read(path()).unwrap(), bytes);
+            }
+            fs::write(path(), original).unwrap();
+            assert_eq!(stats(None).unwrap()["records"], 1);
+            assert!(
+                get(&KeyedParams {
+                    key: KEY.into(),
+                    scope: "s".into(),
+                    id: "kept".into()
+                })
+                .is_ok()
+            );
+        });
+    }
+
+    #[test]
+    fn encoded_record_sizes_require_complete_base64() {
+        for count in [1, 2, 3, 16, 24, 255, 1024] {
+            assert_eq!(encoded_size(&b64encode(&vec![7; count])), Some(count));
+        }
+        for invalid in ["", "A", "AAA", "====", "A===", "AA=A", "AA?=", "AAAA\n"] {
+            assert_eq!(encoded_size(invalid), None);
+        }
     }
 
     #[test]
