@@ -2207,8 +2207,8 @@ final class ChatModel {
               !loadingResponseAttachments.contains(attachment.id),
               userInitiated || !attemptedResponseAttachments.contains(attachment.id)
         else { return }
+        guard let previewReference = currentReference, WorkCacheAccess.canRead(previewReference) else { return }
         let targetPeer = peer
-        let previewReference = currentReference
         let memoryGeneration = attachmentCacheGeneration
         attemptedResponseAttachments.insert(attachment.id)
         loadingResponseAttachments.insert(attachment.id)
@@ -2218,26 +2218,28 @@ final class ChatModel {
                 loadingResponseAttachments.remove(attachment.id)
             }
         }
-        if let previewReference,
-           let saved = await WorkSavedPreview.read(reference: previewReference, attachment: attachment.id) {
+        if let saved = await WorkSavedPreview.read(reference: previewReference, attachment: attachment.id) {
             guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
-                  currentReference == previewReference else { return }
+                  currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
             responseAttachmentData[attachment.id] = saved
             return
         }
         guard savedCopy == nil, selectionMatches(id: id, generation: generation),
               memoryGeneration == attachmentCacheGeneration else { return }
         let cacheEpoch = await ChatAttachmentCache.shared.epoch()
-        guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
-        if let cached = await ChatAttachmentCache.shared.read(peer: targetPeer, chat: id, attachment: attachment.id) {
-            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
+        guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+                  currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
+        if let cached = await ChatAttachmentCache.shared.read(reference: previewReference, attachment: attachment.id) {
+            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+                  currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
             responseAttachmentData[attachment.id] = cached
-            if let previewReference, currentReference == previewReference {
+            if currentReference == previewReference, WorkCacheAccess.canSave(previewReference) {
                 await WorkSavedPreview.save(reference: previewReference, attachment: attachment, data: cached)
             }
             return
         }
-        guard selectionMatches(id: id, generation: generation),
+        guard selectionMatches(id: id, generation: generation), currentReference == previewReference,
+              WorkCacheAccess.canSave(previewReference),
               userInitiated || ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: attachment.size)
         else { return }
         do {
@@ -2246,14 +2248,18 @@ final class ChatModel {
                   data.count <= ChatInbox.maxBytes else {
                 throw CocoaError(.fileReadCorruptFile)
             }
-            guard await ChatAttachmentCache.shared.write(data, peer: targetPeer, chat: id, attachment: attachment.id, epoch: cacheEpoch) else { return }
-            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
+            guard selectionMatches(id: id, generation: generation), currentReference == previewReference,
+                  WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else { return }
+            guard await ChatAttachmentCache.shared.write(data, reference: previewReference, attachment: attachment.id, epoch: cacheEpoch) else { return }
+            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+                  currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
             responseAttachmentData[attachment.id] = data
-            if let previewReference, currentReference == previewReference {
+            if currentReference == previewReference, WorkCacheAccess.canSave(previewReference) {
                 await WorkSavedPreview.save(reference: previewReference, attachment: attachment, data: data)
             }
         } catch {
-            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
+            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+                  currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
             responseAttachmentErrors[attachment.id] = Self.downloadFailure(error)
         }
     }

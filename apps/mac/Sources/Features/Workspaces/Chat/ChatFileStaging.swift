@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import Foundation
+import CryptoKit
 
 /// Writing a downloaded attachment somewhere the system can open it.
 ///
@@ -22,7 +23,10 @@ enum ChatFileStaging {
     /// Throws rather than returning nil. A silent failure here is a card that
     /// does nothing when tapped and says nothing about why.
     static func stage(_ data: Data, id: String, name: String, into root: URL? = nil) throws -> URL {
-        let safeID = sanitized(id)
+        // A different file with a reused host ID must not overwrite a copy
+        // already open in another application or account's window.
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let safeID = digest
         let safeName = sanitized(name)
         let base = root ?? directory
         // Join with path strings, not `URL.appendingPathComponent`. On iOS a
@@ -33,7 +37,7 @@ enum ChatFileStaging {
             .appendingPathComponent(safeID)
         try FileManager.default.createDirectory(
             atPath: folderPath,
-            withIntermediateDirectories: true
+            withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
         )
         let filePath = (folderPath as NSString).appendingPathComponent(safeName)
         let prefix = folderPath.hasSuffix("/") ? folderPath : folderPath + "/"
@@ -55,6 +59,7 @@ enum ChatFileStaging {
             options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
         )
         #endif
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath)
         return url
     }
 

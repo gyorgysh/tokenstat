@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Run with ChatInbox.swift using swiftc -parse-as-library, then run the binary.
+// Run with ChatInbox.swift WorkReference.swift using swiftc -parse-as-library, then run the binary.
 import Foundation
 
 @main
@@ -11,26 +11,31 @@ struct ChatAttachmentCacheTests {
     static func main() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
+        func reference(_ host: String = "phone-host", chat: String = "chat", account: String = "one", folder: String = "folder") -> WorkReference {
+            .init(scope: .local(installationID: account), hostIdentity: host, workspaceID: folder, kind: .conversation, itemID: chat)
+        }
         let cache = ChatAttachmentCache(directory: root, budget: 1024)
         let bytes = Data("file contents".utf8)
-        await cache.write(bytes, peer: "phone-host", chat: "chat", attachment: "file")
-        require(await cache.read(peer: "phone-host", chat: "chat", attachment: "file") == bytes, "Byte round trip")
-        require(await cache.read(peer: "other-host", chat: "chat", attachment: "file") == nil, "Peer isolation")
-        require(await cache.read(peer: "phone-host", chat: "other-chat", attachment: "file") == nil, "Chat isolation")
+        await cache.write(bytes, reference: reference(), attachment: "file")
+        require(await cache.read(reference: reference(), attachment: "file") == bytes, "Byte round trip")
+        require(await cache.read(reference: reference("other-host"), attachment: "file") == nil, "Peer isolation")
+        require(await cache.read(reference: reference(chat: "other-chat"), attachment: "file") == nil, "Chat isolation")
+        require(await cache.read(reference: reference(account: "other"), attachment: "file") == nil, "Account isolation")
+        require(await cache.read(reference: reference(folder: "other"), attachment: "file") == nil, "Folder isolation")
         let reopened = ChatAttachmentCache(directory: root)
-        require(await reopened.read(peer: "phone-host", chat: "chat", attachment: "file") == bytes, "Persistent reuse")
+        require(await reopened.read(reference: reference(), attachment: "file") == bytes, "Persistent reuse")
         let expired = ChatAttachmentCache(directory: root, lifetime: 0)
-        require(await expired.read(peer: "phone-host", chat: "chat", attachment: "file") == nil, "Expired cache miss")
+        require(await expired.read(reference: reference(), attachment: "file") == nil, "Expired cache miss")
 
         let smallRoot = root.appendingPathComponent("bounded")
         let bounded = ChatAttachmentCache(directory: smallRoot, budget: 8)
-        await bounded.write(Data([1, 1, 1, 1]), peer: nil, chat: "chat", attachment: "old")
+        await bounded.write(Data([1, 1, 1, 1]), reference: reference(), attachment: "old")
         let firstFile = try FileManager.default.contentsOfDirectory(at: smallRoot, includingPropertiesForKeys: nil)[0]
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: firstFile.path)
-        await bounded.write(Data([2, 2, 2, 2]), peer: nil, chat: "chat", attachment: "second")
-        await bounded.write(Data([3, 3, 3, 3]), peer: nil, chat: "chat", attachment: "third")
-        require(await bounded.read(peer: nil, chat: "chat", attachment: "old") == nil, "Oldest evicted")
-        require(await bounded.read(peer: nil, chat: "chat", attachment: "third") == Data([3, 3, 3, 3]), "Newest retained")
+        await bounded.write(Data([2, 2, 2, 2]), reference: reference(), attachment: "second")
+        await bounded.write(Data([3, 3, 3, 3]), reference: reference(), attachment: "third")
+        require(await bounded.read(reference: reference(), attachment: "old") == nil, "Oldest evicted")
+        require(await bounded.read(reference: reference(), attachment: "third") == Data([3, 3, 3, 3]), "Newest retained")
         let sizes = try FileManager.default.contentsOfDirectory(at: smallRoot, includingPropertiesForKeys: [.fileSizeKey])
             .map { try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0 }
         require(sizes.reduce(0, +) <= 8, "Disk budget")
@@ -45,12 +50,12 @@ struct ChatAttachmentCacheTests {
         try bytes.write(to: previews.appendingPathComponent("preview.txt"))
         let purgeCache = ChatAttachmentCache(directory: purgeRoot, previewDirectory: previews)
         let epoch = await purgeCache.epoch()
-        await purgeCache.write(bytes, peer: nil, chat: "chat", attachment: "file", epoch: epoch)
+        await purgeCache.write(bytes, reference: reference(), attachment: "file", epoch: epoch)
         require(await purgeCache.usedBytes() == bytes.count * 2, "Previews counted")
         try await purgeCache.purge()
         require(await purgeCache.usedBytes() == 0, "Purge downloads and previews")
-        require(!(await purgeCache.write(bytes, peer: nil, chat: "chat", attachment: "late", epoch: epoch)), "Late download cannot restore purge")
-        require(await purgeCache.read(peer: nil, chat: "chat", attachment: "late") == nil, "Purged bytes stay absent")
+        require(!(await purgeCache.write(bytes, reference: reference(), attachment: "late", epoch: epoch)), "Late download cannot restore purge")
+        require(await purgeCache.read(reference: reference(), attachment: "late") == nil, "Purged bytes stay absent")
         require(ChatCachePreferences.sizes.contains(5) && ChatCachePreferences.days.last == 30, "Supported settings")
         print("Attachment cache and download policy checks passed")
     }

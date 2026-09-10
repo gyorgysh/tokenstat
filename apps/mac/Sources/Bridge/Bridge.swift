@@ -2878,6 +2878,7 @@ extension Bridge {
             return true
         }
         if !allowed, stillOwned, let scope {
+            try? await ChatAttachmentCache.shared.purge()
             await WorkSearchCache.shared.revokeHost(peer, scope: scope)
             await WorkCacheAccess.purge(host: peer, scope: scope)
         }

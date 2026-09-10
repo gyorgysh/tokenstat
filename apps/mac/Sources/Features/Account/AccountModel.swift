@@ -22,7 +22,15 @@ final class AccountModel {
     /// "signed out". Showing a sign-in button before we have checked would
     /// flash the wrong state on every launch.
     var account: Account? {
-        didSet { WorkSessionContext.shared.update(account: account) }
+        didSet {
+            let previous = WorkSessionContext.shared.scope
+            WorkSessionContext.shared.update(account: account)
+            if previous != WorkSessionContext.shared.scope {
+                // Full downloaded files and OS preview copies are reconstructible.
+                // Clear them when ownership changes and invalidate in-flight writes.
+                Task { try? await ChatAttachmentCache.shared.purge() }
+            }
+        }
     }
     /// Local host traffic. Independent of the signed-in account snapshot.
     var remoteStatus: RemoteStatus?

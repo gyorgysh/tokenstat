@@ -441,15 +441,16 @@ actor ChatAttachmentCache {
 
     private var roots: [URL] { [directory, previewDirectory].compactMap { $0 } }
 
-    private func file(peer: String?, chat: String, attachment: String) -> URL? {
-        let key = [peer ?? "local", chat, attachment].map { "\($0.utf8.count):\($0)" }.joined()
+    private func file(reference: WorkReference, attachment: String) -> URL? {
+        guard let owner = WorkReferenceKey.conversation(reference) else { return nil }
+        let key = ["owned-v1", owner, attachment].map { "\($0.utf8.count):\($0)" }.joined()
         let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
         return directory?.appendingPathComponent(digest)
     }
 
-    func read(peer: String?, chat: String, attachment: String) -> Data? {
+    func read(reference: WorkReference, attachment: String) -> Data? {
         if Date().timeIntervalSince(lastPruned) > 60 { try? prune() }
-        guard let url = file(peer: peer, chat: chat, attachment: attachment),
+        guard let url = file(reference: reference, attachment: attachment),
               let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
               let date = values.contentModificationDate,
               Date().timeIntervalSince(date) < lifetime,
@@ -461,17 +462,18 @@ actor ChatAttachmentCache {
     }
 
     @discardableResult
-    func write(_ data: Data, peer: String?, chat: String, attachment: String, epoch: UInt64? = nil) -> Bool {
+    func write(_ data: Data, reference: WorkReference, attachment: String, epoch: UInt64? = nil) -> Bool {
         guard epoch == nil || epoch == generation else { return false }
         guard data.count <= ChatInbox.maxBytes, let directory,
-              let url = file(peer: peer, chat: chat, attachment: attachment) else { return true }
+              let url = file(reference: reference, attachment: attachment) else { return true }
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             #if os(macOS)
             try data.write(to: url, options: .atomic)
             #else
             try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             #endif
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             try prune()
         } catch {
             // Cache failure must not prevent opening the downloaded file.

@@ -19,8 +19,8 @@ struct ChatFileStagingTests {
         )
         require(url.lastPathComponent == "galaxy.jpg", "Keeps the real name")
         require(
-            url.deletingLastPathComponent().lastPathComponent == "output-1",
-            "Lives under the attachment id"
+            url.deletingLastPathComponent().lastPathComponent.count == 64,
+            "Lives under a content digest"
         )
         require(try Data(contentsOf: url) == bytes, "Bytes round trip")
 
@@ -35,20 +35,22 @@ struct ChatFileStagingTests {
             collision, id: "output-1", name: "galaxy.jpg", into: root
         )
         require(try Data(contentsOf: fixed) == collision, "Same size never reuses wrong bytes")
+        require(fixed != url, "A reused ID never overwrites an already opened copy")
+        require(try Data(contentsOf: url) == bytes, "The original open copy keeps its bytes")
 
         let changed = Data("galaxy!!".utf8)
         let rewritten = try ChatFileStaging.stage(
             changed, id: "output-1", name: "galaxy.jpg", into: root
         )
-        require(try Data(contentsOf: rewritten) == changed, "Size change overwrites")
+        require(try Data(contentsOf: rewritten) == changed, "Size change has its own bytes")
 
         let escaped = try ChatFileStaging.stage(
             Data("x".utf8), id: "id", name: "../etc/passwd", into: root
         )
         require(escaped.lastPathComponent == "passwd", "Strips directory components")
         require(
-            escaped.deletingLastPathComponent().lastPathComponent == "id",
-            "Traversal stays inside the id folder"
+            escaped.deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL == root.standardizedFileURL,
+            "Traversal stays inside the staging root"
         )
 
         let unnamed = try ChatFileStaging.stage(
