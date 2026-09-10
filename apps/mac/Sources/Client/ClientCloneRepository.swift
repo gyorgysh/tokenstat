@@ -33,6 +33,7 @@ struct ClientCloneRepository: View {
     @State private var working = false
     @State private var error: String?
     @State private var picking = false
+    @State private var statusAttempt = 0
 
     private var ready: Bool {
         !url.trimmingCharacters(in: .whitespaces).isEmpty && parent != nil
@@ -138,13 +139,21 @@ struct ClientCloneRepository: View {
                     .font(ClientType.label)
                     .foregroundStyle(.secondary)
                 Spacer()
-                if status?.state == "running" || status == nil {
+                if error == nil && (status?.state == "running" || status == nil) {
                     ProgressView().controlSize(.small)
                 }
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)
             ThemeRule()
+            if let error {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Text(error).font(ClientType.caption).foregroundStyle(Theme.controlGlyph)
+                    Button("Check status again", .refresh) { statusAttempt += 1 }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                .padding(Theme.Space.m)
+            }
             ClientTerminalScreen(session: session, hostName: hostName)
             ThemeRule()
             VStack(spacing: Theme.Space.s) {
@@ -162,11 +171,12 @@ struct ClientCloneRepository: View {
             .padding(.horizontal, Theme.Space.m)
             .padding(.bottom, Theme.Space.s)
         }
-        .task { await watch() }
+        .task(id: statusAttempt) { await watch() }
     }
 
     private var headline: String {
-        switch status?.state {
+        if error != nil { return "Clone status unavailable" }
+        return switch status?.state {
         case "done": "Cloned. The folder is registered on \(hostName)."
         case "failed": status?.error ?? "The clone did not finish."
         default: "Cloning onto \(hostName)…"
@@ -185,7 +195,9 @@ struct ClientCloneRepository: View {
     /// Start at the machine's own home, so the common case needs no picking.
     private func defaultParent() async {
         guard parent == nil else { return }
-        parent = try? await Bridge.browse(peer: peer, path: nil).path
+        let suggested = try? await Bridge.browse(peer: peer, path: nil).path
+        guard parent == nil, !Task.isCancelled else { return }
+        parent = suggested
     }
 
     private func start() async {
@@ -210,9 +222,11 @@ struct ClientCloneRepository: View {
     /// on "Cloning…" forever.
     private func watch() async {
         guard let id = session?.hostID else { return }
+        error = nil
         let deadline = Date().addingTimeInterval(1800)
         while Date() < deadline, !Task.isCancelled {
             if let answer = try? await Bridge.cloneStatus(peer: peer, sessionID: id) {
+                guard !Task.isCancelled, session?.hostID == id else { return }
                 status = answer
                 if answer.state != "running" { return }
             }
@@ -220,7 +234,7 @@ struct ClientCloneRepository: View {
         }
         guard !Task.isCancelled else { return }
         if status?.state == "running" || status == nil {
-            self.error = "The clone timed out. Check the terminal above, or try again."
+            self.error = "Status checks stopped after 30 minutes. The clone may still be running. Check the terminal or check its status again."
         }
     }
 }
