@@ -8,7 +8,9 @@
 //! token is what joins those processes into a conversation.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
