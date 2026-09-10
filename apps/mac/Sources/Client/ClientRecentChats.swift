@@ -384,12 +384,14 @@ struct ClientRecentChatView: View {
         guard model.savedCopy == nil, !savedUnavailable,
               let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
         else { return }
-        savedUnavailable = !(await model.loadSavedConversation(reference))
+        let opened = await model.loadSavedConversation(reference)
+        guard !Task.isCancelled, reference.scope == WorkSessionContext.shared.scope else { return }
+        savedUnavailable = !opened
         loaded = true
     }
 
     private func load() async {
-        guard !loadingLive else { return }
+        guard !loadingLive, !needsSavedCopy, model.savedCopy == nil else { return }
         loadingLive = true
         defer { loadingLive = false }
         guard !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else {
@@ -399,7 +401,7 @@ struct ClientRecentChatView: View {
         guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
         func stillCurrent() -> Bool {
             !Task.isCancelled && scope == WorkSessionContext.shared.scope
-                && machine != nil && account.signedIn
+                && machine != nil && account.signedIn && !needsSavedCopy && model.savedCopy == nil
         }
         guard stillCurrent() else { return }
         savedUnavailable = false
