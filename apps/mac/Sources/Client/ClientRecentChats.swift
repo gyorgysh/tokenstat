@@ -269,6 +269,10 @@ struct ClientRecentChatView: View {
     @State private var model = ChatModel()
     @State private var loaded = false
     @State private var savedUnavailable = false
+    @State private var accessAllowed: Bool?
+    @State private var hostProtocol: Int?
+    @State private var liveItemExists: Bool?
+    @State private var loadingLive = false
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
 
@@ -279,11 +283,34 @@ struct ClientRecentChatView: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
 
+    private var availability: WorkDestinationResolver.Availability {
+        WorkDestinationResolver.availability(.init(
+            accountVerified: account.signedIn,
+            hostLinked: machine != nil,
+            accessAllowed: accessAllowed,
+            supported: hostProtocol.map { $0 >= RemoteHostFeature.chat.minimumProtocol },
+            itemExists: liveItemExists,
+            connected: !needsSavedCopy,
+            savedCopy: model.savedCopy != nil
+        ))
+    }
+
     var body: some View {
         Group {
-            if needsSavedCopy, machine != nil {
+            if availability == .accessRequired, account.signedIn, accessAllowed == false {
+                ClientEmptyState(kind: .unreachable, title: "Workspace access is required",
+                    message: "Allow this device on \(hostName), then check again to return to this conversation.",
+                    actionTitle: "Check again", actionIcon: .refresh,
+                    action: { Task { await load() } })
+                    .padding(Theme.Space.m)
+            } else if availability == .unsupportedHost, let hostProtocol {
+                RemoteHostFeatureUpdateView(feature: .chat, hostName: hostName,
+                    hostProtocol: hostProtocol, retry: { Task { await load() } })
+            } else if availability == .itemDeleted {
+                thread
+            } else if needsSavedCopy, machine != nil, account.signedIn {
                 thread.task { await loadSaved() }
-            } else if model.savedCopy != nil, machine != nil {
+            } else if model.savedCopy != nil, machine != nil, account.signedIn {
                 // Reconnecting does not replace the reader or send its draft.
                 thread
             } else {
@@ -362,6 +389,9 @@ struct ClientRecentChatView: View {
     }
 
     private func load() async {
+        guard !loadingLive else { return }
+        loadingLive = true
+        defer { loadingLive = false }
         guard !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else {
             loaded = true
             return
@@ -373,6 +403,11 @@ struct ClientRecentChatView: View {
         }
         guard stillCurrent() else { return }
         savedUnavailable = false
+        accessAllowed = nil
+        hostProtocol = nil
+        liveItemExists = nil
+        model.error = nil
+        loaded = false
         do {
             await ClientDeviceName.publish()
             guard stillCurrent() else { return }
@@ -382,13 +417,18 @@ struct ClientRecentChatView: View {
             guard stillCurrent() else { return }
             let allowed = try await Bridge.workspaceAccessAllowed(peer: peer)
             guard stillCurrent() else { return }
-            guard allowed else {
-                model.error = "Workspace access is required. Allow this device on \(hostName) to open the conversation."
-                return
-            }
+            accessAllowed = allowed
+            guard allowed else { return }
+            let version = try await Bridge.peerProtocolVersion(peer)
+            guard stillCurrent() else { return }
+            hostProtocol = version
+            guard version >= RemoteHostFeature.chat.minimumProtocol else { return }
             await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
             guard stillCurrent() else { return }
             loaded = true
+            if model.error == nil {
+                liveItemExists = model.chats.contains { $0.id == chatID }
+            }
         } catch {
             guard stillCurrent() else { return }
             model.error = error.localizedDescription

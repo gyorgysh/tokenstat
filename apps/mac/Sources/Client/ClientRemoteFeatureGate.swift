@@ -175,7 +175,7 @@ private struct RemoteHostFeatureCheckingView: View {
 /// The paired desktop has answered, but predates a feature on this client.
 /// Reuse the app's living persona rather than a static warning mark: this is a
 /// calm detour while the desktop update installs, not a broken connection.
-private struct RemoteHostFeatureUpdateView: View {
+struct RemoteHostFeatureUpdateView: View {
     let feature: RemoteHostFeature
     let hostName: String?
     let hostProtocol: Int
