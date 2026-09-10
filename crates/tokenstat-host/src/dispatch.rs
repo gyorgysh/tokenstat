@@ -506,6 +506,7 @@ struct ChatParams {
     /// the agent twice. See `chat_receipts`.
     client_message_id: Option<String>,
     client_message_created_at_ms: Option<i64>,
+    expected_revision: Option<u64>,
     attachment_id: Option<String>,
     name: Option<String>,
     data: Option<String>,
@@ -1940,6 +1941,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             &p.attachment_ids.unwrap_or_default(),
             p.client_message_id.as_deref(),
             p.client_message_created_at_ms,
+            p.expected_revision,
         )?)
         .envelope(),
         // What the host already knows about one message. Reporting only: a

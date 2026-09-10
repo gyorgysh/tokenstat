@@ -67,7 +67,7 @@ fn lost_socket_response_and_concurrent_retries_launch_once() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64;
-    let request = json!({"id":1,"method":"chat.send","params":{"id":chat["id"],"text":"One synthetic turn","clientMessageId":"lost-reply","clientMessageCreatedAtMs":now}});
+    let request = json!({"id":1,"method":"chat.send","params":{"id":chat["id"],"text":"One synthetic turn","clientMessageId":"lost-reply","clientMessageCreatedAtMs":now,"expectedRevision":chat["sendRevision"]}});
     // Close the first client without consuming its response. The request may
     // race the retries, but only one of them may accept the message.
     send(&socket, &request, false);
@@ -115,6 +115,19 @@ fn lost_socket_response_and_concurrent_retries_launch_once() {
     let mut conflict = request["params"].clone();
     conflict["text"] = json!("Different words");
     assert_eq!(call("chat.send", conflict)["ok"], false);
+    let current = success("chat.list", json!({"workspaceId":workspace["id"]}))[0].clone();
+    assert_eq!(chat["sendRevision"], 0);
+    assert_eq!(current["sendRevision"], 1);
+    let mut stale = request["params"].clone();
+    stale["clientMessageId"] = json!("stale-revision");
+    assert_eq!(
+        call("chat.send", stale)["error"]["code"],
+        "conversation_changed"
+    );
+    assert_eq!(
+        success("chat.list", json!({"workspaceId":workspace["id"]}))[0]["sendRevision"],
+        1
+    );
     // An unseen expired id and a client missing the age contract never launch.
     let mut expired = request["params"].clone();
     expired["clientMessageId"] = json!("expired");
@@ -133,7 +146,7 @@ fn lost_socket_response_and_concurrent_retries_launch_once() {
     // The live fixture must still be drained and must never run again on retry.
     let chat_root = data.join("chat").join(chat["id"].as_str().unwrap());
     std::fs::create_dir(chat_root.join("brain.md")).unwrap();
-    let uncertain = json!({"id":chat["id"],"text":"Keep this unresolved turn","clientMessageId":"post-spawn-failure","clientMessageCreatedAtMs":now});
+    let uncertain = json!({"id":chat["id"],"text":"Keep this unresolved turn","clientMessageId":"post-spawn-failure","clientMessageCreatedAtMs":now,"expectedRevision":current["sendRevision"]});
     assert_eq!(
         call("chat.send", uncertain.clone())["error"]["code"],
         "delivery_unknown"

@@ -117,6 +117,10 @@ pub struct Conversation {
     pub budget_seconds: u64,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+    /// Changes when setup is edited or a turn is reserved, not for streamed
+    /// output. An old conversation starts at zero until its next such change.
+    #[serde(default)]
+    pub send_revision: u64,
     /// The last human or agent event, separate from `updated_at_ms`: changing
     /// a title or setup must not make a conversation look unread.
     #[serde(default)]
@@ -1123,6 +1127,7 @@ impl Store {
             created_at_ms: now,
             updated_at_ms: now,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         };
@@ -1194,6 +1199,7 @@ impl Store {
                     Some(trimmed.to_string())
                 };
             }
+            chat.send_revision = next_send_revision(chat.send_revision)?;
             chat.updated_at_ms = now_ms();
             Ok(chat.clone())
         })
@@ -1812,6 +1818,7 @@ impl Store {
         attachment_ids: &[String],
         client_message_id: Option<&str>,
         client_message_created_at_ms: Option<i64>,
+        expected_revision: Option<u64>,
     ) -> Result<Conversation, DispatchError> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
@@ -1877,6 +1884,12 @@ impl Store {
         }
         if client_message_id.is_some() {
             crate::chat_receipts::validate_created_at(client_message_created_at_ms, now_ms())?;
+        }
+        if expected_revision.is_some_and(|expected| expected != chat.send_revision) {
+            return Err(DispatchError::new(
+                "conversation_changed",
+                "This conversation changed before your message was sent. Review the latest conversation and try again. Your pending copy stays here.",
+            ));
         }
         if chat.running
             || self
@@ -2054,6 +2067,12 @@ impl Store {
         // Written before anything is started, so a host that dies between the
         // spawn and its answer leaves a record to reconcile against rather
         // than a message the next attempt would run a second time.
+        // Reserve a new revision durably before launch. Even a failed spawn
+        // consumes it: another client must review the changed launch intent.
+        self.edit_conversation(id, |current| {
+            current.send_revision = next_send_revision(current.send_revision)?;
+            Ok(())
+        })?;
         let accepted_at = now_ms();
         if let Some(key) = &receipt_key {
             self.write_receipt(
@@ -3618,6 +3637,12 @@ fn parse_cursor(raw: &str, len: u64, first: u64) -> Option<u64> {
     Some(start)
 }
 
+fn next_send_revision(revision: u64) -> Result<u64, String> {
+    revision
+        .checked_add(1)
+        .ok_or_else(|| "This conversation cannot accept another revision.".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3903,6 +3928,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: true,
         });
@@ -3972,6 +3998,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         };
@@ -4067,6 +4094,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         };
@@ -4169,6 +4197,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         });
@@ -4222,6 +4251,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         });
@@ -4387,6 +4417,67 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn send_revision_survives_reload_and_rejects_stale_setup_before_launch() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "revision");
+        let mut legacy = serde_json::to_value(store.get("revision").unwrap()).unwrap();
+        legacy.as_object_mut().unwrap().remove("sendRevision");
+        assert_eq!(
+            serde_json::from_value::<Conversation>(legacy)
+                .unwrap()
+                .send_revision,
+            0
+        );
+        let stale = Arc::new(Store::load_at(store.root.clone()));
+        let first = store
+            .update(
+                "revision",
+                Update {
+                    title: Some("Revised setup".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let second = store
+            .update(
+                "revision",
+                Update {
+                    system_prompt: Some("New instructions".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(first.send_revision, 1);
+        assert_eq!(second.send_revision, 2);
+        store.mark_last_message("revision", 10, "agent").unwrap();
+        store.set_running("revision", false).unwrap();
+        assert_eq!(
+            Store::load_at(store.root.clone())
+                .get("revision")
+                .unwrap()
+                .send_revision,
+            2
+        );
+        assert_eq!(
+            stale
+                .send(
+                    "revision",
+                    "Preserve these words",
+                    &[],
+                    Some("stale"),
+                    Some(now_ms()),
+                    Some(0)
+                )
+                .unwrap_err()
+                .code,
+            "conversation_changed"
+        );
+        assert!(!store.receipts_path("revision").exists());
+        assert!(!store.response_output_dir("revision").exists());
     }
 
     #[test]
@@ -4957,20 +5048,27 @@ mod tests {
         // Returns the conversation without reaching the workspace lookup,
         // which is the first thing a real send needs and does not exist here.
         let chat = store
-            .send("chat-receipt", "hello", &[], Some("m-1"), None)
+            .send("chat-receipt", "hello", &[], Some("m-1"), None, None)
             .unwrap();
         assert_eq!(chat.id, "chat-receipt");
         assert!(!store.events_path("chat-receipt").exists());
 
         // The same name for different words is a mistake, not a repeat.
         let conflict = store
-            .send("chat-receipt", "something else", &[], Some("m-1"), None)
+            .send(
+                "chat-receipt",
+                "something else",
+                &[],
+                Some("m-1"),
+                None,
+                None,
+            )
             .unwrap_err();
         assert!(conflict.message.contains("different message"), "{conflict}");
 
         // And a name that could shape a key in the ledger is refused.
         let bad = store
-            .send("chat-receipt", "hello", &[], Some("../escape"), None)
+            .send("chat-receipt", "hello", &[], Some("../escape"), None, None)
             .unwrap_err();
         assert!(bad.message.contains("not usable"), "{bad}");
     }
@@ -4983,7 +5081,7 @@ mod tests {
         store.set_running("chat-running", true).unwrap();
         // Without a receipt this is the ordinary refusal.
         let busy = store
-            .send("chat-running", "hello", &[], None, None)
+            .send("chat-running", "hello", &[], None, None, None)
             .unwrap_err();
         assert!(busy.message.contains("already responding"), "{busy}");
         // With one it is the answer the client was waiting for. The case this
@@ -5002,7 +5100,7 @@ mod tests {
             )
             .unwrap();
         let chat = store
-            .send("chat-running", "hello", &[], Some("m-4"), None)
+            .send("chat-running", "hello", &[], Some("m-4"), None, None)
             .unwrap();
         assert!(chat.running);
     }
@@ -5034,7 +5132,7 @@ mod tests {
                     .unwrap();
             }
             let error = store
-                .send("chat-pending", "hello", &[], Some("m-2"), None)
+                .send("chat-pending", "hello", &[], Some("m-2"), None, None)
                 .unwrap_err();
             assert_eq!(error.code, crate::error::DELIVERY_UNKNOWN);
             let ledger =
@@ -5060,7 +5158,7 @@ mod tests {
         let path = store.receipts_path("corrupt");
         fs::write(&path, b"{broken").unwrap();
         let error = store
-            .send("corrupt", "hello", &[], Some("m-1"), None)
+            .send("corrupt", "hello", &[], Some("m-1"), None, None)
             .unwrap_err();
         assert_eq!(error.code, crate::error::DELIVERY_UNKNOWN);
         assert!(store.receipt("corrupt", "m-1").is_err());
@@ -5113,6 +5211,7 @@ mod tests {
                 &[],
                 Some("crashed"),
                 Some(now_ms()),
+                None,
             )
             .unwrap_err();
         assert_eq!(error.code, crate::error::DELIVERY_UNKNOWN);
@@ -5136,7 +5235,14 @@ mod tests {
         store.remove("removed-send").unwrap();
         assert!(
             stale
-                .send("removed-send", "hello", &[], Some("new"), Some(now_ms()))
+                .send(
+                    "removed-send",
+                    "hello",
+                    &[],
+                    Some("new"),
+                    Some(now_ms()),
+                    None
+                )
                 .is_err()
         );
         assert!(!store.root.join("removed-send").exists());
@@ -5383,6 +5489,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         };
@@ -5496,6 +5603,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         };
@@ -5634,6 +5742,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         };
@@ -5735,6 +5844,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         });
@@ -5846,6 +5956,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         });
@@ -5895,6 +6006,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         });
@@ -5971,6 +6083,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         });
@@ -6172,6 +6285,7 @@ mod tests {
             created_at_ms: 1,
             updated_at_ms: 1,
             last_message_at_ms: None,
+            send_revision: 0,
             last_message_author: None,
             running: false,
         });
