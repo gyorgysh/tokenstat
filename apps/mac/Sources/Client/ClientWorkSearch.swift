@@ -33,6 +33,7 @@ struct ClientWorkSearchPresentation: View {
     @State private var model: WorkSearchModel?
     @State private var failure: String?
     @State private var preparing = false
+    @State private var visible = false
 
     var body: some View {
         Group {
@@ -55,13 +56,15 @@ struct ClientWorkSearchPresentation: View {
             }
         }
         .task { await prepare() }
+        .onAppear { visible = true }
+        .onDisappear { visible = false; model?.close() }
         .onChange(of: WorkSessionContext.shared.scope) { _, _ in model?.close(); dismiss() }
         .onChange(of: WorkAccessStore.shared.generation) { _, _ in model?.close(); dismiss() }
         .onChange(of: account.account?.machines.compactMap(\.publicIdentity)) { _, _ in model?.close(); dismiss() }
     }
 
     private func prepare() async {
-        guard !preparing, model == nil, account.signedIn,
+        guard visible, !Task.isCancelled, !preparing, model == nil, account.signedIn,
               let scope = WorkSessionContext.shared.scope, let value = account.account else { return }
         preparing = true
         failure = nil
@@ -84,8 +87,9 @@ struct ClientWorkSearchPresentation: View {
         do {
             let includesText = WorkCacheSettings.shared.enabled
             let records = includesText ? try await Bridge.cacheList(scope: WorkCache.scope(for: scope)).records : []
-            guard !Task.isCancelled, account.signedIn, WorkSessionContext.shared.scope == scope,
-                  WorkAccessStore.shared.generation == access else { return }
+            guard visible, !Task.isCancelled, account.signedIn, WorkSessionContext.shared.scope == scope,
+                  WorkAccessStore.shared.generation == access,
+                  Set(account.account?.machines.compactMap(\.publicIdentity) ?? []) == Set(machines.keys) else { return }
             let catalog = WorkSearchCatalog(scope: scope, linkedMachines: machines, allowedHosts: allowed,
                                             knownFolders: known, records: records)
             let model = WorkSearchModel(scope: scope, folders: catalog.folders, machines: catalog.machines,
@@ -99,7 +103,10 @@ struct ClientWorkSearchPresentation: View {
                 : (includesText ? nil : "Saved conversation text is off. Search covers folder information kept on this device.")
             self.model = model
         } catch {
-            guard WorkSessionContext.shared.scope == scope, !Task.isCancelled else { return }
+            guard visible, !Task.isCancelled, account.signedIn,
+                  WorkSessionContext.shared.scope == scope,
+                  WorkAccessStore.shared.generation == access,
+                  Set(account.account?.machines.compactMap(\.publicIdentity) ?? []) == Set(machines.keys) else { return }
             failure = "Saved work could not be opened for search. Unlock this device and try again."
         }
     }
