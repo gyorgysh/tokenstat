@@ -37,6 +37,12 @@ ALLOWED = [
     # this script cannot read, not the value.
     ("App/SyncCard.swift", ".tint(tint)"),
     ("App/UpdateCard.swift", ".tint(tint)"),
+    # Separators inside a pull-down Menu. The menu itself is the platform's
+    # surface, as with alerts and toolbars: a ThemeRule rectangle there would
+    # be a full-bleed custom view where the system draws an inset separator.
+    ("Features/Automations/AutomationsView.swift", "Divider()"),
+    ("Features/Todo/NotesView.swift", "Divider()"),
+    ("Features/Machines/MachinesView.swift", "Divider()"),
 ]
 
 # `.tint(` at the start of a line is the view modifier. `RunOutcome.tint(…)`

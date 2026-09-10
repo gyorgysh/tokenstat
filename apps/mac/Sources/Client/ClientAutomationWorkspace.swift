@@ -66,7 +66,7 @@ struct ClientAutomationWorkspace: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text("Automations").font(ClientType.sectionTitle)
-                TextField("Search automations", text: $search).textFieldStyle(.roundedBorder)
+                TextField("Search automations", text: $search).textFieldStyle(.themed)
                 if session.loaded {
                     Text("\(session.jobs.filter(\.enabled).count) enabled · \(session.runs.filter(\.isRunning).count) running")
                         .font(ClientType.caption).foregroundStyle(.secondary)

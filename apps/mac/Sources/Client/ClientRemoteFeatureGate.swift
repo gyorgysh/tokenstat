@@ -53,6 +53,9 @@ enum RemoteHostFeature {
     /// Version 11 adds explicitly shared continuation records with revision checks.
     /// Version 12 adds authorized live work search and durable transcript
     /// positions. Handoff needs those positions to survive history retention.
+    /// Version 13 hardens receipts with recovery states, and version 14 adds
+    /// the send revision: a host below 14 refuses an id without the revision
+    /// the client only sends beside it, so confirmed send needs all of 14.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4

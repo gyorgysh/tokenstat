@@ -47,10 +47,37 @@ pub fn configure_mobile(data: impl AsRef<Path>, cache: impl AsRef<Path>) -> Resu
 }
 
 pub fn data_dir() -> Option<PathBuf> {
-    MOBILE_ROOTS
-        .get()
-        .map(|roots| roots.data.clone())
-        .or_else(|| project_dirs().map(|dirs| dirs.data_dir().to_path_buf()))
+    // An explicit mobile configuration wins: an API call beats ambient
+    // environment. Otherwise the override applies, then the system directory.
+    // This order matters to tests: an integration test that sandboxes itself
+    // with `configure_mobile` must not have the harness env var hijack it.
+    if let Some(roots) = MOBILE_ROOTS.get() {
+        return Some(roots.data.clone());
+    }
+    if let Some(dir) = data_dir_override() {
+        return Some(dir);
+    }
+    project_dirs().map(|dirs| dirs.data_dir().to_path_buf())
+}
+
+/// `TOKENSTAT_DATA_DIR` points the data directory somewhere else.
+///
+/// That is not a test hook bolted on: a portable install, a second account on
+/// one machine, and a developer sandbox all need the same thing, which is a
+/// data directory that is not the shared one. The test suite is one consumer:
+/// pointed at a temp directory, host tests never touch the live archive, the
+/// live socket, or anything a running app or daemon is watching, so a test
+/// run no longer reads as hundreds of real runs, chats and grants.
+///
+/// An explicit mobile configuration still wins: an API call beats ambient
+/// environment. Empty and relative values are ignored, so a stray export
+/// cannot silently redirect the archive into a checkout.
+fn data_dir_override() -> Option<PathBuf> {
+    let dir = std::env::var_os("TOKENSTAT_DATA_DIR").map(PathBuf::from)?;
+    if dir.as_os_str().is_empty() || dir.is_relative() {
+        return None;
+    }
+    Some(dir)
 }
 
 pub fn data_local_dir() -> Option<PathBuf> {

@@ -37,7 +37,7 @@ struct SavedWorkSettings: View {
                 bytes = nil; records = nil; pinned = nil; cleared = false; message = nil
                 await refresh()
             }
-            .sheet(isPresented: $showManagement, onDismiss: { Task { await refresh() } }) {
+            .sheet(isPresented: $showManagement, onDismiss: refreshAfterDismiss) {
                 if let scope { WorkCacheManagementSheet(scope: scope) }
             }
             .onChange(of: enabled) { _, _ in
@@ -211,6 +211,13 @@ struct SavedWorkSettings: View {
         return records == 1
             ? "1 saved item (\(size)\(kept)) on this device"
             : "\(records) saved items (\(size)\(kept)) on this device"
+    }
+
+    /// Re-read totals when the management sheet goes away. A named function
+    /// rather than an inline closure: `onDismiss` takes no view, and an inline
+    /// `Task` would read as the sheet's content to the surface gate.
+    private func refreshAfterDismiss() {
+        Task { await refresh() }
     }
 
     private func refresh(afterFailedClear: Bool = false) async {

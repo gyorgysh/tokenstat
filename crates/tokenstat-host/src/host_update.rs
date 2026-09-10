@@ -179,10 +179,24 @@ fn app_managed_helper() -> bool {
 /// "not yet, two things are running" is an answer somebody can act on and
 /// "not yet" is not.
 fn live_work() -> usize {
-    let chats = tokenstat_paths::data_dir()
+    live_chats() + live_terminals()
+}
+
+/// Agent turns this daemon owns right now.
+///
+/// Without the local half there is no chat store to count: receipts and
+/// runner leases live behind `local-host`, and the count is zero rather
+/// than a read of a directory this build never writes.
+#[cfg(feature = "local-host")]
+fn live_chats() -> usize {
+    tokenstat_paths::data_dir()
         .map(|dir| crate::chat_receipts::running_count(&dir.join("chat")))
-        .unwrap_or(0);
-    chats + live_terminals()
+        .unwrap_or(0)
+}
+
+#[cfg(not(feature = "local-host"))]
+fn live_chats() -> usize {
+    0
 }
 
 #[cfg(feature = "local-host")]

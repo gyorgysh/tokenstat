@@ -78,6 +78,34 @@ with a server that runs agents.
   the words until the machine has taken them, so a refusal puts them back
   instead of losing them. They are kept on this device only, and if a write
   ever fails the field says so rather than claiming it saved.
+- **Opened conversations are kept on this device, encrypted.** Open one again
+  with no connection and it reads from the saved copy, which says when it was
+  saved and what it does not contain. Pin a folder or a conversation to Home
+  to keep it close, on the desktop Home as well as the phone. Saved copies
+  never leave the machine, a damaged store is quarantined rather than deleted,
+  and removing a saved copy clears its history everywhere.
+- **Search your saved work, and the machines that are awake.** One search
+  covers the conversations on this device and asks the hosts that are up, then
+  merges the answers with live results first. History is shared across
+  windows, and a result that cannot be opened says so instead of dropping the
+  list.
+- **Hand work to another device.** Start on one, carry on on the other: the
+  draft, the files and the place in the transcript move across, and an import
+  whose files are gone says so instead of guessing.
+- **A message queued offline is sent when the machine is back.** The send
+  keeps its files, its place and its review state through a crash, a reconnect
+  or a quit, and repeating it is safe: the machine answers from the receipt
+  instead of running the agent twice. The first page of a long conversation
+  reloads once after upgrading, because transcript positions changed format.
+- **The update finds the computers too.** Devices shows the release a paired
+  host runs. A host downloads its own update, proves the new binaries run, and
+  restarts when nothing it owns is running. Otherwise it waits and says what
+  is in the way, and you can insist, having been told what insisting ends.
+- **Assistants can find their way around.** The MCP server lists workspaces
+  and manages tasks and notes, so an agent working through it sees the same
+  workplace a person does.
+- **New dashboards on macOS and iOS.** Usage, activity and rankings read the
+  same on both, with accessible tables and a refreshed look.
 
 ### Changed
 
@@ -85,6 +113,10 @@ with a server that runs agents.
   because it no longer does.
 - Devices leads with setting a machine up rather than listing the ones that
   already exist.
+- The app icon is new: layered glass with the mark over dark and light
+  grounds.
+- Home tells a machine that is offline apart from one that is asleep, and plan
+  cards load only while they are on screen.
 
 ### Fixed
 
@@ -120,6 +152,15 @@ with a server that runs agents.
   the caret back where the app said they were made the field report that same
   position as news, mid-draw, which asked for another draw. It is quiet while
   it is being set, and it reports a caret only when the caret actually moved.
+- Navigation, chat rendering and remote sessions are steadier on iPhone and
+  iPad. Saved places stop retrying after you have moved on, search preparation
+  stays with its own screen, and recent chats load against the destination
+  they were opened for.
+- A new account with no handle yet can finish setting up: the setup gate no
+  longer reads it as signed out. Setup doors also stay quiet about failures
+  until one is entered, then offer a retry or a sign-in card instead of a dead
+  button. Relay use is metered by what it was for, so a pooled channel reused
+  for chat no longer bills chat bytes to the terminal.
 
 ## [0.9.2] - 2026-09-08
 

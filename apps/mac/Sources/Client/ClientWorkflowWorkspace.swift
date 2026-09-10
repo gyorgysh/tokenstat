@@ -68,7 +68,7 @@ struct ClientWorkflowWorkspace: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text("Workflows").font(ClientType.sectionTitle)
-                TextField("Search workflows", text: $search).textFieldStyle(.roundedBorder)
+                TextField("Search workflows", text: $search).textFieldStyle(.themed)
                 if session.loaded {
                     Text("\(session.graphs.count) workflows · \(session.runs.filter(\.isLive).count) running")
                         .font(ClientType.caption).foregroundStyle(.secondary)
