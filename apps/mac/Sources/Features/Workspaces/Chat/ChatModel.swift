@@ -1775,7 +1775,7 @@ final class ChatModel {
     /// The host's figure where there is one, because it covers the whole
     /// archive and this model only holds a window of it. Folding what is
     /// resident would make the meter climb as somebody read backwards.
-    var turnUsage: ChatUsageTotals? {
+    var turnUsage: ChatUsageSummary {
         // Read on every draw of the meter, which redraws on every poll.
         // Folding the whole window that often is what made a long running
         // chat re-scan thousands of records 2.5x a second.
@@ -1789,19 +1789,26 @@ final class ChatModel {
         )
         if key == turnUsageKey { return turnUsageCache }
         var totals = conversationUsage ?? .zero
+        guard totals.isValid else {
+            turnUsageCache = .unavailable
+            turnUsageKey = key
+            return .unavailable
+        }
         for timeline in events {
             guard let event = timeline.event, event.kind == "usage" else { continue }
             // With a host figure in hand, only what has been written since it
             // was counted. Without one, this host reads whole conversations,
             // so everything held is everything there is.
             if conversationUsage != nil, let usageThrough, (timeline.seq ?? 0) <= usageThrough { continue }
-            totals.input += event.input ?? 0
-            totals.output += event.output ?? 0
-            totals.cacheRead += event.cacheRead ?? 0
-            totals.cacheWrite += event.cacheWrite ?? 0
-            totals.cost += event.costUsd ?? 0
+            guard totals.add(ChatUsageTotals(input: event.input ?? 0, output: event.output ?? 0,
+                cacheRead: event.cacheRead ?? 0, cacheWrite: event.cacheWrite ?? 0,
+                cost: event.costUsd ?? 0)) else {
+                turnUsageCache = .unavailable
+                turnUsageKey = key
+                return .unavailable
+            }
         }
-        let answer: ChatUsageTotals? = totals.isEmpty ? nil : totals
+        let answer: ChatUsageSummary = totals.isEmpty ? .empty : .available(totals)
         turnUsageCache = answer
         turnUsageKey = key
         return answer
@@ -1818,7 +1825,7 @@ final class ChatModel {
         var hasBase: Bool
     }
 
-    @ObservationIgnored private var turnUsageCache: ChatUsageTotals?
+    @ObservationIgnored private var turnUsageCache: ChatUsageSummary = .empty
     @ObservationIgnored private var turnUsageKey: UsageKey?
 
     var hasStarted: Bool {

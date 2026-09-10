@@ -15,12 +15,34 @@ struct ChatUsageTotals: Codable, Equatable, Sendable {
     var cacheWrite: UInt64
     var cost: Double
 
-    var cache: UInt64 { cacheRead + cacheWrite }
+    var cache: Decimal { Decimal(cacheRead) + Decimal(cacheWrite) }
+    var isValid: Bool { cost.isFinite && cost >= 0 }
+
+    /// Commit the whole increment only when every field is representable.
+    mutating func add(_ other: ChatUsageTotals) -> Bool {
+        guard isValid, other.isValid else { return false }
+        let (nextInput, inputOverflow) = input.addingReportingOverflow(other.input)
+        let (nextOutput, outputOverflow) = output.addingReportingOverflow(other.output)
+        let (nextRead, readOverflow) = cacheRead.addingReportingOverflow(other.cacheRead)
+        let (nextWrite, writeOverflow) = cacheWrite.addingReportingOverflow(other.cacheWrite)
+        let nextCost = cost + other.cost
+        guard !inputOverflow, !outputOverflow, !readOverflow, !writeOverflow,
+              nextCost.isFinite else { return false }
+        self = ChatUsageTotals(input: nextInput, output: nextOutput,
+                               cacheRead: nextRead, cacheWrite: nextWrite, cost: nextCost)
+        return true
+    }
     var isEmpty: Bool { input == 0 && output == 0 && cache == 0 && cost == 0 }
 
     static let zero = ChatUsageTotals(
         input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0
     )
+}
+
+enum ChatUsageSummary: Equatable {
+    case empty
+    case available(ChatUsageTotals)
+    case unavailable
 }
 
 /// Quiet token and cost card for the inspector and the phone setup sheet.
@@ -29,14 +51,14 @@ struct ChatUsageTotals: Codable, Equatable, Sendable {
 /// only appears when a figure is actually known, so a plan-covered turn is
 /// not drawn as money charged.
 struct ChatCostMeter: View {
-    let totals: ChatUsageTotals?
+    let totals: ChatUsageSummary
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("This conversation")
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
-            if let totals {
+            if case let .available(totals) = totals {
                 TokenSplitBar(input: totals.input, output: totals.output)
                 HStack(spacing: Theme.Space.m) {
                     legend(color: Theme.accent, title: "In", value: totals.input)
@@ -56,7 +78,9 @@ struct ChatCostMeter: View {
                         .monospacedDigit()
                 }
             } else {
-                Text("Tokens and cost show up after a turn.")
+                Text(totals == .unavailable
+                     ? "Usage totals could not be verified."
+                     : "Tokens and cost show up after a turn.")
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -88,8 +112,10 @@ struct ChatCostMeter: View {
     }
 
     private var label: String {
-        guard let totals else {
-            return "This conversation, no tokens yet"
+        guard case let .available(totals) = totals else {
+            return totals == .unavailable
+                ? "This conversation, usage totals could not be verified"
+                : "This conversation, no tokens yet"
         }
         var parts = [
             "This conversation",
@@ -113,7 +139,7 @@ private struct TokenSplitBar: View {
 
     var body: some View {
         GeometryReader { geo in
-            let total = input + output
+            let total = Double(input) + Double(output)
             Capsule()
                 .fill(Theme.accentSoft)
                 .overlay {
