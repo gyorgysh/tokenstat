@@ -322,6 +322,7 @@ final class ChatDraftStore {
             if FileManager.default.fileExists(atPath: file.path) {
                 try FileManager.default.removeItem(at: file)
             }
+            try synchronizeDirectory(directory)
             return
         }
         let data = try JSONEncoder().encode(drafts)
@@ -335,6 +336,17 @@ final class ChatDraftStore {
         try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         #endif
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        try handle.synchronize()
+        try synchronizeDirectory(directory)
+    }
+
+    private nonisolated static func synchronizeDirectory(_ directory: URL) throws {
+        let descriptor = Darwin.open(directory.path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+        defer { Darwin.close(descriptor) }
+        guard Darwin.fsync(descriptor) == 0 else { throw CocoaError(.fileWriteUnknown) }
     }
 
     /// One conversation on one machine under one account, in the name every
