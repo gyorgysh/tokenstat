@@ -19,12 +19,13 @@ actor ChatLocalAttachmentStore {
     private var uploads: [URL: Task<ChatAttachment, Error>] = [:]
     private var removals: Set<URL> = []
     enum Failure: LocalizedError {
-        case invalid, missing, inUse
+        case invalid, missing, inUse, removalUnconfirmed
         var errorDescription: String? {
             switch self {
             case .invalid: "This attachment could not be saved on this device. Files can be up to 12 MB."
             case .inUse: "This file is now used by a draft or pending message. It has been kept."
             case .missing: "An original draft file is unavailable. Remove it and attach the original again before sending."
+            case .removalUnconfirmed: "The file was removed, but the change could not be saved reliably. Reopen this sheet to check."
             }
         }
     }
@@ -170,6 +171,8 @@ actor ChatLocalAttachmentStore {
                 guard encoded.count < 17 * 1024 * 1024,
                       Data(SHA256.hash(data: encoded)) == retained.fingerprint else { throw Failure.invalid }
                 try FileManager.default.removeItem(at: url)
+                do { try Self.synchronizeDirectory(url.deletingLastPathComponent()) }
+                catch { throw Failure.removalUnconfirmed }
             }
         }
     }

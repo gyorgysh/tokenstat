@@ -138,6 +138,9 @@ struct WorkOriginalFilesSheet: View {
             }
             message = "Retained original removed from this device."
             await refresh()
+        } catch ChatLocalAttachmentStore.Failure.removalUnconfirmed {
+            message = ChatLocalAttachmentStore.Failure.removalUnconfirmed.localizedDescription
+            await refresh()
         } catch ChatLocalAttachmentStore.Failure.inUse {
             message = "This file is now used by a draft or pending message. It has been kept."
             await refresh()
