@@ -2895,6 +2895,9 @@ struct RootView: View {
         guard let folderID = WorkPlaceRestoration.folderID(for: reference, among: workspaces.folders.map(\.id),
                                                           localHostIdentity: local) else { return false }
         if reference.kind == .conversation {
+            // Search closes only after a destination can actually open. Home's
+            // availability gate may otherwise decline this request silently.
+            guard workAvailabilityMessage(reference) == nil else { return false }
             if let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) {
                 ChatReadingStore.shared.remember(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
             }
