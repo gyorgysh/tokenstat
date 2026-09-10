@@ -162,6 +162,14 @@ jobs:
       - name: Home recent places never contact a machine
         run: bash scripts/check-home-account-plane.sh
 
+  installer-tests:
+    name: installer rollback
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Failed replacements preserve the installed pair
+        run: bash scripts/tests/install-release-pair.sh
+
   # The client's state, without a simulator. These are plain executables that
   # compile a handful of real sources with their own stubs, so they run in
   # seconds and catch the class of bug an Xcode build cannot see: a draft that

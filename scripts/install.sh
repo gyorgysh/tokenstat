@@ -240,6 +240,41 @@ ensure_path() {
   fi
 }
 
+# Keep the previous daemon available until both replacement steps succeed.
+# A subshell owns cleanup; explicit checks also work when called in an `if`.
+install_release_pair() (
+  local candidate="$1" daemon="$2" directory="$3"
+  local stage keep_stage=0 had_daemon=0
+  mkdir -p "$directory" || exit 1
+  if [ -d "$directory/tokenstat" ] || [ -d "$directory/tokenstat-hostd" ]; then
+    echo "error: an executable destination is a directory" >&2
+    exit 1
+  fi
+  stage="$(mktemp -d "$directory/.tokenstat-install.XXXXXX")" || exit 1
+  trap '[ "$keep_stage" = 1 ] || rm -rf -- "$stage"' EXIT
+  cp -p "$candidate" "$stage/tokenstat" || exit 1
+  cp -p "$daemon" "$stage/tokenstat-hostd" || exit 1
+  if [ -e "$directory/tokenstat-hostd" ] || [ -L "$directory/tokenstat-hostd" ]; then
+    cp -pP "$directory/tokenstat-hostd" "$stage/previous-hostd" || exit 1
+    had_daemon=1
+  fi
+  mv -f "$stage/tokenstat-hostd" "$directory/tokenstat-hostd" || exit 1
+  if ! mv -f "$stage/tokenstat" "$directory/tokenstat"; then
+    if [ "$had_daemon" = 1 ]; then
+      if ! mv -f "$stage/previous-hostd" "$directory/tokenstat-hostd"; then
+        keep_stage=1
+        echo "error: replacement and rollback failed; the previous host is preserved at $stage/previous-hostd" >&2
+        exit 1
+      fi
+    elif ! rm -f "$directory/tokenstat-hostd"; then
+      echo "error: could not remove the new host after the CLI replacement failed" >&2
+      exit 1
+    fi
+    echo "error: CLI replacement failed; the previous installation was kept" >&2
+    exit 1
+  fi
+)
+
 main() {
   need_cmd curl
   need_cmd tar
@@ -289,14 +324,7 @@ main() {
 
   mkdir -p "$BIN_DIR"
   dest="$BIN_DIR/tokenstat"
-  # Best-effort staging: both copies land before either rename, so a failed
-  # copy leaves the installed pair untouched. The two renames are sequential,
-  # so a failed second rename can still leave a split pair; that path is
-  # unlikely (same-directory renames) and the version check below catches it.
-  cp -f "$extracted" "$dest.new"
-  cp -f "$daemon" "$BIN_DIR/tokenstat-hostd.new"
-  mv -f "$BIN_DIR/tokenstat-hostd.new" "$BIN_DIR/tokenstat-hostd"
-  mv -f "$dest.new" "$dest"
+  install_release_pair "$extracted" "$daemon" "$BIN_DIR"
   if [ "$(uname -s)" = "Darwin" ]; then
     # Clear quarantine only. Do not ad-hoc re-sign (strips Developer ID).
     xattr -cr "$dest" "$BIN_DIR/tokenstat-hostd" 2>/dev/null || true
