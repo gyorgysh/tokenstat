@@ -2329,6 +2329,7 @@ final class ChatModel {
     }
 
     private func loadResponseAttachments(id: String, generation: UInt64) async {
+        guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return }
         let descriptors = events.compactMap { timeline -> ChatAttachment? in
             guard let event = timeline.event,
                   event.kind == "attachment",
@@ -2353,7 +2354,7 @@ final class ChatModel {
     private func loadResponseAttachment(
         _ attachment: ChatAttachment, id: String, generation: UInt64, userInitiated: Bool
     ) async {
-        guard selectionMatches(id: id, generation: generation),
+        guard !Task.isCancelled, selectionMatches(id: id, generation: generation),
               responseAttachmentData[attachment.id] == nil,
               !loadingResponseAttachments.contains(attachment.id),
               userInitiated || !attemptedResponseAttachments.contains(attachment.id)
@@ -2389,8 +2390,9 @@ final class ChatModel {
             }
             return
         }
-        guard selectionMatches(id: id, generation: generation), currentReference == previewReference,
-              WorkCacheAccess.canSave(previewReference),
+        guard !Task.isCancelled, savedCopy == nil,
+              selectionMatches(id: id, generation: generation), currentReference == previewReference,
+              memoryGeneration == attachmentCacheGeneration, WorkCacheAccess.canSave(previewReference),
               userInitiated || ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: attachment.size)
         else { return }
         do {
