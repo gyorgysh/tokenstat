@@ -12,6 +12,12 @@ struct ChatInspector: View {
     var onClose: () -> Void
     @State private var showingPersonas = false
     @State private var pendingDelete = false
+    @State private var deletionTarget: DeletionTarget?
+
+    private struct DeletionTarget {
+        let chat: ChatConversation
+        let owner: WorkReference
+    }
     @State private var titleDraft = ""
     @FocusState private var titleFocused: Bool
 
@@ -32,9 +38,12 @@ struct ChatInspector: View {
                             allowlist(chat)
                             ChatCostMeter(totals: model.turnUsage)
                             Button("Delete chat", .delete, role: .destructive) {
+                                guard let owner = model.currentReference else { return }
+                                deletionTarget = DeletionTarget(chat: chat, owner: owner)
                                 pendingDelete = true
                             }
                             .buttonStyle(SecondaryButtonStyle())
+                            .disabled(model.currentReference == nil || model.savedCopy != nil)
                         }
                         .padding(Theme.Space.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -66,13 +75,27 @@ struct ChatInspector: View {
         }
         .confirmationDialog("Delete this chat?", isPresented: $pendingDelete, titleVisibility: .visible) {
             Button("Delete chat", role: .destructive) {
-                if let chat = model.selected {
-                    Task { await model.remove(chat) }
+                guard let target = deletionTarget else { return }
+                Task {
+                    guard model.currentReference == target.owner,
+                          model.selected?.id == target.chat.id,
+                          model.savedCopy == nil else { return }
+                    await model.remove(target.chat)
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The transcript stays on this computer until you delete it. This cannot be undone.")
+        }
+        .onChange(of: model.currentReference) { _, _ in
+            pendingDelete = false
+            deletionTarget = nil
+        }
+        .onChange(of: model.savedCopy != nil) { _, saved in
+            if saved {
+                pendingDelete = false
+                deletionTarget = nil
+            }
         }
     }
 
