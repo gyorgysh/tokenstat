@@ -226,12 +226,22 @@ struct ClientRootView: View {
                 await store.finishPendingIntent(with: signed)
             }
         }
-        .onChange(of: WorkSessionContext.shared.scope) { oldScope, newScope in
+        .onChange(of: navigation.currentRoute) { _, _ in navigation.saveRoute() }
+        .onChange(of: layout) { _, _ in
+            // Keep an exact destination above the subtree being replaced.
+            if let route = navigation.currentRoute, route.reference != nil,
+               navigation.presentedChat == nil {
+                navigation.restoredRoute = route
+            }
+        }
+        .onChange(of: WorkSessionContext.shared.scope, initial: true) { oldScope, newScope in
             if oldScope != nil && oldScope != newScope {
                 navigation.reset()
                 _ = NotificationOpen.shared.take()
                 editors.reset()
             }
+            navigation.restoreRoute(visibleTabs: tabCustomization.visibleTabs,
+                notificationPending: notificationOpen.request != nil)
         }
         .onChange(of: account.signedIn) { _, signedIn in
             if !signedIn { editors.reset() }
@@ -247,6 +257,7 @@ struct ClientRootView: View {
             Task { await Bridge.nudgeTunnel(reconnect: true) }
         }
         .onChange(of: scenePhase) { _, phase in
+            if phase != .active { navigation.saveRoute() }
             guard phase == .active, account.signedIn else { return }
             Task { await Bridge.nudgeTunnelOnForeground() }
         }
@@ -270,6 +281,7 @@ struct ClientRootView: View {
         }
         .onChange(of: notificationOpen.request, initial: true) { _, request in
             guard request?.kind == .chat || request?.kind == .session else { return }
+            navigation.restoredRoute = nil
             if navigation.destination != .workspaces {
                 navigation.destination = .workspaces
             }
@@ -324,6 +336,7 @@ struct ClientRootView: View {
                         NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                             tab.content
                                 .clientChrome(showAccount: $showAccount)
+                                .modifier(ClientRestoredDestination(tab: tab))
                                 .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                         }
                     }
@@ -341,6 +354,7 @@ struct ClientRootView: View {
                     NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                         tab.content
                             .clientChrome(showAccount: $showAccount)
+                            .modifier(ClientRestoredDestination(tab: tab))
                             .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                     }
                     .tabItem { Label(tab.label, systemImage: tab.symbol) }

@@ -494,6 +494,7 @@ struct ClientTerminalRepresentable: UIViewRepresentable {
 
 /// Full-screen terminal for one remote session.
 struct ClientTerminalScreen: View {
+    @Environment(ClientNavigationModel.self) private var navigation
     @Environment(AccountModel.self) private var account
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -506,6 +507,11 @@ struct ClientTerminalScreen: View {
 
     private func rememberTerminal() {
         guard !session.hostID.hasPrefix("pending-") else { return }
+        if let scope = WorkSessionContext.shared.scope, scope.kind == .account,
+           let workspaceID = session.workspaceID {
+            navigation.visibleTerminal = WorkReference(scope: scope, hostIdentity: session.peer,
+                workspaceID: workspaceID, kind: .terminal, itemID: session.hostID)
+        }
         // A basename is a label. Never hand the working directory or command
         // (which may include a prompt) to the persistence boundary.
         ClientRecentPlaces.shared.record(
@@ -606,6 +612,10 @@ struct ClientTerminalScreen: View {
             // Full-screen dismiss: stop draining when nobody is watching.
             // Re-open attaches a fresh session from pty.list.
             session.stop()
+            if scenePhase == .active, navigation.visibleTerminal?.hostIdentity == session.peer,
+               navigation.visibleTerminal?.itemID == session.hostID {
+                navigation.visibleTerminal = nil
+            }
         }
         .confirmationDialog(
             "Close this session?",

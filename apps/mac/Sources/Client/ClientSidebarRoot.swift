@@ -204,6 +204,7 @@ struct ClientSidebarRoot: View {
             Section {
                 ForEach(tabCustomization.visibleTabs) { tab in
                     Button {
+                        navigation.restoredRoute = nil
                         navigation.destination = tab
                         navigation.folderID = nil
                     } label: {
@@ -313,6 +314,7 @@ struct ClientSidebarRoot: View {
             guard let key = "12345".dropFirst(index).first else { continue }
             commands.append(
                 ClientShortcut(id: tab.rawValue, title: tab.label, key: KeyEquivalent(key)) {
+                    navigation.restoredRoute = nil
                     navigation.destination = tab
                     navigation.folderID = nil
                 }
@@ -622,12 +624,21 @@ struct ClientSidebarRoot: View {
     /// one, is the same kind of move as leaving Workspaces entirely: whatever
     /// the last page pushed should not still be on top.
     private var detailIdentity: String {
-        "\(navigation.destination)-\(navigation.folderID ?? "")-\(navigation.section)"
+        "\(navigation.destination)-\(navigation.folderID ?? "")-\(navigation.section)-\(navigation.restoredRouteGeneration)"
     }
 
     @ViewBuilder
     private func detail(width: CGFloat) -> some View {
-        if let id = navigation.folderID,
+        if let route = navigation.restoredRoute {
+            ClientRestoredRouteView(route: route)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button { navigation.restoredRoute = nil } label: {
+                            ActionIcon.back.label("Back")
+                        }
+                    }
+                }
+        } else if let id = navigation.folderID,
            navigation.destination == .workspaces,
            let folder = workspaces.folders.first(where: { $0.id == id }),
            let peer = workspaces.connectedKey

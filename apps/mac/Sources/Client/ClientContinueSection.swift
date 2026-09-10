@@ -131,23 +131,38 @@ extension ClientRecentPlaces.Place {
 /// Recording on appearance also covers device-detail links, which do not go
 /// through the sidebar's navigation model.
 private struct RememberWorkspace: ViewModifier {
+    @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var routeOwner = UUID()
     @Environment(AccountModel.self) private var account
     let peer: String
     let folder: WorkspaceFolder
+    let section: WorkspaceSection?
     func body(content: Content) -> some View {
         content.onAppear {
+            navigation.rememberWorkspace(peer: peer,
+                workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id, section: section, owner: routeOwner)
             ClientRecentPlaces.shared.record(
                 in: account.account?.recentPlacesScope, peer: peer,
                 workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id,
                 workspaceName: folder.name, kind: .workspace
             )
         }
+        .onChange(of: section) { _, section in
+            navigation.rememberWorkspace(peer: peer,
+                workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id,
+                section: section, owner: routeOwner)
+        }
+        .onDisappear {
+            guard scenePhase == .active else { return }
+            navigation.leaveWorkspace(owner: routeOwner)
+        }
     }
 }
 
 extension View {
-    func rememberWorkspace(peer: String, folder: WorkspaceFolder) -> some View {
-        modifier(RememberWorkspace(peer: peer, folder: folder))
+    func rememberWorkspace(peer: String, folder: WorkspaceFolder, section: WorkspaceSection? = nil) -> some View {
+        modifier(RememberWorkspace(peer: peer, folder: folder, section: section))
     }
 }
 #endif

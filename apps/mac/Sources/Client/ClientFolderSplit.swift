@@ -267,7 +267,7 @@ struct ClientWorkspaceSectionDetail: View {
     private var folderNow: WorkspaceFolder { current ?? folder }
 
     var body: some View {
-        sectionContent.rememberWorkspace(peer: peer, folder: folder)
+        sectionContent.rememberWorkspace(peer: peer, folder: folder, section: section)
     }
 
     @ViewBuilder private var sectionContent: some View {

@@ -15,23 +15,109 @@ import SwiftUI
 /// or the swap lands you on Home, which is the one thing that would make the
 /// feature feel like a bug.
 ///
-/// **What survives a swap is the destination and the selected folder**, not a
-/// pushed stack. Each tab's `NavigationStack` owns its own pushes and there is
-/// no honest way to replay a view-based push into a split view's detail column,
-/// so this does not pretend to. Landing on the folder you were in, in the other
-/// shape, is the promise.
+/// A scoped identifier route survives relaunch and layout changes. Restored
+/// destinations resolve through Continue's availability flow, while active
+/// folder models and pushed snapshots stay in memory only.
 @MainActor
 @Observable
 final class ClientNavigationModel {
     /// The destination: a tab in tab mode, a sidebar row in sidebar mode.
-    var destination: ClientTab = .home
+    var destination: ClientTab = .home {
+        didSet {
+            if destination != oldValue {
+                restoredRoute = nil
+                routeLaunch.navigationChanged()
+            }
+        }
+    }
+    private(set) var restoredRouteGeneration: UInt64 = 0
+    var restoredRoute: WorkMobileRoute? {
+        didSet {
+            if restoredRoute != nil || oldValue != nil { restoredRouteGeneration &+= 1 }
+            if restoredRoute != nil && restoredRoute != oldValue {
+                visibleChat = nil
+                visibleTerminal = nil
+                rememberedWorkspace = nil
+                rememberedWorkspaceOwner = nil
+            }
+        }
+    }
+    func dismissRestoredRoute(generation: UInt64) {
+        guard restoredRoute != nil, generation == restoredRouteGeneration else { return }
+        restoredRoute = nil
+    }
+
+    var rememberedWorkspace: WorkReference?
+    private var rememberedWorkspaceOwner: UUID?
+    var visibleTerminal: WorkReference?
+    var rememberedSection: WorkspaceSection?
+    private let routeLaunch = WorkMobileRouteLaunch()
+    private var restorationFinished = false
+
+    func restoreRoute(visibleTabs: [ClientTab], notificationPending: Bool) {
+        guard !restorationFinished, let scope = WorkSessionContext.shared.scope,
+              scope.kind == .account else { return }
+        restorationFinished = true
+        guard !notificationPending, routeLaunch.claim(ticket: 0),
+              let route = WorkMobileRouteStore.shared.route(for: scope) else { return }
+        let tab = ClientTab(rawValue: route.tab) ?? .home
+        destination = visibleTabs.contains(tab) ? tab : (visibleTabs.first ?? .home)
+        if route.reference != nil { restoredRoute = route }
+    }
+
+    var currentRoute: WorkMobileRoute? {
+        guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return nil }
+        if let terminal = visibleTerminal, terminal.scope == scope {
+            return WorkMobileRoute(scope: scope, tab: destination.rawValue,
+                                   reference: terminal, section: "sessions")
+        }
+        let chat = presentedChat?.reference ?? visibleChat
+        if let chat, chat.scope == scope {
+            return WorkMobileRoute(scope: scope, tab: destination.rawValue, reference: chat, section: "chat")
+        }
+        if let folder = rememberedWorkspace, folder.scope == scope {
+            return WorkMobileRoute(scope: scope, tab: destination.rawValue,
+                                   reference: folder, section: rememberedSection?.rawValue)
+        }
+        if let restoredRoute, restoredRoute.scope == scope { return restoredRoute }
+        return WorkMobileRoute(scope: scope, tab: destination.rawValue)
+    }
+
+    func saveRoute() {
+        guard restorationFinished, let route = currentRoute else { return }
+        WorkMobileRouteStore.shared.save(route)
+    }
+
+    func rememberWorkspace(peer: String, workspaceID: String, section: WorkspaceSection?, owner: UUID) {
+        guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
+        rememberedWorkspaceOwner = owner
+        rememberedWorkspace = WorkReference(scope: scope, hostIdentity: peer,
+            workspaceID: workspaceID, kind: .workspace, itemID: nil)
+        rememberedSection = section
+    }
+
+    func leaveWorkspace(owner: UUID) {
+        guard rememberedWorkspaceOwner == owner else { return }
+        rememberedWorkspaceOwner = nil
+        rememberedWorkspace = nil
+    }
+
 
     /// The folder open in the workspace plane, as `remote:<peer>:<id>`.
-    var folderID: String?
+    var folderID: String? {
+        didSet {
+            if folderID != oldValue {
+                restoredRoute = nil
+                routeLaunch.navigationChanged()
+            }
+        }
+    }
 
     /// Which of that folder's sections is showing. The sidebar lists them, so
     /// the detail column draws one section rather than the sections again.
-    var section: WorkspaceSection = .sessions
+    var section: WorkspaceSection = .sessions {
+        didSet { if section != oldValue { restoredRoute = nil } }
+    }
 
     /// Conversation a notification asked to open, consumed by the chat list
     /// once that folder is on screen.
@@ -41,11 +127,11 @@ final class ClientNavigationModel {
     /// Recents push. A notification tap for this id leaves that window as it
     /// is: locking the phone does not unmount it, and remounting blanks the
     /// transcript. The cover a tap presents is `presentedChat`, not this.
-    var visibleChat: WorkReference?
+    var visibleChat: WorkReference? { didSet { if visibleChat != oldValue { routeLaunch.navigationChanged() } } }
 
     /// A chat opened from a notification on the tab layout, where there is
     /// no sidebar to land the folder in. Dismissing it returns where you were.
-    var presentedChat: PresentedChat?
+    var presentedChat: PresentedChat? { didSet { if presentedChat != oldValue { routeLaunch.navigationChanged() } } }
 
     /// True when this conversation is already on screen, so a tap should not
     /// open it again.
@@ -64,6 +150,11 @@ final class ClientNavigationModel {
 
     /// Remove the old account's entire navigation state before showing another.
     func reset() {
+        restoredRoute = nil
+        visibleTerminal = nil
+        rememberedWorkspaceOwner = nil
+        rememberedWorkspace = nil
+        WorkMobileRouteStore.shared.clear()
         destination = .home
         folderID = nil
         section = .sessions
@@ -110,6 +201,7 @@ final class ClientNavigationModel {
 
     /// Selecting a folder implies the workspace plane, so both move together.
     func open(folderID: String?, section: WorkspaceSection = .sessions) {
+        restoredRoute = nil
         self.folderID = folderID
         self.section = section
         if folderID != nil { destination = .workspaces }

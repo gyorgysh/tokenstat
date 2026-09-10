@@ -140,6 +140,7 @@ struct ClientWorkspaceDetailView: View {
         VStack(spacing: Theme.Space.s) {
             NavigationLink {
                 ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
+                .rememberWorkspace(peer: peer, folder: folder, section: .sessions)
             } label: {
                 ClientSectionRow(section: .sessions, count: counts.sessions)
             }
@@ -152,6 +153,7 @@ struct ClientWorkspaceDetailView: View {
                 RemoteHostFeatureGate(feature: .chat, peer: peer, hostName: hostName) {
                     ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name, hostName: hostName)
                 }
+                .rememberWorkspace(peer: peer, folder: folder, section: .chat)
             } label: {
                 ClientSectionRow(section: .chat, count: counts.chats)
             }
@@ -164,6 +166,7 @@ struct ClientWorkspaceDetailView: View {
                     folder: current,
                     hostName: hostName
                 )
+                .rememberWorkspace(peer: peer, folder: folder, section: .changes)
             } label: {
                 ClientSectionRow(section: .changes, count: counts.changes)
             }
@@ -176,6 +179,7 @@ struct ClientWorkspaceDetailView: View {
                     folder: current,
                     hostName: hostName
                 )
+                .rememberWorkspace(peer: peer, folder: folder, section: .history)
             } label: {
                 ClientSectionRow(section: .history, count: nil)
             }
@@ -191,6 +195,7 @@ struct ClientWorkspaceDetailView: View {
                 )
                     .navigationTitle("Pull requests")
                     .navigationBarTitleDisplayMode(.inline)
+                .rememberWorkspace(peer: peer, folder: folder, section: .pulls)
             } label: {
                 ClientSectionRow(
                     section: .pulls,
@@ -208,6 +213,7 @@ struct ClientWorkspaceDetailView: View {
                     hostName: hostName,
                     folderName: folder.name
                 )
+                .rememberWorkspace(peer: peer, folder: folder, section: .todo)
             } label: {
                 ClientSectionRow(section: .todo, count: counts.todo)
             }
@@ -220,6 +226,7 @@ struct ClientWorkspaceDetailView: View {
                     hostName: hostName,
                     folderName: current.name
                 )
+                .rememberWorkspace(peer: peer, folder: folder, section: .notes)
             } label: {
                 ClientSectionRow(section: .notes, count: counts.notes)
             }
@@ -232,6 +239,7 @@ struct ClientWorkspaceDetailView: View {
                     hostName: hostName,
                     folderName: current.name
                 )
+                .rememberWorkspace(peer: peer, folder: folder, section: .workflows)
             } label: {
                 ClientSectionRow(section: .workflows, count: counts.workflows)
             }
@@ -244,6 +252,7 @@ struct ClientWorkspaceDetailView: View {
                     hostName: hostName,
                     folderName: current.name
                 )
+                .rememberWorkspace(peer: peer, folder: folder, section: .automations)
             } label: {
                 ClientSectionRow(section: .automations, count: counts.automations)
             }
@@ -251,6 +260,7 @@ struct ClientWorkspaceDetailView: View {
 
             NavigationLink {
                 ClientFilesView(peer: peer, workspace: workspaceID, folderName: folder.name)
+                .rememberWorkspace(peer: peer, folder: folder, section: .files)
             } label: {
                 ClientSectionRow(section: .files, count: nil)
             }

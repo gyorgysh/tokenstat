@@ -63,6 +63,8 @@ struct ClientPlaceAvailability<Content: View>: View {
 /// the peer here, never from the saved history or Home.
 struct ClientSavedPlaceView: View {
     let place: ClientRecentPlaces.Place
+    var restoredSection: WorkspaceSection? = nil
+    var onRestoredTerminalClose: (() -> Void)? = nil
     @Environment(AccountModel.self) private var account
     @State private var folder: WorkspaceFolder?
     @State private var terminal: ClientTerminalSession?
@@ -89,7 +91,7 @@ struct ClientSavedPlaceView: View {
                 }
             }
         }
-        .navigationTitle(place.title)
+        .navigationTitle(folder?.name ?? place.title)
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(isPresented: $showTerminal) {
             if let terminal { ClientTerminalScreen(session: terminal, hostName: hostName) }
@@ -103,7 +105,16 @@ struct ClientSavedPlaceView: View {
         } else if needsAccess {
             ClientHostWorkspacesView(peerKey: place.id.peer, hostName: hostName)
         } else if let folder {
-            ClientWorkspaceDetailView(peer: place.id.peer, hostName: hostName, folder: folder)
+            if let restoredSection {
+                GeometryReader { geometry in
+                    ClientWorkspaceSectionDetail(peer: place.id.peer, hostName: hostName,
+                        folder: folder, section: restoredSection, width: geometry.size.width)
+                }
+            } else {
+                ClientWorkspaceDetailView(peer: place.id.peer, hostName: hostName, folder: folder)
+            }
+        } else if let terminal, let onRestoredTerminalClose {
+            ClientTerminalScreen(session: terminal, hostName: hostName, onClose: onRestoredTerminalClose)
         } else if loaded {
             ClientEmptyState(
                 kind: .nothingYet,
@@ -160,7 +171,7 @@ struct ClientSavedPlaceView: View {
                 guard stillCurrent() else { return }
                 if let info = sessions.first(where: { $0.id == id && $0.alive }) {
                     terminal = ClientTerminalSession(peer: place.id.peer, info: info)
-                    showTerminal = true
+                    showTerminal = onRestoredTerminalClose == nil
                 } else {
                     terminal = nil
                 }
