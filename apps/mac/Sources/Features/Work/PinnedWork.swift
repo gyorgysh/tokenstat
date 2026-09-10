@@ -6,8 +6,8 @@ import Observation
 /// The work worth keeping: pinned folders and conversations.
 ///
 /// Account-scoped identifiers and a short label only. Transcript text never
-/// lands here; the sealed conversation copies live in the work cache, and a
-/// pin is what keeps a copy past age eviction. At most eight per scope: Home
+/// lands here; sealed conversation copies and their Keep offline setting live
+/// in the work cache independently. At most eight per scope: Home
 /// is a shelf, not a second folder list, and the limit is refused with words
 /// rather than by silently dropping somebody's oldest pin.
 ///
