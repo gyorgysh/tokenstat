@@ -22,6 +22,7 @@ struct ChatView: View {
     /// nobody can see does not poll, and it does not hold the shared model to
     /// a folder that has since been left: it reloads when it comes forward.
     var isActive = true
+    var loadsWorkspace = true
     /// The composer's words live on the model, keyed to the conversation
     /// rather than to this pane, so leaving and coming back finds them and
     /// switching conversations does not carry them across.
@@ -60,6 +61,7 @@ struct ChatView: View {
     /// Observed, so pinning from the sidebar or Home redraws the chrome
     /// without leaving the conversation.
     @State private var pins = PinnedWorkStore.shared
+    @State private var showingHandoff = false
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -103,12 +105,20 @@ struct ChatView: View {
                         }
                     }
                 }
+                if model.currentReference != nil, model.savedCopy == nil {
+                    ToolbarIconButton(systemImage: ActionIcon.device.symbol, help: "Continue on another device") {
+                        showingHandoff = true
+                    }
+                }
                 ToolbarIconButton(systemImage: "plus", help: "New chat") {
                     Task { await model.create() }
                 }
             }
             #endif
             if let chat = model.selected {
+                if isActive, model.savedCopy == nil {
+                    WorkHandoffOffer(chat: model) { showingHandoff = true }
+                }
                 transcript(chat)
                     .overlay {
                         if dropExperienceVisible {
@@ -213,6 +223,7 @@ struct ChatView: View {
                 .padding(.top, Theme.Space.m)
                 .padding(.trailing, Theme.Space.m)
         }
+        .sheet(isPresented: $showingHandoff) { WorkHandoffSheet(chat: model) }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
         #if os(macOS)
         .onExitCommand {
@@ -231,7 +242,7 @@ struct ChatView: View {
         .task(id: "\(workspaceID)-\(isActive)-\(String(describing: WorkSessionContext.shared.scope))") {
             Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
                 .error("view task ws=\(workspaceID) active=\(isActive)")
-            guard isActive else { return }
+            guard isActive, loadsWorkspace else { return }
             await model.load(workspaceID: workspaceID)
         }
         // What is on screen, for the notifier. This pane stays mounted behind

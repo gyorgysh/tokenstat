@@ -133,12 +133,12 @@ final class ChatDraftStore {
     /// Keep this conversation's unsent words. An empty draft removes the
     /// record rather than storing emptiness.
     func save(text: String, attachments: [ChatAttachment], for reference: WorkReference,
-              at date: Date = Date()) {
+              at date: Date = Date(), newMessage: Bool = false) {
         guard let key = Self.key(reference) else { return }
         let draft = ChatDraft(reference: reference,
                               text: text,
                               attachments: attachments, updatedAt: date,
-                              messageID: drafts[key]?.messageID ?? UUID().uuidString)
+                              messageID: newMessage ? UUID().uuidString : (drafts[key]?.messageID ?? UUID().uuidString))
         if draft.isEmpty {
             guard drafts.removeValue(forKey: key) != nil else { return }
             mark(key, occupied: false)
@@ -147,7 +147,7 @@ final class ChatDraftStore {
         }
         // The time is not part of "has this changed": a save with the same
         // words in it is not a save.
-        if let held = drafts[key], held.text == draft.text, held.attachments == draft.attachments {
+        if !newMessage, let held = drafts[key], held.text == draft.text, held.attachments == draft.attachments {
             return
         }
         drafts[key] = draft

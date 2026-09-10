@@ -36,6 +36,7 @@ SKIP_STARTERS = (
 # Buttons whose whole surface is the label (rows, tiles, chips, links).
 # Snippet must uniquely identify that one button, not every Button in the file.
 ALLOWED = [
+    ("Features/Work/WorkSearchSheet.swift", "model.selected = hit.reference"),
     ("App/RootView.swift", "Button(action: action) {"),
     ("App/TokenstatApp.swift", 'Button("About tokenstat")'),
     ("Features/Home/HeatmapView.swift", "onSelect?(item.day)"),

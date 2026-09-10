@@ -267,6 +267,9 @@ struct ClientRootView: View {
         )) { owner in
             ClientSavedWorkView(owner: owner)
         }
+        .sheet(isPresented: Binding(get: { navigation.showWorkSearch }, set: { navigation.showWorkSearch = $0 })) {
+            ClientWorkSearchPresentation()
+        }
         .sheet(isPresented: $showAccount) {
             ClientAccountSheet()
         }
@@ -527,6 +530,9 @@ private extension View {
                 // the one piece of pure brand the client gets.
                 // The one global word about the network, and only when there
                 // is one to say. See `ClientConnectionChip`.
+                ToolbarItem(placement: .topBarTrailing) {
+                    ClientWorkSearchButton(compact: true)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     ClientConnectionChip()
                 }

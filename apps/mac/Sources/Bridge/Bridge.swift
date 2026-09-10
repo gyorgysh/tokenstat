@@ -1008,6 +1008,68 @@ extension Bridge {
         )
     }
 
+    @MainActor
+    static func workSearchConnection(host: String, scope: WorkReference.Scope,
+                                     local: Bool = false, ownsSession: @escaping @MainActor () -> Bool) -> WorkSearchLiveConnection {
+        WorkSearchLiveConnection(host: host, scope: scope, transport: .init(
+            allowed: {
+                if local { return WorkSessionContext.shared.localHostIdentity == host }
+                return try await workspaceAccessAllowed(peer: host)
+            },
+            version: {
+                if local {
+                    struct Spoken: Decodable { let protocolVersion: String }
+                    let spoken = try await background("protocol", as: Spoken.self)
+                    return Int(spoken.protocolVersion) ?? 0
+                }
+                return try await peerProtocolVersion(host)
+            },
+            search: { query, kinds, cursor in
+                try await workSearch(query: query, kinds: kinds, cursor: cursor, peer: local ? nil : host)
+            }), ownsSession: {
+                WorkSessionContext.shared.scope == scope && (!local || WorkSessionContext.shared.localHostIdentity == host) && ownsSession()
+            })
+    }
+
+    /// Remote hosts require explicit search-session opt-in. A local Mac
+    /// searches its own work without contacting any paired machine.
+    /// The session owner validates the returned host-local references before use.
+    static func workSearch(query: String, kinds: Set<WorkReference.Kind> = [],
+                           workspaceIDs: Set<String> = [], cursor: String? = nil,
+                           peer: String? = nil) async throws -> WorkSearchLive.Response {
+        let parsed = try WorkSearchQuery(query)
+        guard !parsed.terms.isEmpty, workspaceIDs.count <= 32,
+              !kinds.contains(.terminal) else { throw WorkSearchLive.Invalid.response }
+        var params: [String: Any] = ["query": query, "entityKinds": kinds.map(\.rawValue).sorted(),
+                                     "workspaceIds": workspaceIDs.sorted(), "limit": 50]
+        if let cursor { params["cursor"] = cursor }
+        return try await chatInvoke(peer: peer, "work.search", params, as: WorkSearchLive.Response.self)
+    }
+
+    static func workHandoffAttachments(workspaceID: String, conversationID: String,
+                                      attachmentIDs: [String], peer: String? = nil) async throws -> [ChatAttachment] {
+        try await chatInvoke(peer: peer, "work.continuity.attachments",
+            ["workspaceId": workspaceID, "conversationId": conversationID, "attachmentIds": attachmentIDs],
+            as: [ChatAttachment].self)
+    }
+
+    static func workHandoff(workspaceID: String, conversationID: String, peer: String? = nil) async throws -> WorkHandoff? {
+        struct Answer: Decodable, Sendable { let handoff: WorkHandoff? }
+        let route = chatRoute(workspaceID: workspaceID, peer: peer)
+        let answer = try await chatInvoke(peer: route.peer, "work.continuity.get",
+            ["workspaceId": route.workspaceID, "conversationId": conversationID], as: Answer.self)
+        return answer.handoff
+    }
+
+    static func putWorkHandoff(workspaceID: String, conversationID: String,
+                               request: WorkHandoffRequest, peer: String? = nil) async throws -> WorkHandoffResult {
+        let route = chatRoute(workspaceID: workspaceID, peer: peer)
+        let payload = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+        return try await chatInvoke(peer: route.peer, "work.continuity.put",
+            ["workspaceId": route.workspaceID, "conversationId": conversationID, "handoff": payload],
+            as: WorkHandoffResult.self)
+    }
+
     static func chats(workspaceID: String, peer: String? = nil) async throws -> [ChatConversation] {
         let route = chatRoute(workspaceID: workspaceID, peer: peer)
         return try await chatInvoke(
@@ -1147,13 +1209,10 @@ extension Bridge {
         _ = try await chatInvoke(peer: peer, "chat.stop", ["id": id], as: Ack.self)
     }
 
-    static func chatEvents(id: String, offset: UInt64, peer: String? = nil) async throws -> ChatEventChunk {
-        try await chatInvoke(
-            peer: peer,
-            "chat.events",
-            ["id": id, "offset": offset],
-            as: ChatEventChunk.self
-        )
+    static func chatEvents(id: String, offset: UInt64, tailCursor: String? = nil, peer: String? = nil) async throws -> ChatEventChunk {
+        var params: [String: Any] = ["id": id, "offset": offset, "stablePositions": true]
+        if let tailCursor { params["tailCursor"] = tailCursor }
+        return try await chatInvoke(peer: peer, "chat.events", params, as: ChatEventChunk.self)
     }
 
     /// One bounded page of a conversation, newest first.
@@ -1169,7 +1228,7 @@ extension Bridge {
         limit: Int,
         peer: String? = nil
     ) async throws -> ChatEventPage {
-        var params: [String: Any] = ["id": id, "limit": limit]
+        var params: [String: Any] = ["id": id, "limit": limit, "stablePositions": true]
         if let cursor { params["cursor"] = cursor }
         return try await chatInvoke(peer: peer, "chat.eventPage", params, as: ChatEventPage.self)
     }
@@ -1187,9 +1246,39 @@ extension Bridge {
         var params: [String: Any] = [
             "key": key, "scope": scope, "id": id, "kind": kind,
             "itemId": itemId, "payload": payload,
+            "budgetBytes": WorkCacheSettings.shared.budgetMB * 1_000_000,
+            "hardBudgetBytes": WorkCacheSettings.shared.offlineBudgetMB * 1_000_000,
+            "retentionMs": WorkCacheSettings.shared.retentionDays * 24 * 60 * 60 * 1000,
         ]
         if let revision { params["revision"] = revision }
-        return try await background("cache.put", params, as: CachePutResult.self)
+        let mutation = await WorkSearchCache.shared.beginMutation()
+        do {
+            let result = try await background("cache.put", params, as: CachePutResult.self)
+            await WorkSearchCache.shared.finishMutation(mutation, scope: scope, changedIDs: [id],
+                                                       evicted: result.evicted, uncertain: result.repaired)
+            return result
+        } catch {
+            await WorkSearchCache.shared.finishMutation(mutation, scope: scope, uncertain: true)
+            throw error
+        }
+    }
+
+    static func searchHistory(key: String, scope: String) async throws -> WorkSearchHistory.Payload? {
+        struct Record: Decodable { let payload: WorkSearchHistory.Payload }
+        do {
+            let record = try await background("cache.get", ["key": key, "scope": scope, "id": "search-history-v1"], as: Record.self)
+            return record.payload
+        } catch BridgeError.core(_, let message) where message == "cache miss" {
+            return nil
+        }
+    }
+
+    static func savedPreview(key: String, scope: String, id: String) async throws -> WorkSavedPreview.Record {
+        try await background("cache.get", ["key": key, "scope": scope, "id": id], as: WorkSavedPreview.Record.self)
+    }
+
+    static func cachedChange(key: String, scope: String, id: String) async throws -> WorkViewedChange.Record {
+        try await background("cache.get", ["key": key, "scope": scope, "id": id], as: WorkViewedChange.Record.self)
     }
 
     static func cacheGet(key: String, scope: String, id: String) async throws -> CachedRecord {
@@ -1199,29 +1288,60 @@ extension Bridge {
     }
 
     static func cacheList(scope: String) async throws -> CacheListResult {
-        try await background("cache.list", ["scope": scope], as: CacheListResult.self)
+        let result = try await background("cache.list", ["scope": scope], as: CacheListResult.self)
+        if result.repaired { await WorkSearchCache.shared.discardAfterRepair() }
+        return result
     }
 
     static func cacheRemove(scope: String, id: String) async throws -> CacheRemoveResult {
-        try await background(
-            "cache.remove", ["scope": scope, "id": id], as: CacheRemoveResult.self
-        )
+        let mutation = await WorkSearchCache.shared.beginMutation()
+        do {
+            let result = try await background(
+                "cache.remove", ["scope": scope, "id": id], as: CacheRemoveResult.self
+            )
+            await WorkSearchCache.shared.finishMutation(mutation, scope: scope, changedIDs: [id],
+                                                       uncertain: result.repaired)
+            return result
+        } catch {
+            await WorkSearchCache.shared.finishMutation(mutation, scope: scope, uncertain: true)
+            throw error
+        }
     }
 
     static func cachePin(scope: String, id: String, pinned: Bool) async throws -> CachePinResult {
-        try await background(
-            "cache.pin", ["scope": scope, "id": id, "pinned": pinned], as: CachePinResult.self
-        )
+        let mutation = await WorkSearchCache.shared.beginMutation()
+        do {
+            let result = try await background(
+                "cache.pin", ["scope": scope, "id": id, "pinned": pinned,
+                             "hardBudgetBytes": WorkCacheSettings.shared.offlineBudgetMB * 1_000_000], as: CachePinResult.self
+            )
+            await WorkSearchCache.shared.finishMutation(mutation, scope: scope, uncertain: result.repaired)
+            return result
+        } catch {
+            await WorkSearchCache.shared.finishMutation(mutation, scope: scope, uncertain: true)
+            throw error
+        }
     }
 
     static func cacheStats(scope: String?) async throws -> CacheStatsResult {
         var params: [String: Any] = [:]
         if let scope { params["scope"] = scope }
-        return try await background("cache.stats", params, as: CacheStatsResult.self)
+        let result = try await background("cache.stats", params, as: CacheStatsResult.self)
+        if result.repaired { await WorkSearchCache.shared.discardAfterRepair() }
+        return result
     }
 
     static func cacheClearScope(scope: String) async throws -> CacheClearResult {
-        try await background("cache.clearScope", ["scope": scope], as: CacheClearResult.self)
+        let mutation = await WorkSearchCache.shared.beginMutation()
+        do {
+            let result = try await background("cache.clearScope", ["scope": scope], as: CacheClearResult.self)
+            await WorkSearchCache.shared.finishMutation(mutation, scope: scope, cleared: true,
+                                                       uncertain: result.repaired)
+            return result
+        } catch {
+            await WorkSearchCache.shared.finishMutation(mutation, scope: scope, uncertain: true)
+            throw error
+        }
     }
 
     static func chatAttachment(
@@ -2750,7 +2870,18 @@ extension Bridge {
     /// have meant matching on a sentence.
     static func workspaceAccessAllowed(peer: String) async throws -> Bool {
         struct Answer: Codable, Sendable { var allowed: Bool }
-        return try await onPeer(peer, "workspace.access.check", as: Answer.self).allowed
+        let scope = await WorkSessionContext.shared.scope
+        let allowed = try await onPeer(peer, "workspace.access.check", as: Answer.self).allowed
+        let stillOwned = await MainActor.run {
+            guard let scope, WorkSessionContext.shared.scope == scope else { return false }
+            WorkAccessStore.shared.record(allowed, scope: scope, host: peer)
+            return true
+        }
+        if !allowed, stillOwned, let scope {
+            await WorkSearchCache.shared.revokeHost(peer, scope: scope)
+            await WorkCacheAccess.purge(host: peer, scope: scope)
+        }
+        return allowed
     }
 
     /// Devices this machine has let into its work.

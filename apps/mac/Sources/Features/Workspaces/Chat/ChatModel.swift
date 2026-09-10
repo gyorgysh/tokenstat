@@ -34,6 +34,7 @@ final class ChatModel {
     /// words. Read so the inspector can show it rather than describe it.
     var instructions: ChatInstructions?
     var offset: UInt64 = 0
+    @ObservationIgnored private var tailCursor: String?
     /// Asks the host for the page before the oldest one held. Nil once the
     /// beginning of the archive is on screen.
     private(set) var earlierCursor: String?
@@ -53,6 +54,7 @@ final class ChatModel {
     /// have, saying "start of chat" would be announcing the obvious about a
     /// short conversation.
     private(set) var reachedStart = false
+    private(set) var historyTrimmed = false
     /// What the whole conversation has spent, as counted by the host over the
     /// whole archive. Nil on a host that predates paging, and then the meter
     /// folds what is held, which on that host is everything.
@@ -60,7 +62,7 @@ final class ChatModel {
     /// Where the host's count stopped. Usage written after this is added on
     /// top of it, so a turn taken while the conversation is open moves the
     /// meter without asking the host to read the archive again.
-    private var usageThrough: UInt64 = 0
+    private var usageThrough: UInt64?
     /// This host predates `chat.eventPage`, so the timeline is read whole the
     /// way it always was. Latched per model, not per call: a host does not
     /// grow the method while a conversation is open.
@@ -208,8 +210,58 @@ final class ChatModel {
         return draftReference(for: selected.id, in: folderID)
     }
 
+    private var readingRestorationPulse: UInt64 = 0
+
     var readingIdentity: ChatReadingIdentity {
-        ChatReadingIdentity(reference: currentReference, generation: selectionGeneration)
+        ChatReadingIdentity(reference: currentReference, generation: selectionGeneration,
+                            restoration: readingRestorationPulse)
+    }
+
+    var handoffDraft: WorkSharedDraft {
+        WorkSharedDraft(text: draft, attachmentIDs: attachments.map(\.id))
+    }
+
+    /// Explicit import is a new local draft, never another device's send.
+    /// Compare the snapshot again after metadata resolution so later typing wins.
+    func importHandoffDraft(_ shared: WorkSharedDraft, files: [ChatAttachment],
+                            replacing expected: WorkSharedDraft, reference: WorkReference) -> Bool {
+        guard currentReference == reference, draftReference == reference,
+              reference.scope == WorkSessionContext.shared.scope, savedCopy == nil,
+              !sending, heldSubmission == nil, unconfirmedSend == nil,
+              handoffDraft == expected, files.map(\.id) == shared.attachmentIDs else { return false }
+        draftSaveTask?.cancel()
+        draftSaveTask = nil
+        setDraft(shared.text)
+        attachments = files
+        attachmentPreviews = [:]
+        ChatDraftStore.shared.save(text: draft, attachments: files, for: reference, newMessage: true)
+        return true
+    }
+
+    /// A search hit in the already-mounted conversation must move the
+    /// viewport too, without changing selection or touching the draft.
+    @discardableResult
+    func restoreSearchReadingPosition(_ reference: WorkReference) -> Bool {
+        guard WorkDestinationResolver.sameConversation(reference, currentReference),
+              reference.scope == WorkSessionContext.shared.readingScope,
+              let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) else { return false }
+        ChatReadingStore.shared.remember(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
+        readingRestorationPulse &+= 1
+        return true
+    }
+
+    func importHandoffAnchor(_ anchor: WorkHandoffAnchor, reference: WorkReference) -> Bool {
+        guard currentReference == reference, reference.scope == WorkSessionContext.shared.scope,
+              savedCopy == nil, anchor.fraction <= 10_000,
+              ChatReadingMark.isStable(eventID: anchor.eventID) else { return false }
+        if anchor.followsLatest {
+            ChatReadingStore.shared.forget(for: reference)
+        } else {
+            ChatReadingStore.shared.remember(ChatReadingMark(eventID: anchor.eventID, offset: 0,
+                updatedAt: Date(), within: Double(anchor.fraction) / 10_000), for: reference)
+        }
+        readingRestorationPulse &+= 1
+        return true
     }
 
     private func scheduleDraftSave() {
@@ -888,6 +940,7 @@ final class ChatModel {
     /// the real one. Refresh in the picker is the other call, for a list that
     /// is complete but out of date.
     func refillBackendsIfIncomplete() async {
+        guard savedCopy == nil else { return }
         guard let chosen = backends.first(where: { $0.id == selected?.backend }) else { return }
         guard chosen.models.isEmpty, chosen.id != "sh" else { return }
         let context = loadGeneration
@@ -1525,7 +1578,7 @@ final class ChatModel {
             // With a host figure in hand, only what has been written since it
             // was counted. Without one, this host reads whole conversations,
             // so everything held is everything there is.
-            if conversationUsage != nil, (timeline.seq ?? 0) < usageThrough { continue }
+            if conversationUsage != nil, let usageThrough, (timeline.seq ?? 0) <= usageThrough { continue }
             totals.input += event.input ?? 0
             totals.output += event.output ?? 0
             totals.cacheRead += event.cacheRead ?? 0
@@ -1545,7 +1598,7 @@ final class ChatModel {
         var count: Int
         var firstSeq: UInt64?
         var lastSeq: UInt64?
-        var through: UInt64
+        var through: UInt64?
         var hasBase: Bool
     }
 
@@ -1693,13 +1746,15 @@ final class ChatModel {
     private func forgetWindow() {
         eventsEpoch &+= 1
         offset = 0
+        tailCursor = nil
         conversationUsage = nil
-        usageThrough = 0
+        usageThrough = nil
         earlierCursor = nil
         hasEarlier = false
         loadingEarlier = false
         earlierInFlight = false
         reachedStart = false
+        historyTrimmed = false
     }
 
     /// Open a conversation on its newest page rather than on its beginning.
@@ -1729,14 +1784,16 @@ final class ChatModel {
             savedCopy = nil
             reconcileOutgoing()
             offset = page.nextOffset
+            tailCursor = page.tailCursor
             earlierCursor = page.cursor
             hasEarlier = page.hasEarlier
+            historyTrimmed = page.historyTrimmed
             conversationUsage = page.usage
-            usageThrough = page.nextOffset
+            usageThrough = page.events.compactMap(\.seq).max()
             // Opened where the archive begins, with content on screen: say
             // so. Otherwise a fully loaded conversation is indistinguishable
             // from one stuck mid-history. Empty chats stay quiet.
-            if !page.hasEarlier, !page.events.isEmpty { reachedStart = true }
+            reachedStart = !page.hasEarlier && !page.events.isEmpty
             warmMarkdown()
             settleNotifications()
             keepOfflineCopy(id: id, title: selected?.title, page: page)
@@ -1774,11 +1831,15 @@ final class ChatModel {
         guard !pagingUnavailable, hasEarlier, !earlierInFlight,
               let cursor = earlierCursor
         else { return }
+        var restoreAfterReplacement = false
         earlierInFlight = true
         loadingEarlier = !quiet
         defer {
             earlierInFlight = false
             loadingEarlier = false
+            if restoreAfterReplacement, selectionMatches(id: id, generation: generation) {
+                readingRestorationPulse &+= 1
+            }
         }
         do {
             let page = try await Bridge.chatEventPage(
@@ -1794,8 +1855,9 @@ final class ChatModel {
                 events = page.events
                 reconcileOutgoing()
                 offset = page.nextOffset
+                tailCursor = page.tailCursor
                 conversationUsage = page.usage
-                usageThrough = page.nextOffset
+                usageThrough = page.events.compactMap(\.seq).max()
                 warmMarkdown()
             } else {
                 // Pages do not overlap, but a trim or a retry could still put
@@ -1812,7 +1874,13 @@ final class ChatModel {
             // and never reaching the beginning.
             earlierCursor = page.cursor
             hasEarlier = page.hasEarlier
-            if !hasEarlier { reachedStart = true }
+            historyTrimmed = page.reset ? page.historyTrimmed : historyTrimmed || page.historyTrimmed
+            if page.reset {
+                reachedStart = !hasEarlier && !page.events.isEmpty
+                restoreAfterReplacement = true
+            } else if !hasEarlier {
+                reachedStart = true
+            }
             await loadResponseAttachments(id: id, generation: generation)
         } catch {
             if isUnknownMethod(error) { pagingUnavailable = true }
@@ -1863,10 +1931,22 @@ final class ChatModel {
     @discardableResult
     private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async -> Bool {
         let requestedOffset = reset ? 0 : offset
+        let requestedCursor = reset ? nil : tailCursor
         do {
-            let chunk = try await Bridge.chatEvents(id: id, offset: requestedOffset, peer: peer)
+            let chunk = try await Bridge.chatEvents(id: id, offset: requestedOffset, tailCursor: requestedCursor, peer: peer)
             guard selectionMatches(id: id, generation: generation) else { return false }
-            guard reset || requestedOffset == offset else { return false }
+            guard reset || (requestedOffset == offset && requestedCursor == tailCursor) else { return false }
+            if chunk.reset {
+                let opened = await openEvents(id: id, generation: generation)
+                if opened, selectionMatches(id: id, generation: generation) {
+                    // A replacement can move the current row or leave it in
+                    // an older page. Restore the reader after the new window
+                    // lands, just as on a deliberate return to this chat.
+                    readingRestorationPulse &+= 1
+                }
+                return opened
+            }
+            tailCursor = chunk.tailCursor
             // A poll that found nothing new must not write anything back. The
             // write is what redraws the transcript, and most polls of a
             // running turn arrive between records rather than on one.
@@ -1883,10 +1963,10 @@ final class ChatModel {
                 // when there is something on screen; empty chats stay quiet.
                 earlierCursor = nil
                 hasEarlier = false
-                if !chunk.events.isEmpty { reachedStart = true }
+                reachedStart = !chunk.events.isEmpty
                 keepOfflineCopy(
                     id: id, title: selected?.title,
-                    page: ChatEventPage(events: chunk.events, nextOffset: chunk.nextOffset)
+                    page: ChatEventPage(events: chunk.events, nextOffset: chunk.nextOffset, tailCursor: chunk.tailCursor)
                 )
             } else {
                 events.append(contentsOf: chunk.events)
@@ -1940,15 +2020,22 @@ final class ChatModel {
         events = copy.page.events
         reconcileOutgoing()
         offset = copy.page.nextOffset
+        tailCursor = nil
+        historyTrimmed = copy.page.historyTrimmed
         earlierCursor = nil
         hasEarlier = false
         reachedStart = false
-        conversationUsage = nil
+        conversationUsage = copy.page.usage
+        usageThrough = copy.page.events.compactMap(\.seq).max()
         error = nil
         savedCopy = SavedCopyInfo(title: copy.title, savedAt: copy.savedAt,
                                   hasEarlier: copy.page.hasEarlier, revision: copy.revision)
         warmMarkdown()
         settleNotifications()
+        if let id = selected?.id {
+            let generation = selectionGeneration
+            Task { await loadResponseAttachments(id: id, generation: generation) }
+        }
     }
 
     /// Ask the machine again from the saved-copy banner. A live answer
@@ -2014,9 +2101,8 @@ final class ChatModel {
     }
 
     func downloadResponseAttachment(_ attachment: ChatAttachment) async {
-        // File bytes are not in the copy, and a download against a snapshot
-        // would refill the row it came from with live state. The row says the
-        // file is unavailable instead.
+        // Saved previews load locally with the page. A missing preview never
+        // starts a live download against a saved conversation.
         guard savedCopy == nil, let selected else { return }
         await loadResponseAttachment(
             attachment, id: selected.id, generation: selectionGeneration, userInitiated: true
@@ -2054,6 +2140,7 @@ final class ChatModel {
               userInitiated || !attemptedResponseAttachments.contains(attachment.id)
         else { return }
         let targetPeer = peer
+        let previewReference = currentReference
         let memoryGeneration = attachmentCacheGeneration
         attemptedResponseAttachments.insert(attachment.id)
         loadingResponseAttachments.insert(attachment.id)
@@ -2063,11 +2150,23 @@ final class ChatModel {
                 loadingResponseAttachments.remove(attachment.id)
             }
         }
+        if let previewReference,
+           let saved = await WorkSavedPreview.read(reference: previewReference, attachment: attachment.id) {
+            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+                  currentReference == previewReference else { return }
+            responseAttachmentData[attachment.id] = saved
+            return
+        }
+        guard savedCopy == nil, selectionMatches(id: id, generation: generation),
+              memoryGeneration == attachmentCacheGeneration else { return }
         let cacheEpoch = await ChatAttachmentCache.shared.epoch()
         guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
         if let cached = await ChatAttachmentCache.shared.read(peer: targetPeer, chat: id, attachment: attachment.id) {
             guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
             responseAttachmentData[attachment.id] = cached
+            if let previewReference, currentReference == previewReference {
+                await WorkSavedPreview.save(reference: previewReference, attachment: attachment, data: cached)
+            }
             return
         }
         guard selectionMatches(id: id, generation: generation),
@@ -2082,6 +2181,9 @@ final class ChatModel {
             guard await ChatAttachmentCache.shared.write(data, peer: targetPeer, chat: id, attachment: attachment.id, epoch: cacheEpoch) else { return }
             guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
             responseAttachmentData[attachment.id] = data
+            if let previewReference, currentReference == previewReference {
+                await WorkSavedPreview.save(reference: previewReference, attachment: attachment, data: data)
+            }
         } catch {
             guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration else { return }
             responseAttachmentErrors[attachment.id] = Self.downloadFailure(error)
@@ -2459,6 +2561,9 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable {
 struct ChatDisplayItem: Identifiable, Equatable {
     let id: String
     let kind: Kind
+    /// Inclusive end of a coalesced text/thinking block in the loaded archive.
+    /// Lets a mark from a partial page resolve after earlier deltas arrive.
+    var lastSequence: UInt64? = nil
 
     enum Kind: Equatable {
         case user(String)
@@ -2502,6 +2607,8 @@ struct ChatDisplayItem: Identifiable, Equatable {
         var text = ""
         var textID = ""
         var textBackend: String?
+        var textLastSequence: UInt64?
+        var thinkingLastSequence: UInt64?
         var thinking = ""
         var thinkingID = ""
         var lastBackend: String?
@@ -2513,22 +2620,25 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 items.append(
                     ChatDisplayItem(
                         id: textID,
-                        kind: .assistant(body, backend: textBackend ?? defaultBackend)
+                        kind: .assistant(body, backend: textBackend ?? defaultBackend),
+                        lastSequence: textLastSequence
                     )
                 )
             }
             text = ""
             textID = ""
             textBackend = nil
+            textLastSequence = nil
         }
 
         func flushThinking() {
             let body = thinking.trimmingCharacters(in: .whitespacesAndNewlines)
             if !body.isEmpty {
-                items.append(ChatDisplayItem(id: thinkingID, kind: .thinking(body)))
+                items.append(ChatDisplayItem(id: thinkingID, kind: .thinking(body), lastSequence: thinkingLastSequence))
             }
             thinking = ""
             thinkingID = ""
+            thinkingLastSequence = nil
         }
 
         func closeRunningTools(failed: Bool, at: Int64?, detail: String?) {
@@ -2658,10 +2768,12 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     textBackend = event.backend ?? defaultBackend
                 }
                 text += agent.delta ?? ""
+                textLastSequence = event.seq
             case "thinking":
                 flushText()
                 if thinking.isEmpty { thinkingID = "think-\(stamp(event, items.count))" }
                 thinking += agent.delta ?? ""
+                thinkingLastSequence = event.seq
             case "toolStart":
                 flushText()
                 flushThinking()

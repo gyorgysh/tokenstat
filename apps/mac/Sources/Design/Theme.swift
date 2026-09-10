@@ -676,6 +676,7 @@ struct ScopeChip: View {
 struct DetailChromeToggles {
     var leftSidebar: AnyView
     var rightInspector: AnyView?
+    var search: AnyView? = nil
 }
 
 private struct DetailChromeTogglesKey: EnvironmentKey {
@@ -757,6 +758,7 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
             Spacer(minLength: 0)
             HStack(spacing: Theme.Space.s) {
                 trailing()
+                toggles?.search
                 // Last, so it is the control nearest the edge it opens, and so
                 // a destination's own actions keep their order regardless of
                 // whether that destination has an inspector at all.

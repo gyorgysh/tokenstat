@@ -50,4 +50,5 @@ enum ChatReadingPosition: Equatable {
 struct ChatReadingIdentity: Hashable {
     let reference: WorkReference?
     let generation: UInt64
+    var restoration: UInt64 = 0
 }

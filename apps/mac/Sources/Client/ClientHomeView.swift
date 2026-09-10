@@ -36,6 +36,8 @@ struct ClientHomeView: View {
                 // somebody chose to keep, and hiding Activity must not hide
                 // "you are offline".
                 status
+                ClientWorkSearchButton()
+                    .buttonStyle(SecondaryButtonStyle())
                 // In the order this device was arranged in. A card with
                 // nothing to say draws nothing and keeps its place.
                 ForEach(layout.sections) { section in

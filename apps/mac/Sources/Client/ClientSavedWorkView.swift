@@ -14,6 +14,9 @@ struct ClientSavedWorkView: View {
     @State private var loaded = false
     @State private var failure: String?
     @State private var unavailable = 0
+    @State private var searchModel: WorkSearchModel?
+    @State private var showSearch = false
+    @State private var path: [WorkReference] = []
 
     private struct SavedRow: Identifiable {
         let reference: WorkReference
@@ -24,7 +27,7 @@ struct ClientSavedWorkView: View {
     private var stillOwned: Bool { SavedWorkAccess.shared.reader == owner }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     Text("Saved for \(owner.name)")
@@ -35,14 +38,11 @@ struct ClientSavedWorkView: View {
                     if let failure {
                         ClientErrorCard(message: failure) { Task { await load() } }
                     } else if loaded, records.isEmpty {
-                        ClientEmptyState(kind: .nothingYet, title: "No saved conversations",
-                            message: "Conversations you open while connected can be kept here for later.")
+                        ClientEmptyState(kind: .nothingYet, title: "No saved work",
+                            message: "Conversations and changes you open while connected can be kept here for later.")
                     }
                     ForEach(rows) { row in
-                        NavigationLink {
-                            ClientSavedWorkConversation(reference: row.reference,
-                                hostName: owner.hosts[row.reference.hostIdentity] ?? "Machine")
-                        } label: {
+                        NavigationLink(value: row.reference) {
                             HStack(spacing: Theme.Space.m) {
                                 Image(systemName: ActionIcon.archive.symbol)
                                     .foregroundStyle(Theme.accent)
@@ -79,14 +79,37 @@ struct ClientSavedWorkView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(Theme.background)
+            .navigationDestination(for: WorkReference.self) { reference in
+                if reference.kind == .conversation {
+                    ClientSavedWorkConversation(reference: reference, hostName: owner.hosts[reference.hostIdentity] ?? "Machine")
+                } else {
+                    ClientSavedChangeDestination(reference: reference, owner: owner)
+                }
+            }
+            .sheet(isPresented: $showSearch) {
+                if let searchModel {
+                    WorkSearchSheet(model: searchModel) { reference in
+                        guard stillOwned, reference.scope == owner.scope else { return false }
+                        path.append(reference)
+                        return true
+                    }
+                }
+            }
             .navigationTitle("Saved work")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Search work", .search) { Task { await openSearch() } }
+                        .disabled(loading)
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
             }
             .task { if !loaded { await load() } }
+            .onChange(of: stillOwned) { _, value in
+                if !value { rows = []; path = []; searchModel?.close(); dismiss() }
+            }
         }
     }
 
@@ -101,10 +124,11 @@ struct ClientSavedWorkView: View {
             let result = try await Bridge.cacheList(scope: scope)
             guard stillOwned, generation == SavedWorkAccess.shared.generation, !Task.isCancelled else { return }
             records = result.records.filter { record in
-                guard record.scope == scope, record.kind == "conversation",
+                guard record.scope == scope,
                       let reference = WorkCache.reference(recordID: record.id, scope: owner.scope),
+                      WorkCache.matches(kind: record.kind, reference: reference),
                       reference.itemID == record.itemId else { return false }
-                return owner.hosts[reference.hostIdentity] != nil
+                return owner.hosts[reference.hostIdentity] != nil && WorkCacheAccess.canRead(reference)
             }.sorted { $0.updatedMs > $1.updatedMs }
             guard records.isEmpty || WorkCacheKey.existingKey(for: scope) != nil else {
                 failure = "Saved work is unavailable on this device. Unlock it and try again, or verify your account when you can connect."
@@ -135,14 +159,57 @@ struct ClientSavedWorkView: View {
                 offset += 1
                 continue
             }
-            let copy = await WorkCacheStore.shared.savedConversation(for: reference)
+            let row: SavedRow?
+            if reference.kind == .conversation {
+                let copy = await WorkCacheStore.shared.savedConversation(for: reference)
+                row = copy.map { SavedRow(reference: reference, title: $0.title, savedAt: $0.savedAt) }
+            } else if WorkCacheAccess.canRead(reference), let key = WorkCacheKey.existingKey(for: record.scope),
+                      let copy = try? await Bridge.cachedChange(key: WorkCacheKey.encoded(key), scope: record.scope, id: record.id),
+                      WorkCacheAccess.canRead(reference), copy.matches(reference) {
+                row = SavedRow(reference: reference, title: copy.payload.title, savedAt: copy.payload.capturedAt)
+            } else { row = nil }
             guard stillOwned, generation == SavedWorkAccess.shared.generation, !Task.isCancelled else { return }
             offset += 1
-            if let copy {
-                rows.append(SavedRow(reference: reference, title: copy.title, savedAt: copy.savedAt))
-            } else {
-                unavailable += 1
-            }
+            if let row { rows.append(row) } else { unavailable += 1 }
+        }
+    }
+    private func openSearch() async {
+        guard stillOwned else { return }
+        let generation = SavedWorkAccess.shared.generation
+        let access = WorkAccessStore.shared.generation
+        let catalog = WorkSearchCatalog(scope: owner.scope, linkedMachines: owner.hosts,
+            allowedHosts: Set(owner.hosts.keys.filter { WorkAccessStore.shared.allowed(scope: owner.scope, host: $0) != false }), knownFolders: [], records: records)
+        searchModel = WorkSearchModel(scope: owner.scope, folders: catalog.folders,
+            machines: catalog.machines, metadata: [], includesSavedText: WorkCacheSettings.shared.enabled,
+            ownsSession: { SavedWorkAccess.shared.reader == owner && SavedWorkAccess.shared.generation == generation
+                && WorkAccessStore.shared.generation == access })
+        showSearch = true
+    }
+
+}
+
+private struct ClientSavedChangeDestination: View {
+    let reference: WorkReference
+    let owner: SavedWorkOwner
+    @State private var change: WorkViewedChange?
+    @State private var loaded = false
+    var body: some View {
+        Group {
+            if let change {
+                WorkViewedChangeSheet(change: change, ownsSession: { SavedWorkAccess.shared.reader == owner })
+            } else if loaded {
+                Text("This saved change is no longer available.").font(Theme.callout)
+            } else { ProgressView("Opening saved change") }
+        }
+        .task {
+            defer { loaded = true }
+            let scope = WorkCache.scope(for: reference.scope)
+            guard SavedWorkAccess.shared.reader == owner, WorkCacheAccess.canRead(reference),
+                  let id = WorkCache.recordID(for: reference),
+                  let key = WorkCacheKey.existingKey(for: scope),
+                  let record = try? await Bridge.cachedChange(key: WorkCacheKey.encoded(key), scope: scope, id: id),
+                  SavedWorkAccess.shared.reader == owner, WorkCacheAccess.canRead(reference), !Task.isCancelled, record.matches(reference) else { return }
+            change = record.payload
         }
     }
 }
@@ -155,7 +222,7 @@ private struct ClientSavedWorkConversation: View {
 
     var body: some View {
         Group {
-            if model.savedCopy != nil, let id = reference.itemID {
+            if WorkCacheAccess.canRead(reference), model.savedCopy != nil, let id = reference.itemID {
                 ClientChatThread(model: model, chatID: id, folderName: "", hostName: hostName)
             } else if loaded {
                 ClientEmptyState(kind: .unreachable, title: "Saved copy unavailable",
@@ -168,6 +235,7 @@ private struct ClientSavedWorkConversation: View {
         .background(Theme.background)
         .task {
             _ = await model.loadSavedConversation(reference)
+            _ = model.restoreSearchReadingPosition(reference)
             loaded = true
         }
     }

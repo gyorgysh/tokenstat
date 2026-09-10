@@ -1257,10 +1257,11 @@ struct TranscriptEarlierHeader: View {
         } else if model.reachedStart {
             HStack(spacing: Theme.Space.s) {
                 ThemeRule()
-                Text("Start of chat")
+                Text(model.historyTrimmed ? "Earlier messages are no longer available" : "Start of chat")
                     .font(Theme.caption)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize()
+                    .foregroundStyle(Theme.controlGlyph)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 ThemeRule()
             }
             .frame(minHeight: Self.height)

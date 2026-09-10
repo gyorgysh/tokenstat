@@ -188,12 +188,14 @@ struct ClientDiffView: View {
     }
 
     private func load() async {
+        let owner = WorkViewedChange.owner(folderID: workspaceID, peer: peer)
         do {
             diff = try await ClientRemote.diff(
                 peer: peer,
                 workspace: workspaceID,
                 path: file.path
             )
+            if let diff { await WorkViewedChange.save(owner: owner, diff: diff) }
             errorMessage = nil
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)

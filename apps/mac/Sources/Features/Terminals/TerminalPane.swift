@@ -275,6 +275,9 @@ struct TerminalPane: View {
                     Group {
                         if let detail = workspaces.commit(id, in: folder.id) {
                             CommitView(detail: detail)
+                                .task(id: detail) {
+                                    await WorkViewedChange.save(owner: WorkViewedChange.owner(folderID: folder.id), commit: detail)
+                                }
                         } else if let message = workspaces.commitError(id, in: folder.id) {
                             failedRead(message)
                         } else {

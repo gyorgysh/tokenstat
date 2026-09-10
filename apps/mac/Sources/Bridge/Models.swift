@@ -2928,12 +2928,17 @@ struct ChatAttachmentData: Codable, Sendable {
 struct ChatEventChunk: Codable, Sendable {
     var events: [ChatTimelineEvent]
     var nextOffset: UInt64
+    var tailCursor: String?
 
-    enum CodingKeys: String, CodingKey { case events, nextOffset }
+    var reset: Bool
+
+    enum CodingKeys: String, CodingKey { case events, nextOffset, tailCursor, reset }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         nextOffset = try c.decodeIfPresent(UInt64.self, forKey: .nextOffset) ?? 0
+        tailCursor = try c.decodeIfPresent(String.self, forKey: .tailCursor)
+        reset = try c.decodeIfPresent(Bool.self, forKey: .reset) ?? false
         // One ugly toolStart must not fail the whole poll. The host writes
         // `input` as an object on tools and as a count on usage.
         events = (try c.decodeIfPresent([FailableChatEvent].self, forKey: .events) ?? [])
@@ -2944,6 +2949,8 @@ struct ChatEventChunk: Codable, Sendable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(events, forKey: .events)
         try c.encode(nextOffset, forKey: .nextOffset)
+        try c.encodeIfPresent(tailCursor, forKey: .tailCursor)
+        try c.encode(reset, forKey: .reset)
     }
 }
 
@@ -2956,8 +2963,10 @@ struct ChatEventPage: Codable, Sendable {
     var events: [ChatTimelineEvent]
     /// Where live tailing carries on from. Only the newest page's is useful.
     var nextOffset: UInt64
+    var tailCursor: String?
     var cursor: String?
     var hasEarlier: Bool
+    var historyTrimmed: Bool
     /// The cursor could not be honoured because the archive was trimmed under
     /// it, so this is the newest page rather than the one asked for. What is
     /// held should be replaced, not extended.
@@ -2967,15 +2976,17 @@ struct ChatEventPage: Codable, Sendable {
     var usage: ChatUsageTotals?
 
     enum CodingKeys: String, CodingKey {
-        case events, nextOffset, cursor, hasEarlier, reset, usage
+        case events, nextOffset, tailCursor, cursor, hasEarlier, historyTrimmed, reset, usage
     }
 
     init(events: [ChatTimelineEvent], nextOffset: UInt64, cursor: String? = nil,
-         hasEarlier: Bool = false, reset: Bool = false, usage: ChatUsageTotals? = nil) {
+         hasEarlier: Bool = false, reset: Bool = false, usage: ChatUsageTotals? = nil, tailCursor: String? = nil, historyTrimmed: Bool = false) {
         self.events = events
         self.nextOffset = nextOffset
+        self.tailCursor = tailCursor
         self.cursor = cursor
         self.hasEarlier = hasEarlier
+        self.historyTrimmed = historyTrimmed
         self.reset = reset
         self.usage = usage
     }
@@ -2983,8 +2994,10 @@ struct ChatEventPage: Codable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         nextOffset = try c.decodeIfPresent(UInt64.self, forKey: .nextOffset) ?? 0
+        tailCursor = try c.decodeIfPresent(String.self, forKey: .tailCursor)
         cursor = try c.decodeIfPresent(String.self, forKey: .cursor)
         hasEarlier = try c.decodeIfPresent(Bool.self, forKey: .hasEarlier) ?? false
+        historyTrimmed = try c.decodeIfPresent(Bool.self, forKey: .historyTrimmed) ?? false
         reset = try c.decodeIfPresent(Bool.self, forKey: .reset) ?? false
         usage = try c.decodeIfPresent(ChatUsageTotals.self, forKey: .usage)
         // One unreadable row must not empty a page, exactly as on the tail.
@@ -2996,8 +3009,10 @@ struct ChatEventPage: Codable, Sendable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(events, forKey: .events)
         try c.encode(nextOffset, forKey: .nextOffset)
+        try c.encodeIfPresent(tailCursor, forKey: .tailCursor)
         try c.encodeIfPresent(cursor, forKey: .cursor)
         try c.encode(hasEarlier, forKey: .hasEarlier)
+        try c.encode(historyTrimmed, forKey: .historyTrimmed)
         try c.encode(reset, forKey: .reset)
         try c.encodeIfPresent(usage, forKey: .usage)
     }

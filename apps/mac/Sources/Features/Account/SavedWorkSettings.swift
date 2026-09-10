@@ -18,11 +18,18 @@ struct SavedWorkSettings: View {
     @State private var clearing = false
     @State private var cleared = false
     @State private var message: String?
+    @State private var showManagement = false
+    @State private var retentionDays = WorkCacheSettings.shared.retentionDays
+    @State private var budgetMB = WorkCacheSettings.shared.budgetMB
+    @State private var offlineBudgetMB = WorkCacheSettings.shared.offlineBudgetMB
 
     var body: some View {
         card
             .disabled(clearing)
-            .task { await refresh() }
+            .task(id: scope) { bytes = nil; records = nil; pinned = nil; await refresh() }
+            .sheet(isPresented: $showManagement, onDismiss: { Task { await refresh() } }) {
+                if let scope { WorkCacheManagementSheet(scope: scope) }
+            }
             .onChange(of: enabled) { _, _ in
                 WorkCacheSettings.shared.enabled = enabled
             }
@@ -68,7 +75,7 @@ struct SavedWorkSettings: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             keepRow
             ThemeRule()
-            Text("Opened chats are sealed on this device and reopened when the machine cannot be reached. Copies never leave the device; clearing them deletes nothing on any computer and leaves drafts alone.")
+            Text("Opened conversations and viewed changes are encrypted on this device. Saved changes are read-only snapshots. Copies never leave the device; clearing them leaves source work and unsent drafts alone. Downloaded copies remain readable offline until removed or until access changes are learned on reconnection.")
                 #if os(macOS)
                 .font(Theme.caption)
                 #else
@@ -76,6 +83,10 @@ struct SavedWorkSettings: View {
                 #endif
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            storagePolicy
+            Button("Manage saved work", .archive) { showManagement = true }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(scope == nil)
             clearButton
             if let message {
                 Text(message)
@@ -91,7 +102,8 @@ struct SavedWorkSettings: View {
     }
 
     private var keepRow: some View {
-        Toggle("Keep copies of opened chats", isOn: $enabled)
+        Toggle("Save recent work on this device", isOn: $enabled)
+            .toggleStyle(.brandCheckbox)
             #if os(macOS)
             .font(Theme.callout)
             #else
@@ -100,6 +112,38 @@ struct SavedWorkSettings: View {
             .contentShape(.rect)
             #endif
             .tint(Theme.accent)
+    }
+
+    private var storagePolicy: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Menu {
+                ForEach(WorkCacheSettings.retentionChoices, id: \.self) { days in
+                    Button("\(days) days", days == retentionDays ? ActionIcon.done : .history) {
+                        retentionDays = days
+                        WorkCacheSettings.shared.retentionDays = days
+                    }
+                }
+            } label: { ActionIcon.history.label("Keep recent copies for \(retentionDays) days") }
+            Menu {
+                ForEach(WorkCacheSettings.budgetChoices, id: \.self) { mb in
+                    Button("\(mb) MB", mb == budgetMB ? ActionIcon.done : .archive) {
+                        budgetMB = mb
+                        WorkCacheSettings.shared.budgetMB = mb
+                    }
+                }
+            } label: { ActionIcon.archive.label("Recent copies · \(budgetMB) MB") }
+            Menu {
+                ForEach(WorkCacheSettings.offlineBudgetChoices, id: \.self) { mb in
+                    Button("\(mb) MB", mb == offlineBudgetMB ? ActionIcon.done : .pin) {
+                        offlineBudgetMB = mb
+                        WorkCacheSettings.shared.offlineBudgetMB = mb
+                    }
+                }
+            } label: { ActionIcon.pin.label("Offline storage limit · \(offlineBudgetMB) MB") }
+            Text("Limits apply when saving new work. Copies kept offline do not expire automatically. Lowering a limit never deletes them; remove copies in Manage saved work to make room.")
+                .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+        }
+        .font(Theme.callout)
     }
 
     @ViewBuilder
@@ -125,7 +169,7 @@ struct SavedWorkSettings: View {
         }
         .buttonStyle(.plain)
         .disabled(clearing || bytes == nil || bytes == 0)
-        .accessibilityHint("Removes saved chat copies from this device. Drafts stay, and nothing is deleted on any computer.")
+        .accessibilityHint("Removes saved copies from this device. Drafts stay, and nothing is deleted on any computer.")
         #endif
     }
 
@@ -145,24 +189,26 @@ struct SavedWorkSettings: View {
 
     private var usageLabel: String {
         if cleared { return "Saved work cleared" }
-        guard let bytes, let records else { return "Saved conversations on this device" }
+        guard let bytes, let records else { return "Saved work on this device" }
         if records == 0 { return "Nothing saved on this device" }
         let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
         let kept = pinned.map { $0 > 0 ? ", \($0) kept" : "" } ?? ""
         return records == 1
-            ? "1 saved conversation (\(size)\(kept)) on this device"
-            : "\(records) saved conversations (\(size)\(kept)) on this device"
+            ? "1 saved item (\(size)\(kept)) on this device"
+            : "\(records) saved items (\(size)\(kept)) on this device"
     }
 
     private func refresh() async {
         guard let scope else { bytes = nil; records = nil; pinned = nil; return }
         do {
             let stats = try await Bridge.cacheStats(scope: WorkCache.scope(for: scope))
+            guard self.scope == scope, !Task.isCancelled else { return }
             bytes = stats.bytes
             records = stats.records
             pinned = stats.pinned
             cleared = false
-            message = nil
+            message = enabled && WorkCacheKey.key(for: WorkCache.scope(for: scope)) == nil
+                ? "Secure storage is unavailable. Unlock this device and try again. Work cannot be saved until its encryption key is available." : nil
         } catch {
             if !WorkCacheStore.isUnavailable(error) {
                 message = "Saved work could not be measured. Try again."
@@ -181,12 +227,13 @@ struct SavedWorkSettings: View {
         defer { clearing = false }
         do {
             _ = try await Bridge.cacheClearScope(scope: WorkCache.scope(for: scope))
+            guard self.scope == scope, !Task.isCancelled else { return }
             bytes = 0
             records = 0
             cleared = true
         } catch {
-            message = "Some saved work could not be removed. Try again."
             await refresh()
+            if self.scope == scope { message = "Some saved work could not be removed. Try again." }
         }
     }
 }

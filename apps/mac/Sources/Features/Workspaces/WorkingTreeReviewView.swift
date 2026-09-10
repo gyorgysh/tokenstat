@@ -40,6 +40,9 @@ struct WorkingTreeReviewView: View {
                         ForEach(diffs, id: \.path) { diff in
                             fileHeader(diff)
                             DiffBody(diff: diff)
+                                .task(id: diff) {
+                                    await WorkViewedChange.save(owner: WorkViewedChange.owner(folderID: folder.id), diff: diff)
+                                }
                         }
                     }
                 }

@@ -213,6 +213,15 @@ final class Notified: @unchecked Sendable {
         assert(afterCorruption.draft(for: named)?.messageID == minted)
         afterCorruption.settle()
         assert(ChatDraftStore(directory: root).draft(for: named)?.messageID == minted)
+        // An explicit handoff import is a fresh local send identity, even if
+        // its words and files happen to match the existing draft exactly.
+        afterCorruption.save(text: "first, edited", attachments: [file], for: named, newMessage: true)
+        let importedID = afterCorruption.draft(for: named)?.messageID
+        assert(importedID != nil && importedID != minted)
+        afterCorruption.settle()
+        let reopenedImport = ChatDraftStore(directory: root).draft(for: named)
+        assert(reopenedImport?.messageID == importedID)
+        assert(reopenedImport?.text == "first, edited" && reopenedImport?.attachments == [file])
         // A message that was sent takes its name with it: the next one is new.
         afterCorruption.clear(for: named)
         afterCorruption.save(text: "second", attachments: [], for: named)

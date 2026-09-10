@@ -372,12 +372,14 @@ struct ClientCommitDetailView: View {
     }
 
     private func load() async {
+        let owner = WorkViewedChange.owner(folderID: workspaceID, peer: peer)
         do {
             detail = try await ClientRemote.showCommit(
                 peer: peer,
                 workspace: workspaceID,
                 commit: commit.id
             )
+            if let detail { await WorkViewedChange.save(owner: owner, commit: detail) }
             errorMessage = nil
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)

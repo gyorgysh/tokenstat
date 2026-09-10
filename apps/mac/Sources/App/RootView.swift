@@ -25,6 +25,7 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var route: Route = .global(.home)
+    @State private var showWorkSearch = false
     /// The folder whose chat pane is mounted, on macOS.
     ///
     /// Set on the first visit and kept. Chat is the one non-workspace screen
@@ -155,6 +156,9 @@ struct RootView: View {
     /// Observed, so pinning anywhere redraws every pin mark without leaving
     /// the screen: sidebar rows, chat chrome and Home read the same shelf.
     @State private var pins = PinnedWorkStore.shared
+    @State private var savedWorkCatalog = DesktopSavedWorkCatalog()
+    @State private var savedConversation: DesktopSavedConversation.Destination?
+    @State private var savedFolder: WorkFolderCacheSettings.Destination?
     /// The every-folder group. Shut by default, and remembered: it answers a
     /// question people ask about once a week.
     @AppStorage("sidebar.globalGroupExpanded") private var isGlobalGroupExpanded = false
@@ -362,6 +366,16 @@ struct RootView: View {
                 anchor: hoveredCell,
                 windowSize: windowSize
             )
+        }
+        .task(id: WorkSessionContext.shared.scope) {
+            await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
+        }
+        .sheet(item: $savedConversation) { DesktopSavedConversation(destination: $0) }
+        .sheet(item: $savedFolder) { destination in
+            WorkFolderCacheSettings(destination: destination)
+        }
+        .sheet(isPresented: $showWorkSearch) {
+            DesktopWorkSearchPresentation(account: account, workspaces: workspaces, open: openSearchWork)
         }
         .sheet(isPresented: $workspaces.isAddSheetPresented) {
             AddWorkspaceSheet(model: workspaces, machines: account.account?.machines ?? [])
@@ -644,7 +658,10 @@ struct RootView: View {
             leftSidebar: AnyView(leftSidebarToolbarButton),
             rightInspector: route.hasInspector
                 ? AnyView(rightInspectorToolbarButton)
-                : nil
+                : nil,
+            search: AnyView(ToolbarIconButton(systemImage: ActionIcon.search.symbol, help: "Search work (⌘K)") {
+                showWorkSearch = true
+            }.keyboardShortcut("k", modifiers: .command))
         )
     }
 
@@ -1790,6 +1807,9 @@ struct RootView: View {
                         }
                         .contextMenu {
                             if let reference = pinReference(for: folder) {
+                                Button("Saved work on this device", .archive) {
+                                    savedFolder = .init(reference: reference, name: folder.name)
+                                }
                                 let pinned = pins.isPinned(reference)
                                 Button(pinned ? "Unpin" : "Pin", pinned ? .pinned : .pin) {
                                     Task {
@@ -2858,12 +2878,40 @@ struct RootView: View {
             return DesktopHomeDestination(
                 reference: reference, title: title ?? "Conversation in \(folder?.name ?? "a previous folder")",
                 subtitle: "\(folder?.name ?? "Folder") · \(machine)",
-                unavailable: folder == nil ? "Folder is not available in Workspaces" : nil
+                unavailable: workAvailabilityMessage(reference)
             )
         }
     }
 
+    private func openSearchWork(_ reference: WorkReference) -> Bool {
+        guard let scope = WorkSessionContext.shared.scope, reference.scope == scope,
+              let local = WorkSessionContext.shared.localHostIdentity,
+              reference.hostIdentity == local || WorkAccessStore.shared.allowed(scope: scope, host: reference.hostIdentity) == true else { return false }
+        if reference.kind == .conversation, savedWorkCatalog.contains(reference),
+           desktopAvailability(reference) == .savedCopy {
+            savedConversation = .init(reference: reference)
+            return true
+        }
+        guard let folderID = WorkPlaceRestoration.folderID(for: reference, among: workspaces.folders.map(\.id),
+                                                          localHostIdentity: local) else { return false }
+        if reference.kind == .conversation {
+            if let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) {
+                ChatReadingStore.shared.remember(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
+            }
+            chat.restoreSearchReadingPosition(reference)
+            openHomeWork(reference)
+        } else if reference.kind == .workspace {
+            openSection(lastSection[folderID] ?? .chat, in: folderID)
+        } else { return false }
+        return true
+    }
+
     private func openHomeWork(_ reference: WorkReference) {
+        guard workAvailabilityMessage(reference) == nil else { return }
+        if desktopAvailability(reference) == .savedCopy {
+            savedConversation = .init(reference: reference)
+            return
+        }
         guard reference.scope == WorkSessionContext.shared.scope,
               let folderID = WorkPlaceRestoration.folderID(
                 for: reference, among: workspaces.folders.map(\.id),
@@ -2887,20 +2935,42 @@ struct RootView: View {
     }
 
     /// Availability is resolved without opening a peer connection from Home.
-    private func pinAvailability(_ pin: PinnedWorkStore.Pin) -> String? {
-        guard pin.reference.scope == WorkSessionContext.shared.scope else {
-            return "Sign in to the account that pinned this work"
+    private func desktopAvailability(_ reference: WorkReference) -> WorkDestinationResolver.Availability {
+        let local = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity
+        let machine = account.account?.machines.first { $0.publicIdentity == reference.hostIdentity }
+        let folder = WorkPlaceRestoration.folderID(for: reference, among: workspaces.folders.map(\.id),
+                                                   localHostIdentity: WorkSessionContext.shared.localHostIdentity)
+        return WorkDestinationResolver.availability(.init(
+            accountVerified: reference.scope == WorkSessionContext.shared.scope,
+            hostLinked: local || machine != nil,
+            accessAllowed: local ? true : WorkAccessStore.shared.allowed(scope: reference.scope, host: reference.hostIdentity),
+            connected: folder != nil && (local || machine?.online == true),
+            savedCopy: savedWorkCatalog.contains(reference)))
+    }
+
+    private func workAvailabilityMessage(_ reference: WorkReference) -> String? {
+        switch desktopAvailability(reference) {
+        case .live, .savedCopy: nil
+        case .accessRequired: "Verify this account and its workspace access"
+        case .hostRemoved: "This machine is no longer linked"
+        case .itemDeleted: "This work is no longer available"
+        case .unsupportedHost: "Update the host to open this work"
+        case .reconnecting: "Reconnecting to the machine"
+        case .unavailable: "Connect the machine and open its folder in Workspaces"
         }
-        guard WorkPlaceRestoration.folderID(
-            for: pin.reference, among: workspaces.folders.map(\.id),
-            localHostIdentity: WorkSessionContext.shared.localHostIdentity
-        ) != nil else { return "Folder is not available in Workspaces" }
-        return nil
+    }
+
+    private func pinAvailability(_ pin: PinnedWorkStore.Pin) -> String? {
+        workAvailabilityMessage(pin.reference)
     }
 
     /// Reuse the exact folder and conversation routing used by the sidebar.
     private func openPin(_ pin: PinnedWorkStore.Pin) {
         guard pinAvailability(pin) == nil else { return }
+        if desktopAvailability(pin.reference) == .savedCopy {
+            savedConversation = .init(reference: pin.reference)
+            return
+        }
         let ids = workspaces.folders.map(\.id)
         guard let folderID = WorkPlaceRestoration.folderID(
             for: pin.reference, among: ids,

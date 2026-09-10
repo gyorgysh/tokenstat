@@ -67,11 +67,13 @@ enum TranscriptReading {
         // Inside a long row the reader was partway down it, so the row's
         // own fraction puts them back there. Otherwise the row's top goes
         // where it was in the viewport.
+        // Rows sit inside horizontal padding. Centering preserves that
+        // gutter instead of scrolling the padded leading edge sideways.
         let point: UnitPoint
         if mark.within > 0 {
-            point = UnitPoint(x: 0, y: min(max(mark.within, 0), 0.9))
+            point = UnitPoint(x: 0.5, y: min(max(mark.within, 0), 0.9))
         } else {
-            point = UnitPoint(x: 0, y: min(max(mark.offset, 0), 0.6))
+            point = UnitPoint(x: 0.5, y: min(max(mark.offset, 0), 0.6))
         }
         follow.settle(true)
         var placements = 0
@@ -91,7 +93,7 @@ enum TranscriptReading {
             }
             // Still arriving: the row may be in a page that has not landed.
             if model.openingConversation, placements == 0, fetched == 0 { continue }
-            if !model.displayItems.contains(where: { $0.id == mark.eventID }) {
+            guard let rowID = ChatReadingAnchor.resolve(mark.eventID, items: model.displayItems, events: model.events) else {
                 // Not loaded yet, not necessarily gone: the conversation
                 // opens on its newest page, and the kept row may be screens
                 // above it. Pull older pages until it appears, the start is
@@ -102,7 +104,7 @@ enum TranscriptReading {
                 fetched += 1
                 continue
             }
-            place(mark.eventID, point)
+            place(rowID, point)
             placements += 1
             if placements > corrections { break }
         }

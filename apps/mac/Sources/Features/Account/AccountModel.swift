@@ -464,6 +464,7 @@ final class AccountModel {
             // stay for the account they belong to. A sign-out that never
             // reached the host keeps everything until it completes.
             if let purgeScope {
+                WorkAccessStore.shared.clear(scope: purgeScope)
                 let scope = WorkCache.scope(for: purgeScope)
                 _ = try? await Bridge.cacheClearScope(scope: scope)
                 WorkCacheKey.delete(for: scope)

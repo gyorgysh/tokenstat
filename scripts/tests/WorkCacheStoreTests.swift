@@ -9,6 +9,10 @@ struct ChatEventPage: Codable, Sendable {
     var nextOffset: UInt64
     var hasEarlier: Bool
 }
+enum WorkCacheAccess {
+    static func canSave(_ reference: WorkReference) async -> Bool { true }
+    static func canRead(_ reference: WorkReference) async -> Bool { true }
+}
 enum BridgeError: Error { case core(code: String, message: String) }
 enum WorkCacheKey {
     static var keys: [String: [UInt8]] = [:]
@@ -30,7 +34,10 @@ enum Bridge {
         writes += 1
         records[scope + "/" + id] = (key, try JSONSerialization.data(withJSONObject: payload))
     }
-    struct Record { let payload: CachedRecordPayload }
+    struct Record {
+        let scope: String; let id: String; let kind = "conversation"; let itemId: String
+        let payload: CachedRecordPayload
+    }
     static func cacheGet(key: String, scope: String, id: String) async throws -> Record {
         reads += 1
         guard let saved = records[scope + "/" + id], saved.key == key else {
@@ -38,7 +45,8 @@ enum Bridge {
         }
         let decoder = JSONDecoder()
         // Match Bridge.background's ordinary JSONDecoder, without a date override.
-        return Record(payload: try decoder.decode(CachedRecordPayload.self, from: saved.data))
+        return Record(scope: scope, id: id, itemId: String(id.split(separator: "|").last ?? "").removingPercentEncoding ?? "",
+                      payload: try decoder.decode(CachedRecordPayload.self, from: saved.data))
     }
     static func cacheRemove(scope: String, id: String) async throws {
         records.removeValue(forKey: scope + "/" + id)

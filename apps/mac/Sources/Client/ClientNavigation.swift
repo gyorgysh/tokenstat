@@ -21,6 +21,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class ClientNavigationModel {
+    var showWorkSearch = false
     /// The destination: a tab in tab mode, a sidebar row in sidebar mode.
     var destination: ClientTab = .home {
         didSet {

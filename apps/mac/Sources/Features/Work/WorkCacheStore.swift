@@ -30,7 +30,7 @@ final class WorkCacheStore {
 
     /// Keep this conversation's newest page under the scope's key.
     func saveConversation(reference: WorkReference, title: String, page: ChatEventPage, backend: String? = nil) async {
-        guard settings.enabled,
+        guard await WorkCacheAccess.canSave(reference), settings.saves(reference), reference.kind == .conversation,
               let recordID = WorkCache.recordID(for: reference),
               let itemID = reference.itemID,
               let key = WorkCacheKey.key(for: WorkCache.scope(for: reference.scope)),
@@ -54,12 +54,14 @@ final class WorkCacheStore {
 
     /// Disabling future saving does not hide copies that are already kept.
     func savedConversation(for reference: WorkReference) async -> CachedRecordPayload? {
-        guard let recordID = WorkCache.recordID(for: reference) else { return nil }
+        guard await WorkCacheAccess.canRead(reference), reference.kind == .conversation, let recordID = WorkCache.recordID(for: reference) else { return nil }
         let scope = WorkCache.scope(for: reference.scope)
         guard let key = WorkCacheKey.existingKey(for: scope) else { return nil }
         guard let record = try? await Bridge.cacheGet(
             key: WorkCacheKey.encoded(key), scope: scope, id: recordID
         ) else { return nil }
+        guard await WorkCacheAccess.canRead(reference), record.scope == scope, record.id == recordID,
+              record.kind == "conversation", record.itemId == reference.itemID else { return nil }
         return record.payload
     }
 

@@ -72,6 +72,11 @@ struct ClientWorkspaceDetailView: View {
             }
         }
         .rememberWorkspace(peer: peer, folder: folder)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                WorkFolderCacheButton(folderID: workspaceID, peer: peer, name: folder.name)
+            }
+        }
     }
 
     private var stacked: some View {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 // Compile with WorkReference.swift ChatReadingStore.swift ChatReadingPosition.swift
-// TranscriptReading.swift.
+// TranscriptReading.swift ChatReadingAnchor.swift.
 import SwiftUI
 
 @MainActor final class ChatModel {
@@ -8,7 +8,8 @@ import SwiftUI
     var currentReference: WorkReference?
     var openingConversation = false
     var displayItems: [Row] = [ChatModel.Row(id: "text-s1")]
-    struct Row { let id: String }
+    struct Row { let id: String; var lastSequence: UInt64? = nil }
+    var events: [ChatTimelineEvent] = []
     var hasEarlier = false
     var reachedStart = false
     /// Pages the next fetch reveals, oldest first. Empty means the host
@@ -28,6 +29,12 @@ import SwiftUI
             reachedStart = true
         }
     }
+}
+typealias ChatDisplayItem = ChatModel.Row
+struct ChatTimelineEvent {
+    var seq: UInt64?
+    var event: Event?
+    struct Event { var kind: String }
 }
 @MainActor final class TranscriptFollowState {
     var atEnd = false
@@ -124,7 +131,7 @@ import SwiftUI
                 placements += 1
             }
         assert(paged == .restored && model.fetches == 1 && !follow.settling)
-        assert(landed == UnitPoint(x: 0, y: 0))
+        assert(landed == UnitPoint(x: 0.5, y: 0))
 
         // Inside a long row the placement carries the reader's fraction
         // down it rather than the row's top edge in the viewport.
@@ -133,7 +140,7 @@ import SwiftUI
         var deepPoint: UnitPoint?
         let deepRestored = await TranscriptReading.restore(deep, reference: reference,
             model: model, follow: follow) { _, point in deepPoint = point }
-        assert(deepRestored == .restored && deepPoint == UnitPoint(x: 0, y: 0.5))
+        assert(deepRestored == .restored && deepPoint == UnitPoint(x: 0.5, y: 0.5))
 
         // Pages that never contain the row end at the start of the chat,
         // and the conversation opens at its latest turn instead of waiting.

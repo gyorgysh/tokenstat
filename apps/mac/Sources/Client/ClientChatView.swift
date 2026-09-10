@@ -340,6 +340,7 @@ struct ClientChatThread: View {
     /// geometry readers exist for the stretch that can need an anchor and
     /// nowhere else.
     @State private var measuringRows = false
+    @State private var showingHandoff = false
     @State private var showingSetup = false
     @State private var showingPersonas = false
     @State private var urlDropTargeted = false
@@ -407,6 +408,9 @@ struct ClientChatThread: View {
     var body: some View {
         VStack(spacing: 0) {
             if let chat {
+                if model.savedCopy == nil {
+                    WorkHandoffOffer(chat: model) { showingHandoff = true }
+                }
                 // The bar is pinned, not the next row of a stack. Stacked,
                 // it had the window background under it rather than the
                 // conversation, so its glass had nothing to be glass about and
@@ -487,12 +491,14 @@ struct ClientChatThread: View {
                             folderName: folderName
                         )
                         if model.savedCopy == nil {
+                            Button("Continue on another device", .device) { showingHandoff = true }
                             Button("Setup", .settings) { showingSetup = true }
                         }
                     }
                 }
             }
         }
+        .sheet(isPresented: $showingHandoff) { WorkHandoffSheet(chat: model) }
         .sheet(isPresented: $showingSetup) {
             setupSheet
         }
