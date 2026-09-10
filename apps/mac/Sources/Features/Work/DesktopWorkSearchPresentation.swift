@@ -10,6 +10,7 @@ struct DesktopWorkSearchPresentation: View {
     @State private var model: WorkSearchModel?
     @State private var failure: String?
     @State private var preparing = false
+    @State private var visible = false
 
     var body: some View {
         Group {
@@ -31,23 +32,27 @@ struct DesktopWorkSearchPresentation: View {
             }
         }
         .task { await prepare() }
+        .onAppear { visible = true }
+        .onDisappear { visible = false; model?.close() }
         .onChange(of: WorkSessionContext.shared.scope) { _, _ in model?.close(); dismiss() }
         .onChange(of: WorkAccessStore.shared.generation) { _, _ in model?.close(); dismiss() }
         .onChange(of: account.account?.machines.compactMap(\.publicIdentity)) { _, _ in model?.close(); dismiss() }
     }
 
     private func prepare() async {
-        guard !preparing, model == nil, let scope = WorkSessionContext.shared.scope else { return }
+        guard visible, !Task.isCancelled, !preparing, model == nil,
+              let scope = WorkSessionContext.shared.scope else { return }
         preparing = true
         failure = nil
         defer { preparing = false }
         await WorkSessionContext.shared.resolveLocalHostIdentity()
-        guard WorkSessionContext.shared.scope == scope else { return }
+        guard visible, !Task.isCancelled, WorkSessionContext.shared.scope == scope else { return }
         guard let local = WorkSessionContext.shared.localHostIdentity else {
             failure = "This Mac’s identity could not be loaded. Try again."
             return
         }
         let access = WorkAccessStore.shared.generation
+        let linked = Set(account.account?.machines.compactMap(\.publicIdentity) ?? [])
         var machines = account.account?.machines.reduce(into: [String: String]()) { result, machine in
             if let identity = machine.publicIdentity { result[identity] = machine.displayName }
         } ?? [:]
@@ -69,11 +74,11 @@ struct DesktopWorkSearchPresentation: View {
             do { records = try await Bridge.cacheList(scope: WorkCache.scope(for: scope)).records }
             catch { savedUnavailable = true }
         }
-        guard !Task.isCancelled, WorkSessionContext.shared.scope == scope,
-              WorkAccessStore.shared.generation == access else { return }
+        guard visible, !Task.isCancelled, WorkSessionContext.shared.scope == scope,
+              WorkAccessStore.shared.generation == access,
+              Set(account.account?.machines.compactMap(\.publicIdentity) ?? []) == linked else { return }
         let catalog = WorkSearchCatalog(scope: scope, linkedMachines: machines, allowedHosts: allowed,
                                         knownFolders: known, records: records)
-        let linked = Set(account.account?.machines.compactMap(\.publicIdentity) ?? [])
         let model = WorkSearchModel(scope: scope, folders: catalog.folders, machines: catalog.machines,
             metadata: catalog.metadata, includesSavedText: includesText, liveHosts: allowed.subtracting([local]), localHost: local, ownsSession: {
                 WorkSessionContext.shared.scope == scope && WorkAccessStore.shared.generation == access
