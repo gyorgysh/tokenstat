@@ -343,6 +343,13 @@ The Mac app is generated from `apps/mac/project.yml`. The Windows app is
 `apps/windows/`. The Android app is `apps/android/`. Each tree has its own
 README for the extra tooling that build needs.
 
+On macOS, `scripts/run-swift-tests.sh` runs the Apple client's standalone state
+tests. To measure the production local search index with 10,000 synthetic
+messages, run `scripts/benchmark-work-search.sh 10000 20 varied`. It prints
+release-mode timing JSON and peak process memory for a corpus near 100 MB.
+Use `1024` instead of `10000` for a corpus near 10 MB. These are local index
+measurements; native rendering and device checks remain separate.
+
 ## Privacy
 
 Everything happens on your machine. tokenstat reads your local session logs,

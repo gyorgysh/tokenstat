@@ -17,6 +17,22 @@ import Foundation
         let partialFold = WorkSearchText("ß").excerpt(for: try WorkSearchQuery("s ss"))
         assert(partialFold.highlights == [NSRange(location: 0, length: 1)])
 
+        // The optimized byte search keeps Foundation's literal semantics
+        // after normalization, including partial graphemes and embedded NUL.
+        let corpus = ["", "ASCII text", "one\r\nneedle\r\nafter", "Straße", "Cafe\u{301}", "Σ σ ς", "👩🏽‍💻", "a\0b", "İstanbul"]
+        let needles = ["", "text", "needle", "ss", "café", "σ", "🏽", "\u{200D}", "\0", "i", "missing"]
+        let longCorpus = corpus.map { String(repeating: "Planning local work. ", count: 80) + $0 + " Café 👩🏽‍💻 suffix" }
+        for original in corpus + longCorpus {
+            let folded = WorkSearchText.normalize(original)
+            let indexed = WorkSearchText(original)
+            for needle in needles {
+                let term = WorkSearchText.normalize(needle)
+                assert(indexed.contains(term) == (folded.range(of: term, options: .literal) != nil))
+            }
+        }
+        let lineBreaks = WorkSearchText("one\r\nneedle\r\nafter").excerpt(for: try WorkSearchQuery("needle"))
+        assert(lineBreaks.highlights.map { (lineBreaks.text as NSString).substring(with: $0) } == ["needle"])
+
         let literal = try WorkSearchQuery(".* [x] OR")
         assert(!WorkSearchText("anything").contains(literal.terms[0]))
         assert(WorkSearchText("literal .* [x] OR").contains(literal.terms[0]))

@@ -104,14 +104,21 @@ actor WorkSearchIndex {
 
     @discardableResult
     func replace(_ load: Load, documents: [Document]) -> Bool {
-        guard loads[load.reference] == load.token, permits(load.reference),
+        guard !Task.isCancelled, loads[load.reference] == load.token, permits(load.reference),
               documents.allSatisfy({ container($0.reference) == load.reference }) else { return false }
         var seen = Set<WorkReference>()
-        let prepared = documents.filter { seen.insert($0.reference).inserted }.map { document in
-            Entry(document: document, title: WorkSearchText(document.title),
+        var prepared: [Entry] = []
+        for document in documents where seen.insert(document.reference).inserted {
+            guard !Task.isCancelled else { return false }
+            prepared.append(Entry(document: document, title: WorkSearchText(document.title),
                   text: WorkSearchText(document.text), folder: WorkSearchText(document.folderName),
-                  machine: WorkSearchText(document.machineName), key: stableKey(document.reference))
+                  machine: WorkSearchText(document.machineName), key: stableKey(document.reference)))
         }
+        prepared.sort {
+            if $0.document.updatedAt != $1.document.updatedAt { return $0.document.updatedAt > $1.document.updatedAt }
+            return $0.key < $1.key
+        }
+        guard !Task.isCancelled else { return false }
         entries[load.reference] = prepared
         loads.removeValue(forKey: load.reference)
         generation = UUID()
@@ -143,6 +150,7 @@ actor WorkSearchIndex {
 
     func search(_ query: WorkSearchQuery, kinds: Set<WorkReference.Kind> = [],
                 hosts: Set<String> = [], limit: Int = 50, cursor: Cursor? = nil) throws -> Results {
+        try Task.checkCancellation()
         if let cursor {
             guard cursor.generation == generation, cursor.query == query,
                   cursor.kinds == kinds, cursor.hosts == hosts else { throw PageError.staleCursor }
@@ -150,14 +158,24 @@ actor WorkSearchIndex {
         guard !query.terms.isEmpty else {
             return Results(hits: [], total: 0, generation: generation, nextCursor: nil)
         }
+        let terms = query.terms.map(WorkSearchText.Needle.init).sorted { $0.bytes.count > $1.bytes.count }
         var matches: [(entry: Entry, score: Int)] = []
         for (reference, records) in entries where permits(reference) {
             guard (kinds.isEmpty || kinds.contains(reference.kind)),
                   (hosts.isEmpty || hosts.contains(reference.hostIdentity)) else { continue }
+            try Task.checkCancellation()
+            // Records are already in date/identity tie order. Once a record
+            // reaches the highest score any title in this conversation can
+            // attain, no older record can replace it as the destination.
+            let ceiling = records.reduce(0) { highest, entry in
+                max(highest, terms.reduce(0) { $0 + (entry.title.contains($1) ? 12 : 4) })
+            }
+            var best: (entry: Entry, score: Int)?
             for entry in records {
+                try Task.checkCancellation()
                 var score = 0
                 var matchesAll = true
-                for term in query.terms {
+                for term in terms {
                     let titleMatch = entry.title.contains(term)
                     let textMatch = entry.text.contains(term)
                     if titleMatch || textMatch {
@@ -165,8 +183,12 @@ actor WorkSearchIndex {
                     } else if entry.folder.contains(term) || entry.machine.contains(term) { score += 1 }
                     else { matchesAll = false; break }
                 }
-                if matchesAll { matches.append((entry, score)) }
+                if matchesAll, score > (best?.score ?? -1) {
+                    best = (entry, score)
+                    if score == ceiling { break }
+                }
             }
+            if let best { matches.append(best) }
         }
         matches.sort {
             if $0.score != $1.score { return $0.score > $1.score }
@@ -175,11 +197,8 @@ actor WorkSearchIndex {
             }
             return $0.entry.key < $1.entry.key
         }
-        // One destination per conversation. A body match wins over a title
-        // alone and keeps its exact message anchor. Title-only ties prefer
-        // the unanchored metadata document, which sorts before message IDs.
-        var destinations = Set<WorkReference>()
-        matches = matches.filter { destinations.insert(container($0.entry.document.reference)).inserted }
+        // Each conversation contributes its best exact anchor. Title-only
+        // ties retain the unanchored metadata document's stable ordering.
         let offset = cursor?.offset ?? 0
         let end = min(matches.count, 200, offset + max(1, min(50, limit)))
         let hits = matches[offset..<end].map { match in

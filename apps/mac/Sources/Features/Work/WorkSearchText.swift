@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
+import Darwin
 
 /// Literal search terms, never regular expressions or database syntax.
 struct WorkSearchQuery: Equatable, Sendable {
@@ -30,11 +31,37 @@ struct WorkSearchText: Sendable {
 
     static let maximumExcerptCharacters = 240
     let original: String
-    private let folded: String
+    private let foldedUTF8: [UInt8]
+    private let signature: [UInt64]?
+
+    struct Needle: Sendable {
+        let bytes: [UInt8]
+        fileprivate let signature: [UInt64]?
+        init(_ text: String) {
+            bytes = Array(text.utf8)
+            signature = WorkSearchText.signature(bytes)
+        }
+    }
+
+    /// A small rejection filter for long messages. Every consecutive byte
+    /// triple sets a bit; collisions only cause a full literal search, never
+    /// a missing match. Short labels do not need the extra storage.
+    private static func signature(_ bytes: [UInt8]) -> [UInt64]? {
+        guard bytes.count >= 3 else { return nil }
+        var bits = [UInt64](repeating: 0, count: 16)
+        for i in 0..<(bytes.count - 2) {
+            let triple = UInt32(bytes[i]) << 16 | UInt32(bytes[i + 1]) << 8 | UInt32(bytes[i + 2])
+            let mixed = triple &* 0x9e3779b1
+            let bit = Int((mixed ^ (mixed >> 16)) & 1023)
+            bits[bit >> 6] |= UInt64(1) << (bit & 63)
+        }
+        return bits
+    }
 
     init(_ text: String) {
         original = text
-        folded = Self.normalize(text)
+        foldedUTF8 = Array(Self.normalize(text).utf8)
+        signature = foldedUTF8.count >= 128 ? Self.signature(foldedUTF8) : nil
     }
 
     static func normalize(_ text: String) -> String {
@@ -42,11 +69,26 @@ struct WorkSearchText: Sendable {
             .precomposedStringWithCanonicalMapping
     }
 
-    func contains(_ term: String) -> Bool {
-        folded.range(of: term, options: .literal) != nil
+    func contains(_ term: String) -> Bool { contains(Needle(term)) }
+
+    /// Both sides are already case-folded NFC. Literal UTF-8 byte matching
+    /// has the same boundaries as a valid Unicode needle, without rebuilding
+    /// Foundation string-search state for every field of every message.
+    func contains(_ term: Needle) -> Bool {
+        guard !term.bytes.isEmpty else { return false }
+        if let signature, let required = term.signature {
+            for index in signature.indices where signature[index] & required[index] != required[index] { return false }
+        }
+        return foldedUTF8.withUnsafeBufferPointer { haystack in
+            term.bytes.withUnsafeBufferPointer { needle in
+                guard let source = haystack.baseAddress, let target = needle.baseAddress else { return false }
+                return memmem(source, haystack.count, target, needle.count) != nil
+            }
+        }
     }
 
     func excerpt(for query: WorkSearchQuery) -> Excerpt {
+        let folded = String(decoding: foldedUTF8, as: UTF8.self)
         // Mapping costs more memory than the text. Build it only for visible
         // result excerpts, not for every indexed message.
         let rawMatches = query.terms.compactMap { term in
@@ -58,7 +100,11 @@ struct WorkSearchText: Sendable {
         var offset = 0
         var contextRemaining = Self.maximumExcerptCharacters
         for character in characters {
-            offset += Self.normalize(String(character)).utf16.count
+            if character.asciiValue != nil {
+                // Swift treats CRLF as one Character with ASCII value LF,
+                // but its normalized UTF-16 position still advances by two.
+                offset += character == "\r\n" ? 2 : 1
+            } else { offset += Self.normalize(String(character)).utf16.count }
             foldedOffsets.append(offset)
             if offset >= firstOffset {
                 contextRemaining -= 1
