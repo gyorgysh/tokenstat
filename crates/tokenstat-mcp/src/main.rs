@@ -6,7 +6,7 @@
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
 
-//! `tokenstat-mcp` binary: stdio MCP server for local spend queries.
+//! `tokenstat-mcp` binary: stdio MCP server for local usage and workspace management.
 
 #![forbid(unsafe_code)]
 

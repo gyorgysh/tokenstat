@@ -411,3 +411,61 @@ sole copyright holder and can keep shipping the apps. **Issues are very
 welcome** and are the more useful thing anyway: a harness that is not read yet,
 counts that disagree with the tool itself, or anything in the privacy claim
 that does not match the code. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+
+### Connect an agent through MCP
+
+tokenstat's MCP server exposes local usage reports, workspace discovery, tasks,
+notes/memos, automations and workflows. Build with
+`cargo build --release -p tokenstat-mcp` or use `tokenstat mcp` from the CLI.
+Configure your MCP client to launch the executable over stdio:
+
+```json
+{
+  "mcpServers": {
+    "tokenstat": {
+      "command": "/absolute/path/to/tokenstat-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+For the CLI executable, set `command` to its absolute path and `args` to
+`["mcp"]`. Restart/reconnect the client after changing its configuration.
+The server uses newline-delimited JSON-RPC on stdin/stdout; it does not expose
+an HTTP endpoint. Archive queries run independently. Workspace, task, note,
+automation and workflow tools require the tokenstat app or `tokenstat-hostd`
+running under the same user on Unix. If the host is unavailable, the tool
+returns an error with startup guidance. Windows host management is not yet
+supported by this MCP transport.
+
+Agents receive a startup guide in `initialize.instructions`, also available
+as the `tokenstat://guide` resource. A reliable working sequence is:
+
+1. Call `workspace_list` to get registered folder IDs, names and paths. The
+   `projects` tool reports historical usage and does not supply workspace IDs.
+2. If a folder is missing, call `workspace_add` with its existing absolute
+   `path`, then use the returned ID.
+3. Call `workspace_context` with `{}` for a memo of all folders and their
+   tasks/notes, or `{"id":"<workspace-id>"}` for one project.
+4. Create work with `task_create` or save a memo with `note_create`, for example
+   `{"title":"Release checklist","notes":"Run checks before release","workspaceId":"<workspace-id>"}`.
+   Omitting `workspaceId` creates an unassigned/global card. List tools omit
+   that filter to show every workspace, or use `workspaceId: ""` for only
+   unassigned cards. Notes are private reminder cards and cannot be delegated.
+5. Use `task_get`, `task_update`, `note_get`, `note_update`, and their list/remove
+   tools to manage existing cards. `includeArchived: true` includes archived
+   cards. List tools also support `column` and case-insensitive `query` filters.
+6. To execute work, call `backend_list`, set a task's backend and workspace,
+   then explicitly call `task_delegate`. Inspect its `delegate.runId` using
+   `automation_transcript`, or stop it with `task_stop`.
+
+Creation alone does not launch an agent. Delegated tasks, automation runs and
+workflows can edit files, execute commands and contact services through their
+configured backends. The MCP-to-host connection itself uses a local Unix socket.
+Automation tools cover listing, creating, updating, enabling, running, deleting,
+stopping, transcripts and queue settings. Workflow tools cover saved graphs,
+execution, run history, transcripts, gates and stopping. Workflow/automation
+object inputs retain the host's JSON shape; start from an existing list/get
+result when editing a saved definition.

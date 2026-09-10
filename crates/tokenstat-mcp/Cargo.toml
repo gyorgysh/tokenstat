@@ -1,6 +1,6 @@
 [package]
 name = "tokenstat-mcp"
-description = "MCP server: query local tokenstat spend over stdio"
+description = "MCP server: manage tokenstat workspaces, tasks, notes, automations, workflows and local usage over stdio"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -23,3 +23,6 @@ tokenstat-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
