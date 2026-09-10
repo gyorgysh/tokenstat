@@ -446,14 +446,11 @@ fn call_inner(method: &str, params: &str) -> Result<Value, crate::error::Dispatc
         // something arbitrary on somebody's server.
         "ssh.provision.identity" => {
             let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            let output = runtime()?.block_on(async {
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(30),
-                    provision_exec(p, crate::ssh_provision::IDENTITY_SCRIPT.to_string(), None),
-                )
-                .await
-                .map_err(|_| "The server took too long to return its identity.".to_string())?
-            })?;
+            let output = runtime()?.block_on(provision_exec(
+                p,
+                crate::ssh_provision::IDENTITY_SCRIPT.to_string(),
+                None,
+            ))?;
             crate::ssh_provision::parse_identity(&output).map_err(Into::into)
         }
         "ssh.provision.check" => {
@@ -784,6 +781,24 @@ async fn provision_exec(
     command: String,
     stdin: Option<String>,
 ) -> Result<String, DispatchError> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        provision_exec_inner(p, command, stdin),
+    )
+    .await
+    .map_err(|_| {
+        DispatchError::from(
+            "The server took too long to finish the setup step. Check its state before retrying."
+                .to_string(),
+        )
+    })?
+}
+
+async fn provision_exec_inner(
+    p: OpenParams,
+    command: String,
+    stdin: Option<String>,
+) -> Result<String, DispatchError> {
     if p.host_keys.is_empty() {
         return Err(DispatchError::new(
             crate::error::SSH_HOST_KEY_UNVERIFIED,
@@ -816,37 +831,56 @@ async fn provision_exec(
             .map_err(|e| e.to_string())?;
         channel.eof().await.map_err(|e| e.to_string())?;
     }
-    // Bounded, because this reads whatever the far end decides to send.
-    const MAX: usize = 16 * 1024;
     let mut out: Vec<u8> = Vec::new();
     let mut status: Option<u32> = None;
     while let Some(message) = channel.wait().await {
-        match message {
-            ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
-                let room = MAX.saturating_sub(out.len());
-                out.extend_from_slice(&data[..room.min(data.len())]);
-                if out.len() >= MAX {
-                    break;
-                }
-            }
-            ChannelMsg::ExitStatus { exit_status } => status = Some(exit_status),
-            ChannelMsg::Eof | ChannelMsg::Close => break,
-            _ => {}
+        if provision_message(message, &mut out, &mut status)? {
+            break;
         }
     }
     let _ = channel.close().await;
     let _ = handle
         .disconnect(Disconnect::ByApplication, "setup step finished", "en")
         .await;
-    let text = String::from_utf8_lossy(&out).into_owned();
+    provision_result(&out, status)
+}
+
+fn provision_result(out: &[u8], status: Option<u32>) -> Result<String, DispatchError> {
+    let text = String::from_utf8_lossy(out).into_owned();
     match status {
-        Some(0) | None => Ok(text),
+        Some(0) => Ok(text),
+        None => Err("The server closed the setup step without confirming its result. Check its state before retrying.".into()),
         Some(code) => Err(format!(
             "The machine refused that step (exit {code}). {}",
             text.trim()
         )
         .into()),
     }
+}
+
+/// EOF ends output, not the command result. SSH may send its exit status
+/// afterwards; only channel closure ends collection.
+fn provision_message(
+    message: ChannelMsg,
+    out: &mut Vec<u8>,
+    status: &mut Option<u32>,
+) -> Result<bool, DispatchError> {
+    const MAX: usize = 16 * 1024;
+    match message {
+        ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
+            if data.len() > MAX.saturating_sub(out.len()) {
+                return Err("The server sent too much output for this setup step. Its result was not confirmed.".into());
+            }
+            out.extend_from_slice(&data);
+        }
+        ChannelMsg::ExitStatus { exit_status } => *status = Some(exit_status),
+        ChannelMsg::Close => return Ok(true),
+        ChannelMsg::Failure | ChannelMsg::ExitSignal { .. } => {
+            return Err("The server refused or interrupted the setup step.".into());
+        }
+        _ => {}
+    }
+    Ok(false)
 }
 
 async fn probe(p: &OpenParams) -> Result<String, DispatchError> {
@@ -1036,6 +1070,55 @@ fn reap_closed(map: &mut HashMap<String, LiveSession>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provisioning_requires_a_result_after_eof_and_rejects_truncation() {
+        let mut out = Vec::new();
+        let mut status = None;
+        assert!(!provision_message(ChannelMsg::Eof, &mut out, &mut status).unwrap());
+        assert!(provision_result(&out, status).is_err());
+        assert!(
+            !provision_message(
+                ChannelMsg::ExitStatus { exit_status: 23 },
+                &mut out,
+                &mut status
+            )
+            .unwrap()
+        );
+        assert!(provision_message(ChannelMsg::Close, &mut out, &mut status).unwrap());
+        assert!(
+            provision_result(&out, status)
+                .unwrap_err()
+                .message
+                .contains("exit 23")
+        );
+        assert!(provision_message(ChannelMsg::Failure, &mut out, &mut status).is_err());
+
+        status = Some(0);
+        assert!(
+            !provision_message(
+                ChannelMsg::Data {
+                    data: b"ready".to_vec().into()
+                },
+                &mut out,
+                &mut status
+            )
+            .unwrap()
+        );
+        assert_eq!(provision_result(&out, status).unwrap(), "ready");
+        let before = out.clone();
+        assert!(
+            provision_message(
+                ChannelMsg::Data {
+                    data: vec![b'x'; 16 * 1024].into()
+                },
+                &mut out,
+                &mut status
+            )
+            .is_err()
+        );
+        assert_eq!(out, before, "a truncated result must not look successful");
+    }
 
     #[test]
     fn output_is_bounded_and_reports_its_new_base() {
