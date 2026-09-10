@@ -70,6 +70,8 @@ final class ChatModel {
     var attachments: [ChatAttachment] = []
     /// Downsampled JPEG for the composer strip, keyed by attachment id.
     var attachmentPreviews: [String: Data] = [:]
+    private(set) var stagingAttachments = 0
+    private(set) var missingDraftAttachments: Set<String> = []
     /// Agent-returned file bytes, loaded lazily from the chat's owning host.
     /// The transcript only persists descriptors, so remote files work exactly
     /// like local ones without exposing a host filesystem path to SwiftUI.
@@ -318,12 +320,22 @@ final class ChatModel {
             setDraft("")
             attachments = []
             attachmentPreviews = [:]
+            missingDraftAttachments = []
             unconfirmedSend = nil
             guard let reference, let stored = ChatDraftStore.shared.draft(for: reference) else {
                 return
             }
             setDraft(stored.text)
             attachments = stored.attachments
+            Task {
+                for attachment in stored.attachments {
+                    let data = try? await ChatLocalAttachmentStore.shared.read(attachment, reference: reference)
+                    guard self.draftReference == reference, self.attachments.contains(attachment) else { return }
+                    if let data {
+                        if let preview = ChatThumbnail.make(from: data) { self.attachmentPreviews[attachment.id] = preview }
+                    } else { self.missingDraftAttachments.insert(attachment.id) }
+                }
+            }
         }
     }
 
@@ -348,7 +360,7 @@ final class ChatModel {
     /// Nothing is lost if the app stops between the two.
     @discardableResult
     func holdDraftForSending(_ text: String) -> Bool {
-        guard savedCopy == nil, let selected, !sending, heldSubmission == nil else { return false }
+        guard savedCopy == nil, let selected, !sending, stagingAttachments == 0, heldSubmission == nil else { return false }
         saveDraftNow()
         if let pending = queued.first(where: { $0.id == draftMessageID && $0.needsReceipt }) {
             unconfirmedSend = .init(conversationID: selected.id, messageID: pending.id, checking: false)
@@ -1132,7 +1144,7 @@ final class ChatModel {
 
     @discardableResult
     func enqueue(_ text: String, atFront: Bool = false, whenConnected: Bool = false) -> ChatQueuedMessage? {
-        guard (savedCopy == nil || whenConnected), ownsQueue, let reference = queuedReference else { return nil }
+        guard stagingAttachments == 0, (savedCopy == nil || whenConnected), ownsQueue, let reference = queuedReference else { return nil }
         var item = ChatQueuedMessage(id: draftMessageID ?? UUID().uuidString, text: text, attachments: attachments)
         item.whenConnected = whenConnected
         do {
@@ -1300,6 +1312,8 @@ final class ChatModel {
                 }
             }
             guard current(), !busy else { return false }
+            let resolved = try await resolveDraftAttachments(item.attachments, reference: reference, peer: targetPeer)
+            guard current(), !busy else { return false }
             publish(try ChatOutboxStore.shared.update(reference) { items in
                 guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item else {
                     throw ChatOutboxStore.Failure.conflict
@@ -1311,7 +1325,7 @@ final class ChatModel {
             var accepted = false
             do {
                 let updated = try await Bridge.sendChat(id: conversationID, text: item.text,
-                    attachmentIDs: item.attachments.map(\.id), clientMessageID: item.id, peer: targetPeer)
+                    attachmentIDs: resolved.map(\.id), clientMessageID: item.id, peer: targetPeer)
                 accepted = true
                 let remaining = try ChatOutboxStore.shared.update(reference) { $0.removeAll { $0.id == item.id } }
                 publish(remaining)
@@ -1337,9 +1351,50 @@ final class ChatModel {
             }
         } catch {
             authorizedQueueItems.remove(candidate.id)
-            if current() { self.error = "The queued message could not be checked or saved. It stays in the outbox; reopen Pending messages and check delivery before trying again." }
+            if current() {
+                self.error = candidate.needsReceipt
+                    ? "Delivery could not be checked. The original stays pending; check delivery again before starting a new message."
+                    : "This message stays pending. " + error.localizedDescription
+            }
             return false
         }
+    }
+
+    private func resolveDraftAttachments(_ files: [ChatAttachment], reference: WorkReference, peer: String?) async throws -> [ChatAttachment] {
+        guard let conversationID = reference.itemID else { throw CancellationError() }
+        var resolved: [ChatAttachment] = []
+        for file in files {
+            guard currentReference == reference, WorkCacheAccess.canSave(reference), savedCopy == nil else { throw CancellationError() }
+            if ChatLocalAttachmentStore.isLocal(file) {
+                let uploaded = try await ChatLocalAttachmentStore.shared.resolve(file, reference: reference) { data in
+                    guard await MainActor.run(body: { WorkCacheAccess.canSave(reference) }) else { throw CancellationError() }
+                    return try await Bridge.attachToChat(id: conversationID, name: file.name, data: data, mediaType: file.mediaType, peer: peer)
+                }
+                resolved.append(uploaded)
+            } else { resolved.append(file) }
+        }
+        guard currentReference == reference, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
+        return resolved
+    }
+
+    func keepImportedDraftFiles(_ files: [ChatAttachment], reference: WorkReference, expected: WorkSharedDraft) async throws {
+        guard let conversationID = reference.itemID else { throw CancellationError() }
+        let targetPeer = peer
+        for file in files {
+            guard currentReference == reference, handoffDraft == expected, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
+            if (try? await ChatLocalAttachmentStore.shared.read(file, reference: reference)) != nil { continue }
+            let payload = try await Bridge.chatAttachment(id: conversationID, attachmentID: file.id, peer: targetPeer)
+            guard payload.attachment == file, let data = Data(base64Encoded: payload.data) else { throw ChatLocalAttachmentStore.Failure.missing }
+            guard currentReference == reference, handoffDraft == expected, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
+            try await ChatLocalAttachmentStore.shared.keep(file, data: data, reference: reference)
+        }
+    }
+
+    func prepareHandoffDraft(_ expected: WorkSharedDraft) async throws -> WorkSharedDraft {
+        guard let reference = currentReference, handoffDraft == expected, !sending, stagingAttachments == 0 else { throw CancellationError() }
+        let files = try await resolveDraftAttachments(attachments, reference: reference, peer: peer)
+        guard currentReference == reference, handoffDraft == expected else { throw CancellationError() }
+        return WorkSharedDraft(text: expected.text, attachmentIDs: files.map(\.id))
     }
 
     func attach(_ file: URL) async {
@@ -1351,21 +1406,31 @@ final class ChatModel {
     }
 
     func attach(_ item: ChatInboxItem) async {
-        guard let selected else { return }
+        guard let selected, !sending else { return }
+        guard attachments.count + stagingAttachments < 20 else {
+            error = "A draft can include up to 20 files. Remove a file before adding another."
+            return
+        }
         let generation = selectionGeneration
         if item.data.count > ChatInbox.maxBytes {
             error = "An attachment is limited to 12 MB."
             return
         }
+        guard let reference = currentReference, WorkCacheAccess.canRead(reference) else { return }
+        saveDraftNow()
+        stagingAttachments += 1
+        defer { stagingAttachments -= 1 }
         do {
-            let attachment = try await Bridge.attachToChat(
-                id: selected.id,
-                name: item.name,
-                data: item.data,
-                mediaType: item.mediaType,
-                peer: peer
-            )
-            guard selectionMatches(id: selected.id, generation: generation) else { return }
+            let attachment = try await ChatLocalAttachmentStore.shared.stage(data: item.data,
+                name: item.name, mediaType: item.mediaType, reference: reference)
+            guard selectionMatches(id: selected.id, generation: generation), currentReference == reference,
+                  WorkCacheAccess.canRead(reference) else {
+                // The person picked this file for the original conversation.
+                // Navigation changes where it is displayed, never its owner.
+                let original = ChatDraftStore.shared.draft(for: reference)
+                ChatDraftStore.shared.save(text: original?.text ?? "", attachments: (original?.attachments ?? []) + [attachment], for: reference)
+                return
+            }
             attachments.append(attachment)
             if let preview = ChatThumbnail.make(from: item.data) {
                 attachmentPreviews[attachment.id] = preview
@@ -1382,6 +1447,7 @@ final class ChatModel {
     func removeAttachment(_ attachment: ChatAttachment) {
         attachments.removeAll { $0.id == attachment.id }
         attachmentPreviews.removeValue(forKey: attachment.id)
+        missingDraftAttachments.remove(attachment.id)
         saveDraftNow()
     }
 

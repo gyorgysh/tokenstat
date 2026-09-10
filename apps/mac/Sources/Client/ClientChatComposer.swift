@@ -47,7 +47,7 @@ struct ClientChatComposer: View {
             if model.savedCopy != nil {
                 Button("Send when connected", .scheduled) { model.queueDraftWhenConnected() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                    .disabled(model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
+                    .disabled(model.stagingAttachments > 0 || model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
             }
             if model.draftSaveFailed {
                 ChatDraftNotice(retrySave: { model.retryDraftSave() })
@@ -175,6 +175,7 @@ struct ClientChatComposer: View {
                     ChatAttachmentTile(
                         attachment: attachment,
                         preview: previews[attachment.id],
+                        unavailable: model.missingDraftAttachments.contains(attachment.id),
                         onRemove: { onRemove(attachment) }
                     )
                 }
@@ -287,6 +288,7 @@ struct ClientChatComposer: View {
         // A saved copy is read and drafted in, never sent from: the banner
         // above says why, and the field stays editable for those drafts.
         model.savedCopy != nil
+            || model.stagingAttachments > 0
             || model.sending
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
     }

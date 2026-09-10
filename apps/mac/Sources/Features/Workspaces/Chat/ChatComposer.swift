@@ -57,7 +57,7 @@ struct ChatComposer: View {
             if model.savedCopy != nil {
                 Button("Send when connected", .scheduled) { model.queueDraftWhenConnected() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                    .disabled(model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
+                    .disabled(model.stagingAttachments > 0 || model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
             }
             if model.draftSaveFailed {
                 ChatDraftNotice(retrySave: { model.retryDraftSave() })
@@ -140,6 +140,7 @@ struct ChatComposer: View {
                     ChatAttachmentTile(
                         attachment: attachment,
                         preview: previews[attachment.id],
+                        unavailable: model.missingDraftAttachments.contains(attachment.id),
                         onRemove: { onRemove(attachment) }
                     )
                 }
@@ -229,6 +230,7 @@ struct ChatComposer: View {
         // A saved copy is read and drafted in, never sent from: the banner
         // above says why, and the field stays editable for those drafts.
         model.savedCopy != nil
+            || model.stagingAttachments > 0
             || model.sending
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
     }
@@ -255,6 +257,7 @@ struct ChatComposer: View {
 struct ChatAttachmentTile: View {
     let attachment: ChatAttachment
     var preview: Data?
+    var unavailable = false
     var onRemove: () -> Void
 
     var body: some View {
@@ -270,7 +273,7 @@ struct ChatAttachmentTile: View {
                 .overlay { Circle().strokeBorder(Theme.border, lineWidth: 1) }
                 .offset(x: 5, y: -5)
         }
-        .help(attachment.name)
+        .help(unavailable ? "The original is not saved on this device. Reconnect or remove it and attach the original again." : attachment.name)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(attachment.name)
     }
@@ -292,7 +295,7 @@ struct ChatAttachmentTile: View {
                 Image(systemName: fileSymbol)
                     .font(Theme.font(16, weight: .medium))
                     .foregroundStyle(Theme.accent)
-                Text(attachment.name)
+                Text(unavailable ? "Not saved here" : attachment.name)
                     .font(Theme.mono(9))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)

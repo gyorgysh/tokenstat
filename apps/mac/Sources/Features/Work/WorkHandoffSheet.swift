@@ -17,6 +17,7 @@ struct WorkHandoffSheet: View {
     @State private var fileGeneration = UUID()
     @State private var loadingFiles = false
     @State private var importing = false
+    @State private var preparingDraft = false
     @State private var notice: String?
     @State private var fileError: String?
 
@@ -94,6 +95,7 @@ struct WorkHandoffSheet: View {
             Text("This conversation changed. Close this sheet and open it again to continue.")
                 .font(Theme.callout)
         } else {
+            if preparingDraft { ProgressView("Preparing draft files…") }
             if model.isBusy { ProgressView(model.phase == .loading ? "Checking shared work…" : "Sharing…") }
             if let error = model.error {
                 Text(error).font(Theme.callout).foregroundStyle(Theme.warning)
@@ -130,7 +132,7 @@ struct WorkHandoffSheet: View {
                     }
                     Button("Share this place", .upload) { share(model) }
                         .buttonStyle(AccentButtonStyle())
-                        .disabled(chat.sending || chat.unconfirmedSend != nil)
+                        .disabled(preparingDraft || chat.stagingAttachments > 0 || chat.sending || chat.unconfirmedSend != nil)
                 }
             }
         }
@@ -186,7 +188,7 @@ struct WorkHandoffSheet: View {
     }
 
     private func share(_ model: WorkHandoffModel) {
-        guard connection?.isCurrent == true else { return }
+        guard !preparingDraft, connection?.isCurrent == true else { return }
         chat.saveDraftNow()
         let draft = includeDraft ? chat.handoffDraft : nil
         let anchor: WorkHandoffAnchor?
@@ -201,7 +203,17 @@ struct WorkHandoffSheet: View {
         #else
         let name = ClientDeviceName.marketing
         #endif
-        Task { await model.share(deviceName: name, draft: draft, anchor: anchor) }
+        preparingDraft = true
+        Task {
+            defer { preparingDraft = false }
+            do {
+                let prepared: WorkSharedDraft?
+                if let draft { prepared = try await chat.prepareHandoffDraft(draft) }
+                else { prepared = nil }
+                guard connection?.isCurrent == true else { return }
+                await model.share(deviceName: name, draft: prepared, anchor: anchor)
+            } catch { notice = error.localizedDescription }
+        }
     }
 
     private func loadFiles() async {
@@ -230,6 +242,7 @@ struct WorkHandoffSheet: View {
             defer { importing = false }
             do {
                 let resolved = try await connection.attachments(for: draft)
+                try await chat.keepImportedDraftFiles(resolved, reference: model.reference, expected: expected)
                 guard model.phase != .invalidated, connection.isCurrent,
                       chat.importHandoffDraft(draft, files: resolved, replacing: expected, reference: model.reference) else {
                     notice = "Your draft changed while opening shared work. Review it and choose again."
