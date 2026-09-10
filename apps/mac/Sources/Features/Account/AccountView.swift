@@ -352,18 +352,7 @@ struct AccountView: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(model.isSyncing || model.isSigningOut)
-                .confirmationDialog(
-                    "Sign out of this device?",
-                    isPresented: $confirmSignOut,
-                    titleVisibility: .visible
-                ) {
-                    Button("Sign out", role: .destructive) {
-                        Task { await model.signOut() }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Usage on this account stays. You will need to approve the device again.")
-                }
+                .sheet(isPresented: $confirmSignOut) { WorkSignOutReview(model: model) }
                 #else
                 // Phone account UI lives in `ClientAccountSheet`. Keep a
                 // non-system control here if this view is ever shown on iOS.

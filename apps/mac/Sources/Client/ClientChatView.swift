@@ -467,6 +467,7 @@ struct ClientChatThread: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { model.saveDraftNow() }
+            else { Task { await model.resumeWaitingConnection() } }
             guard phase == .active else { return }
             Task { await foregroundRefresh() }
         }
@@ -546,6 +547,9 @@ struct ClientChatThread: View {
             }
             UserPresence.shared.chatSurface(showing: id.isEmpty ? nil : id)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            Task { await model.resumeWaitingConnection() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in
             model.clearCachedAttachmentMemory()
         }
@@ -593,22 +597,24 @@ struct ClientChatThread: View {
                     }
                     .padding(.horizontal, Theme.Space.s)
                 }
-                // The queue is live outbox state: its sends wait for the
-                // machine, so it stays out of a snapshot. Queued words are
-                // kept and drain on the next live open.
-                if model.savedCopy == nil, !model.queued.isEmpty {
+                // Pending writing stays available offline for copying or cancellation.
+                // Sending and receipt checks require a live, verified owner.
+                if !model.queued.isEmpty {
+                        let queueOwner = model.currentReference
                     ChatQueueStrip(
                         items: model.queued,
-                        ownerID: chat.id,
-                        onChange: { item, text in model.updateQueued(item, text: text) },
-                        onRemove: { model.removeQueued($0) },
+                        owner: queueOwner,
+                            paused: model.queuePaused,
+                            offline: model.savedCopy != nil,
+                        onChange: { item, text in model.updateQueued(item, text: text, owner: queueOwner) },
+                        onRemove: { model.removeQueued($0, owner: queueOwner) },
                         onSendNow: { item in
                             showNewest()
                             follow.jump()
                             followPulse += 1
-                            Task { await model.sendNow(item) }
+                            Task { await model.sendNow(item, owner: queueOwner) }
                         },
-                        onMove: { model.moveQueued(from: $0, to: $1) }
+                        onMove: { model.moveQueued(from: $0, to: $1, owner: queueOwner) }
                     )
                     .padding(.horizontal, Theme.Space.s)
                 }
@@ -1188,7 +1194,8 @@ struct ClientChatThread: View {
             showNewest()
             follow.jump()
             followPulse += 1
-            Task { await model.sendNow(item) }
+            let queueOwner = model.currentReference
+            Task { await model.sendNow(item, owner: queueOwner) }
             return
         }
         if model.busy {

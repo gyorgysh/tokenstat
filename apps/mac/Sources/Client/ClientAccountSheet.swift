@@ -565,18 +565,7 @@ private struct ClientAccountContent: View {
         .buttonStyle(.plain)
         .disabled(model.isSyncing || model.isSigningOut)
         .accessibilityHint("Signs out of this device and ends the online session")
-        .confirmationDialog(
-            "Sign out of this device?",
-            isPresented: $confirmSignOut,
-            titleVisibility: .visible
-        ) {
-            Button("Sign out", role: .destructive) {
-                Task { await model.signOut() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Usage on this account stays. You will need to approve the device again.")
-        }
+        .sheet(isPresented: $confirmSignOut) { WorkSignOutReview(model: model) }
     }
 
     private var signedOut: some View {

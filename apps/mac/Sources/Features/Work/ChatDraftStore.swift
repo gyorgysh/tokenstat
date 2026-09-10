@@ -111,6 +111,10 @@ final class ChatDraftStore {
 
     // MARK: - Reading
 
+    func drafts(in scope: WorkReference.Scope) -> [ChatDraft] {
+        drafts.values.filter { $0.reference.scope == scope }.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
     func draft(for reference: WorkReference) -> ChatDraft? {
         guard let key = Self.key(reference) else { return nil }
         return drafts[key]
@@ -177,6 +181,15 @@ final class ChatDraftStore {
         flush(key: key, mutation: .remove)
     }
 
+    /// Acceptance may arrive after this draft was edited in another window.
+    /// Remove only the exact submitted record, including on the writer queue.
+    func clear(_ expected: ChatDraft) {
+        guard let key = Self.key(expected.reference), drafts[key] == expected else { return }
+        drafts.removeValue(forKey: key)
+        mark(key, occupied: false)
+        flush(key: key, mutation: .removeIfMatches(expected))
+    }
+
     /// Try the failed write again with what is on screen now.
     func retryFailedSave() {
         flush()
@@ -187,6 +200,7 @@ final class ChatDraftStore {
     private enum Mutation: Sendable {
         case save(ChatDraft)
         case remove
+        case removeIfMatches(ChatDraft)
     }
 
     /// Accessed only on the shared serial queue. Failed changes stay pending,
@@ -202,6 +216,8 @@ final class ChatDraftStore {
                     switch mutation {
                     case let .save(draft): merged[key] = draft
                     case .remove: merged.removeValue(forKey: key)
+                    case let .removeIfMatches(expected):
+                        if merged[key] == expected { merged.removeValue(forKey: key) }
                     }
                 }
                 if !pending.isEmpty {

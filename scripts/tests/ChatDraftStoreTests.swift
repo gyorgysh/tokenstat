@@ -114,6 +114,23 @@ final class Notified: @unchecked Sendable {
         assert(merged.draft(for: reference(chat: "one"))?.text == "from one")
         assert(merged.draft(for: reference(chat: "two"))?.text == "from two")
 
+        // A late acknowledgement must not remove another window's edit.
+        let receiptRef = reference(chat: "late-receipt")
+        windowOne.save(text: "submitted", attachments: [], for: receiptRef)
+        windowOne.settle()
+        let acknowledged = windowOne.draft(for: receiptRef)!
+        let editingWindow = ChatDraftStore(directory: root)
+        editingWindow.save(text: "new writing", attachments: [], for: receiptRef, newMessage: true)
+        editingWindow.settle()
+        windowOne.clear(acknowledged)
+        windowOne.settle()
+        assert(ChatDraftStore(directory: root).draft(for: receiptRef)?.text == "new writing")
+        let currentDraft = editingWindow.draft(for: receiptRef)!
+        editingWindow.save(text: "another edit", attachments: [], for: receiptRef)
+        editingWindow.clear(currentDraft)
+        editingWindow.settle()
+        assert(ChatDraftStore(directory: root).draft(for: receiptRef)?.text == "another edit")
+
         // An old window edits only its own changed keys. It cannot revive
         // another window's deletion or overwrite that window's newer words.
         let stale = ChatDraftStore(directory: root)

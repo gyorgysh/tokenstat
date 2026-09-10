@@ -348,8 +348,28 @@ final class ChatModel {
     /// Nothing is lost if the app stops between the two.
     @discardableResult
     func holdDraftForSending(_ text: String) -> Bool {
-        guard savedCopy == nil, let selected, !sending else { return false }
+        guard savedCopy == nil, let selected, !sending, heldSubmission == nil else { return false }
         saveDraftNow()
+        if let pending = queued.first(where: { $0.id == draftMessageID && $0.needsReceipt }) {
+            unconfirmedSend = .init(conversationID: selected.id, messageID: pending.id, checking: false)
+            error = "Check delivery before sending this draft again. An unknown receipt does not prove it was never sent."
+            return false
+        }
+        if let previous = queued.first(where: { $0.id == draftMessageID }),
+           previous.text != text || previous.attachments != attachments {
+            guard let reference = draftReference, previous.canEdit else { return false }
+            do {
+                queued = try ChatOutboxStore.shared.update(reference) { items in
+                    guard let index = items.firstIndex(where: { $0.id == previous.id }),
+                          items[index] == previous else { throw ChatOutboxStore.Failure.conflict }
+                    items.remove(at: index)
+                }
+                ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference, newMessage: true)
+            } catch {
+                self.error = "The pending message changed. Review Pending messages before sending this edit."
+                return false
+            }
+        }
         heldSubmission = ChatDraftSubmission(
             conversationID: selected.id, peer: peer, scope: continuityScope,
             reference: draftReference, generation: selectionGeneration,
@@ -389,9 +409,8 @@ final class ChatModel {
 
     /// A message the machine had and did not answer for.
     ///
-    /// Not a failure and not a success. The words are back in the composer,
-    /// and because they carry a name the machine recognises, sending them
-    /// again cannot run the agent a second time.
+    /// Neither failure nor success. Keep the original payload and check its
+    /// receipt before any retry. An expired receipt cannot prove non-delivery.
     struct UnconfirmedSend: Equatable, Sendable {
         let conversationID: String
         let messageID: String
@@ -418,55 +437,57 @@ final class ChatModel {
     /// and on a machine that did not answer they come back with a note saying
     /// so rather than a claim in either direction.
     func sendFromComposer() async {
-        guard savedCopy == nil else { return }
         guard let submission = heldSubmission else { return }
-        defer {
-            heldSubmission = nil
-            sending = false
-        }
-        let supported = await machineConfirmsSends(peer: submission.peer)
-        // Navigation during capability discovery cancels this attempt. Its
-        // draft is still stored under the original owner, ready to send there.
-        guard selectionMatches(id: submission.conversationID, generation: submission.generation),
-              submission.owns(reference: draftReference, conversationID: selected?.id,
+        defer { heldSubmission = nil; sending = false }
+        guard let reference = submission.reference, let messageID = submission.messageID,
+              submission.owns(reference: currentReference, conversationID: selected?.id,
                               peer: peer, scope: WorkSessionContext.shared.scope) else {
             restoreSubmission(submission)
             return
         }
-        let messageID = supported ? submission.messageID : nil
-        unconfirmedSend = nil
-        let staged = stageOutgoing(submission.text)
         do {
-            let updated = try await Bridge.sendChat(id: submission.conversationID,
-                text: submission.text, attachmentIDs: submission.attachments.map(\.id),
-                clientMessageID: messageID, peer: submission.peer)
-            // Acceptance belongs to the captured draft even when its screen
-            // has gone away. Never clear the newly selected conversation.
-            if let reference = submission.reference {
-                ChatDraftStore.shared.clear(for: reference)
+            var candidate = ChatQueuedMessage(id: messageID, text: submission.text, attachments: submission.attachments)
+            candidate.sourceDraftText = submission.draftText
+            queued = try ChatOutboxStore.shared.update(reference) { items in
+                if let existing = items.first(where: { $0.id == messageID }) {
+                    guard existing.text == candidate.text, existing.attachments == candidate.attachments else {
+                        throw ChatOutboxStore.Failure.conflict
+                    }
+                } else { items.append(candidate) }
             }
-            if submission.owns(reference: draftReference, conversationID: selected?.id,
-                               peer: peer, scope: WorkSessionContext.shared.scope) {
-                setDraft("")
-                let sent = Set(submission.attachments.map(\.id))
-                attachments.removeAll { sent.contains($0.id) }
-                for id in sent { attachmentPreviews.removeValue(forKey: id) }
+            guard let item = queued.first(where: { $0.id == messageID }) else { throw ChatOutboxStore.Failure.invalid }
+            let accepted = await deliverQueued(item, stopCurrent: false, reserved: true)
+            if !accepted {
+                restoreSubmission(submission)
+                if submission.owns(reference: currentReference, conversationID: selected?.id,
+                                   peer: peer, scope: WorkSessionContext.shared.scope),
+                   queued.contains(where: { $0.id == messageID && $0.needsReceipt }) {
+                    unconfirmedSend = .init(conversationID: submission.conversationID, messageID: messageID, checking: false)
+                }
             }
-            guard selectionMatches(id: updated.id, generation: submission.generation) else { return }
-            replace(updated)
-            await loadEvents(id: updated.id, reset: false, generation: submission.generation)
         } catch {
-            dropOutgoing(staged)
             restoreSubmission(submission)
-            guard selectionMatches(id: submission.conversationID, generation: submission.generation)
-            else { return }
-            self.error = error.localizedDescription
-            guard let messageID, Bridge.isDeliveryUnknown(error) else { return }
-            self.error = nil
-            unconfirmedSend = UnconfirmedSend(conversationID: submission.conversationID,
-                                              messageID: messageID, checking: false)
-            await checkUnconfirmedSend()
+            if currentReference == reference {
+                self.error = "This message could not be safely saved for sending. Your draft stays here. Review Pending messages before trying again."
+            }
         }
+    }
+
+    private func clearSubmittedDraft(_ item: ChatQueuedMessage, reference: WorkReference) {
+        let text = item.sourceDraftText ?? item.text
+        let stored = ChatDraftStore.shared.draft(for: reference)
+        let ownsDraft = stored?.messageID == item.id
+        if let stored, ownsDraft, stored.text == text, stored.attachments == item.attachments {
+            ChatDraftStore.shared.clear(stored)
+        }
+        guard currentReference == reference else { return }
+        if ownsDraft, draft.isEmpty || draft == text {
+            setDraft("")
+            let sent = Set(item.attachments.map(\.id))
+            attachments.removeAll { sent.contains($0.id) }
+            for id in sent { attachmentPreviews.removeValue(forKey: id) }
+        }
+        if unconfirmedSend?.messageID == item.id { unconfirmedSend = nil }
     }
 
     private func restoreSubmission(_ submission: ChatDraftSubmission) {
@@ -477,31 +498,20 @@ final class ChatModel {
 
     /// Ask the machine what became of a message it never answered for.
     func checkUnconfirmedSend() async {
-        guard savedCopy == nil else { return }
-        guard var pending = unconfirmedSend, !pending.checking,
-              selected?.id == pending.conversationID
-        else { return }
-        pending.checking = true
-        unconfirmedSend = pending
-        let generation = selectionGeneration
-        let receipt = try? await Bridge.chatReceipt(id: pending.conversationID,
-            clientMessageID: pending.messageID, peer: peer)
-        guard selectionMatches(id: pending.conversationID, generation: generation),
-              unconfirmedSend?.messageID == pending.messageID
-        else { return }
-        switch receipt?.state {
-        case .accepted:
-            // It was taken after all. The words on screen are a copy of a
-            // message that is already in the conversation.
-            unconfirmedSend = nil
-            clearDraft()
-            await loadEvents(id: pending.conversationID, reset: false, generation: generation)
-        case .unknown:
-            // The machine never took it, so this is an ordinary retry.
-            unconfirmedSend = nil
-        case .pending, .none:
-            unconfirmedSend?.checking = false
-        }
+        guard savedCopy == nil, let pending = unconfirmedSend, !pending.checking,
+              let reference = currentReference, reference.itemID == pending.conversationID,
+              WorkCacheAccess.canSave(reference) else { return }
+        unconfirmedSend?.checking = true
+        defer { if unconfirmedSend?.messageID == pending.messageID { unconfirmedSend?.checking = false } }
+        do {
+            guard let item = try ChatOutboxStore.shared.items(for: reference).first(where: { $0.id == pending.messageID }) else {
+                // A legacy unresolved send has no durable payload to compare.
+                // Never interpret a missing record or receipt as permission to replay.
+                error = "Review the conversation before starting a new draft. The original delivery cannot be confirmed from this device."
+                return
+            }
+            _ = await deliverQueued(item, stopCurrent: false)
+        } catch { self.error = "Pending delivery could not be read. Your draft remains on this device." }
     }
 
     /// Conversation lists read earlier this session, keyed by the folder id
@@ -639,6 +649,7 @@ final class ChatModel {
         folderID = workspaceID
         self.workspaceID = route.workspaceID
         self.peer = route.peer
+        loadQueue(for: selected?.id)
         do {
             async let loadedBackends = Bridge.chatBackends(peer: route.peer)
             async let loadedPersonas = Bridge.chatPersonas(workspaceID: route.workspaceID, peer: route.peer)
@@ -1106,170 +1117,227 @@ final class ChatModel {
     /// Messages waiting for the open turn to finish. Kept per conversation so
     /// leaving the thread and coming back still has them.
     private(set) var queued: [ChatQueuedMessage] = []
-    private var queuedConversationID: String?
-    /// Send now is in flight. `drainQueue` must not pick the next waiting
-    /// message while this one is still stopping the open turn.
+    private var queuedReference: WorkReference?
     @ObservationIgnored private var sendingNow = false
-    private static let queueCap = 20
-    private static let queueKeyPrefix = "chat.queuedMessages.v1."
+    private var authorizedQueueItems: Set<String> = []
+    var queuePaused: Bool {
+        guard let first = queued.first else { return false }
+        return !authorizedQueueItems.contains(first.id) || first.delivery != .waiting
+    }
 
-    /// Queue a message for when the current turn ends. The composer stays
-    /// usable mid-turn: the host will not take a second send until this one
-    /// finishes, so the words wait here.
+    private var ownsQueue: Bool {
+        guard let queuedReference else { return false }
+        return currentReference == queuedReference && WorkCacheAccess.canRead(queuedReference)
+    }
+
     @discardableResult
-    func enqueue(_ text: String, atFront: Bool = false) -> ChatQueuedMessage? {
-        guard selected != nil else { return nil }
-        // No outbox against a snapshot. Queued sends drain on the next live
-        // open, and a snapshot must never enroll one: explicit "send when
-        // connected" is future work, not this queue by accident.
-        guard savedCopy == nil else { return nil }
-        if queued.count >= Self.queueCap {
-            error = "Already \(Self.queueCap) messages waiting."
+    func enqueue(_ text: String, atFront: Bool = false, whenConnected: Bool = false) -> ChatQueuedMessage? {
+        guard (savedCopy == nil || whenConnected), ownsQueue, let reference = queuedReference else { return nil }
+        var item = ChatQueuedMessage(id: draftMessageID ?? UUID().uuidString, text: text, attachments: attachments)
+        item.whenConnected = whenConnected
+        do {
+            queued = try ChatOutboxStore.shared.update(reference) { items in
+                if let existing = items.first(where: { $0.id == item.id }) {
+                    guard existing.text == item.text, existing.attachments == item.attachments else { throw ChatOutboxStore.Failure.conflict }
+                    return
+                }
+                guard items.count < ChatOutboxStore.capacity else { throw ChatOutboxStore.Failure.full }
+                if atFront { items.insert(item, at: 0) } else { items.append(item) }
+            }
+            guard let stored = queued.first(where: { $0.id == item.id }), !stored.needsReceipt else {
+                self.error = "Check delivery in Pending messages before queuing this draft again."
+                return nil
+            }
+            authorizedQueueItems.insert(item.id)
+            attachments = []
+            attachmentPreviews = [:]
+            Task { await drainQueue() }
+            return item
+        } catch {
+            self.error = "This message could not be saved to the queue. Your draft and attachments stay here. The queue holds 20 messages."
             return nil
         }
-        let item = ChatQueuedMessage(
-            id: UUID().uuidString,
-            text: text,
-            attachments: attachments
-        )
-        if atFront {
-            queued.insert(item, at: 0)
-        } else {
-            queued.append(item)
+    }
+
+    func updateQueued(_ item: ChatQueuedMessage, text: String, owner: WorkReference?) {
+        guard text != item.text else { return }
+        guard let owner, owner == queuedReference, ownsQueue, let reference = queuedReference else { return }
+        do {
+            queued = try ChatOutboxStore.shared.update(reference) { items in
+                guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item,
+                      items[index].canEdit else { throw ChatOutboxStore.Failure.conflict }
+                guard items[index].text != text else { return }
+                if items[index].attemptedAt != nil {
+                    items[index].id = UUID().uuidString
+                    items[index].attemptedAt = nil
+                    items[index].delivery = .waiting
+                }
+                items[index].text = text
+            }
+        } catch { self.error = "This queued message changed or could not be saved. Reopen Pending messages before editing it again." }
+    }
+
+    func removeQueued(_ item: ChatQueuedMessage, owner: WorkReference?) {
+        guard let owner, owner == queuedReference, ownsQueue, let reference = queuedReference else { return }
+        do {
+            queued = try ChatOutboxStore.shared.update(reference) { items in
+                guard let stored = items.first(where: { $0.id == item.id }), stored == item, stored.delivery != .sending else {
+                    throw ChatOutboxStore.Failure.conflict
+                }
+                items.removeAll { $0.id == item.id }
+            }
+            authorizedQueueItems.remove(item.id)
+            Task { await drainQueue() }
+        } catch { self.error = "The queued copy could not be removed. Check its delivery first, then try again." }
+    }
+
+    func moveQueued(from offsets: IndexSet, to destination: Int, owner: WorkReference?) {
+        guard let owner, owner == queuedReference, ownsQueue, let reference = queuedReference else { return }
+        let expected = queued.map(\.id)
+        do {
+            queued = try ChatOutboxStore.shared.update(reference) { items in
+                guard items.map(\.id) == expected else { throw ChatOutboxStore.Failure.conflict }
+                items.move(fromOffsets: offsets, toOffset: destination)
+            }
+        } catch { self.error = "The queue changed or could not be saved. Reopen Pending messages to see its current order." }
+    }
+
+    func queueDraftWhenConnected() {
+        guard savedCopy != nil, unconfirmedSend == nil, heldSubmission == nil,
+              !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
+        if enqueue(draft, whenConnected: true) != nil { clearDraft() }
+    }
+
+    func resumeWaitingConnection() async {
+        guard ownsQueue, let reference = queuedReference, WorkCacheAccess.canSave(reference),
+              queued.contains(where: { $0.whenConnected && $0.delivery == .waiting }) else { return }
+        authorizedQueueItems.formUnion(queued.filter { $0.whenConnected && $0.delivery == .waiting }.map(\.id))
+        if savedCopy != nil { await checkSavedCopyForUpdates(quiet: true) }
+        else { await drainQueue() }
+    }
+
+    func sendNow(_ item: ChatQueuedMessage, owner: WorkReference?) async {
+        guard let owner, owner == queuedReference, ownsQueue else { return }
+        guard savedCopy == nil else {
+            error = "Check for updates to return to the live conversation before sending or checking delivery. Your pending copy stays here."
+            return
         }
-        attachments = []
-        attachmentPreviews = [:]
-        persistQueue()
-        return item
-    }
-
-    func updateQueued(_ item: ChatQueuedMessage, text: String) {
-        guard let index = queued.firstIndex(where: { $0.id == item.id }) else { return }
-        queued[index].text = text
-        persistQueue()
-    }
-
-    func removeQueued(_ item: ChatQueuedMessage) {
-        queued.removeAll { $0.id == item.id }
-        persistQueue()
-    }
-
-    /// Drag reorder from the pending sheet. The order is the send order,
-    /// so it persists like every other queue change.
-    func moveQueued(from offsets: IndexSet, to destination: Int) {
-        queued.move(fromOffsets: offsets, toOffset: destination)
-        persistQueue()
-    }
-
-    /// Stop the current turn and send this queued message as soon as the
-    /// host will take it. Remaining queued items stay waiting.
-    ///
-    /// The item leaves the strip first, so Send now is visible as the turn
-    /// stopping rather than as a no-op on the same waiting row. A stale
-    /// tool row must not hold the send: the conversation's own running
-    /// flag is what the host uses to accept the next prompt.
-    func sendNow(_ item: ChatQueuedMessage) async {
-        guard savedCopy == nil else { return }
         guard !sendingNow else { return }
         sendingNow = true
         defer { sendingNow = false }
-        let targetID = selected?.id
-        let generation = selectionGeneration
-        let originalIndex = queued.firstIndex(where: { $0.id == item.id }) ?? 0
-        removeQueued(item)
-        if selected?.running == true {
-            await stop()
-            for _ in 0..<80 {
-                if Task.isCancelled { break }
-                guard selectionMatches(id: targetID ?? "", generation: generation) else { break }
-                if selected?.running != true, !sending { break }
-                await poll()
-                try? await Task.sleep(for: .milliseconds(200))
-            }
-        }
-        guard let targetID else {
-            queued.insert(item, at: min(originalIndex, queued.count))
-            persistQueue()
-            return
-        }
-        guard selectionMatches(id: targetID, generation: generation) else {
-            Self.reappendToStoredQueue(item, at: originalIndex, conversationID: targetID)
-            return
-        }
-        if sending || selected?.running == true {
-            queued.insert(item, at: min(originalIndex, queued.count))
-            persistQueue()
-            return
-        }
-        let ok = await send(item.text, attachmentIDs: item.attachments.map(\.id))
-        if !ok {
-            // The selection may have moved during the send. Only touch the
-            // live queue when it is still this conversation; otherwise write
-            // back to the owning conversation's stored queue.
-            if selectionMatches(id: targetID, generation: generation) {
-                queued.insert(item, at: min(originalIndex, queued.count))
-                persistQueue()
-            } else {
-                Self.reappendToStoredQueue(item, at: originalIndex, conversationID: targetID)
-            }
-        }
+        _ = await deliverQueued(item, stopCurrent: true)
     }
 
     func drainQueue() async {
-        guard savedCopy == nil else { return }
-        guard !busy, !sending, !sendingNow, let item = queued.first else { return }
-        guard let ownerID = selected?.id else { return }
-        let generation = selectionGeneration
-        let originalIndex = 0
-        queued.removeFirst()
-        persistQueue()
-        let ok = await send(item.text, attachmentIDs: item.attachments.map(\.id))
-        if !ok {
-            if selectionMatches(id: ownerID, generation: generation) {
-                queued.insert(item, at: min(originalIndex, queued.count))
-                persistQueue()
-            } else {
-                Self.reappendToStoredQueue(item, at: originalIndex, conversationID: ownerID)
-            }
-        } else if selectionMatches(id: ownerID, generation: generation) {
-            // A send that won the race with the turn ending left this item
-            // waiting one extra turn. Chain while still idle and owned.
+        guard !busy, !sending, !sendingNow, !queuePaused, let item = queued.first else { return }
+        if await deliverQueued(item, stopCurrent: false), !busy {
             await drainQueue()
         }
     }
 
-    @discardableResult
-    func send(_ text: String, attachmentIDs: [String]? = nil,
-              clientMessageID: String? = nil) async -> Bool {
-        guard savedCopy == nil, let selected, !sending else { return false }
+    /// Acceptance updates the captured owner's disk record even if navigation
+    /// changes. Nothing leaves the outbox before the host's acknowledgement.
+    private func deliverQueued(_ candidate: ChatQueuedMessage, stopCurrent: Bool, reserved: Bool = false) async -> Bool {
+        guard savedCopy == nil, ownsQueue, (!sending || reserved), let reference = queuedReference,
+              WorkCacheAccess.canSave(reference), let conversationID = reference.itemID,
+              ChatOutboxStore.shared.beginDelivery(reference) else { return false }
         sending = true
-        let staged = stageOutgoing(text)
-        defer { sending = false }
+        defer { ChatOutboxStore.shared.endDelivery(reference); sending = false }
+        let targetPeer = peer
         let generation = selectionGeneration
-        let ids = attachmentIDs ?? attachments.map(\.id)
+        func current() -> Bool {
+            !Task.isCancelled && selectionMatches(id: conversationID, generation: generation)
+                && currentReference == reference && WorkCacheAccess.canSave(reference) && savedCopy == nil
+        }
+        func publish(_ items: [ChatQueuedMessage]) {
+            if currentReference == reference { queued = items }
+        }
+        guard await machineConfirmsSends(peer: targetPeer), current() else {
+            if current() { error = "Update this machine before sending queued messages. Its host must be able to confirm delivery." }
+            authorizedQueueItems.remove(candidate.id)
+            return false
+        }
         do {
-            let updated = try await Bridge.sendChat(
-                id: selected.id,
-                text: text,
-                attachmentIDs: ids,
-                clientMessageID: clientMessageID,
-                peer: peer
-            )
-            guard selectionMatches(id: updated.id, generation: generation) else {
-                dropOutgoing(staged)
+            if let targetPeer {
+                guard try await Bridge.workspaceAccessAllowed(peer: targetPeer), current() else {
+                    authorizedQueueItems.remove(candidate.id)
+                    return false
+                }
+            }
+            guard current() else { return false }
+            let stored = try ChatOutboxStore.shared.items(for: reference)
+            guard let item = stored.first(where: { $0.id == candidate.id }), item == candidate else {
+                publish(stored)
+                authorizedQueueItems.remove(candidate.id)
+                error = "The pending message changed. Review its current copy before sending."
                 return false
             }
-            replace(updated)
-            let sent = Set(ids)
-            attachments.removeAll { sent.contains($0.id) }
-            for id in sent { attachmentPreviews.removeValue(forKey: id) }
-            await loadEvents(id: updated.id, reset: false, generation: generation)
-            return true
-        } catch {
-            dropOutgoing(staged)
-            if selectionMatches(id: selected.id, generation: generation) {
-                self.error = error.localizedDescription
+            if item.needsReceipt {
+                let receipt = try await Bridge.chatReceipt(id: conversationID, clientMessageID: item.id, peer: targetPeer)
+                if receipt.isAccepted {
+                    let items = try ChatOutboxStore.shared.update(reference) { $0.removeAll { $0.id == item.id } }
+                    publish(items)
+                    clearSubmittedDraft(item, reference: reference)
+                    authorizedQueueItems.remove(item.id)
+                    if current() { await loadEvents(id: conversationID, reset: false, generation: generation) }
+                    return true
+                }
+                publish(try ChatOutboxStore.shared.update(reference) { items in
+                    if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].delivery = .deliveryUnknown }
+                })
+                authorizedQueueItems.remove(item.id)
+                if current() { error = "Delivery is not confirmed. Check the conversation before copying this message into a new draft. An unknown receipt is not proof it was never sent." }
+                return false
             }
+            guard current(), !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !item.attachments.isEmpty else { return false }
+            if stopCurrent, selected?.running == true {
+                await stop()
+                for _ in 0..<80 {
+                    guard current() else { return false }
+                    if selected?.running != true { break }
+                    await poll()
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+            }
+            guard current(), !busy else { return false }
+            publish(try ChatOutboxStore.shared.update(reference) { items in
+                guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item else {
+                    throw ChatOutboxStore.Failure.conflict
+                }
+                items[index].delivery = .sending
+                items[index].attemptedAt = Date()
+            })
+            let staged = stageOutgoing(item.text)
+            var accepted = false
+            do {
+                let updated = try await Bridge.sendChat(id: conversationID, text: item.text,
+                    attachmentIDs: item.attachments.map(\.id), clientMessageID: item.id, peer: targetPeer)
+                accepted = true
+                let remaining = try ChatOutboxStore.shared.update(reference) { $0.removeAll { $0.id == item.id } }
+                publish(remaining)
+                clearSubmittedDraft(item, reference: reference)
+                authorizedQueueItems.remove(item.id)
+                if current() {
+                    replace(updated)
+                    await loadEvents(id: conversationID, reset: false, generation: generation)
+                }
+                return true
+            } catch {
+                if current() { dropOutgoing(staged) }
+                authorizedQueueItems.remove(item.id)
+                publish(try ChatOutboxStore.shared.update(reference) { items in
+                    if let index = items.firstIndex(where: { $0.id == item.id }) {
+                        items[index].delivery = accepted || Bridge.isDeliveryUnknown(error) ? .deliveryUnknown : .failed
+                    }
+                })
+                if current() { self.error = accepted || Bridge.isDeliveryUnknown(error)
+                    ? "The machine did not confirm delivery. Your queued copy stays here. Choose Check delivery before doing anything else."
+                    : error.localizedDescription }
+                return false
+            }
+        } catch {
+            authorizedQueueItems.remove(candidate.id)
+            if current() { self.error = "The queued message could not be checked or saved. It stays in the outbox; reopen Pending messages and check delivery before trying again." }
             return false
         }
     }
@@ -2040,7 +2108,7 @@ final class ChatModel {
 
     /// Ask the machine again from the saved-copy banner. A live answer
     /// replaces the copy; another failure keeps it, with its saved time.
-    func checkSavedCopyForUpdates(prepareConnection: (() async throws -> Void)? = nil) async {
+    func checkSavedCopyForUpdates(prepareConnection: (() async throws -> Void)? = nil, quiet: Bool = false) async {
         guard savedCopy != nil, !checkingSavedCopy, let chat = selected,
               let workspaceID, let reference = currentReference else { return }
         guard reference.scope == WorkSessionContext.shared.scope else {
@@ -2083,7 +2151,7 @@ final class ChatModel {
             await select(live)
         } catch {
             guard stillCurrent() else { return }
-            self.error = error.localizedDescription
+            if !quiet { self.error = error.localizedDescription }
         }
     }
 
@@ -2302,51 +2370,17 @@ final class ChatModel {
     }
 
     private func loadQueue(for id: String?) {
-        persistQueue()
-        queuedConversationID = id
-        guard let id else {
-            queued = []
-            return
+        authorizedQueueItems = []
+        queuedReference = currentReference
+        queued = []
+        guard let id, let reference = queuedReference, reference.itemID == id else { return }
+        do {
+            queued = try ChatOutboxStore.shared.items(for: reference)
+            authorizedQueueItems = Set(queued.filter { $0.whenConnected && $0.delivery == .waiting }.map(\.id))
         }
-        queued = Self.storedQueue(for: id)
-    }
-
-    private static func storedQueue(for id: String) -> [ChatQueuedMessage] {
-        guard let data = UserDefaults.standard.data(forKey: Self.queueKeyPrefix + id),
-            let items = try? JSONDecoder().decode([ChatQueuedMessage].self, from: data)
-        else {
-            return []
-        }
-        return items
-    }
-
-    /// Write an item back to the conversation that owns it, without touching
-    /// the live queue (which now belongs to another conversation).
-    private static func reappendToStoredQueue(
-        _ item: ChatQueuedMessage, at index: Int, conversationID: String
-    ) {
-        var stored = storedQueue(for: conversationID)
-        if !stored.contains(where: { $0.id == item.id }) {
-            stored.insert(item, at: min(max(0, index), stored.count))
-        }
-        let key = Self.queueKeyPrefix + conversationID
-        if stored.isEmpty {
-            UserDefaults.standard.removeObject(forKey: key)
-        } else if let data = try? JSONEncoder().encode(stored) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
-    }
-
-    private func persistQueue() {
-        guard let id = queuedConversationID else { return }
-        let key = Self.queueKeyPrefix + id
-        if queued.isEmpty {
-            UserDefaults.standard.removeObject(forKey: key)
-            return
-        }
-        if let data = try? JSONEncoder().encode(queued) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
+        catch { self.error = "Saved pending messages could not be opened. They have not been discarded. Try again after unlocking this device." }
+        // Legacy conversation-only queues have no provable host/account owner.
+        // Recovery is explicit; opening this conversation never adopts them.
     }
 
     private func saveLaunchChoice(from chat: ChatConversation) {
@@ -2549,12 +2583,6 @@ enum ChatClock {
 }
 
 /// A message waiting for the current turn to finish.
-struct ChatQueuedMessage: Identifiable, Equatable, Codable {
-    var id: String
-    var text: String
-    var attachments: [ChatAttachment]
-}
-
 /// Equatable so a transcript can skip the rows that did not move. A chat
 /// redraws whenever anything about it changes, and without this every visible
 /// row rebuilds itself because one of them grew by a word.

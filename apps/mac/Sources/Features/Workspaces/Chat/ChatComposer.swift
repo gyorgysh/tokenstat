@@ -54,6 +54,11 @@ struct ChatComposer: View {
 
     private var well: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
+            if model.savedCopy != nil {
+                Button("Send when connected", .scheduled) { model.queueDraftWhenConnected() }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .disabled(model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
+            }
             if model.draftSaveFailed {
                 ChatDraftNotice(retrySave: { model.retryDraftSave() })
             } else if let unconfirmed = model.unconfirmedSend {

@@ -2,6 +2,11 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Messages waiting for the open turn to finish, sitting above the composer.
 ///
@@ -13,7 +18,9 @@ struct ChatQueueStrip: View {
     let items: [ChatQueuedMessage]
     /// Conversation the strip belongs to. Switching threads with the pending
     /// sheet open must close it rather than retarget it at the new chat.
-    var ownerID: String?
+    var owner: WorkReference?
+    var paused = false
+    var offline = false
     var onChange: (ChatQueuedMessage, String) -> Void
     var onRemove: (ChatQueuedMessage) -> Void
     var onSendNow: (ChatQueuedMessage) -> Void
@@ -39,6 +46,7 @@ struct ChatQueueStrip: View {
                 ChatQueueRow(
                     item: next,
                     compact: true,
+                    offline: offline,
                     onChange: { onChange(next, $0) },
                     onRemove: { onRemove(next) },
                     onSendNow: { onSendNow(next) }
@@ -58,6 +66,7 @@ struct ChatQueueStrip: View {
         .sheet(isPresented: $showingQueue) {
             ChatPendingMessagesSheet(
                 items: items,
+                offline: offline,
                 onChange: onChange,
                 onRemove: onRemove,
                 onSendNow: onSendNow,
@@ -68,15 +77,17 @@ struct ChatQueueStrip: View {
         .onChange(of: items.isEmpty) { _, empty in
             if empty { showingQueue = false }
         }
-        .onChange(of: ownerID) { _, _ in
+        .onChange(of: owner) { _, _ in
             showingQueue = false
         }
     }
 
     private var title: String {
-        items.count <= 1
-            ? "Waiting to send after this turn"
-            : "Waiting to send after this turn · \(items.count)"
+        if offline, items.first?.needsReceipt == true { return "Delivery needs checking · Reconnect to review" }
+        if offline { return items.first?.whenConnected == true ? "Waiting for connection · Cancel by removing the copy" : "Paused · Reconnect to review delivery" }
+        if items.first?.needsReceipt == true { return "Delivery needs checking" }
+        if paused { return "Paused on this device · Choose Send now to continue" }
+        return items.count <= 1 ? "Waiting to send after this turn" : "Waiting to send after this turn · \(items.count)"
     }
 }
 
@@ -87,6 +98,7 @@ struct ChatQueueStrip: View {
 /// is the same window as Personas, Add workspace, and the rest.
 private struct ChatPendingMessagesSheet: View {
     let items: [ChatQueuedMessage]
+    var offline = false
     var onChange: (ChatQueuedMessage, String) -> Void
     var onRemove: (ChatQueuedMessage) -> Void
     var onSendNow: (ChatQueuedMessage) -> Void
@@ -97,7 +109,7 @@ private struct ChatPendingMessagesSheet: View {
         #if os(macOS)
         ThemedSheet(
             title: "Pending messages",
-            subtitle: "These send once the current turn finishes, in this order. Drag to reorder.",
+            subtitle: "New queues wait for this turn. Send when connected keeps your explicit choice; other reopened messages stay paused.",
             icon: .scheduled,
             scrolls: false,
             onClose: onClose
@@ -142,19 +154,22 @@ private struct ChatPendingMessagesSheet: View {
                 ForEach(items) { item in
                     ChatQueueRow(
                         item: item,
+                        offline: offline,
                         onChange: { onChange(item, $0) },
                         onRemove: { onRemove(item) },
                         onSendNow: { onSendNow(item) }
                     )
+                    .listRowBackground(Theme.background)
                 }
                 .onMove(perform: onMove)
             } header: {
-                Text("Drag to reorder. These send once the current turn finishes, in this order.")
+                Text("Drag to reorder. Messages marked Send when connected keep that choice. Other reopened messages stay paused.")
             } footer: {
-                Text("Send now stops that turn so the chosen message goes out next.")
+                Text("Send now stops the current turn. Check delivery never resends a message.")
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .environment(\.editMode, .constant(.active))
         #endif
     }
@@ -171,7 +186,7 @@ private struct ChatPendingMessagesSheet: View {
                 ForEach(items) { item in
                     macQueueRow(item)
                 }
-                Text("Send now stops that turn so the chosen message goes out next.")
+                Text("Send now stops the current turn. Check delivery never resends a message.")
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -199,6 +214,7 @@ private struct ChatPendingMessagesSheet: View {
                 }
             ChatQueueRow(
                 item: item,
+                offline: offline,
                 onChange: { onChange(item, $0) },
                 onRemove: { onRemove(item) },
                 onSendNow: { onSendNow(item) }
@@ -251,6 +267,7 @@ private struct QueueDropDelegate: DropDelegate {
 private struct ChatQueueRow: View {
     let item: ChatQueuedMessage
     var compact = false
+    var offline = false
     var onChange: (String) -> Void
     var onRemove: () -> Void
     var onSendNow: () -> Void
@@ -260,9 +277,9 @@ private struct ChatQueueRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if compact {
-                compactField
+                compactField.disabled(!item.canEdit)
             } else {
-                sheetField
+                sheetField.disabled(!item.canEdit)
             }
             if !item.attachments.isEmpty {
                 Text(attachmentLabel)
@@ -270,12 +287,26 @@ private struct ChatQueueRow: View {
                     .foregroundStyle(Theme.controlGlyph)
                     .padding(.leading, compact ? 24 : 0)
             }
+            if offline {
+                Text("Reconnect to send or check delivery. You can still copy, edit unsent text, or remove the local copy.")
+                    .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+            }
+            if item.needsReceipt {
+                Text("The host has not confirmed this message. Check delivery, or copy its text after reviewing the conversation. Removing this copy does not cancel a message already sent.")
+                    .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+            } else if item.delivery == .failed {
+                Text("The last attempt was refused. Your message is still here.")
+                    .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+            }
             HStack(spacing: Theme.Space.s) {
+                Button("Copy", .copy) { copyText() }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
                 Spacer(minLength: 0)
-                Button("Send now", .send, action: onSendNow)
+                Button(item.needsReceipt ? "Check delivery" : "Send now", .send, action: onSendNow)
                     .buttonStyle(AccentButtonStyle(small: true))
-                    .help("Stop this turn so this message goes out next")
-                Button("Remove", .delete, action: onRemove)
+                    .disabled(offline)
+                    .help(item.needsReceipt ? "Ask the host whether it accepted this message" : "Stop this turn so this message goes out next")
+                Button(item.needsReceipt ? "Remove copy" : "Remove", .delete, action: onRemove)
                     .buttonStyle(DestructiveButtonStyle(small: true))
                     .environment(\.compactActions, compact)
             }
@@ -312,6 +343,15 @@ private struct ChatQueueRow: View {
             .onChange(of: draft) { _, text in
                 onChange(text)
             }
+    }
+
+    private func copyText() {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.text, forType: .string)
+        #else
+        UIPasteboard.general.string = item.text
+        #endif
     }
 
     private var attachmentLabel: String {

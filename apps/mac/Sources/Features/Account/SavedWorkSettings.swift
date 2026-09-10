@@ -19,6 +19,7 @@ struct SavedWorkSettings: View {
     @State private var cleared = false
     @State private var message: String?
     @State private var showManagement = false
+    @State private var showOlderDrafts = false
     @State private var retentionDays = WorkCacheSettings.shared.retentionDays
     @State private var budgetMB = WorkCacheSettings.shared.budgetMB
     @State private var offlineBudgetMB = WorkCacheSettings.shared.offlineBudgetMB
@@ -26,6 +27,7 @@ struct SavedWorkSettings: View {
     var body: some View {
         card
             .disabled(clearing)
+            .sheet(isPresented: $showOlderDrafts) { WorkLegacyDraftsSheet() }
             .task(id: scope) { bytes = nil; records = nil; pinned = nil; await refresh() }
             .sheet(isPresented: $showManagement, onDismiss: { Task { await refresh() } }) {
                 if let scope { WorkCacheManagementSheet(scope: scope) }
@@ -87,6 +89,8 @@ struct SavedWorkSettings: View {
             Button("Manage saved work", .archive) { showManagement = true }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(scope == nil)
+            Button("Recover older pending drafts", .history) { showOlderDrafts = true }
+                .buttonStyle(SecondaryButtonStyle())
             clearButton
             if let message {
                 Text(message)
