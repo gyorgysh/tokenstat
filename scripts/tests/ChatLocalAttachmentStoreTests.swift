@@ -44,9 +44,26 @@ actor UploadCounter {
         assert(reused == resolved.0)
         let original = try await relaunched.read(attachment, reference: ref())
         assert(original == bytes, "Sending never discards the original file as cache")
+        let retained = try await relaunched.retained(in: ref().scope)
+        assert(retained.files.count == 1 && !retained.hasUnreadableFiles)
+        let otherOwner = try await relaunched.retained(in: ref("two").scope)
+        assert(otherOwner.files.isEmpty)
+        let entry = retained.files[0]
+        // A removal selected before the first upload cannot erase its newer mapping.
+        let unuploaded = try await relaunched.stage(data: bytes, name: "other.txt", mediaType: "text/plain", reference: ref())
+        let beforeUpload = try await relaunched.retained(in: ref().scope).files.first { $0.attachment.id == unuploaded.id }!
+        _ = try await relaunched.resolve(unuploaded, reference: ref()) { try await counter.upload($0) }
+        do { try await relaunched.remove(beforeUpload); assertionFailure("Stale removal deleted changed file") } catch {}
+        let current = try await relaunched.retained(in: ref().scope).files.first { $0.attachment.id == unuploaded.id }!
+        try await relaunched.remove(current)
+        let stillThere = try await relaunched.read(attachment, reference: ref())
+        assert(stillThere == bytes)
+        assert(entry.attachment == attachment)
         let file = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)[0]
         try Data("corrupt".utf8).write(to: file)
         do { _ = try await relaunched.read(attachment, reference: ref()); assertionFailure("Corrupt source accepted") } catch {}
+        let brokenListing = try await relaunched.retained(in: ref().scope)
+        assert(brokenListing.hasUnreadableFiles)
         let imported = ChatAttachment(id: "imported-host-file", name: "draft.txt", mediaType: "text/plain", size: UInt64(bytes.count))
         try await relaunched.keep(imported, data: bytes, reference: ref())
         let importedRead = try await ChatLocalAttachmentStore(directory: root).read(imported, reference: ref())

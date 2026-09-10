@@ -100,6 +100,50 @@ actor ChatLocalAttachmentStore {
         defer { uploads[url] = nil }
         return try await task.value
     }
+    struct RetainedFile: Identifiable, Sendable {
+        let reference: WorkReference
+        let attachment: ChatAttachment
+        let bytes: Int
+        let fingerprint: Data
+        var id: String { (WorkReferenceKey.conversation(reference) ?? "") + "|" + attachment.id }
+    }
+    struct RetainedListing: Sendable {
+        var files: [RetainedFile] = []
+        var hasUnreadableFiles = false
+    }
+    func retained(in scope: WorkReference.Scope) throws -> RetainedListing {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return RetainedListing() }
+        let urls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
+        var result = RetainedListing()
+        for url in urls where url.pathExtension == "json" {
+            try Task.checkCancellation()
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+            let handle = try FileHandle(forReadingFrom: url)
+            let encoded: Data
+            do { encoded = try handle.read(upToCount: 17 * 1024 * 1024) ?? Data(); try handle.close() }
+            catch { try? handle.close(); throw error }
+            guard encoded.count < 17 * 1024 * 1024, let file = try? JSONDecoder().decode(File.self, from: encoded) else {
+                result.hasUnreadableFiles = true
+                continue
+            }
+            guard file.reference.scope == scope, try location(file.attachment.id, reference: file.reference).resolvingSymlinksInPath().path == url.resolvingSymlinksInPath().path else { continue }
+            result.files.append(RetainedFile(reference: file.reference, attachment: file.attachment, bytes: encoded.count,
+                                       fingerprint: Data(SHA256.hash(data: encoded))))
+        }
+        result.files.sort { $0.attachment.name.localizedStandardCompare($1.attachment.name) == .orderedAscending }
+        return result
+    }
+    /// Explicit removal rechecks the selected disk copy. A changed upload
+    /// mapping or an active upload requires a fresh review.
+    func remove(_ retained: RetainedFile) throws {
+        let url = try location(retained.attachment.id, reference: retained.reference)
+        guard uploads[url] == nil else { throw Failure.invalid }
+        let file = try load(retained.attachment, reference: retained.reference)
+        let encoded = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard encoded.count < 17 * 1024 * 1024, file.reference.scope == retained.reference.scope,
+              Data(SHA256.hash(data: encoded)) == retained.fingerprint else { throw Failure.invalid }
+        try FileManager.default.removeItem(at: url)
+    }
     func read(_ attachment: ChatAttachment, reference: WorkReference) throws -> Data {
         try load(attachment, reference: reference).data
     }

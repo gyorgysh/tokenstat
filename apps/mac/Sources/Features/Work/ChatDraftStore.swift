@@ -115,6 +115,25 @@ final class ChatDraftStore {
         drafts.values.filter { $0.reference.scope == scope }.sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    func protectedAttachments(in scope: WorkReference.Scope) throws -> [String: Set<String>] {
+        let stored = try Self.queue.sync { try Self.read(file, byteLimit: byteLimit) }
+        var result: [String: Set<String>] = [:]
+        for draft in Array(drafts.values) + Array(stored.values) where draft.reference.scope == scope {
+            guard let key = Self.key(draft.reference) else { continue }
+            result[key, default: []].formUnion(draft.attachments.map(\.id))
+        }
+        return result
+    }
+
+    /// Protect both current in-memory writing and the latest persisted copy
+    /// when reviewing retained original files for explicit removal.
+    func referencedAttachmentIDs(for reference: WorkReference) throws -> Set<String> {
+        guard let key = Self.key(reference) else { return [] }
+        let stored = try Self.queue.sync { try Self.read(file, byteLimit: byteLimit) }
+        return Set((drafts[key]?.attachments ?? []).map(\.id))
+            .union((stored[key]?.attachments ?? []).map(\.id))
+    }
+
     func draft(for reference: WorkReference) -> ChatDraft? {
         guard let key = Self.key(reference) else { return nil }
         return drafts[key]

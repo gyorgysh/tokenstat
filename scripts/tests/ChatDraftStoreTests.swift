@@ -114,6 +114,20 @@ final class Notified: @unchecked Sendable {
         assert(merged.draft(for: reference(chat: "one"))?.text == "from one")
         assert(merged.draft(for: reference(chat: "two"))?.text == "from two")
 
+        // Original-file cleanup protects both a window's unsaved view and
+        // the latest persisted attachment references from another window.
+        let fileRef = reference(chat: "original-files")
+        windowOne.save(text: "original", attachments: [file], for: fileRef)
+        windowOne.settle()
+        let fileWindow = ChatDraftStore(directory: root)
+        let nextFile = ChatAttachment(id: "file-2", name: "new.txt", mediaType: "text/plain", size: 4)
+        windowOne.save(text: "changed", attachments: [nextFile], for: fileRef)
+        windowOne.settle()
+        assert(try! fileWindow.referencedAttachmentIDs(for: fileRef) == Set([file.id, nextFile.id]))
+        let protectedFiles = try! fileWindow.protectedAttachments(in: alice)
+        assert(protectedFiles[WorkReferenceKey.conversation(fileRef)!] == Set([file.id, nextFile.id]))
+        assert((try! fileWindow.protectedAttachments(in: bob))[WorkReferenceKey.conversation(fileRef)!] == nil)
+
         // A late acknowledgement must not remove another window's edit.
         let receiptRef = reference(chat: "late-receipt")
         windowOne.save(text: "submitted", attachments: [], for: receiptRef)
