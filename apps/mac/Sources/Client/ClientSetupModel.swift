@@ -248,6 +248,23 @@ final class ClientSetupModel {
         catch { self.error = Self.readable(error); return false }
     }
 
+    /// Typing another server must stop referring to a saved record. Clear
+    /// its identity too, so confirming the new fingerprint creates a new row.
+    func editServer(_ field: WritableKeyPath<SSHHost, String>, value: String) {
+        if pickedHostID != nil || !host.id.isEmpty {
+            pickedHostID = nil
+            host = SSHHost(
+                id: "", label: host.label, hostname: host.hostname, port: 22,
+                username: host.username, initialDirectory: "~", credentialID: nil,
+                jumpHostID: nil, tags: [], provider: nil, hostKeys: []
+            )
+            credential = .none
+            password = ""
+            resetServer()
+        }
+        host[keyPath: field] = value
+    }
+
     /// The host record as it stands, whether picked or typed.
     func resolvedHost(library: SSHLibraryModel) -> SSHHost {
         if let pickedHostID, let saved = library.hosts.first(where: { $0.id == pickedHostID }) {

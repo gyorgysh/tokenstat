@@ -43,7 +43,7 @@ struct ClientSetupServerGuide: View {
                 .frame(maxWidth: .infinity)
 
                 section("What it has to be") {
-                    requirement("Linux", "Any mainstream distribution. Setup keeps the "
+                    requirement("Linux with systemd", "Setup uses systemd to keep the "
                         + "helper running, including after a reboot.")
                     requirement("64-bit Intel or AMD", "The standard server image at "
                         + "any provider.")
@@ -53,14 +53,13 @@ struct ClientSetupServerGuide: View {
                 }
 
                 section("What size is enough") {
-                    Text("Start small. The usual $5 plan with 1 vCPU and 1 GB of "
-                        + "memory runs most agents well enough to get started.")
+                    Text("The coding agent, your project and any local models determine "
+                        + "how much memory, disk space and processing power you need.")
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    bullet("Add about 2 GB of swap. Agents spike, and swap is "
-                        + "where the spike goes instead of the helper being "
-                        + "killed.")
+                    bullet("Check the agent's system requirements and leave room for "
+                        + "your project's builds and tests.")
                     bullet("Grow when the projects do. Disk and memory follow "
                         + "your checkouts and models, not us.")
                 }
@@ -79,10 +78,10 @@ struct ClientSetupServerGuide: View {
                 }
 
                 section("Where to get one") {
-                    Text("Any provider that rents a Linux server works. These two are the "
-                        + "ones tokenstat already knows how to read a machine list from. "
-                        + "You create the account and the server there; we are not part of "
-                        + "that and see none of it.")
+                    Text("Choose a provider with a server that meets the requirements above. "
+                        + "Setup can import DigitalOcean servers on this device; for AWS, "
+                        + "enter the server's SSH address. You create and manage the server "
+                        + "in the provider's own account.")
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

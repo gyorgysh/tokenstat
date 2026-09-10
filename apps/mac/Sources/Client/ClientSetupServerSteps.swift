@@ -227,6 +227,8 @@ struct SetupFailureBanner: View {
                         onDismiss()
                     } label: {
                         Image(systemName: "xmark").font(Theme.font(10))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Dismiss")
@@ -389,6 +391,10 @@ private struct WhereStep: View {
     @Bindable var library: SSHLibraryModel
     @Binding var path: [SetupStep]
 
+    private func serverField(_ field: WritableKeyPath<SSHHost, String>) -> Binding<String> {
+        Binding(get: { model.host[keyPath: field] }, set: { model.editServer(field, value: $0) })
+    }
+
     private var ready: Bool {
         model.pickedHostID != nil
             || (!model.host.hostname.trimmingCharacters(in: .whitespaces).isEmpty
@@ -409,6 +415,8 @@ private struct WhereStep: View {
                 StepSection(title: "Saved servers") {
                     ForEach(library.hosts) { host in
                         Button {
+                            model.password = ""
+                            model.credential = .none
                             model.pickedHostID = model.pickedHostID == host.id ? nil : host.id
                         } label: {
                             HStack {
@@ -424,8 +432,11 @@ private struct WhereStep: View {
                                         .foregroundStyle(Theme.accent)
                                 }
                             }
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(model.pickedHostID == host.id ? .isSelected : [])
                         if host.id != library.hosts.last?.id { ThemeRule() }
                     }
                 }
@@ -433,13 +444,13 @@ private struct WhereStep: View {
             StepSection(title: library.hosts.isEmpty
                 ? "The server"
                 : (model.pickedHostID == nil ? "Or type one" : "Type another")) {
-                LabeledField(title: "Address", text: $model.host.hostname, placeholder: "203.0.113.10")
+                LabeledField(title: "Address", text: serverField(\.hostname), placeholder: "203.0.113.10")
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                LabeledField(title: "User", text: $model.host.username, placeholder: "root")
+                LabeledField(title: "User", text: serverField(\.username), placeholder: "root")
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                LabeledField(title: "Name", text: $model.host.label, placeholder: "cloud one")
+                LabeledField(title: "Name", text: serverField(\.label), placeholder: "cloud one")
             }
         } footer: {
             Button("Continue", .next) {
@@ -520,8 +531,11 @@ private struct CredentialStep: View {
                                         .foregroundStyle(Theme.accent)
                                 }
                             }
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(model.credential == .key(key.id) ? .isSelected : [])
                         if key.id != library.keys.last?.id { ThemeRule() }
                     }
                 }
@@ -675,8 +689,8 @@ private struct CheckStep: View {
                             .font(ClientType.body)
                         Text(
                             "That is the same authority as the SSH session you just opened, "
-                            + "so it grants nothing you did not already have. It does mean an "
-                            + "agent here is never blocked by a permission."
+                            + "so agents can access system files as well as your projects. "
+                            + "Each agent's own approval settings still apply."
                         )
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
@@ -803,7 +817,7 @@ private struct InstallStep: View {
                         Text("Choose either, both, or neither. You can install more later.")
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
-                        Text("After setup, open a terminal on this machine and run claude or codex to sign in. Then add a project folder in Workspaces and start a session.")
+                        Text("Next, setup helps you sign in to your agent and choose a project. You can also do either later from the machine's page.")
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
