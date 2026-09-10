@@ -19,6 +19,8 @@ enum RemoteHostFeature {
     case inviteCode
     case agentSignIn
     case confirmedSend
+    case handoff
+    case workSearch
 
     var title: String {
         switch self {
@@ -31,6 +33,8 @@ enum RemoteHostFeature {
         case .inviteCode: "Adding this device"
         case .agentSignIn: "Signing in to an agent"
         case .confirmedSend: "Confirming a sent message"
+        case .handoff: "Handoff"
+        case .workSearch: "Search work"
         }
     }
 
@@ -44,6 +48,9 @@ enum RemoteHostFeature {
     /// on `chat.send` and `chat.receipt`, which is what makes repeating a send
     /// safe: an older machine ignores the id, so a message must never be sent
     /// to one twice.
+    /// Version 11 adds explicitly shared continuation records with revision checks.
+    /// Version 12 adds authorized live work search and durable transcript
+    /// positions. Handoff needs those positions to survive history retention.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
@@ -55,6 +62,8 @@ enum RemoteHostFeature {
         case .inviteCode: 7
         case .agentSignIn: 9
         case .confirmedSend: 10
+        case .handoff: 12
+        case .workSearch: 12
         }
     }
 
@@ -69,6 +78,8 @@ enum RemoteHostFeature {
         case .inviteCode: "key.horizontal.fill"
         case .agentSignIn: "person.badge.key.fill"
         case .confirmedSend: "checkmark.message.fill"
+        case .handoff: "arrow.left.arrow.right"
+        case .workSearch: "magnifyingglass"
         }
     }
 

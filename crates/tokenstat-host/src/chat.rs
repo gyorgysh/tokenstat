@@ -370,6 +370,18 @@ struct Index {
     conversations: Vec<Conversation>,
 }
 
+/// Deliberately not serializable: raw events are converted into allowlisted
+/// readable search documents before anything can cross the host boundary.
+#[derive(Debug)]
+pub struct SearchSnapshot {
+    pub title: String,
+    pub backend: String,
+    pub updated_at_ms: i64,
+    pub revision: String,
+    pub events: Vec<Value>,
+    pub partial: bool,
+}
+
 pub struct Store {
     root: PathBuf,
     conversations: Mutex<Vec<Conversation>>,
@@ -424,6 +436,7 @@ impl Store {
             .and_then(|body| serde_json::from_slice::<Index>(&body).ok())
             .map(|index| index.conversations)
             .unwrap_or_default();
+        let original_conversations = conversations.clone();
         let mut migrated = false;
         let mut interrupted = Vec::new();
         for chat in &mut conversations {
@@ -466,25 +479,84 @@ impl Store {
             );
         }
         if migrated {
-            let _ = store.save();
+            let migrated_chats = store
+                .conversations
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            if let Ok(lifecycle) = crate::work_handoff_store::lifecycle_lock(&store.root) {
+                let _ = store.edit_index_locked(&lifecycle, false, |_, current| {
+                    for (original, migrated) in original_conversations.iter().zip(&migrated_chats) {
+                        if let Some(chat) = current.iter_mut().find(|chat| chat.id == original.id)
+                            && serde_json::to_value(&*chat).map_err(|e| e.to_string())?
+                                == serde_json::to_value(original).map_err(|e| e.to_string())?
+                        {
+                            *chat = migrated.clone();
+                        }
+                    }
+                    Ok(())
+                });
+            }
         }
         store
     }
 
-    fn save(&self) -> Result<(), String> {
-        let conversations = self
+    /// Apply one operation to the current durable index, never a stale snapshot.
+    /// Publish to memory only after the replacement succeeds.
+    fn edit_index_locked<T>(
+        &self,
+        _lifecycle: &crate::work_handoff_store::Guard,
+        allow_missing: bool,
+        edit: impl FnOnce(&[Conversation], &mut Vec<Conversation>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut memory = self
             .conversations
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+            .unwrap_or_else(PoisonError::into_inner);
+        let path = self.root.join("conversations.json");
+        let mut index: Index = match fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map_err(|_| "conversation index could not be verified")?,
+            Err(error) if allow_missing && error.kind() == std::io::ErrorKind::NotFound => {
+                Index::default()
+            }
+            Err(error) => return Err(error.to_string()),
+        };
+        let out = edit(&memory, &mut index.conversations)?;
+        let bytes = serde_json::to_vec_pretty(&index).map_err(|e| e.to_string())?;
+        replace_chat_file(&path, &bytes)?;
+        *memory = index.conversations;
+        Ok(out)
+    }
+
+    fn edit_conversation<T>(
+        &self,
+        id: &str,
+        edit: impl FnOnce(&mut Conversation) -> Result<T, String>,
+    ) -> Result<T, String> {
+        validate_record_id(id)?;
+        let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        self.edit_index_locked(&lifecycle, false, |memory, current| {
+            let selected = memory
+                .iter()
+                .find(|chat| chat.id == id)
+                .ok_or("no chat with that id")?;
+            let chat = current
+                .iter_mut()
+                .find(|chat| chat.id == id && chat.workspace_id == selected.workspace_id)
+                .ok_or("this conversation is no longer in that workspace")?;
+            edit(chat)
+        })
+    }
+
+    #[cfg(test)]
+    fn save(&self) -> Result<(), String> {
         fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
-        let temp = self.root.join("conversations.tmp");
-        fs::write(
-            &temp,
-            serde_json::to_vec_pretty(&Index { conversations }).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        fs::rename(temp, self.root.join("conversations.json")).map_err(|e| e.to_string())
+        let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        self.edit_index_locked(&lifecycle, true, |memory, current| {
+            *current = memory.to_vec();
+            Ok(())
+        })
     }
 
     pub fn list(&self, workspace_id: &str) -> Vec<Conversation> {
@@ -811,23 +883,16 @@ impl Store {
             approval.clone()
         };
         if choice == "allowAlways" {
-            let mut chats = self
-                .conversations
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            let chat = chats
-                .iter_mut()
-                .find(|chat| chat.id == out.conversation_id)
-                .ok_or("no chat with that id")?;
-            if let Some(prefix) = &out.shell_prefix {
-                if !chat.allowed_shell_prefixes.contains(prefix) {
-                    chat.allowed_shell_prefixes.push(prefix.clone());
+            self.edit_conversation(&out.conversation_id, |chat| {
+                if let Some(prefix) = &out.shell_prefix {
+                    if !chat.allowed_shell_prefixes.contains(prefix) {
+                        chat.allowed_shell_prefixes.push(prefix.clone());
+                    }
+                } else if !chat.allowed_tools.contains(&out.verb) {
+                    chat.allowed_tools.push(out.verb.clone());
                 }
-            } else if !chat.allowed_tools.contains(&out.verb) {
-                chat.allowed_tools.push(out.verb.clone());
-            }
-            drop(chats);
-            self.save()?;
+                Ok(())
+            })?;
         }
         // Write the answer back to the timeline. The queue holds the live
         // decision only until the request expires, so without this a
@@ -1060,88 +1125,83 @@ impl Store {
             last_message_author: None,
             running: false,
         };
-        self.conversations
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(chat.clone());
-        self.save()?;
-        Ok(chat)
+        fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
+        let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        self.edit_index_locked(&lifecycle, true, |_, current| {
+            current.push(chat.clone());
+            Ok(chat)
+        })
     }
 
     pub fn update(&self, id: &str, changes: Update) -> Result<Conversation, String> {
-        let mut chats = self
-            .conversations
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let chat = chats
-            .iter_mut()
-            .find(|chat| chat.id == id)
-            .ok_or("no chat with that id")?;
-        if chat.running
-            && (changes.backend.is_some()
-                || changes.model.is_some()
-                || changes.effort.is_some()
-                || changes.mode.is_some()
-                || changes.autonomy.is_some())
-        {
-            return Err("finish or stop this turn before changing its setup".into());
-        }
-        if let Some(title) = changes.title.filter(|text| !text.trim().is_empty()) {
-            chat.title = title;
-        }
-        if let Some(backend) = changes.backend {
-            if backend != chat.backend {
-                chat.backend = backend;
-                // A model/effort value and a backend session are backend-
-                // specific. Do not send stale setup or a legacy token to the
-                // newly selected agent. A previously used backend can still
-                // recover its own token from `resume_tokens`.
-                chat.model = None;
-                chat.effort = None;
-                chat.resume_token = chat.resume_tokens.get(&chat.backend).cloned();
+        self.edit_conversation(id, |chat| {
+            if chat.running
+                && (changes.backend.is_some()
+                    || changes.model.is_some()
+                    || changes.effort.is_some()
+                    || changes.mode.is_some()
+                    || changes.autonomy.is_some())
+            {
+                return Err("finish or stop this turn before changing its setup".into());
             }
-        }
-        if let Some(model) = changes.model {
-            chat.model = Some(model).filter(|value| !value.trim().is_empty());
-        }
-        if let Some(effort) = changes.effort {
-            chat.effort = Some(effort).filter(|value| !value.trim().is_empty());
-        }
-        if let Some(mode) = changes.mode {
-            chat.mode = mode;
-        }
-        if let Some(autonomy) = changes.autonomy {
-            chat.autonomy = autonomy;
-        }
-        if let Some(tools) = changes.allowed_tools {
-            chat.allowed_tools = tools;
-        }
-        if let Some(prefixes) = changes.allowed_shell_prefixes {
-            chat.allowed_shell_prefixes = prefixes;
-        }
-        if let Some(budget) = changes.budget_seconds {
-            chat.budget_seconds = budget;
-        }
-        if let Some(prompt) = changes.system_prompt {
-            chat.system_prompt = prompt;
-        }
-        if let Some(persona_id) = changes.persona_id {
-            let trimmed = persona_id.trim();
-            chat.persona_id = if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            };
-        }
-        chat.updated_at_ms = now_ms();
-        let out = chat.clone();
-        drop(chats);
-        self.save()?;
-        Ok(out)
+            if let Some(title) = changes.title.filter(|text| !text.trim().is_empty()) {
+                chat.title = title;
+            }
+            if let Some(backend) = changes.backend {
+                if backend != chat.backend {
+                    chat.backend = backend;
+                    // A model/effort value and a backend session are backend-
+                    // specific. Do not send stale setup or a legacy token to the
+                    // newly selected agent. A previously used backend can still
+                    // recover its own token from `resume_tokens`.
+                    chat.model = None;
+                    chat.effort = None;
+                    chat.resume_token = chat.resume_tokens.get(&chat.backend).cloned();
+                }
+            }
+            if let Some(model) = changes.model {
+                chat.model = Some(model).filter(|value| !value.trim().is_empty());
+            }
+            if let Some(effort) = changes.effort {
+                chat.effort = Some(effort).filter(|value| !value.trim().is_empty());
+            }
+            if let Some(mode) = changes.mode {
+                chat.mode = mode;
+            }
+            if let Some(autonomy) = changes.autonomy {
+                chat.autonomy = autonomy;
+            }
+            if let Some(tools) = changes.allowed_tools {
+                chat.allowed_tools = tools;
+            }
+            if let Some(prefixes) = changes.allowed_shell_prefixes {
+                chat.allowed_shell_prefixes = prefixes;
+            }
+            if let Some(budget) = changes.budget_seconds {
+                chat.budget_seconds = budget;
+            }
+            if let Some(prompt) = changes.system_prompt {
+                chat.system_prompt = prompt;
+            }
+            if let Some(persona_id) = changes.persona_id {
+                let trimmed = persona_id.trim();
+                chat.persona_id = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+            }
+            chat.updated_at_ms = now_ms();
+            Ok(chat.clone())
+        })
     }
 
     pub fn remove(&self, id: &str) -> Result<bool, String> {
         validate_record_id(id)?;
+        if !self.root.exists() {
+            return Ok(false);
+        }
+        let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         if self
             .active
             .lock()
@@ -1150,44 +1210,180 @@ impl Store {
         {
             return Err("stop this chat before removing it".into());
         }
-        let mut chats = self
-            .conversations
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let before = chats.len();
-        chats.retain(|chat| chat.id != id);
-        let removed = chats.len() != before;
-        drop(chats);
+        let _transcript = self.transcript_guard()?;
+        let removed = self.edit_index_locked(&lifecycle, false, |memory, current| {
+            let Some(selected) = memory.iter().find(|chat| chat.id == id) else {
+                return Ok(false);
+            };
+            if let Some(chat) = current.iter().find(|chat| chat.id == id)
+                && chat.workspace_id != selected.workspace_id
+            {
+                return Err("this conversation is no longer in that workspace".into());
+            }
+            let before = current.len();
+            current.retain(|chat| chat.id != id);
+            Ok(current.len() != before)
+        })?;
         if removed {
-            self.save()?;
             let _ = fs::remove_dir_all(safe_join(&self.root, id)?);
         }
         Ok(removed)
     }
 
-    pub fn remove_all(&self, workspace_id: &str) -> Result<usize, String> {
-        let targets: Vec<String> = self
+    /// Both the in-memory selection and the persisted index must still name
+    /// this exact conversation. The lifecycle lock is held by the caller, so
+    /// another process cannot delete it between this check and a handoff write.
+    fn handoff_conversation(
+        &self,
+        workspace_id: &str,
+        id: &str,
+        chats: &[Conversation],
+    ) -> Result<PathBuf, String> {
+        self.verified_conversation(workspace_id, id, chats)
+            .map(|(path, _)| path)
+    }
+
+    fn verified_conversation(
+        &self,
+        workspace_id: &str,
+        id: &str,
+        chats: &[Conversation],
+    ) -> Result<(PathBuf, Conversation), String> {
+        validate_record_id(id)?;
+        if !chats
+            .iter()
+            .any(|chat| chat.id == id && chat.workspace_id == workspace_id)
+        {
+            return Err("this conversation is no longer in that workspace".into());
+        }
+        let index: Index = serde_json::from_slice(
+            &fs::read(self.root.join("conversations.json")).map_err(|e| e.to_string())?,
+        )
+        .map_err(|_| "conversation index could not be verified")?;
+        let chat = index
+            .conversations
+            .into_iter()
+            .find(|chat| chat.id == id && chat.workspace_id == workspace_id)
+            .ok_or("this conversation is no longer in that workspace")?;
+        Ok((safe_join(&self.root, id)?, chat))
+    }
+
+    pub fn handoff(
+        &self,
+        workspace_id: &str,
+        id: &str,
+    ) -> Result<Option<crate::work_handoff::Handoff>, String> {
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let chats = self
             .conversations
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-            .filter(|chat| chat.workspace_id == workspace_id)
-            .map(|chat| chat.id.clone())
-            .collect();
-        let active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
-        if targets.iter().any(|id| active.contains_key(id)) {
-            return Err("stop the running chats before removing them".into());
+            .unwrap_or_else(PoisonError::into_inner);
+        let directory = self.handoff_conversation(workspace_id, id, &chats)?;
+        if !directory.exists() {
+            return Ok(None);
         }
-        drop(active);
-        if targets.is_empty() {
+        crate::work_handoff_store::read(&directory)
+    }
+
+    /// Descriptors only: previewing a shared draft must not download its files.
+    /// Keep the same ownership/deletion lock as the handoff record itself.
+    pub fn handoff_attachments(
+        &self,
+        workspace_id: &str,
+        id: &str,
+        ids: &[String],
+    ) -> Result<Vec<Attachment>, String> {
+        if ids.len() > 20 {
+            return Err("a handoff can include at most 20 attachments".into());
+        }
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let chats = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        self.handoff_conversation(workspace_id, id, &chats)?;
+        ids.iter()
+            .map(|attachment_id| {
+                validate_record_id(attachment_id)?;
+                let conversation = self.root.join(id);
+                let files = conversation.join("files");
+                for directory in [&conversation, &files, &files.join(attachment_id)] {
+                    if !fs::symlink_metadata(directory)
+                        .map_err(|_| "an attachment is no longer available")?
+                        .is_dir()
+                    {
+                        return Err("invalid attachment directory".into());
+                    }
+                }
+                let path = self.single_attachment_path(id, attachment_id)?;
+                let metadata = fs::symlink_metadata(&path)
+                    .map_err(|_| "an attachment is no longer available")?;
+                if !metadata.is_file() {
+                    return Err("invalid attachment file".into());
+                }
+                Ok(Attachment {
+                    id: attachment_id.clone(),
+                    name: path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(safe_file_name)
+                        .unwrap_or_else(|| "attachment".into()),
+                    media_type: media_type_for_path(&path),
+                    size: Some(metadata.len()),
+                })
+            })
+            .collect()
+    }
+
+    pub fn put_handoff(
+        &self,
+        workspace_id: &str,
+        id: &str,
+        request: &crate::work_handoff::PutHandoff,
+        authenticated_device: &str,
+    ) -> Result<crate::work_handoff::PutResult, String> {
+        crate::work_handoff::validate(request, authenticated_device)?;
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let chats = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let directory = self.handoff_conversation(workspace_id, id, &chats)?;
+        if let Some(draft) = &request.draft {
+            self.attachment_paths(id, &draft.attachment_ids)?;
+        }
+        // A new conversation has an index entry before it has any events.
+        // Initialize only while ownership is locked and verified; the storage
+        // layer itself must never recreate a deleted conversation directory.
+        fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+        crate::work_handoff_store::put(&directory, request, authenticated_device, now_ms())
+    }
+
+    pub fn remove_all(&self, workspace_id: &str) -> Result<usize, String> {
+        if !self.root.exists() {
             return Ok(0);
         }
-        let target_set: HashSet<&str> = targets.iter().map(String::as_str).collect();
-        self.conversations
+        let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let _transcript = self.transcript_guard()?;
+        let active: HashSet<String> = self
+            .active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .retain(|chat| !target_set.contains(chat.id.as_str()));
-        self.save()?;
+            .keys()
+            .cloned()
+            .collect();
+        let targets = self.edit_index_locked(&lifecycle, false, |_, current| {
+            let targets: Vec<String> = current
+                .iter()
+                .filter(|chat| chat.workspace_id == workspace_id)
+                .map(|chat| chat.id.clone())
+                .collect();
+            if targets.iter().any(|id| active.contains(id)) {
+                return Err("stop the running chats before removing them".into());
+            }
+            current.retain(|chat| chat.workspace_id != workspace_id);
+            Ok(targets)
+        })?;
         for id in &targets {
             if let Ok(path) = safe_join(&self.root, id) {
                 let _ = fs::remove_dir_all(path);
@@ -1196,20 +1392,6 @@ impl Store {
         Ok(targets.len())
     }
 
-    /// What this conversation tells its agent before it hears the person.
-    ///
-    /// Split into the two halves deliberately. `brief` is the person's own
-    /// words and is theirs to edit. `added` is the one rule tokenstat puts in
-    /// every conversation, and it is shown rather than hidden: a product that
-    /// quietly appends instructions to somebody's chat should at minimum let
-    /// them read what it appended.
-    /// What this conversation's persona is called, or empty.
-    ///
-    /// Read live from the persona rather than copied onto the conversation
-    /// the way its brief is. A brief is a copy on purpose, so editing a
-    /// persona does not rewrite what old conversations were told. A name is
-    /// identity: rename Lumen and the chats wearing that face are talking to
-    /// the renamed one, because that is the name on screen beside them.
     fn persona_name(&self, chat: &Conversation) -> String {
         chat.persona_id
             .as_deref()
@@ -1249,12 +1431,53 @@ impl Store {
     /// hundred bytes of it was work paid for four hundred milliseconds at a
     /// time.
     pub fn events(&self, id: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
+        let chunk = self.tail_events(id, offset, None)?;
+        Ok((chunk.events, chunk.next_offset))
+    }
+
+    /// A live cursor binds the physical offset to the retained archive. After
+    /// compaction the client reloads a bounded newest page, rather than missing
+    /// deltas or appending a slice from the middle of another record.
+    pub fn tail_events(
+        &self,
+        id: &str,
+        offset: u64,
+        cursor: Option<&str>,
+    ) -> Result<EventChunk, String> {
+        self.tail_events_positions(id, offset, cursor, true)
+    }
+
+    /// Older clients compare row positions with physical usage offsets. Keep
+    /// that representation until a client opts into durable message positions.
+    pub fn tail_events_positions(
+        &self,
+        id: &str,
+        offset: u64,
+        cursor: Option<&str>,
+        stable: bool,
+    ) -> Result<EventChunk, String> {
+        let _guard = self.transcript_guard()?;
         self.get(id)?;
         let path = self.events_path(id);
         let end = file_len(&path);
+        let first = archive_generation(&path)?;
+        let reset = cursor.is_some_and(|raw| parse_cursor(raw, end, first) != Some(offset));
         let start = offset.min(end);
-        let bytes = read_region(&path, start, end).unwrap_or_default();
-        Ok((records(&bytes, start), end))
+        let events = if reset {
+            Vec::new()
+        } else {
+            records_with_positions(
+                &read_region(&path, start, end).unwrap_or_default(),
+                start,
+                stable,
+            )
+        };
+        Ok(EventChunk {
+            events,
+            next_offset: end,
+            tail_cursor: make_cursor(end, end, first),
+            reset,
+        })
     }
 
     /// One bounded page of the timeline, newest first.
@@ -1266,7 +1489,7 @@ impl Store {
     /// that read either of those would be a client this store could no longer
     /// change.
     ///
-    /// The archive is capped (see `cap_events`), which rewrites the file from
+    /// The archive is capped (see `append`), which rewrites the file from
     /// the front and moves every offset in it. A cursor issued before that
     /// cannot be honoured, so the answer is the newest page again with
     /// `reset` set, rather than an error or a page of the wrong records.
@@ -1276,9 +1499,23 @@ impl Store {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<EventPage, String> {
+        self.event_page_positions(id, cursor, limit, true)
+    }
+
+    /// Wire compatibility for clients whose usage watermark is still a byte
+    /// offset. Paging cursors stay opaque in either representation.
+    pub fn event_page_positions(
+        &self,
+        id: &str,
+        cursor: Option<&str>,
+        limit: usize,
+        stable: bool,
+    ) -> Result<EventPage, String> {
+        let _guard = self.transcript_guard()?;
         self.get(id)?;
         let path = self.events_path(id);
         let len = file_len(&path);
+        let first = archive_generation(&path)?;
         let limit = if limit == 0 {
             PAGE_EVENTS
         } else {
@@ -1286,23 +1523,80 @@ impl Store {
         };
         let (end, reset) = match cursor {
             None => (len, false),
-            Some(raw) => match parse_cursor(raw, len) {
+            Some(raw) => match parse_cursor(raw, len, first) {
                 Some(end) => (end, false),
                 None => (len, true),
             },
         };
         let (start, bytes) = read_back(&path, end, limit)?;
         Ok(EventPage {
-            events: records(&bytes, start),
+            events: records_with_positions(&bytes, start, stable),
+            history_trimmed: retained_prefix(&bytes, start),
             start,
             next_offset: end,
-            cursor: (start > 0).then(|| make_cursor(start, len)),
+            tail_cursor: make_cursor(end, len, first),
+            cursor: (start > 0).then(|| make_cursor(start, len, first)),
             has_earlier: start > 0,
             reset,
             // Only with the newest page. It is the whole conversation's
             // figure, it does not change as somebody reads backwards, and it
             // is the one thing here that has to look past the window.
-            usage: (cursor.is_none() || reset).then(|| usage_totals(&path)),
+            usage: if cursor.is_none() || reset {
+                Some(usage_totals(&path)?)
+            } else {
+                None
+            },
+        })
+    }
+
+    /// A bounded, server-internal input for live search. The caller must first
+    /// authorize the workspace; this additionally checks current durable
+    /// ownership under the same lifecycle lock used by deletion. No usage
+    /// totals, attachment bytes, system prompts or resume credentials enter the snapshot.
+    pub fn search_snapshot(&self, workspace_id: &str, id: &str) -> Result<SearchSnapshot, String> {
+        use sha2::{Digest, Sha256};
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let chats = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (_, chat) = self.verified_conversation(workspace_id, id, &chats)?;
+        drop(chats);
+        let _guard = self.transcript_guard()?;
+        let path = self.events_path(id);
+        let end = match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_file() => metadata.len(),
+            Ok(_) => return Err("conversation transcript is not a regular file".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(_) => return Err("conversation transcript could not be read".into()),
+        };
+        let (start, bytes) = read_back_checked(&path, end, PAGE_EVENTS_MAX, true)?;
+        let mut digest = Sha256::new();
+        digest.update((chat.title.len() as u64).to_le_bytes());
+        digest.update(chat.title.as_bytes());
+        digest.update((chat.backend.len() as u64).to_le_bytes());
+        digest.update(chat.backend.as_bytes());
+        digest.update(chat.updated_at_ms.to_le_bytes());
+        digest.update(start.to_le_bytes());
+        digest.update(end.to_le_bytes());
+        digest.update(&bytes);
+        let events = records(&bytes, start);
+        let record_count = bytes
+            .split(|byte| *byte == b'\n')
+            .filter(|line| line.iter().any(|byte| !byte.is_ascii_whitespace()))
+            .count();
+        let partial = start > 0 || events.len() != record_count || retained_prefix(&bytes, start);
+        Ok(SearchSnapshot {
+            title: chat.title.clone(),
+            backend: chat.backend.clone(),
+            updated_at_ms: chat.updated_at_ms,
+            revision: digest
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect(),
+            events,
+            partial,
         })
     }
 
@@ -2034,6 +2328,12 @@ impl Store {
         text: &str,
         response_output_dir: &Path,
     ) {
+        let Ok(lifecycle) = crate::work_handoff_store::lifecycle_lock(&self.root) else {
+            return;
+        };
+        if self.verified_append_directory(id).is_err() {
+            return;
+        }
         let Ok(output_root) = fs::canonicalize(response_output_dir) else {
             return;
         };
@@ -2066,10 +2366,16 @@ impl Store {
             let Some(parent) = destination.parent() else {
                 continue;
             };
-            if fs::create_dir_all(parent).is_err() || fs::copy(&source, &destination).is_err() {
+            if fs::create_dir_all(parent).is_err() {
                 continue;
             }
-            let _ = self.append(
+            if fs::copy(&source, &destination).is_err() {
+                let _ = fs::remove_file(&destination);
+                let _ = fs::remove_dir(parent);
+                continue;
+            }
+            let written = self.append_with_lifecycle(
+                &lifecycle,
                 id,
                 &StoredEvent::Agent {
                     event: Event::Attachment {
@@ -2082,39 +2388,93 @@ impl Store {
                     backend: backend.into(),
                 },
             );
+            if written.is_err() {
+                let _ = fs::remove_file(&destination);
+                let _ = fs::remove_dir(parent);
+            }
         }
+    }
+
+    /// The caller holds the root lifecycle lock until all writes finish.
+    fn verified_append_directory(&self, id: &str) -> Result<PathBuf, String> {
+        validate_record_id(id)?;
+        let chats = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let chat = chats
+            .iter()
+            .find(|chat| chat.id == id)
+            .ok_or("this conversation is no longer available")?;
+        self.verified_conversation(&chat.workspace_id, id, &chats)
+            .map(|(path, _)| path)
     }
 
     fn append(&self, id: &str, event: &StoredEvent) -> Result<(), String> {
-        let path = self.events_path(id);
-        fs::create_dir_all(path.parent().ok_or("invalid chat events path")?)
-            .map_err(|e| e.to_string())?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .map_err(|e| e.to_string())?;
-        serde_json::to_writer(&mut file, event).map_err(|e| e.to_string())?;
-        file.write_all(b"\n").map_err(|e| e.to_string())?;
-        if file
-            .metadata()
-            .map(|meta| meta.len() > EVENTS_CAP)
-            .unwrap_or(false)
-        {
-            self.cap_events(&path)?;
-        }
-        Ok(())
+        let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        self.append_with_lifecycle(&lifecycle, id, event)
     }
 
-    fn cap_events(&self, path: &PathBuf) -> Result<(), String> {
-        let bytes = fs::read(path).map_err(|e| e.to_string())?;
-        let start = bytes.len().saturating_sub(EVENTS_CAP as usize);
-        let kept = bytes[start..]
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map(|at| &bytes[start + at + 1..])
-            .unwrap_or(&bytes[start..]);
-        fs::write(path, kept).map_err(|e| e.to_string())
+    fn append_with_lifecycle(
+        &self,
+        _lifecycle: &crate::work_handoff_store::Guard,
+        id: &str,
+        event: &StoredEvent,
+    ) -> Result<(), String> {
+        use std::io::Read;
+        let _guard = crate::work_handoff_store::transcript_lock(&self.root)?;
+        let directory = self.verified_append_directory(id)?;
+        let path = directory.join("events.ndjson");
+        fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+        let mut options = OpenOptions::new();
+        options.create(true).read(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        }
+        let mut file = options.open(&path).map_err(|e| e.to_string())?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_file()
+            || metadata.len()
+                > PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64
+        {
+            return Err("conversation transcript is not a bounded regular file".into());
+        }
+        let end = metadata.len();
+        let (base, tail) = read_back_checked(&path, end, 1, true)?;
+        let seq = crate::work_transcript_identity::next_sequence(&tail, base)?;
+        let Value::Object(record) = serde_json::to_value(event).map_err(|e| e.to_string())? else {
+            return Err("conversation event could not be encoded".into());
+        };
+        let encoded = crate::work_transcript_identity::encoded(record, seq)?;
+        if encoded.len() as u64 > PAGE_RECORD_BYTES {
+            return Err("conversation event exceeds the record limit".into());
+        }
+        if end + encoded.len() as u64 > EVENTS_CAP {
+            let mut bytes = Vec::new();
+            (&mut file)
+                .take(PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() as u64 != end {
+                return Err("conversation transcript changed while reading".into());
+            }
+            bytes.extend_from_slice(&encoded);
+            // Leave room for streamed deltas instead of rewriting on every
+            // token. A single readable large record is retained in full.
+            let cap = (EVENTS_CAP as usize * 3 / 4)
+                .max(encoded.len() + crate::work_transcript_identity::SUMMARY_BYTES);
+            let kept = crate::work_transcript_identity::retained(&bytes, cap)?;
+            drop(file);
+            replace_chat_file(&path, &kept)?;
+        } else if let Err(error) = file.write_all(&encoded) {
+            // An ordinary I/O failure must not leave half a JSON record.
+            // A process crash is detected by the complete-tail check above.
+            file.set_len(end).map_err(|e| e.to_string())?;
+            return Err(error.to_string());
+        }
+        Ok(())
     }
 
     fn get(&self, id: &str) -> Result<Conversation, String> {
@@ -2127,83 +2487,54 @@ impl Store {
             .ok_or_else(|| "no chat with that id".into())
     }
     fn retitle_if_untitled(&self, id: &str, prompt: &str) -> Result<(), String> {
-        let mut chats = self
-            .conversations
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let chat = chats
-            .iter_mut()
-            .find(|chat| chat.id == id)
-            .ok_or("no chat with that id")?;
-        if chat.title == "New chat" {
-            chat.title = title_from_prompt(prompt);
-            chat.updated_at_ms = now_ms();
-        }
-        drop(chats);
-        self.save()
+        self.edit_conversation(id, |chat| {
+            if chat.title == "New chat" {
+                chat.title = title_from_prompt(prompt);
+                chat.updated_at_ms = now_ms();
+            }
+            Ok(())
+        })
     }
 
     fn set_running(&self, id: &str, running: bool) -> Result<Conversation, String> {
-        let mut chats = self
-            .conversations
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let chat = chats
-            .iter_mut()
-            .find(|chat| chat.id == id)
-            .ok_or("no chat with that id")?;
-        chat.running = running;
-        chat.updated_at_ms = now_ms();
-        let out = chat.clone();
-        drop(chats);
-        self.save()?;
-        Ok(out)
+        self.edit_conversation(id, |chat| {
+            chat.running = running;
+            chat.updated_at_ms = now_ms();
+            Ok(chat.clone())
+        })
     }
     fn mark_last_message(&self, id: &str, at_ms: i64, author: &str) -> Result<(), String> {
-        let mut chats = self
-            .conversations
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let chat = chats
-            .iter_mut()
-            .find(|chat| chat.id == id)
-            .ok_or("no chat with that id")?;
-        chat.last_message_at_ms = Some(at_ms);
-        chat.last_message_author = Some(author.into());
-        chat.updated_at_ms = chat.updated_at_ms.max(at_ms);
-        drop(chats);
-        self.save()
+        self.edit_conversation(id, |chat| {
+            chat.last_message_at_ms = Some(at_ms);
+            chat.last_message_author = Some(author.into());
+            chat.updated_at_ms = chat.updated_at_ms.max(at_ms);
+            Ok(())
+        })
     }
     fn set_resume(&self, id: &str, backend: &str, token: &str) -> Result<(), String> {
-        let mut chats = self
-            .conversations
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let chat = chats
-            .iter_mut()
-            .find(|chat| chat.id == id)
-            .ok_or("no chat with that id")?;
-        chat.resume_tokens.insert(backend.into(), token.into());
-        chat.resume_token = Some(token.into());
-        chat.updated_at_ms = now_ms();
-        drop(chats);
-        self.save()
+        self.edit_conversation(id, |chat| {
+            chat.resume_tokens.insert(backend.into(), token.into());
+            chat.resume_token = Some(token.into());
+            chat.updated_at_ms = now_ms();
+            Ok(())
+        })
     }
     /// Remember that one backend now holds this version of the conversation's
     /// standing rules, so the next turn on it can be the person's words alone.
     fn mark_standing_sent(&self, id: &str, backend: &str, fingerprint: &str) -> Result<(), String> {
-        let mut chats = self
-            .conversations
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let chat = chats
-            .iter_mut()
-            .find(|chat| chat.id == id)
-            .ok_or("no chat with that id")?;
-        chat.standing_sent
-            .insert(backend.into(), fingerprint.into());
-        drop(chats);
-        self.save()
+        self.edit_conversation(id, |chat| {
+            chat.standing_sent
+                .insert(backend.into(), fingerprint.into());
+            Ok(())
+        })
+    }
+
+    fn transcript_guard(&self) -> Result<Option<crate::work_handoff_store::Guard>, String> {
+        if self.root.exists() {
+            crate::work_handoff_store::transcript_lock(&self.root).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     fn events_path(&self, id: &str) -> PathBuf {
@@ -2898,14 +3229,28 @@ fn grok_allow_rules(chat: &Conversation) -> Vec<String> {
     rules
 }
 
+/// A physical tail position with enough identity to detect history trimming.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventChunk {
+    pub events: Vec<Value>,
+    pub next_offset: u64,
+    pub tail_cursor: String,
+    pub reset: bool,
+}
+
 /// One bounded page of a conversation's timeline.
 pub struct EventPage {
     pub events: Vec<Value>,
+    /// This is the earliest retained window, not the conversation's origin.
+    pub history_trimmed: bool,
     /// Byte offset of the first record in this page.
     pub start: u64,
     /// Byte offset just past the last record. The newest page's is where live
     /// tailing carries on from.
     pub next_offset: u64,
+    /// Opaque cursor for live polling from this page's end.
+    pub tail_cursor: String,
     /// Asks for the page before this one. Absent at the beginning.
     pub cursor: Option<String>,
     pub has_earlier: bool,
@@ -2925,41 +3270,52 @@ pub struct EventPage {
 ///
 /// Cheap despite reading the file, because usage is a few dozen records out
 /// of thousands and a substring test skips the rest without parsing them.
-fn usage_totals(path: &Path) -> Value {
+fn usage_totals(path: &Path) -> Result<Value, String> {
     let bytes = fs::read(path).unwrap_or_default();
     let text = String::from_utf8_lossy(&bytes);
-    let (mut input, mut output, mut cache_read, mut cache_write) = (0u64, 0u64, 0u64, 0u64);
-    let mut cost = 0.0f64;
-    let mut count = 0u64;
+    let mut totals = crate::work_transcript_identity::UsageTotals::default();
     for line in text.lines() {
         if !line.contains("\"usage\"") {
             continue;
         }
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
+        let Ok(Value::Object(record)) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        let Some(event) = value.get("event") else {
-            continue;
-        };
-        if event.get("kind").and_then(Value::as_str) != Some("usage") {
-            continue;
-        }
-        let number = |key: &str| event.get(key).and_then(Value::as_u64).unwrap_or(0);
-        count += 1;
-        input += number("input");
-        output += number("output");
-        cache_read += number("cache_read");
-        cache_write += number("cache_write");
-        cost += event.get("cost_usd").and_then(Value::as_f64).unwrap_or(0.0);
+        totals.add(&crate::work_transcript_identity::UsageTotals::from_record(
+            &record,
+        )?)?;
     }
-    json!({
-        "turns": count,
-        "input": input,
-        "output": output,
-        "cacheRead": cache_read,
-        "cacheWrite": cache_write,
-        "cost": cost,
-    })
+    Ok(totals.value())
+}
+
+struct ChatTemporary(PathBuf);
+impl Drop for ChatTemporary {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn replace_chat_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let directory = path.parent().ok_or("invalid chat events path")?;
+    let temporary =
+        ChatTemporary(directory.join(format!(".chat-{:032x}.tmp", rand::random::<u128>())));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(&temporary.0).map_err(|e| e.to_string())?;
+    file.write_all(bytes).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    drop(file);
+    fs::rename(&temporary.0, path).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    fs::File::open(directory)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn file_len(path: &Path) -> u64 {
@@ -2979,13 +3335,35 @@ fn read_region(path: &Path, start: u64, end: u64) -> Option<Vec<u8>> {
     Some(buffer)
 }
 
+fn retained_prefix(bytes: &[u8], base: u64) -> bool {
+    if base != 0 {
+        return false;
+    }
+    let Some(line) = bytes.split_inclusive(|byte| *byte == b'\n').next() else {
+        return false;
+    };
+    let Ok(record) = serde_json::from_slice::<Value>(line) else {
+        return false;
+    };
+    record
+        .get("seq")
+        .and_then(Value::as_u64)
+        .is_some_and(|seq| seq > 0)
+        || record.get("kind").and_then(Value::as_str) == Some("retainedUsage")
+}
+
 /// Parse whole records out of a region, stamping each with where it starts.
 ///
-/// `seq` is the byte offset of the record in the archive, which is what gives
-/// a client a name for a row that does not change when an older page is
-/// loaded in front of it. A line that is not an object is skipped: the file
-/// is written one JSON object per line, and anything else in it is damage.
+/// `seq` is a persisted logical position, or the original byte offset for a
+/// legacy record. Retention materializes legacy positions before moving them,
+/// so loading older pages and trimming history both preserve row identity.
+/// A line that is not an object is skipped. The file is written one JSON
+/// object per line, and anything else in it is damage.
 fn records(bytes: &[u8], base: u64) -> Vec<Value> {
+    records_with_positions(bytes, base, true)
+}
+
+fn records_with_positions(bytes: &[u8], base: u64, stable: bool) -> Vec<Value> {
     let mut out = Vec::new();
     let mut at = base;
     for line in bytes.split_inclusive(|byte| *byte == b'\n') {
@@ -2998,7 +3376,10 @@ fn records(bytes: &[u8], base: u64) -> Vec<Value> {
         let Ok(Value::Object(mut object)) = serde_json::from_str::<Value>(text) else {
             continue;
         };
-        object.insert("seq".into(), json!(start));
+        let Ok(seq) = crate::work_transcript_identity::sequence(&object, start) else {
+            continue;
+        };
+        object.insert("seq".into(), json!(if stable { seq } else { start }));
         alias(&mut object);
         if let Some(Value::Object(event)) = object.get_mut("event") {
             alias(event);
@@ -3051,6 +3432,15 @@ fn alias(object: &mut serde_json::Map<String, Value>) {
 /// `PAGE_RECORD_BYTES` for the pathological case of one enormous record. It
 /// never reads the whole archive to hand back the end of it.
 fn read_back(path: &Path, end: u64, limit: usize) -> Result<(u64, Vec<u8>), String> {
+    read_back_checked(path, end, limit, false)
+}
+
+fn read_back_checked(
+    path: &Path,
+    end: u64,
+    limit: usize,
+    strict: bool,
+) -> Result<(u64, Vec<u8>), String> {
     let mut start = end;
     let mut buffer: Vec<u8> = Vec::new();
     loop {
@@ -3069,12 +3459,20 @@ fn read_back(path: &Path, end: u64, limit: usize) -> Result<(u64, Vec<u8>), Stri
         if whole > 0 && buffer.len() as u64 >= PAGE_BYTES {
             break;
         }
-        if buffer.len() as u64 >= PAGE_RECORD_BYTES {
+        // One byte before a maximum-size row establishes its boundary when
+        // the archive also contains a retained usage summary.
+        if buffer.len() as u64 > PAGE_RECORD_BYTES {
             break;
         }
-        let chunk = PAGE_CHUNK.min(start);
+        let chunk = PAGE_CHUNK
+            .min(start)
+            .min(PAGE_RECORD_BYTES + 1 - buffer.len() as u64);
         start -= chunk;
-        let mut head = read_region(path, start, start + chunk).unwrap_or_default();
+        let region = read_region(path, start, start + chunk);
+        if strict && region.is_none() {
+            return Err("conversation changed or could not be read; retry search".into());
+        }
+        let mut head = region.unwrap_or_default();
         head.extend_from_slice(&buffer);
         buffer = head;
     }
@@ -3120,24 +3518,44 @@ fn count_records(bytes: &[u8]) -> usize {
         .count()
 }
 
-/// A cursor names a byte boundary and the size the archive was.
-///
-/// The size is the whole of the validation. The archive is only ever appended
-/// to or trimmed from the front, so a file that has not shrunk still holds
-/// the record that offset points at; one that has shrunk was rewritten and
-/// every offset in it moved.
-fn make_cursor(start: u64, len: u64) -> String {
-    format!("e1.{start:x}.{len:x}")
+/// The first record identifies a retained generation even after the file
+/// grows past its pre-trim size. New and compacted records start with their
+/// unique sequence, so a bounded prefix suffices even for a large first row.
+/// Legacy bytes stay unchanged until compaction writes that sequence prefix.
+fn archive_generation(path: &Path) -> Result<u64, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut first = Vec::new();
+    BufReader::new(file.take(256))
+        .read_until(b'\n', &mut first)
+        .map_err(|e| e.to_string())?;
+    if first.is_empty() {
+        return Ok(0);
+    }
+    let digest = Sha256::digest(first);
+    let mut generation = [0; 8];
+    generation.copy_from_slice(&digest[..8]);
+    Ok(u64::from_le_bytes(generation))
 }
 
-fn parse_cursor(raw: &str, len: u64) -> Option<u64> {
+fn make_cursor(start: u64, len: u64, first: u64) -> String {
+    format!("e2.{start:x}.{len:x}.{first:x}")
+}
+
+fn parse_cursor(raw: &str, len: u64, first: u64) -> Option<u64> {
     let mut parts = raw.split('.');
-    if parts.next()? != "e1" {
+    if parts.next()? != "e2" {
         return None;
     }
     let start = u64::from_str_radix(parts.next()?, 16).ok()?;
     let issued = u64::from_str_radix(parts.next()?, 16).ok()?;
-    if parts.next().is_some() || len < issued || start > len {
+    let generation = u64::from_str_radix(parts.next()?, 16).ok()?;
+    if parts.next().is_some() || len < issued || start > len || first != generation {
         return None;
     }
     Some(start)
@@ -3341,22 +3759,19 @@ mod tests {
 
     #[test]
     fn a_cursor_survives_growth_and_not_a_trim() {
-        let cursor = make_cursor(4_096, 10_000);
-        assert_eq!(parse_cursor(&cursor, 10_000), Some(4_096));
+        let cursor = make_cursor(4_096, 10_000, 25);
+        assert_eq!(parse_cursor(&cursor, 10_000, 25), Some(4_096));
+        assert_eq!(parse_cursor(&cursor, 40_000, 25), Some(4_096));
+        assert_eq!(parse_cursor(&cursor, 9_000, 25), None);
+        assert_eq!(parse_cursor(&cursor, 40_000, 50), None, "trim then growth");
+        assert_eq!(parse_cursor("e2.ffffffff.10.0", 16, 0), None);
+        assert_eq!(parse_cursor("nonsense", 10_000, 0), None);
         assert_eq!(
-            parse_cursor(&cursor, 40_000),
-            Some(4_096),
-            "an archive that only grew still holds that record"
-        );
-        assert_eq!(
-            parse_cursor(&cursor, 9_000),
+            parse_cursor("e1.10.20", 10_000, 0),
             None,
-            "an archive that shrank was rewritten and every offset moved"
+            "legacy cursor resets safely"
         );
-        assert_eq!(parse_cursor("e1.ffffffff.10", 16), None, "past the end");
-        assert_eq!(parse_cursor("nonsense", 10_000), None);
-        assert_eq!(parse_cursor("e2.10.20", 10_000), None, "another version");
-        assert_eq!(parse_cursor("e1.10.20.30", 10_000), None);
+        assert_eq!(parse_cursor("e2.10.20.0.extra", 10_000, 0), None);
     }
 
     #[test]
@@ -3434,6 +3849,7 @@ mod tests {
             last_message_author: None,
             running: true,
         });
+        store.save().unwrap();
         store.record_events(
             "chat-test",
             "muse",
@@ -3598,6 +4014,7 @@ mod tests {
             running: false,
         };
         store.conversations.lock().unwrap().push(chat);
+        store.save().unwrap();
         store
             .append(
                 "chat-test",
@@ -3648,7 +4065,7 @@ mod tests {
         // A cursor from an archive that has since been trimmed cannot be
         // honoured, and the answer says so rather than paging the wrong
         // records.
-        let stale = make_cursor(0, u64::MAX);
+        let stale = make_cursor(0, u64::MAX, 0);
         let answer = store.event_page("chat-test", Some(&stale), 10).unwrap();
         assert!(answer.reset);
         assert_eq!(answer.next_offset, next);
@@ -3751,6 +4168,678 @@ mod tests {
             last_message_author: None,
             running: false,
         });
+        store.save().unwrap();
+    }
+
+    #[test]
+    fn transcript_retention_preserves_legacy_and_new_anchors_across_pages() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "retention");
+        store.save().unwrap();
+        let path = store.events_path("retention");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut legacy = Vec::new();
+        for at_ms in 0..10 {
+            serde_json::to_writer(
+                &mut legacy,
+                &StoredEvent::User {
+                    text: format!("Legacy {at_ms} {}", "x".repeat(32_000)),
+                    at_ms,
+                },
+            )
+            .unwrap();
+            legacy.push(b'\n');
+        }
+        fs::write(&path, &legacy).unwrap();
+        let mut identities: HashMap<u64, Value> = records(&legacy, 0)
+            .into_iter()
+            .map(|row| (row["seq"].as_u64().unwrap(), row["text"].clone()))
+            .collect();
+        let old = store.event_page("retention", None, 1).unwrap();
+        let mut tail_offset = old.next_offset;
+        let mut tail_cursor = old.tail_cursor.clone();
+        let mut trims = 0;
+        let mut previous_first = 0;
+        for at_ms in 10..70 {
+            store
+                .append(
+                    "retention",
+                    &StoredEvent::User {
+                        text: format!("New {at_ms} {}", "y".repeat(32_000)),
+                        at_ms,
+                    },
+                )
+                .unwrap();
+            let (rows, end) = store.events("retention", 0).unwrap();
+            let first = rows[0]["seq"].as_u64().unwrap();
+            let changed = first != previous_first;
+            if changed {
+                trims += 1;
+                previous_first = first;
+            }
+            let chunk = store
+                .tail_events("retention", tail_offset, Some(&tail_cursor))
+                .unwrap();
+            assert_eq!(chunk.reset, changed);
+            if changed {
+                assert!(
+                    chunk.events.is_empty(),
+                    "never return a wrong physical slice"
+                );
+            } else {
+                assert_eq!(chunk.events.len(), 1);
+                assert_eq!(chunk.events[0]["atMs"], at_ms);
+            }
+            tail_offset = chunk.next_offset;
+            tail_cursor = chunk.tail_cursor;
+            let idle = store
+                .tail_events("retention", tail_offset, Some(&tail_cursor))
+                .unwrap();
+            assert!(!idle.reset && idle.events.is_empty());
+            let mut last = None;
+            for row in &rows {
+                let seq = row["seq"].as_u64().unwrap();
+                assert!(last.is_none_or(|before| seq > before));
+                last = Some(seq);
+                if let Some(previous) = identities.insert(seq, row["text"].clone()) {
+                    assert_eq!(
+                        previous, row["text"],
+                        "an anchor must never change its message"
+                    );
+                }
+            }
+            assert_eq!(rows.last().unwrap()["atMs"], at_ms);
+            assert_eq!(
+                end,
+                fs::metadata(&path).unwrap().len(),
+                "transport offsets stay physical"
+            );
+            assert!(end <= EVENTS_CAP);
+        }
+        assert!(trims >= 3, "exercise repeated compaction");
+        assert!(
+            fs::metadata(&path).unwrap().len() > old.next_offset,
+            "regrew past the old length"
+        );
+        let stale_tail = store
+            .tail_events("retention", old.next_offset, Some(&old.tail_cursor))
+            .unwrap();
+        assert!(stale_tail.reset && stale_tail.events.is_empty());
+        let reset = store
+            .event_page("retention", old.cursor.as_deref(), 1)
+            .unwrap();
+        assert!(
+            reset.reset,
+            "trim followed by growth invalidates a physical cursor"
+        );
+        let mut cursor = None;
+        let mut seen = Vec::new();
+        loop {
+            let page = store.event_page("retention", cursor.as_deref(), 3).unwrap();
+            assert!(!page.reset);
+            for row in page.events {
+                seen.push(row["seq"].as_u64().unwrap());
+            }
+            cursor = page.cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let (rows, _) = store.events("retention", 0).unwrap();
+        seen.sort();
+        assert_eq!(
+            seen,
+            rows.iter()
+                .map(|r| r["seq"].as_u64().unwrap())
+                .collect::<Vec<_>>()
+        );
+        let legacy_page = store
+            .event_page_positions("retention", None, PAGE_EVENTS_MAX, false)
+            .unwrap();
+        assert_eq!(legacy_page.events[0]["seq"], legacy_page.start);
+        let stable_page = store
+            .event_page("retention", None, PAGE_EVENTS_MAX)
+            .unwrap();
+        assert!(stable_page.events[0]["seq"].as_u64().unwrap() > legacy_page.start);
+        assert_eq!(legacy_page.events[0]["text"], stable_page.events[0]["text"]);
+        let legacy_tail = store
+            .tail_events_positions("retention", 0, None, false)
+            .unwrap();
+        assert_eq!(legacy_tail.events[0]["seq"], 0);
+        assert_eq!(legacy_tail.next_offset, fs::metadata(&path).unwrap().len());
+        let snapshot = store.search_snapshot("workspace-a", "retention").unwrap();
+        assert!(
+            snapshot
+                .events
+                .iter()
+                .all(|row| identities[&row["seq"].as_u64().unwrap()] == row["text"])
+        );
+        assert!(!fs::read_dir(path.parent().unwrap()).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn deleted_conversation_refuses_late_and_stale_process_appends() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "deleted");
+        store.save().unwrap();
+        let stale = Store::load_at(store.root.clone());
+        let event = StoredEvent::User {
+            text: "A late event".into(),
+            at_ms: 1,
+        };
+        store.append("deleted", &event).unwrap();
+        assert!(store.remove("deleted").unwrap());
+        assert!(store.append("deleted", &event).is_err());
+        assert!(stale.append("deleted", &event).is_err());
+        assert!(!store.events_path("deleted").parent().unwrap().exists());
+    }
+
+    #[test]
+    fn append_requires_verifiable_durable_ownership_before_creating_files() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let event = StoredEvent::User {
+            text: "Late event".into(),
+            at_ms: 1,
+        };
+        assert!(store.append("missing", &event).is_err());
+        assert!(!store.root.exists());
+        conversation_for_receipts(&store, "owned");
+        let stale = Store::load_at(store.root.clone());
+        store.conversations.lock().unwrap()[0].workspace_id = "workspace-b".into();
+        store.save().unwrap();
+        assert!(stale.append("owned", &event).is_err());
+        assert!(!store.root.join("owned").exists());
+        fs::write(store.root.join("conversations.json"), b"broken index").unwrap();
+        assert!(store.append("owned", &event).is_err());
+        assert!(!store.root.join("owned").exists());
+        fs::remove_file(store.root.join("conversations.json")).unwrap();
+        assert!(store.append("owned", &event).is_err());
+        assert!(!store.root.join("owned").exists());
+    }
+
+    #[test]
+    fn stale_index_updates_preserve_deletion_and_other_process_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "deleted-index");
+        conversation_for_receipts(&store, "survivor");
+        let stale = Store::load_at(store.root.clone());
+        assert!(store.remove("deleted-index").unwrap());
+        store
+            .retitle_if_untitled("survivor", "A title from another process")
+            .unwrap();
+        stale.mark_last_message("survivor", 42, "agent").unwrap();
+        let reloaded = Store::load_at(store.root.clone());
+        assert!(reloaded.get("deleted-index").is_err());
+        let survivor = reloaded.get("survivor").unwrap();
+        assert_eq!(survivor.title, "A title from another process");
+        assert_eq!(survivor.last_message_at_ms, Some(42));
+        assert!(stale.set_running("deleted-index", false).is_err());
+        assert!(
+            Store::load_at(store.root.clone())
+                .get("deleted-index")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn index_edits_fail_without_publishing_partial_or_unverified_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "unchanged");
+        let original = fs::read(store.root.join("conversations.json")).unwrap();
+        let result: Result<(), String> = store.edit_conversation("unchanged", |chat| {
+            chat.title = "Should not be published".into();
+            Err("operation failed".into())
+        });
+        assert!(result.is_err());
+        assert_eq!(store.get("unchanged").unwrap().title, "New chat");
+        assert_eq!(
+            fs::read(store.root.join("conversations.json")).unwrap(),
+            original
+        );
+        fs::write(store.root.join("conversations.json"), b"corrupt").unwrap();
+        assert!(
+            store
+                .retitle_if_untitled("unchanged", "A new title")
+                .is_err()
+        );
+        assert_eq!(store.get("unchanged").unwrap().title, "New chat");
+        assert_eq!(
+            fs::read(store.root.join("conversations.json")).unwrap(),
+            b"corrupt"
+        );
+    }
+
+    #[test]
+    fn workspace_removal_uses_current_index_and_preserves_other_workspaces() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "first");
+        let stale = Store::load_at(store.root.clone());
+        conversation_for_receipts(&store, "newer");
+        conversation_for_receipts(&store, "other");
+        store
+            .conversations
+            .lock()
+            .unwrap()
+            .last_mut()
+            .unwrap()
+            .workspace_id = "workspace-b".into();
+        store.save().unwrap();
+        assert_eq!(stale.remove_all("workspace-a").unwrap(), 2);
+        let reloaded = Store::load_at(store.root.clone());
+        assert!(reloaded.list("workspace-a").is_empty());
+        assert_eq!(reloaded.list("workspace-b").len(), 1);
+        assert!(store.set_resume("newer", "codex", "late-token").is_err());
+    }
+
+    #[test]
+    fn retention_keeps_usage_from_evicted_turns() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "usage-retention");
+        store.save().unwrap();
+        for at_ms in 0..80 {
+            store
+                .append(
+                    "usage-retention",
+                    &StoredEvent::Agent {
+                        event: Event::Usage {
+                            input: 100,
+                            output: 10,
+                            cache_read: 2,
+                            cache_write: 1,
+                            cost_usd: Some(0.01),
+                        },
+                        backend: "codex".into(),
+                        at_ms,
+                    },
+                )
+                .unwrap();
+            store
+                .append(
+                    "usage-retention",
+                    &StoredEvent::User {
+                        text: "x".repeat(32_000),
+                        at_ms,
+                    },
+                )
+                .unwrap();
+        }
+        let page = store.event_page("usage-retention", None, 300).unwrap();
+        let mut cursor = page.cursor.clone();
+        let mut saw_trimmed_origin = page.history_trimmed;
+        while let Some(raw) = cursor {
+            let earlier = store
+                .event_page("usage-retention", Some(&raw), 300)
+                .unwrap();
+            saw_trimmed_origin |= earlier.history_trimmed;
+            cursor = earlier.cursor;
+        }
+        assert!(saw_trimmed_origin);
+        let usage = page.usage.unwrap();
+        assert_eq!(usage["input"], 8000);
+        assert_eq!(usage["output"], 800);
+        assert_eq!(usage["cacheRead"], 160);
+        assert_eq!(usage["cacheWrite"], 80);
+        assert_eq!(usage["turns"], 80);
+        assert!((usage["cost"].as_f64().unwrap() - 0.8).abs() < 0.000001);
+        let bytes = fs::read(store.events_path("usage-retention")).unwrap();
+        assert!(bytes.len() as u64 <= EVENTS_CAP);
+    }
+
+    #[test]
+    fn a_maximum_record_can_be_followed_by_another_after_usage_retention() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "maximum");
+        store.save().unwrap();
+        store
+            .append(
+                "maximum",
+                &StoredEvent::Agent {
+                    event: Event::Usage {
+                        input: 100,
+                        output: 10,
+                        cache_read: 0,
+                        cache_write: 0,
+                        cost_usd: None,
+                    },
+                    backend: "codex".into(),
+                    at_ms: 1,
+                },
+            )
+            .unwrap();
+        let bytes = fs::read(store.events_path("maximum")).unwrap();
+        let seq = crate::work_transcript_identity::next_sequence(&bytes, 0).unwrap();
+        let empty = serde_json::to_value(StoredEvent::User {
+            text: String::new(),
+            at_ms: 2,
+        })
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .clone();
+        let overhead = crate::work_transcript_identity::encoded(empty, seq)
+            .unwrap()
+            .len();
+        store
+            .append(
+                "maximum",
+                &StoredEvent::User {
+                    text: "x".repeat(PAGE_RECORD_BYTES as usize - overhead),
+                    at_ms: 2,
+                },
+            )
+            .unwrap();
+        let page = store.event_page("maximum", None, 1).unwrap();
+        assert_eq!(page.events.len(), 1);
+        assert_eq!(page.events[0]["seq"], seq);
+        store
+            .append(
+                "maximum",
+                &StoredEvent::User {
+                    text: "After the large record".into(),
+                    at_ms: 3,
+                },
+            )
+            .unwrap();
+        let page = store.event_page("maximum", None, 300).unwrap();
+        assert_eq!(page.usage.unwrap()["input"], 100);
+        assert_eq!(
+            page.events.last().unwrap()["text"],
+            "After the large record"
+        );
+        assert!(page.history_trimmed);
+    }
+
+    #[test]
+    fn transcript_writer_refuses_incomplete_tail_and_preserves_a_large_readable_record() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "bounded");
+        let path = store.events_path("bounded");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let incomplete = b"{\"kind\":\"user\",\"text\":\"unfinished";
+        fs::write(&path, incomplete).unwrap();
+        let event = StoredEvent::User {
+            text: "next".into(),
+            at_ms: 2,
+        };
+        assert!(store.append("bounded", &event).is_err());
+        assert_eq!(fs::read(&path).unwrap(), incomplete);
+        fs::write(&path, b"").unwrap();
+        let large = StoredEvent::User {
+            text: "x".repeat(EVENTS_CAP as usize + 100),
+            at_ms: 3,
+        };
+        store.append("bounded", &large).unwrap();
+        let before = fs::read(&path).unwrap();
+        assert_eq!(records(&before, 0).len(), 1);
+        let oversized = StoredEvent::User {
+            text: "x".repeat(PAGE_RECORD_BYTES as usize),
+            at_ms: 4,
+        };
+        assert!(store.append("bounded", &oversized).is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        store.append("bounded", &event).unwrap();
+        let rows = records(&fs::read(&path).unwrap(), 0);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["text"], "next");
+        assert!(rows[0]["seq"].as_u64().unwrap() >= before.len() as u64);
+    }
+
+    #[test]
+    fn transcript_process_writers_allocate_unique_complete_records() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().to_owned());
+        conversation_for_receipts(&store, "shared");
+        let children: Vec<_> = (0..3)
+            .map(|writer| {
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "chat::tests::transcript_process_writer",
+                        "--ignored",
+                    ])
+                    .env("TOKENSTAT_TRANSCRIPT_TEST_ROOT", root.path())
+                    .env("TOKENSTAT_TRANSCRIPT_WRITER", writer.to_string())
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        for mut child in children {
+            assert!(child.wait().unwrap().success());
+        }
+        let saved = Store::load_at(root.path().to_owned())
+            .get("shared")
+            .unwrap();
+        for writer in 0..3 {
+            assert_eq!(saved.resume_tokens[&format!("writer-{writer}")], "59");
+        }
+        let rows = records(
+            &fs::read(root.path().join("shared/events.ndjson")).unwrap(),
+            0,
+        );
+        assert_eq!(rows.len(), 180);
+        let positions: HashSet<_> = rows.iter().map(|r| r["seq"].as_u64().unwrap()).collect();
+        let messages: HashSet<_> = rows.iter().map(|r| r["text"].as_str().unwrap()).collect();
+        assert_eq!(positions.len(), rows.len());
+        assert_eq!(messages.len(), rows.len());
+        assert!(
+            rows.windows(2)
+                .all(|w| w[0]["seq"].as_u64().unwrap() < w[1]["seq"].as_u64().unwrap())
+        );
+    }
+
+    #[test]
+    #[ignore = "subprocess helper invoked by the transcript writer regression"]
+    fn transcript_process_writer() {
+        let root = PathBuf::from(std::env::var_os("TOKENSTAT_TRANSCRIPT_TEST_ROOT").unwrap());
+        let writer = std::env::var("TOKENSTAT_TRANSCRIPT_WRITER").unwrap();
+        let store = Store::load_at(root);
+        for at_ms in 0..60 {
+            store
+                .set_resume("shared", &format!("writer-{writer}"), &at_ms.to_string())
+                .unwrap();
+            store
+                .append(
+                    "shared",
+                    &StoredEvent::User {
+                        text: format!("{writer}-{at_ms}"),
+                        at_ms,
+                    },
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn search_snapshot_verifies_ownership_bounds_content_and_tracks_revisions() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-search");
+        store.save().unwrap();
+        assert!(store.search_snapshot("workspace-b", "chat-search").is_err());
+        let empty = store.search_snapshot("workspace-a", "chat-search").unwrap();
+        assert!(empty.events.is_empty() && !empty.partial);
+        let path = store.events_path("chat-search");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let line = serde_json::to_string(&json!({"kind":"user", "text":"needle", "at_ms":1}))
+            .unwrap()
+            + "\n";
+        fs::write(&path, line.repeat(PAGE_EVENTS_MAX + 10)).unwrap();
+        let snapshot = store.search_snapshot("workspace-a", "chat-search").unwrap();
+        assert!(snapshot.partial);
+        assert!(snapshot.events.len() <= PAGE_EVENTS_MAX);
+        assert_ne!(snapshot.revision, empty.revision);
+        assert!(snapshot.events[0]["seq"].as_u64().unwrap() > 0);
+        assert_eq!(
+            snapshot.revision,
+            store
+                .search_snapshot("workspace-a", "chat-search")
+                .unwrap()
+                .revision
+        );
+        fs::write(&path, format!("{line}broken record\n")).unwrap();
+        let damaged = store.search_snapshot("workspace-a", "chat-search").unwrap();
+        assert!(
+            damaged.partial,
+            "skipped corrupt records must not imply complete coverage"
+        );
+        assert_eq!(damaged.events.len(), 1);
+        let readable = crate::work_search_conversation::blocks(&damaged.events, &damaged.backend);
+        assert_eq!(readable.len(), 1);
+        assert_eq!(readable[0].anchor, "user-s0");
+        assert_eq!(readable[0].text, "needle");
+        let mut durable: Index =
+            serde_json::from_slice(&fs::read(store.root.join("conversations.json")).unwrap())
+                .unwrap();
+        durable.conversations[0].title = "Renamed elsewhere".into();
+        fs::write(
+            store.root.join("conversations.json"),
+            serde_json::to_vec(&durable).unwrap(),
+        )
+        .unwrap();
+        let renamed = store.search_snapshot("workspace-a", "chat-search").unwrap();
+        assert_eq!(renamed.title, "Renamed elsewhere");
+        assert_ne!(renamed.revision, snapshot.revision);
+        // Another store/process removes it while this store still holds the
+        // original in-memory index. No old content may escape that stale view.
+        fs::write(
+            store.root.join("conversations.json"),
+            br#"{"conversations":[]}"#,
+        )
+        .unwrap();
+        assert!(store.search_snapshot("workspace-a", "chat-search").is_err());
+        assert!(
+            read_back_checked(&path, fs::metadata(&path).unwrap().len() + 1, 10, true).is_err()
+        );
+    }
+
+    #[test]
+    fn handoff_attachment_preview_is_bounded_metadata_with_verified_ownership() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-handoff");
+        store.save().unwrap();
+        let path = store.attachment_path("chat-handoff", "att-one", "design.png");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // A sparse file over the byte-transfer cap is still cheap to describe.
+        fs::File::create(&path)
+            .unwrap()
+            .set_len(ATTACHMENT_CAP as u64 + 1)
+            .unwrap();
+        let ids = vec!["att-one".to_string()];
+        let preview = store
+            .handoff_attachments("workspace-a", "chat-handoff", &ids)
+            .unwrap();
+        assert_eq!(preview.len(), 1);
+        assert_eq!(preview[0].id, "att-one");
+        assert_eq!(preview[0].name, "design.png");
+        assert_eq!(preview[0].size, Some(ATTACHMENT_CAP as u64 + 1));
+        assert!(
+            store
+                .handoff_attachments("workspace-b", "chat-handoff", &ids)
+                .is_err()
+        );
+        assert!(
+            store
+                .handoff_attachments("workspace-a", "chat-handoff", &vec!["att-one".into(); 21])
+                .is_err()
+        );
+        assert!(
+            store
+                .handoff_attachments("workspace-a", "chat-handoff", &["../att-one".into()])
+                .is_err()
+        );
+        #[cfg(unix)]
+        {
+            fs::remove_file(&path).unwrap();
+            let outside = root.path().join("outside.png");
+            fs::write(&outside, b"private").unwrap();
+            std::os::unix::fs::symlink(&outside, &path).unwrap();
+            assert!(
+                store
+                    .handoff_attachments("workspace-a", "chat-handoff", &ids)
+                    .is_err()
+            );
+        }
+        let stale = Store::load_at(store.root.clone());
+        store.remove("chat-handoff").unwrap();
+        assert!(
+            stale
+                .handoff_attachments("workspace-a", "chat-handoff", &ids)
+                .is_err()
+        );
+        assert!(!store.root.join("chat-handoff").exists());
+    }
+
+    #[test]
+    fn handoff_checks_persisted_conversation_ownership_and_attachments() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-handoff");
+        store.save().unwrap();
+        let mut request = crate::work_handoff::PutHandoff {
+            request_id: "share-one".into(),
+            expected_revision: 0,
+            device_name: "Phone".into(),
+            draft: Some(crate::work_handoff::SharedDraft {
+                text: "keep this draft".into(),
+                attachment_ids: vec![],
+            }),
+            anchor: None,
+        };
+        assert!(store.handoff("workspace-b", "chat-handoff").is_err());
+        assert_eq!(store.handoff("workspace-a", "chat-handoff").unwrap(), None);
+        assert!(!store.root.join("chat-handoff").exists());
+        request.draft.as_mut().unwrap().attachment_ids = vec!["missing-file".into()];
+        assert!(
+            store
+                .put_handoff("workspace-a", "chat-handoff", &request, "device-a")
+                .is_err()
+        );
+        assert!(!store.root.join("chat-handoff").exists());
+        request.draft.as_mut().unwrap().attachment_ids.clear();
+        assert!(matches!(
+            store
+                .put_handoff("workspace-a", "chat-handoff", &request, "device-a")
+                .unwrap(),
+            crate::work_handoff::PutResult::Saved { .. }
+        ));
+        let shared = store
+            .handoff("workspace-a", "chat-handoff")
+            .unwrap()
+            .unwrap();
+        assert_eq!(shared.device_id, "device-a");
+        assert_eq!(shared.draft.unwrap().text, "keep this draft");
+        let stale = Store::load_at(store.root.clone());
+        assert!(store.remove("chat-handoff").unwrap());
+        assert!(
+            stale
+                .put_handoff("workspace-a", "chat-handoff", &request, "device-a")
+                .is_err()
+        );
+        assert!(!store.root.join("chat-handoff").exists());
     }
 
     #[test]
@@ -4121,6 +5210,7 @@ mod tests {
             running: false,
         };
         store.conversations.lock().unwrap().push(chat.clone());
+        store.save().unwrap();
 
         // Nothing has happened yet, so there is nothing to hand over.
         assert!(store.handover(&chat).unwrap().is_none());
@@ -4233,6 +5323,7 @@ mod tests {
             running: false,
         };
         store.conversations.lock().unwrap().push(chat.clone());
+        store.save().unwrap();
         store
             .append(
                 "chat-rebrief",
@@ -4370,6 +5461,7 @@ mod tests {
             running: false,
         };
         store.conversations.lock().unwrap().push(chat.clone());
+        store.save().unwrap();
         let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
             persona_name: "",
             prompt: "Hey",
@@ -4469,6 +5561,7 @@ mod tests {
             last_message_author: None,
             running: false,
         });
+        store.save().unwrap();
         let source = root.path().join("answer.txt");
         fs::write(&source, b"hello from the agent").unwrap();
         let output_dir = store.response_output_dir("chat-test");
@@ -4502,6 +5595,57 @@ mod tests {
     }
 
     #[test]
+    fn response_file_is_removed_when_its_timeline_record_cannot_be_written() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "broken-transcript");
+        let path = store.events_path("broken-transcript");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"incomplete event").unwrap();
+        let output = root.path().join("agent-output");
+        fs::create_dir_all(&output).unwrap();
+        let source = output.join("answer.txt");
+        fs::write(&source, b"response").unwrap();
+        store.record_response_attachments(
+            "broken-transcript",
+            "codex",
+            &format!("[answer](<{}>)", source.display()),
+            &output,
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"incomplete event");
+        let attachment = store.attachment_path("broken-transcript", "unused", "answer.txt");
+        assert_eq!(
+            fs::read_dir(attachment.parent().unwrap().parent().unwrap())
+                .unwrap()
+                .count(),
+            0
+        );
+        assert_eq!(fs::read(&source).unwrap(), b"response");
+    }
+
+    #[test]
+    fn late_response_files_do_not_recreate_a_deleted_conversation() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "deleted-files");
+        let stale = Store::load_at(store.root.clone());
+        let output = root.path().join("agent-output");
+        fs::create_dir_all(&output).unwrap();
+        let source = output.join("answer.txt");
+        fs::write(&source, b"late response").unwrap();
+        assert!(store.remove("deleted-files").unwrap());
+        for writer in [&store, &stale] {
+            writer.record_response_attachments(
+                "deleted-files",
+                "codex",
+                &format!("[answer](<{}>)", source.display()),
+                &output,
+            );
+            assert!(!store.root.join("deleted-files").exists());
+        }
+    }
+
+    #[test]
     fn agent_events_keep_the_backend_that_emitted_them() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -4528,6 +5672,7 @@ mod tests {
             last_message_author: None,
             running: false,
         });
+        store.save().unwrap();
         store.record_events(
             "chat-test",
             "codex",
@@ -4583,6 +5728,7 @@ mod tests {
                 .insert("claude".into(), "claude-thread".into());
             chats[0].resume_token = Some("claude-thread".into());
         }
+        store.save().unwrap();
         let updated = store
             .update(
                 "chat-test",
@@ -4611,7 +5757,7 @@ mod tests {
         assert_eq!(switched_back.resume_token.as_deref(), Some("claude-thread"));
         assert_eq!(updated.system_prompt, "Be concise.");
         assert_eq!(updated.persona_id.as_deref(), Some("persona-1"));
-        store.conversations.lock().unwrap()[0].running = true;
+        store.set_running("chat-test", true).unwrap();
         let err = store
             .update(
                 "chat-test",
@@ -4651,6 +5797,7 @@ mod tests {
             last_message_author: None,
             running: false,
         });
+        store.save().unwrap();
         let turn_token = store.register_turn_token("chat-test", "claude").unwrap();
         let turn_file = store.write_turn_file("chat-test", &turn_token).unwrap();
         #[cfg(unix)]

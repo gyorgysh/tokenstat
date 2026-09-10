@@ -68,6 +68,9 @@ argon2.workspace = true
 hkdf.workspace = true
 x25519-dalek.workspace = true
 zeroize = "1.9"
+unicode-segmentation = "1.13"
+unicode-normalization = "0.1"
+unicase = "2.9"
 
 # Only for the process's own open-file limit. See src/open_files.rs.
 [target.'cfg(unix)'.dependencies]

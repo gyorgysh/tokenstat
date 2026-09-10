@@ -52,6 +52,7 @@ const MAX_SCOPE_LEN: usize = 160;
 const KIND_CONVERSATION: &str = "conversation";
 const KIND_DIFF: &str = "diff";
 const KIND_ATTACHMENT: &str = "attachment";
+const KIND_SEARCH_HISTORY: &str = "searchHistory";
 
 fn valid_token(value: &str, max: usize) -> bool {
     !value.is_empty()
@@ -359,6 +360,8 @@ struct PutParams {
     #[serde(default)]
     budget_bytes: Option<u64>,
     #[serde(default)]
+    hard_budget_bytes: Option<u64>,
+    #[serde(default)]
     retention_ms: Option<i64>,
 }
 
@@ -409,7 +412,7 @@ fn put(params: &PutParams) -> Result<Value, String> {
     }
     if !matches!(
         params.kind.as_str(),
-        KIND_CONVERSATION | KIND_DIFF | KIND_ATTACHMENT
+        KIND_CONVERSATION | KIND_DIFF | KIND_ATTACHMENT | KIND_SEARCH_HISTORY
     ) {
         return Err("unknown cache kind".into());
     }
@@ -450,6 +453,20 @@ fn put(params: &PutParams) -> Result<Value, String> {
     if let Some(records) = store.scopes.get_mut(&params.scope) {
         records.remove(&params.id);
     }
+    // New clients distinguish disposable recent work from explicitly kept
+    // copies. Older callers retain their original total-budget semantics.
+    let budget = if let Some(hard) = params.hard_budget_bytes {
+        pinned_bytes(&store)
+            .saturating_add(if previous.as_ref().is_some_and(|record| record.pinned) {
+                bytes
+            } else {
+                0
+            })
+            .saturating_add(budget)
+            .min(hard)
+    } else {
+        budget
+    };
     let mut freed = expired;
     match make_room(&mut store, bytes, &params.scope, &params.id, budget) {
         Some(evicted) => freed.extend(evicted),
@@ -764,6 +781,7 @@ mod tests {
             payload: json!({"messages": [{"id": "s1", "role": "user", "text": "hello"}]}),
             now_ms: Some(1_000),
             budget_bytes: None,
+            hard_budget_bytes: None,
             retention_ms: None,
         }
     }
@@ -890,6 +908,39 @@ mod tests {
             assert_eq!(
                 global["evicted"],
                 json!(["account|other|old", "another|old"])
+            );
+        });
+    }
+
+    #[test]
+    fn recent_allowance_is_separate_from_kept_copies_with_a_hard_ceiling() {
+        with_path(fresh_path(), || {
+            put(&params("s", "kept")).unwrap();
+            let used = stats(Some("s")).unwrap()["bytes"].as_u64().unwrap();
+            pin(&PinParams {
+                scope: "s".into(),
+                id: "kept".into(),
+                pinned: true,
+                hard_budget_bytes: Some(used * 4),
+            })
+            .unwrap();
+            let mut recent = params("s", "recent");
+            recent.budget_bytes = Some(used + 10);
+            recent.hard_budget_bytes = Some(used * 4);
+            put(&recent).expect("a kept copy does not consume the recent allowance");
+            assert_eq!(stats(Some("s")).unwrap()["records"], 2);
+            // Lowering the ceiling refuses new work without deleting a pin.
+            recent.id = "refused".into();
+            recent.hard_budget_bytes = Some(used);
+            assert!(put(&recent).is_err());
+            assert_eq!(stats(Some("s")).unwrap()["records"], 2);
+            assert!(
+                get(&KeyedParams {
+                    key: KEY.into(),
+                    scope: "s".into(),
+                    id: "kept".into()
+                })
+                .is_ok()
             );
         });
     }

@@ -130,6 +130,16 @@ pub mod vault;
 pub(crate) mod win32;
 pub mod work_cache;
 pub mod work_contracts;
+pub mod work_handoff;
+#[cfg(feature = "local-host")]
+pub mod work_handoff_store;
+pub mod work_search;
+pub mod work_search_conversation;
+pub mod work_search_cursor;
+#[cfg(feature = "local-host")]
+pub mod work_search_engine;
+pub mod work_search_text;
+pub mod work_transcript_identity;
 #[cfg(feature = "local-host")]
 pub mod workflows;
 #[cfg(feature = "local-host")]
@@ -190,4 +200,4 @@ pub use tokenstat_pty::warm_shell_pool;
 /// read beside it, so a send whose answer went missing can be repeated
 /// without running the agent twice. An older host ignores the field, so a
 /// client must not repeat a send against one.
-pub const PROTOCOL_VERSION: &str = "10";
+pub const PROTOCOL_VERSION: &str = "12";

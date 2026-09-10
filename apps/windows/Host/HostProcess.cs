@@ -18,7 +18,7 @@ internal static class HostProcess
     /// same change, or this app will restart a helper that already speaks the
     /// methods it was built for, or leave one that does not.
     /// </summary>
-    private const string ExpectedProtocolVersion = "10";
+    private const string ExpectedProtocolVersion = "12";
 
     public static void EnsureRunning()
     {

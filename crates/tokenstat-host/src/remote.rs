@@ -2505,7 +2505,15 @@ fn is_attachment_transfer(method: &str) -> bool {
 /// right answer for an old client and the wrong one for a call site in this
 /// binary that simply forgot (see `dial_peer_for`).
 fn purpose_for_method(method: &str) -> ChannelPurpose {
-    if method.starts_with("chat.") {
+    if method.starts_with("chat.")
+        || matches!(
+            method,
+            "work.search"
+                | "work.continuity.get"
+                | "work.continuity.put"
+                | "work.continuity.attachments"
+        )
+    {
         ChannelPurpose::Chat
     } else if method.starts_with("pty.") {
         ChannelPurpose::Pty
@@ -3206,6 +3214,156 @@ fn forward(params: &str) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(feature = "local-host", unix))]
+    #[test]
+    fn handoff_round_trip_over_pinned_encrypted_connection() {
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "remote::tests::handoff_encrypted_child",
+                "--ignored",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[cfg(all(feature = "local-host", unix))]
+    #[test]
+    #[ignore = "isolated process launched by the encrypted handoff parent"]
+    fn handoff_encrypted_child() {
+        let root = tempfile::tempdir().unwrap();
+        tokenstat_paths::configure_mobile(root.path().join("data"), root.path().join("cache"))
+            .unwrap();
+        unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", root.path().join("identity")) };
+        fn local(method: &str, params: serde_json::Value) -> serde_json::Value {
+            serde_json::from_str(
+                &crate::dispatch::call_sessionless(method, &params.to_string()).unwrap(),
+            )
+            .unwrap()
+        }
+        fn rpc(
+            connection: &mut tokenstat_remote::Connection,
+            method: &str,
+            params: serde_json::Value,
+        ) -> serde_json::Value {
+            let line = serde_json::json!({"id": 1, "method": method, "params": params}).to_string();
+            connection.send(line.as_bytes()).unwrap();
+            let answer = connection
+                .receive_within(1024 * 1024, std::time::Duration::from_secs(5))
+                .unwrap();
+            serde_json::from_slice(&answer).unwrap()
+        }
+        let host = MachineIdentity::load_or_create().unwrap();
+        let phone = MachineIdentity::from_secret([41; 32]);
+        let phone_key = phone.public_key_hex();
+        let mut peers = PeerStore::load().unwrap();
+        peers.seen(
+            &phone.public_key(),
+            "QA phone",
+            None,
+            "2026-09-10T00:00:00Z",
+        );
+        assert!(peers.approve(&phone.public_key()));
+        peers.save().unwrap();
+        // Keep optional device-label lookup cache-only. This isolated test
+        // never fetches an account directory or opens a relay connection.
+        *last_directory_miss().lock().unwrap() = jiff::Timestamp::now().as_millisecond();
+        crate::workspace_policy::set_allowed(&phone_key, true).unwrap();
+        assert_eq!(
+            local("host.setPolicy", serde_json::json!({"alwaysOn": true}))["ok"],
+            true
+        );
+        let folder = root.path().join("project");
+        std::fs::create_dir(&folder).unwrap();
+        let workspace = local("workspace.add", serde_json::json!({"path": folder}));
+        assert_eq!(workspace["ok"], true);
+        let chat = local(
+            "chat.create",
+            serde_json::json!({"workspaceId": workspace["result"]["id"], "backend": "codex", "personaId": ""}),
+        );
+        assert_eq!(chat["ok"], true);
+        let reference = serde_json::json!({"workspaceId": workspace["result"]["id"], "conversationId": chat["result"]["id"]});
+        let server = tokenstat_remote::Server::bind("127.0.0.1:0", &host).unwrap();
+        let address = server.local_address().unwrap();
+        let worker = std::thread::spawn(move || {
+            let connection = server.accept().unwrap().unwrap();
+            let session = Mutex::new(Session::open_client(None).unwrap());
+            serve_peer(connection, &session, Route::Direct);
+        });
+        let mut connection = tokenstat_remote::dial_with_timeout(
+            &address,
+            &phone,
+            Some(host.public_key()),
+            "QA host",
+            std::time::Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_eq!(connection.peer_key(), host.public_key());
+        let empty = rpc(&mut connection, "work.continuity.get", reference.clone());
+        assert_eq!(empty["ok"], true, "{empty}");
+        assert!(empty["result"]["handoff"].is_null());
+        let mut request = reference.clone();
+        request["handoff"] = serde_json::json!({"requestId": "encrypted-share", "expectedRevision": 0, "deviceName": "Phone", "draft": {"text": "Continue these words", "attachmentIds": []}});
+        let saved = rpc(&mut connection, "work.continuity.put", request.clone());
+        assert_eq!(saved["ok"], true, "{saved}");
+        assert_eq!(saved["result"]["handoff"]["deviceId"], phone_key);
+        assert_eq!(
+            rpc(&mut connection, "work.continuity.put", request.clone())["result"],
+            saved["result"]
+        );
+        assert_eq!(
+            local("work.continuity.get", reference.clone())["result"]["handoff"],
+            saved["result"]["handoff"]
+        );
+        request["handoff"]["requestId"] = serde_json::json!("host-competing");
+        request["handoff"]["draft"]["text"] = serde_json::json!("Host draft stays separate");
+        assert_eq!(
+            local("work.continuity.put", request.clone())["result"]["status"],
+            "conflict"
+        );
+        let search = rpc(
+            &mut connection,
+            "work.search",
+            serde_json::json!({"query": "project", "entityKinds": ["workspace"]}),
+        );
+        assert_eq!(search["ok"], true, "{search}");
+        assert_eq!(search["result"]["hits"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            search["result"]["hits"][0]["reference"]["hostIdentity"],
+            host.public_key_hex()
+        );
+        crate::workspace_policy::set_allowed(&phone_key, false).unwrap();
+        let denied_search = rpc(
+            &mut connection,
+            "work.search",
+            serde_json::json!({"query": "project"}),
+        );
+        assert_eq!(denied_search["ok"], false);
+        assert!(denied_search["result"].is_null());
+        assert_eq!(
+            rpc(&mut connection, "work.continuity.get", reference.clone())["ok"],
+            false
+        );
+        assert_eq!(
+            rpc(&mut connection, "work.continuity.put", request)["ok"],
+            false
+        );
+        let mut metadata = reference;
+        metadata["attachmentIds"] = serde_json::json!([]);
+        assert_eq!(
+            rpc(&mut connection, "work.continuity.attachments", metadata)["ok"],
+            false
+        );
+        connection.close();
+        worker.join().unwrap();
+    }
+
     use super::*;
 
     #[test]
@@ -3225,6 +3383,15 @@ mod tests {
         assert_eq!(purpose_for_method("chat.send"), ChannelPurpose::Chat);
         assert_eq!(purpose_for_method("chat.events"), ChannelPurpose::Chat);
         assert_eq!(purpose_for_method("chat.list"), ChannelPurpose::Chat);
+        assert_eq!(purpose_for_method("work.search"), ChannelPurpose::Chat);
+        assert_eq!(
+            purpose_for_method("work.continuity.get"),
+            ChannelPurpose::Chat
+        );
+        assert_eq!(
+            purpose_for_method("work.continuity.put"),
+            ChannelPurpose::Chat
+        );
         assert_eq!(purpose_for_method("pty.read"), ChannelPurpose::Pty);
         assert_eq!(purpose_for_method("pty.write"), ChannelPurpose::Pty);
         assert_eq!(purpose_for_method("pty.spawn"), ChannelPurpose::Pty);

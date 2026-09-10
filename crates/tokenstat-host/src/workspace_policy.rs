@@ -374,6 +374,10 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
         m if m.starts_with("workflow.") => true,
         m if m.starts_with("automation.") => true,
         m if m.starts_with("chat.") => true,
+        "work.search"
+        | "work.continuity.get"
+        | "work.continuity.put"
+        | "work.continuity.attachments" => true,
         m if m.starts_with("todo.") => true,
         m if m.starts_with("launcher.") => true,
         m if m.starts_with("harness.") => true,
@@ -707,6 +711,108 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
 
 #[cfg(test)]
 mod tests {
+    /// Isolate process-global host roots and singletons from every other test.
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn handoff_obeys_authenticated_author_and_revoked_access() {
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "workspace_policy::tests::handoff_authenticated_context_child",
+                "--ignored",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    #[ignore = "runs in an isolated process through the parent test"]
+    fn handoff_authenticated_context_child() {
+        let root = tempfile::tempdir().unwrap();
+        tokenstat_paths::configure_mobile(root.path().join("data"), root.path().join("cache"))
+            .unwrap();
+        unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", root.path().join("identity")) };
+        fn local(method: &str, params: serde_json::Value) -> serde_json::Value {
+            serde_json::from_str(
+                &crate::dispatch::call_sessionless(method, &params.to_string()).unwrap(),
+            )
+            .unwrap()
+        }
+        fn remote(peer: &str, method: &str, params: serde_json::Value) -> serde_json::Value {
+            crate::request_context::with_remote_peer(peer, || local(method, params))
+        }
+        let folder = root.path().join("project");
+        std::fs::create_dir(&folder).unwrap();
+        let workspace = local("workspace.add", serde_json::json!({"path": folder}));
+        assert_eq!(workspace["ok"], true);
+        let workspace_id = workspace["result"]["id"].as_str().unwrap();
+        let chat = local(
+            "chat.create",
+            serde_json::json!({"workspaceId": workspace_id, "backend": "codex", "personaId": ""}),
+        );
+        assert_eq!(chat["ok"], true);
+        let reference = serde_json::json!({"workspaceId": workspace_id, "conversationId": chat["result"]["id"]});
+        let phone = "01".repeat(32);
+        let tablet = "02".repeat(32);
+        let mut request = reference.clone();
+        request["handoff"] = serde_json::json!({"requestId": "share-phone", "expectedRevision": 0, "deviceName": "Phone", "draft": {"text": "Phone draft", "attachmentIds": []}});
+        assert_eq!(
+            remote(&phone, "work.continuity.get", reference.clone())["ok"],
+            false
+        );
+        assert_eq!(
+            remote(&phone, "work.continuity.put", request.clone())["ok"],
+            false
+        );
+        // Fixture grants use the real persisted policy writer, without account
+        // directory lookup or any network. Remote callers cannot write policy.
+        super::save(&super::Store {
+            allowed: vec![phone.clone(), tablet.clone()],
+            ..Default::default()
+        })
+        .unwrap();
+        super::invalidate_allowed_cache();
+        let saved = remote(&phone, "work.continuity.put", request.clone());
+        assert_eq!(saved["ok"], true, "{saved}");
+        assert_eq!(saved["result"]["handoff"]["deviceId"], phone);
+        let read = remote(&tablet, "work.continuity.get", reference.clone());
+        assert_eq!(read["result"]["handoff"], saved["result"]["handoff"]);
+        request["handoff"]["requestId"] = serde_json::json!("share-tablet");
+        request["handoff"]["draft"]["text"] = serde_json::json!("Tablet draft");
+        let conflict = remote(&tablet, "work.continuity.put", request.clone());
+        assert_eq!(conflict["result"]["status"], "conflict");
+        assert_eq!(conflict["result"]["current"], saved["result"]["handoff"]);
+        super::save(&super::Store {
+            allowed: vec![phone.clone()],
+            ..Default::default()
+        })
+        .unwrap();
+        super::invalidate_allowed_cache();
+        request["handoff"]["expectedRevision"] = serde_json::json!(1);
+        assert_eq!(remote(&tablet, "work.continuity.put", request)["ok"], false);
+        assert_eq!(
+            remote(&tablet, "work.continuity.get", reference.clone())["ok"],
+            false
+        );
+        let mut metadata = reference.clone();
+        metadata["attachmentIds"] = serde_json::json!([]);
+        assert_eq!(
+            remote(&tablet, "work.continuity.attachments", metadata)["ok"],
+            false
+        );
+        assert_eq!(
+            remote(&phone, "work.continuity.get", reference)["result"]["handoff"],
+            saved["result"]["handoff"]
+        );
+    }
+
     use super::*;
 
     fn peer_key(byte: &str) -> String {
@@ -972,6 +1078,10 @@ mod tests {
             "fs.mkdir",
             "host.provisionStatus",
             "host.logs",
+            "work.search",
+            "work.continuity.get",
+            "work.continuity.put",
+            "work.continuity.attachments",
         ] {
             assert!(needs_access(method, None), "{method} must be gated");
         }

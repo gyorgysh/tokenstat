@@ -527,6 +527,8 @@ struct ChatParams {
     /// page. Never built by a client: it names a byte boundary in a file
     /// whose shape is the store's business.
     cursor: Option<String>,
+    tail_cursor: Option<String>,
+    stable_positions: Option<bool>,
     limit: Option<u32>,
 }
 
@@ -1812,6 +1814,101 @@ fn local_jobs(method: &str, params: &str) -> Option<Result<Value, DispatchError>
 /// the method belongs here, the other answers it. That keeps `?` usable in the
 /// arms, which a function returning `Option` cannot do.
 #[cfg(feature = "local-host")]
+fn work_search_call(params: &str) -> Result<Value, DispatchError> {
+    use crate::work_contracts::{ScopeKind, WorkScope};
+    use crate::work_search_engine::{Owner, StoreSource};
+    use std::sync::{Mutex, OnceLock, PoisonError};
+    static CURSORS: OnceLock<Mutex<crate::work_search_cursor::Cursors>> = OnceLock::new();
+    let request = crate::work_search::Request::parse(params)?;
+    let identity = tokenstat_identity::MachineIdentity::load_or_create()
+        .map_err(|_| "machine identity is unavailable")?
+        .public_key_hex();
+    // This transport authenticates a machine key, not a caller-supplied account.
+    // Return host-local references. A client may adopt them into its current
+    // account scope only after verifying the responding host and session owner.
+    let owner = Owner {
+        scope: WorkScope {
+            kind: ScopeKind::Local,
+            origin: String::new(),
+            identity: identity.clone(),
+        },
+        requester: crate::request_context::remote_peer().unwrap_or_else(|| identity.clone()),
+        host_identity: identity,
+    };
+    let mut cursors = CURSORS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let result =
+        crate::work_search_engine::search(&StoreSource::current(), &owner, &request, &mut cursors)?;
+    serde_json::to_value(result).envelope()
+}
+
+#[cfg(feature = "local-host")]
+fn handoff_call(method: &str, params: &str) -> Result<Value, DispatchError> {
+    if params.len() > 2 * 1024 * 1024 {
+        return Err("handoff request is too large".into());
+    }
+    if let Some(peer) = crate::request_context::remote_peer() {
+        if !crate::workspace_policy::is_allowed(&peer) {
+            return Err("workspace access is required for handoff".into());
+        }
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Params {
+        workspace_id: String,
+        conversation_id: String,
+        handoff: Option<crate::work_handoff::PutHandoff>,
+        attachment_ids: Option<Vec<String>>,
+    }
+    let p: Params = serde_json::from_str(params).map_err(|e| e.to_string())?;
+    crate::workspaces::folder(&p.workspace_id)?;
+    let store = crate::chat::shared();
+    match method {
+        "work.continuity.get" => {
+            if p.handoff.is_some() || p.attachment_ids.is_some() {
+                return Err("reading handoff does not accept a draft".into());
+            }
+            Ok(json!({ "handoff": store.handoff(&p.workspace_id, &p.conversation_id)? }))
+        }
+        "work.continuity.put" => {
+            if p.attachment_ids.is_some() {
+                return Err("attachment IDs belong inside the shared draft".into());
+            }
+            let request = p
+                .handoff
+                .ok_or("sharing handoff needs a draft or position record")?;
+            let author = match crate::request_context::remote_peer() {
+                Some(peer) => peer,
+                None => tokenstat_identity::MachineIdentity::load_or_create()
+                    .map_err(|e| e.to_string())?
+                    .public_key_hex(),
+            };
+            serde_json::to_value(store.put_handoff(
+                &p.workspace_id,
+                &p.conversation_id,
+                &request,
+                &author,
+            )?)
+            .envelope()
+        }
+        "work.continuity.attachments" => {
+            if p.handoff.is_some() {
+                return Err("reading attachment details does not accept a draft".into());
+            }
+            serde_json::to_value(store.handoff_attachments(
+                &p.workspace_id,
+                &p.conversation_id,
+                &p.attachment_ids.ok_or("attachment IDs are required")?,
+            )?)
+            .envelope()
+        }
+        _ => Err("unknown handoff method".into()),
+    }
+}
+
+#[cfg(feature = "local-host")]
 fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     let p: ChatParams = parse(params)?;
     let store = crate::chat::shared();
@@ -1879,27 +1976,32 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             store.stop(&p.id.ok_or("chat.stop needs id")?)?;
             Ok(json!({ "stopped": true }))
         }
-        "chat.events" => {
-            let (events, next) =
-                store.events(&p.id.ok_or("chat.events needs id")?, p.offset.unwrap_or(0))?;
-            Ok(json!({ "events": events, "nextOffset": next }))
-        }
+        "chat.events" => serde_json::to_value(store.tail_events_positions(
+            &p.id.ok_or("chat.events needs id")?,
+            p.offset.unwrap_or(0),
+            p.tail_cursor.as_deref(),
+            p.stable_positions.unwrap_or(false),
+        )?)
+        .envelope(),
         // One bounded page of the timeline, newest first, then older pages
-        // by the cursor each answer carries. `chat.events` stays exactly as
-        // it was: it is how a turn is tailed, and how a client that predates
-        // this reads a conversation.
+        // by the cursor each answer carries. Older clients retain physical
+        // positions; updated clients opt into stable row identities and
+        // reset-aware tailing.
         "chat.eventPage" => {
-            let page = store.event_page(
+            let page = store.event_page_positions(
                 &p.id.ok_or("chat.eventPage needs id")?,
                 p.cursor.as_deref(),
                 p.limit.unwrap_or(0) as usize,
+                p.stable_positions.unwrap_or(false),
             )?;
             Ok(json!({
                 "events": page.events,
                 "start": page.start,
                 "nextOffset": page.next_offset,
+                "tailCursor": page.tail_cursor,
                 "cursor": page.cursor,
                 "hasEarlier": page.has_earlier,
+                "historyTrimmed": page.history_trimmed,
                 "reset": page.reset,
                 "usage": page.usage,
             }))
@@ -2872,6 +2974,19 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
     #[cfg(feature = "local-host")]
     if method.starts_with("todo.") {
         return Some(local_job_call(method, params));
+    }
+
+    #[cfg(feature = "local-host")]
+    if method == "work.search" {
+        return Some(work_search_call(params));
+    }
+
+    #[cfg(feature = "local-host")]
+    if matches!(
+        method,
+        "work.continuity.get" | "work.continuity.put" | "work.continuity.attachments"
+    ) {
+        return Some(handoff_call(method, params));
     }
 
     #[cfg(feature = "local-host")]
