@@ -11,7 +11,7 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
-## [1.0.1] - 2026-09-11
+## Unreleased
 
 Small corrections on top of 1.0.0, most of them invisible. The Windows build
 and its tests are green again, and a transcript the meter cannot reach
