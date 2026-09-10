@@ -252,6 +252,8 @@ private struct ClientFolderPickerForClone: View {
     @State private var newFolder = ""
     @State private var naming = false
     @State private var generation = 0
+    @State private var visible = false
+    @State private var creating = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -308,7 +310,7 @@ private struct ClientFolderPickerForClone: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("New folder", .create) { naming = true }
-                    .disabled(listing == nil)
+                    .disabled(listing == nil || creating)
             }
         }
         .alert("New folder", isPresented: $naming) {
@@ -331,24 +333,38 @@ private struct ClientFolderPickerForClone: View {
                 .background(.bar)
             }
         }
-        .task { await load(nil) }
+        .onAppear { visible = true }
+        .onDisappear { visible = false; generation &+= 1 }
+        .task(id: WorkSessionContext.shared.scope) {
+            listing = nil
+            error = nil
+            naming = false
+            newFolder = ""
+            await load(nil)
+        }
     }
 
     private func load(_ path: String?) async {
+        guard visible, !Task.isCancelled else { return }
         generation &+= 1
         let current = generation
+        let scope = WorkSessionContext.shared.scope
+        error = nil
         do {
             let answer = try await Bridge.browse(peer: peer, path: path)
-            guard current == generation else { return }
+            guard visible, !Task.isCancelled, current == generation,
+                  scope == WorkSessionContext.shared.scope else { return }
             listing = answer
         }
         catch {
-            guard current == generation else { return }
+            guard visible, !Task.isCancelled, current == generation,
+                  scope == WorkSessionContext.shared.scope else { return }
             self.error = ClientSetupModel.readable(error)
         }
     }
 
     private func create() async {
+        guard visible, !creating, !Task.isCancelled else { return }
         let name = newFolder.trimmingCharacters(in: .whitespaces)
         newFolder = ""
         guard !name.isEmpty, let here = listing?.path else { return }
@@ -356,10 +372,25 @@ private struct ClientFolderPickerForClone: View {
             self.error = "A folder name is one name, without a path in it."
             return
         }
+        generation &+= 1
+        let current = generation
+        let scope = WorkSessionContext.shared.scope
+        creating = true
+        error = nil
+        defer { creating = false }
         do {
             let made = try await Bridge.makeDirectory(peer: peer, path: "\(here)/\(name)")
-            listing = try await Bridge.browse(peer: peer, path: made)
-        } catch { self.error = ClientSetupModel.readable(error) }
+            guard visible, !Task.isCancelled, current == generation,
+                  scope == WorkSessionContext.shared.scope else { return }
+            let answer = try await Bridge.browse(peer: peer, path: made)
+            guard visible, !Task.isCancelled, current == generation,
+                  scope == WorkSessionContext.shared.scope else { return }
+            listing = answer
+        } catch {
+            guard visible, !Task.isCancelled, current == generation,
+                  scope == WorkSessionContext.shared.scope else { return }
+            self.error = ClientSetupModel.readable(error)
+        }
     }
 }
 
