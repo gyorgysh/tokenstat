@@ -233,6 +233,35 @@ pub(crate) fn is_allowed(peer_id: &str) -> bool {
     allowed_now().is_some_and(|allowed| allowed.contains(peer_id))
 }
 
+/// Revalidate an authenticated request at a work acceptance boundary. Cached
+/// tunnel admission can predate a lock wait or an expensive launch preparation.
+#[cfg(feature = "local-host")]
+pub(crate) fn require_current_access() -> Result<(), crate::error::DispatchError> {
+    let Some(peer) = crate::request_context::remote_peer() else {
+        return Ok(());
+    };
+    let approved = tokenstat_identity::public_key_from_hex(&peer)
+        .ok()
+        .is_some_and(|key| {
+            tokenstat_identity::PeerStore::load().is_ok_and(|store| store.is_approved(&key))
+        });
+    if !approved {
+        return Err(crate::error::DispatchError::new(
+            "not_approved",
+            "This computer no longer approves this device.",
+        ));
+    }
+    // Read the file even when its timestamp matches a cached grant. Another
+    // process may have revoked access within the same filesystem clock tick.
+    if !load().is_ok_and(|store| store.allowed.contains(&peer)) {
+        return Err(crate::error::DispatchError::new(
+            "workspace_not_allowed",
+            "This device no longer has access to work on this computer.",
+        ));
+    }
+    Ok(())
+}
+
 type AllowedCached = Mutex<Option<(Option<SystemTime>, std::sync::Arc<HashSet<String>>)>>;
 
 fn allowed_cache() -> &'static AllowedCached {

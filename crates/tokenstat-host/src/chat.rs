@@ -1142,6 +1142,7 @@ impl Store {
     pub fn update(&self, id: &str, changes: Update) -> Result<Conversation, String> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         self.edit_conversation(id, |chat| {
             if chat.running
                 && (changes.backend.is_some()
@@ -1211,6 +1212,7 @@ impl Store {
             return Ok(false);
         }
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         if self
             .active
@@ -1374,6 +1376,7 @@ impl Store {
             return Ok(0);
         }
         let _acceptance = crate::chat_receipts::Operation::removal(&self.root)?;
+        crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         let _transcript = self.transcript_guard()?;
         let active: HashSet<String> = self
@@ -1774,6 +1777,7 @@ impl Store {
         }
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         self.current_send_conversation(id)?;
         let key = crate::chat_receipts::key(
             crate::request_context::remote_peer().as_deref(),
@@ -1822,6 +1826,7 @@ impl Store {
     ) -> Result<Conversation, DispatchError> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access()?;
         let typed = text.trim();
         if typed.is_empty() && attachment_ids.is_empty() {
             return Err("chat.send needs text or an attachment".into());
@@ -2073,6 +2078,7 @@ impl Store {
         // Written before anything is started, so a host that dies between the
         // spawn and its answer leaves a record to reconcile against rather
         // than a message the next attempt would run a second time.
+        crate::workspace_policy::require_current_access()?;
         // Reserve a new revision durably before launch. Even a failed spawn
         // consumes it: another client must review the changed launch intent.
         self.edit_conversation(id, |current| {
@@ -2246,6 +2252,7 @@ impl Store {
     pub fn stop(&self, id: &str) -> Result<(), String> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         let pty = self
             .active
             .lock()
@@ -4423,6 +4430,79 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn send_rechecks_revocation_after_waiting_for_acceptance() {
+        crate::test_identity::isolated(|| {
+            let root = tempfile::tempdir().unwrap();
+            let store = Arc::new(Store::at(root.path().join("chat")));
+            conversation_for_receipts(&store, "revoked-send");
+            let phone = tokenstat_identity::MachineIdentity::from_secret([73; 32]);
+            let peer = phone.public_key_hex();
+            let policy = tokenstat_identity::identity_dir()
+                .unwrap()
+                .join("workspace-policy.json");
+            for revoke_trust in [false, true] {
+                let mut peers = tokenstat_identity::PeerStore::load().unwrap();
+                peers.seen(
+                    &phone.public_key(),
+                    "Test device",
+                    None,
+                    "2026-09-10T00:00:00Z",
+                );
+                peers.approve(&phone.public_key());
+                peers.save().unwrap();
+                fs::write(
+                    &policy,
+                    serde_json::to_vec(&serde_json::json!({"allowed": [&peer]})).unwrap(),
+                )
+                .unwrap();
+                let acceptance =
+                    crate::chat_receipts::Operation::conversation(&store.root, "revoked-send")
+                        .unwrap();
+                std::thread::scope(|scope| {
+                    let (ready, admitted) = std::sync::mpsc::channel();
+                    let sending_store = Arc::clone(&store);
+                    let sending_peer = peer.clone();
+                    let pending = scope.spawn(move || {
+                        crate::request_context::with_remote_peer(&sending_peer, || {
+                            crate::workspace_policy::require_current_access().unwrap();
+                            ready.send(()).unwrap();
+                            sending_store.send(
+                                "revoked-send",
+                                "Keep these words",
+                                &[],
+                                Some("pending"),
+                                Some(now_ms()),
+                                Some(0),
+                            )
+                        })
+                    });
+                    admitted.recv_timeout(Duration::from_secs(5)).unwrap();
+                    if revoke_trust {
+                        peers.revoke(&phone.public_key());
+                        peers.save().unwrap();
+                    } else {
+                        // Simulate another process changing the durable grant.
+                        fs::write(&policy, br#"{"allowed":[]}"#).unwrap();
+                    }
+                    drop(acceptance);
+                    let error = pending.join().unwrap().unwrap_err();
+                    assert_eq!(
+                        error.code,
+                        if revoke_trust {
+                            "not_approved"
+                        } else {
+                            "workspace_not_allowed"
+                        }
+                    );
+                });
+                assert!(!store.receipts_path("revoked-send").exists());
+                assert!(!store.response_output_dir("revoked-send").exists());
+                assert_eq!(store.get("revoked-send").unwrap().send_revision, 0);
+            }
+        });
     }
 
     #[test]
