@@ -381,11 +381,16 @@ struct ClientRecentChatView: View {
     }
 
     private func loadSaved() async {
-        guard model.savedCopy == nil, !savedUnavailable,
+        guard model.savedCopy == nil, model.selected == nil, !savedUnavailable,
               let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
         else { return }
-        let opened = await model.loadSavedConversation(reference)
-        guard !Task.isCancelled, reference.scope == WorkSessionContext.shared.scope else { return }
+        // A pending live list has already adopted its folder. Load the copy
+        // into a fresh reader so that request cannot overwrite offline work.
+        let reader = ChatModel()
+        let opened = await reader.loadSavedConversation(reference)
+        guard !Task.isCancelled, reference.scope == WorkSessionContext.shared.scope,
+              needsSavedCopy, model.selected == nil else { return }
+        if opened { model = reader }
         savedUnavailable = !opened
         loaded = true
     }
