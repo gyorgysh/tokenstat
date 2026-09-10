@@ -216,7 +216,7 @@ struct HeadlessReachRecoveryCard: View {
                 Text("\(name) is not answering")
                     .font(ClientType.screenTitle)
                     .multilineTextAlignment(.center)
-                Text("It is a server, so nothing there is asleep and no window has to be open.")
+                Text("Check that the server is running and connected to the internet, then check its tokenstat service.")
                     .font(ClientType.label)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
