@@ -45,8 +45,15 @@ struct WorkSearchSheet: View {
 
                 if let error = model.queryFailure ?? model.failure {
                     Text(error).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
-                    Button("Try again", .refresh) { Task { await model.refresh() } }
+                    if (try? WorkSearchQuery(model.query)) != nil {
+                        Button("Try again", .refresh) {
+                            Task {
+                                if model.queryFailure != nil { await model.search() }
+                                else { await model.refresh() }
+                            }
+                        }
                         .buttonStyle(SecondaryButtonStyle())
+                    }
                 }
                 if let coverage = model.coverage, coverage.unreadable > 0 {
                     Text("\(coverage.unreadable) saved items could not be read. Results cover the copies available now.")
@@ -90,7 +97,8 @@ struct WorkSearchSheet: View {
                         if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             recentWork
                                 .padding(.vertical, Theme.Space.l)
-                        } else if model.results.isEmpty, !model.loading, !model.searching, model.failure == nil {
+                        } else if model.results.isEmpty, !model.loading, !model.searching,
+                                  model.failure == nil, model.queryFailure == nil {
                             Text("No matches in saved work")
                                 .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                                 .padding(.vertical, Theme.Space.l)
