@@ -19,13 +19,16 @@ struct WorkCacheManagementSheet: View {
         ThemedSheet(title: "Manage saved work", subtitle: "Copies on this device", icon: .archive,
                     scrolls: true, onClose: { dismiss() }) {
             if current {
+                let availableRecords = records.filter(allowed)
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     Text("Keep offline protects a copy from automatic expiry, within your storage limit. Removing a copy leaves source work and drafts intact.")
                         .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                     if let failure { Text(failure).font(Theme.caption).foregroundStyle(Theme.controlGlyph) }
                     if busy { ProgressView().controlSize(.small) }
-                    if loaded && records.isEmpty { Text("Nothing saved on this device").font(Theme.callout) }
-                    ForEach(Array(records.filter(allowed).prefix(limit)), id: \.id) { record in
+                    if loaded && availableRecords.isEmpty {
+                        Text("No saved work is available to open").font(Theme.callout)
+                    }
+                    ForEach(Array(availableRecords.prefix(limit)), id: \.id) { record in
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Text(titles[record.id] ?? label(record)).font(Theme.body.weight(.semibold))
                                 .lineLimit(3)
@@ -40,7 +43,7 @@ struct WorkCacheManagementSheet: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 12))
                     }
-                    if records.count > limit {
+                    if availableRecords.count > limit {
                         Button("Show more saved work", .more) {
                             limit += 30
                             Task { await loadTitles() }
