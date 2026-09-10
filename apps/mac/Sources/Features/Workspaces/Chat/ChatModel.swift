@@ -613,6 +613,7 @@ final class ChatModel {
         }
         let draftHost = route.peer ?? WorkSessionContext.shared.localHostIdentity
         if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
+            if self.peer != route.peer { pagingUnavailable = false }
             // The folder is changing. Remember which conversation was open
             // before the clear below drops it, or coming back can only ever
             // find the first row.
@@ -1975,6 +1976,7 @@ final class ChatModel {
     /// find one paragraph in it.
     @discardableResult
     private func openEvents(id: String, generation: UInt64) async -> Bool {
+        guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
         guard !pagingUnavailable else {
             return await loadEvents(id: id, reset: true, generation: generation)
         }
@@ -2015,8 +2017,8 @@ final class ChatModel {
             await loadResponseAttachments(id: id, generation: generation)
             return true
         } catch {
-            if isUnknownMethod(error) { pagingUnavailable = true }
             guard selectionMatches(id: id, generation: generation) else { return false }
+            if isUnknownMethod(error) { pagingUnavailable = true }
             // Whatever went wrong, the conversation still has to appear. The
             // whole-timeline read is the behaviour every host has had.
             return await loadEvents(id: id, reset: true, generation: generation)
@@ -2035,6 +2037,7 @@ final class ChatModel {
     }
 
     private func loadEarlier(id: String, generation: UInt64, quiet: Bool) async {
+        guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return }
         guard !pagingUnavailable, hasEarlier, !earlierInFlight,
               let cursor = earlierCursor
         else { return }
@@ -2042,8 +2045,10 @@ final class ChatModel {
         earlierInFlight = true
         loadingEarlier = !quiet
         defer {
-            earlierInFlight = false
-            loadingEarlier = false
+            if selectionMatches(id: id, generation: generation) {
+                earlierInFlight = false
+                loadingEarlier = false
+            }
             if restoreAfterReplacement, selectionMatches(id: id, generation: generation) {
                 readingRestorationPulse &+= 1
             }
@@ -2090,7 +2095,9 @@ final class ChatModel {
             }
             await loadResponseAttachments(id: id, generation: generation)
         } catch {
-            if isUnknownMethod(error) { pagingUnavailable = true }
+            if selectionMatches(id: id, generation: generation), isUnknownMethod(error) {
+                pagingUnavailable = true
+            }
         }
     }
 
@@ -2137,6 +2144,7 @@ final class ChatModel {
 
     @discardableResult
     private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async -> Bool {
+        guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
         let requestedRevision = selected?.sendRevision
         let requestedOffset = reset ? 0 : offset
         let requestedCursor = reset ? nil : tailCursor
@@ -2431,6 +2439,8 @@ final class ChatModel {
     /// could have moved: a different conversation, a new backend (which changes
     /// how the text travels), or an edited brief.
     private func loadInstructions(id: String, generation: UInt64) async {
+        guard !Task.isCancelled, savedCopy == nil,
+              selectionMatches(id: id, generation: generation) else { return }
         do {
             let loaded = try await Bridge.chatInstructions(id: id, peer: peer)
             guard selectionMatches(id: id, generation: generation) else { return }
@@ -2443,6 +2453,8 @@ final class ChatModel {
     }
 
     private func loadApprovals(id: String, generation: UInt64) async {
+        guard !Task.isCancelled, savedCopy == nil,
+              selectionMatches(id: id, generation: generation) else { return }
         do {
             let loaded = try await Bridge.chatApprovals(id: id, peer: peer)
             guard selectionMatches(id: id, generation: generation) else { return }
