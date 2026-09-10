@@ -231,7 +231,7 @@ fn read_logs(lines: u32) -> Result<String, String> {
     journal_output(&mut command)
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 fn journal_output(command: &mut std::process::Command) -> Result<String, String> {
     use std::process::Stdio;
     let mut child = command
@@ -269,7 +269,7 @@ fn journal_output(command: &mut std::process::Command) -> Result<String, String>
 ///
 /// `journalctl` with a line count normally exits at once. If it does not,
 /// kill it and report that rather than blocking the caller forever.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 fn wait_bounded(child: &mut std::process::Child) -> std::io::Result<std::process::ExitStatus> {
     use std::time::{Duration, Instant};
     let deadline = Instant::now() + Duration::from_secs(15);
