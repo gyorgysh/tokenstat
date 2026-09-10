@@ -2435,6 +2435,18 @@ pub(crate) fn call_peer_result(
 /// that only remote calls use.
 pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, String> {
     crate::request_context::refuse_remote("remote forwarding")?;
+    // A pooled connection authenticated earlier, before the owner may have
+    // revoked this destination. Check disk before every request, including
+    // pooled calls, so another process's trust changes take effect here too.
+    let key = public_key_from_hex(peer_hex).map_err(|error| error.to_string())?;
+    let store = PeerStore::load().map_err(|error| error.to_string())?;
+    if !store.is_approved(&key) {
+        if let Ok(mut held) = pool().lock() {
+            held.retain(|(peer, _), _| !peer.eq_ignore_ascii_case(peer_hex));
+        }
+        return Err("That machine is not approved on this device, so nothing was sent.".into());
+    }
+    drop(store);
     let request = json!({"id": 0, "method": method, "params": parse_params(params)}).to_string();
     // Held for the whole call, pooled connection included: a connection taken
     // out of the pool is as live as a freshly dialled one while it is in use.
@@ -3271,6 +3283,61 @@ fn forwarded_result(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg(unix)]
+    fn revocation_stops_requests_on_an_authenticated_pooled_connection() {
+        crate::test_identity::isolated(|| {
+            let local = MachineIdentity::from_secret([51; 32]);
+            let remote = MachineIdentity::from_secret([52; 32]);
+            let key = remote.public_key();
+            let peer = remote.public_key_hex();
+            let mut store = PeerStore::load().unwrap();
+            for approved in [key, local.public_key()] {
+                store.seen(&approved, "Test peer", None, "2026-09-10T00:00:00Z");
+                assert!(store.approve(&approved));
+            }
+            store.save().unwrap();
+            let server = tokenstat_remote::Server::bind("127.0.0.1:0", &remote).unwrap();
+            let address = server.local_address().unwrap();
+            let worker = std::thread::spawn(move || {
+                let mut connection = server.accept().unwrap().unwrap();
+                let request = connection
+                    .receive_within(4096, Duration::from_secs(5))
+                    .unwrap();
+                let request: Value = serde_json::from_slice(&request).unwrap();
+                assert_eq!(request["method"], "protocol");
+                connection
+                    .send(br#"{"ok":true,"result":{"version":"14"}}"#)
+                    .unwrap();
+                // Revocation closes the idle connection without writing the
+                // next request. A replay would arrive as an ordinary frame.
+                assert!(
+                    connection
+                        .receive_within(4096, Duration::from_secs(5))
+                        .is_err()
+                );
+            });
+            let connection = tokenstat_remote::dial_with_timeout(
+                &address,
+                &local,
+                Some(key),
+                "Test peer",
+                Duration::from_secs(5),
+            )
+            .unwrap();
+            checkin(&peer, ChannelPurpose::Unknown, connection);
+            assert!(call_peer(&peer, "protocol", "{}").is_ok());
+            // A separate load/save models another process revoking the peer.
+            let mut changed = PeerStore::load().unwrap();
+            assert!(changed.revoke(&key));
+            changed.save().unwrap();
+            let error = call_peer(&peer, "protocol", "{}").unwrap_err();
+            assert!(error.contains("not approved"), "{error}");
+            assert!(!pool().lock().unwrap().keys().any(|(held, _)| held == &peer));
+            worker.join().unwrap();
+        });
+    }
+
     #[cfg(all(feature = "local-host", unix))]
     #[test]
     fn handoff_round_trip_over_pinned_encrypted_connection() {
