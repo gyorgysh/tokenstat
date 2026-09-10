@@ -400,6 +400,10 @@ struct PersonaEditor: View {
     }
 
     private func select(_ persona: ChatPersona) {
+        // A generated draft belongs to the editor selection that requested it.
+        // The picker remains available while the agent is working.
+        draftGeneration &+= 1
+        improving = false
         draft = persona
         isNew = false
         failure = nil
