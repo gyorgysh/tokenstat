@@ -66,11 +66,14 @@ struct ClientSavedPlaceView: View {
     var restoredSection: WorkspaceSection? = nil
     var onRestoredTerminalClose: (() -> Void)? = nil
     @Environment(AccountModel.self) private var account
+    @Environment(ConnectivityModel.self) private var connectivity
     @State private var folder: WorkspaceFolder?
     @State private var terminal: ClientTerminalSession?
     @State private var error: String?
     @State private var loaded = false
     @State private var loading = false
+    @State private var visible = false
+    @State private var loadGeneration: UInt64 = 0
     @State private var loadedPlaceID: ClientRecentPlaces.Place.ID?
     @State private var showTerminal = false
     @State private var needsAccess = false
@@ -87,7 +90,16 @@ struct ClientSavedPlaceView: View {
                                      folderName: place.workspaceName, hostName: hostName, chatID: chat)
             } else {
                 ClientPlaceAvailability(peer: place.id.peer, hostName: hostName) {
-                    destination.task { await load() }
+                    destination
+                        .task {
+                            visible = true
+                            await load()
+                        }
+                        .onDisappear {
+                            visible = false
+                            loadGeneration &+= 1
+                            loading = false
+                        }
                 }
             }
         }
@@ -100,7 +112,7 @@ struct ClientSavedPlaceView: View {
 
     @ViewBuilder private var destination: some View {
         if let error {
-            ClientErrorCard(message: error) { Task { await load() } }
+            ClientErrorCard(message: error) { retry() }
                 .padding(Theme.Space.m)
         } else if needsAccess {
             ClientHostWorkspacesView(peerKey: place.id.peer, hostName: hostName)
@@ -122,11 +134,19 @@ struct ClientSavedPlaceView: View {
                 message: terminal == nil ? "The session is no longer running on \(hostName)." : "Return to your session on \(hostName).",
                 actionTitle: terminal == nil ? nil : "Open terminal",
                 actionIcon: .reopen,
-                action: terminal == nil ? nil : { Task { await load(reopen: true) } }
+                action: terminal == nil ? nil : { retry(reopen: true) }
             )
             .padding(Theme.Space.m)
         } else {
             ClientWireframe.Rows(count: 3).padding(Theme.Space.m)
+        }
+    }
+
+    private func retry(reopen: Bool = false) {
+        let generation = loadGeneration
+        Task {
+            guard visible, generation == loadGeneration else { return }
+            await load(reopen: reopen)
         }
     }
 
@@ -136,15 +156,19 @@ struct ClientSavedPlaceView: View {
         // tunnel while the person sits on the screen.
         // An explicit reopen must fetch the existing session again: dismissal
         // stopped the previous attachment, which cannot be reused.
-        guard !loading, reopen || loadedPlaceID != place.id,
+        guard visible, !loading, reopen || loadedPlaceID != place.id,
               let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
+        let generation = loadGeneration
         func stillCurrent() -> Bool {
-            !Task.isCancelled && WorkSessionContext.shared.scope == scope
-                && account.account?.machines.contains { $0.publicIdentity == place.id.peer } == true
+            visible && generation == loadGeneration && !Task.isCancelled
+                && !connectivity.isOffline && WorkSessionContext.shared.scope == scope
+                && account.account?.machines.contains {
+                    $0.publicIdentity == place.id.peer && $0.online != false
+                } == true
         }
         guard stillCurrent() else { return }
         loading = true
-        defer { loading = false }
+        defer { if generation == loadGeneration { loading = false } }
         error = nil
         do {
             // Home has never needed a tunnel. A cold-start tap must establish

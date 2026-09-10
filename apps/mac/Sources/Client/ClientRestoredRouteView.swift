@@ -17,6 +17,7 @@ struct ClientRestoredRouteView: View {
                     ? route.section.flatMap(WorkspaceSection.init(rawValue:)) : nil,
                 onRestoredTerminalClose: reference.kind == .terminal
                     ? { navigation.restoredRoute = nil } : nil)
+                .id(route)
         } else {
             ClientEmptyState(kind: .unreachable, title: "This place is unavailable",
                 message: "Return to your workspaces to choose where to continue.")
