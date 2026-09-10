@@ -83,8 +83,8 @@ struct ClientPinnedWorkSection: View {
     /// target: combining the whole row would swallow it.
     private func content(_ pin: PinnedWorkStore.Pin) -> some View {
         let machine = account.account?.machines.first { $0.publicIdentity == pin.reference.hostIdentity }
-        let state = connectivity.isOffline ? "Asleep"
-            : machine == nil ? "No longer linked"
+        let state = machine == nil ? "No longer linked"
+            : connectivity.isOffline ? "You are offline"
             : machine?.online == true ? "Awake"
             : machine?.online == false ? "Asleep" : "Status unknown"
         return HStack(spacing: Theme.Space.m) {

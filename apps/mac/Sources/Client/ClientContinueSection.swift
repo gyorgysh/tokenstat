@@ -77,8 +77,8 @@ struct ClientContinueSection: View {
 
     private func row(_ place: ClientRecentPlaces.Place) -> some View {
         let machine = account.account?.machines.first { $0.publicIdentity == place.id.peer }
-        let state = connectivity.isOffline ? "Asleep"
-            : machine == nil ? "No longer linked"
+        let state = machine == nil ? "No longer linked"
+            : connectivity.isOffline ? "You are offline"
             : machine?.online == true ? "Awake"
             : machine?.online == false ? "Asleep" : "Status unknown"
         return HStack(spacing: Theme.Space.m) {
