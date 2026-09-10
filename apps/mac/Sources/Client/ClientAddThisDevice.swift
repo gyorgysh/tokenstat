@@ -31,6 +31,8 @@ struct ClientAddThisDevice: View {
     @State private var working = false
     @State private var granted = false
     @State private var error: String?
+    @State private var generation = UUID()
+    @State private var visible = false
 
     private var normalized: String {
         code.uppercased().filter { $0.isLetter || $0.isNumber }
@@ -60,9 +62,10 @@ struct ClientAddThisDevice: View {
                             .font(Theme.monoText(20, relativeTo: .title3))
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
+                            .disabled(working)
                         Text(
-                            "The code never leaves the machine that made it. tokenstat.ai "
-                            + "cannot see it and cannot let a device in."
+                            "The machine checks this code over your encrypted connection. "
+                            + "tokenstat.ai cannot see it and cannot let a device in."
                         )
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
@@ -100,15 +103,31 @@ struct ClientAddThisDevice: View {
             .frame(maxWidth: .infinity)
             .background(.bar)
         }
+        .onAppear { visible = true }
+        .onDisappear { visible = false; reset() }
+        .onChange(of: WorkSessionContext.shared.scope) { _, _ in reset() }
+    }
+
+    private func reset() {
+        generation = UUID()
+        code = ""
+        working = false
+        granted = false
+        error = nil
     }
 
     private func redeem() async {
+        guard visible, !working, let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
+        let attempt = generation
         working = true
         error = nil
-        defer { working = false }
+        defer { if generation == attempt { working = false } }
         do {
-            granted = try await Bridge.redeemWorkspaceAccess(peer: peer, code: normalized)
+            let accepted = try await Bridge.redeemWorkspaceAccess(peer: peer, code: normalized)
+            guard generation == attempt, WorkSessionContext.shared.scope == scope, !Task.isCancelled else { return }
+            granted = accepted
         } catch {
+            guard generation == attempt, WorkSessionContext.shared.scope == scope, !Task.isCancelled else { return }
             self.error = ClientSetupModel.readable(error)
         }
     }
