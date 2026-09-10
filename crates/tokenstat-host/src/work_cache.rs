@@ -141,7 +141,8 @@ fn load() -> Result<(Store, bool), String> {
         Ok(_) => Err("unsupported work cache version".into()),
         Err(_) => {
             let quarantine = path.with_extension("corrupt.json");
-            let _ = fs::rename(&path, &quarantine);
+            fs::rename(&path, &quarantine)
+                .map_err(|error| format!("Cannot preserve damaged work cache: {error}"))?;
             let _ = fs::write(&marker, b"quarantined");
             Ok((Store::default(), true))
         }
@@ -1127,6 +1128,33 @@ mod tests {
             let listed = list("s").expect("list");
             assert_eq!(listed["repaired"], json!(true));
             assert_eq!(listed["records"].as_array().unwrap().len(), 0);
+        });
+    }
+
+    #[test]
+    fn failed_quarantine_preserves_damaged_cache() {
+        with_path(fresh_path(), || {
+            let damaged = b"damaged cache bytes";
+            fs::write(path(), damaged).unwrap();
+            let destination = path().with_extension("corrupt.json");
+            fs::create_dir(&destination).unwrap();
+            fs::write(destination.join("keep"), b"existing quarantine").unwrap();
+            assert!(put(&params("s", "new")).is_err());
+            assert_eq!(fs::read(path()).unwrap(), damaged);
+            assert!(list("s").is_err());
+            assert_eq!(fs::read(path()).unwrap(), damaged);
+            assert!(!path().with_extension("repaired").exists());
+            assert_eq!(
+                fs::read(destination.join("keep")).unwrap(),
+                b"existing quarantine"
+            );
+            fs::remove_dir_all(destination).unwrap();
+            let recovered = put(&params("s", "new")).unwrap();
+            assert_eq!(recovered["repaired"], true);
+            assert_eq!(
+                fs::read(path().with_extension("corrupt.json")).unwrap(),
+                damaged
+            );
         });
     }
 
