@@ -18,11 +18,27 @@ enum WorkCacheKey {
     /// under a weaker key or written beside the ciphertext.
     static func key(for scope: String, generate: () -> [UInt8] = randomBytes) -> [UInt8]? {
         guard !WorkCacheCleanupJournal.blocks(scope) else { return nil }
-        if let held = load(scope: scope) { return held }
+        return getOrCreate(load: { load(scope: scope) },
+                           add: { store(scope: scope, key: $0) }, generate: generate)
+    }
+
+    /// A failed read is not evidence of absence. Add atomically and reuse the
+    /// winner of a concurrent first save; never replace a key sealing copies.
+    static func getOrCreate(load: () -> (status: OSStatus, key: [UInt8]?),
+                            add: ([UInt8]) -> OSStatus,
+                            generate: () -> [UInt8]) -> [UInt8]? {
+        let existing = load()
+        if existing.status == errSecSuccess { return existing.key }
+        guard existing.status == errSecItemNotFound else { return nil }
         let fresh = generate()
         guard fresh.count == 32 else { return nil }
-        guard store(scope: scope, key: fresh) else { return nil }
-        return fresh
+        switch add(fresh) {
+        case errSecSuccess: return fresh
+        case errSecDuplicateItem:
+            let winner = load()
+            return winner.status == errSecSuccess ? winner.key : nil
+        default: return nil
+        }
     }
 
     @discardableResult
@@ -40,7 +56,8 @@ enum WorkCacheKey {
     /// behind for a scope that keeps nothing.
     static func existingKey(for scope: String) -> [UInt8]? {
         guard !WorkCacheCleanupJournal.blocks(scope) else { return nil }
-        return load(scope: scope)
+        let result = load(scope: scope)
+        return result.status == errSecSuccess ? result.key : nil
     }
 
     /// Base64 for the wire, which takes the key as text beside the call.
@@ -54,7 +71,7 @@ enum WorkCacheKey {
         return bytes
     }
 
-    private static func load(scope: String) -> [UInt8]? {
+    private static func load(scope: String) -> (status: OSStatus, key: [UInt8]?) {
         var result: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass as String: kSecClassGenericPassword,
@@ -63,16 +80,12 @@ enum WorkCacheKey {
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ] as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data, data.count == 32 else { return nil }
-        return Array(data)
+        guard status == errSecSuccess else { return (status, nil) }
+        guard let data = result as? Data, data.count == 32 else { return (errSecDecode, nil) }
+        return (errSecSuccess, Array(data))
     }
 
-    private static func store(scope: String, key: [UInt8]) -> Bool {
-        SecItemDelete([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: scope,
-        ] as CFDictionary)
+    private static func store(scope: String, key: [UInt8]) -> OSStatus {
         // Readable after first unlock so a cold open in airplane mode still
         // finds its copies; this device only, so a backup never carries it.
         let status = SecItemAdd([
@@ -82,6 +95,6 @@ enum WorkCacheKey {
             kSecValueData as String: Data(key),
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ] as CFDictionary, nil)
-        return status == errSecSuccess
+        return status
     }
 }
