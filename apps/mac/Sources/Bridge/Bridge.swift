@@ -1175,19 +1175,21 @@ extension Bridge {
     ///
     /// With a `clientMessageID` the host keeps a receipt, so the same message
     /// arriving twice is answered rather than run twice. Only pass one to a
-    /// machine that speaks protocol 13 (`RemoteHostFeature.confirmedSend`):
-    /// older hosts do not provide the crash and retention guarantees needed
-    /// to keep an uncertain send from starting a second turn.
+    /// machine that speaks protocol 14 (`RemoteHostFeature.confirmedSend`):
+    /// older hosts do not provide the revision, crash and retention guarantees
+    /// needed to preserve the intended context and avoid a second turn.
     static func sendChat(
         id: String,
         text: String,
         attachmentIDs: [String] = [],
         clientMessageID: String? = nil,
         clientMessageCreatedAt: Date? = nil,
+        expectedRevision: UInt64? = nil,
         peer: String? = nil
     ) async throws -> ChatConversation {
         var params: [String: Any] = ["id": id, "text": text, "attachmentIds": attachmentIDs]
         if let clientMessageID { params["clientMessageId"] = clientMessageID }
+        if let expectedRevision { params["expectedRevision"] = expectedRevision }
         if let clientMessageCreatedAt {
             guard let milliseconds = Int64(exactly: (clientMessageCreatedAt.timeIntervalSince1970 * 1000).rounded(.towardZero)) else {
                 throw BridgeError.core(code: "invalid_message_time", message: "The saved message time could not be read. Your pending copy stays here.")

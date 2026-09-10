@@ -29,7 +29,7 @@ final class WorkCacheStore {
     }
 
     /// Keep this conversation's newest page under the scope's key.
-    func saveConversation(reference: WorkReference, title: String, page: ChatEventPage, backend: String? = nil) async {
+    func saveConversation(reference: WorkReference, title: String, page: ChatEventPage, backend: String? = nil, sendRevision: UInt64? = nil) async {
         guard await WorkCacheAccess.canSave(reference), settings.saves(reference), reference.kind == .conversation,
               let recordID = WorkCache.recordID(for: reference),
               let itemID = reference.itemID,
@@ -45,6 +45,7 @@ final class WorkCacheStore {
               (try? WorkCache.decode(payload)) != nil
         else { return }
         if let backend { payload["backend"] = backend }
+        if let sendRevision { payload["sendRevision"] = sendRevision }
         _ = try? await Bridge.cachePut(
             key: key, scope: WorkCache.scope(for: reference.scope),
             id: recordID, kind: "conversation", itemId: itemID,

@@ -141,6 +141,11 @@ fn lost_socket_response_and_concurrent_retries_launch_once() {
         call("chat.send", old_client)["error"]["code"],
         "send_upgrade_required"
     );
+    let no_revision = json!({"id":chat["id"],"text":"missing context","clientMessageId":"missing-revision","clientMessageCreatedAtMs":now});
+    assert_eq!(
+        call("chat.send", no_revision)["error"]["code"],
+        "send_upgrade_required"
+    );
     // Force a deterministic storage failure after spawn: the existing turn
     // makes a handover brief necessary, but its destination is a directory.
     // The live fixture must still be drained and must never run again on retry.

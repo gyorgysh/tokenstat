@@ -9,7 +9,7 @@ import Foundation
             for _ in 0..<500 { if condition() { return }; try await Task.sleep(nanoseconds:10_000_000) }
             throw Failure(message:"Timed out awaiting model state")
         }
-        try check(InProcessTransport.protocolVersion == "13", "QA app links the rebuilt protocol 13 runtime")
+        try check(InProcessTransport.protocolVersion == "14", "QA app links the rebuilt protocol 14 runtime")
         let legacyChunk = try JSONDecoder().decode(ChatEventChunk.self, from: Data(#"{"events":[],"nextOffset":10}"#.utf8))
         try check(legacyChunk.tailCursor == nil && !legacyChunk.reset, "older host polling remains decodable")
         let resetChunk = try JSONDecoder().decode(ChatEventChunk.self, from: Data(#"{"events":[],"nextOffset":10,"tailCursor":"opaque-tail","reset":true}"#.utf8))

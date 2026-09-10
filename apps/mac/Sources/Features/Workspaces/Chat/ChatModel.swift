@@ -186,6 +186,9 @@ final class ChatModel {
     private var draftSaveTask: Task<Void, Never>?
     private var restoringDraft = false
     private var heldSubmission: ChatDraftSubmission?
+    /// Context captured before the displayed transcript request, never a newer
+    /// metadata-only refresh that the reader has not seen yet.
+    private var contextRevision: UInt64?
     /// Long enough that a save is not queued per keystroke, short enough that
     /// nothing meaningful is lost to a crash.
     private static let draftSaveDelay = Duration.milliseconds(300)
@@ -386,7 +389,7 @@ final class ChatModel {
             conversationID: selected.id, peer: peer, scope: continuityScope,
             reference: draftReference, generation: selectionGeneration,
             text: text, draftText: draft, attachments: attachments,
-            messageID: draftMessageID
+            messageID: draftMessageID, expectedRevision: contextRevision
         )
         // Reserve the send before the caller starts its Task or capability
         // discovery suspends, so a second click cannot replace this snapshot.
@@ -435,7 +438,7 @@ final class ChatModel {
     private func machineConfirmsSends(peer: String?, checkingReceipt: Bool) async throws -> Bool {
         guard let peer, !peer.isEmpty else { return true }
         let version = try await Bridge.peerProtocolVersion(peer)
-        // Reading an older receipt is safe. New sends require durable protocol 13.
+        // Reading an older receipt is safe. New sends require revision-checked protocol 14.
         return version >= (checkingReceipt ? 10 : RemoteHostFeature.confirmedSend.minimumProtocol)
     }
 
@@ -457,6 +460,7 @@ final class ChatModel {
         do {
             var candidate = ChatQueuedMessage(id: messageID, text: submission.text, attachments: submission.attachments)
             candidate.sourceDraftText = submission.draftText
+            candidate.expectedRevision = submission.expectedRevision
             queued = try ChatOutboxStore.shared.update(reference) { items in
                 if let existing = items.first(where: { $0.id == messageID }) {
                     guard existing.text == candidate.text, existing.attachments == candidate.attachments else {
@@ -777,7 +781,8 @@ final class ChatModel {
         peer = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity ? nil : reference.hostIdentity
         workspaceID = reference.workspaceID
         folderID = peer.map { "remote:\($0):\(reference.workspaceID)" } ?? reference.workspaceID
-        let chat = ChatConversation(saved: reference, title: copy.title, backend: copy.backend)
+        var chat = ChatConversation(saved: reference, title: copy.title, backend: copy.backend)
+        chat.sendRevision = copy.sendRevision
         chats = [chat]
         await select(chat, savedPage: copy)
         return savedCopy != nil
@@ -787,6 +792,7 @@ final class ChatModel {
         selectionGeneration &+= 1
         let generation = selectionGeneration
         selected = chat
+        contextRevision = savedPage?.sendRevision
         if let chat, let folderID {
             rememberLastSelected(chatID: chat.id, folderID: folderID)
         }
@@ -1144,6 +1150,7 @@ final class ChatModel {
         guard stagingAttachments == 0, (savedCopy == nil || whenConnected), ownsQueue, let reference = queuedReference else { return nil }
         var item = ChatQueuedMessage(id: draftMessageID ?? UUID().uuidString, text: text, attachments: attachments)
         item.whenConnected = whenConnected
+        item.expectedRevision = contextRevision
         do {
             queued = try ChatOutboxStore.shared.update(reference) { items in
                 if let existing = items.first(where: { $0.id == item.id }) {
@@ -1183,6 +1190,7 @@ final class ChatModel {
                     items[index].delivery = .waiting
                 }
                 items[index].text = text
+                items[index].expectedRevision = contextRevision
             }
         } catch { self.error = "This queued message changed or could not be saved. Reopen Pending messages before editing it again." }
     }
@@ -1230,6 +1238,23 @@ final class ChatModel {
         guard let owner, owner == queuedReference, ownsQueue else { return }
         guard savedCopy == nil else {
             error = "Check for updates to return to the live conversation before sending or checking delivery. Your pending copy stays here."
+            return
+        }
+        if item.delivery == .needsReview {
+            guard let revision = contextRevision else {
+                error = "Check for updates before using the latest conversation context. Your message stays here."
+                return
+            }
+            do {
+                queued = try ChatOutboxStore.shared.update(owner) { items in
+                    guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item else {
+                        throw ChatOutboxStore.Failure.conflict
+                    }
+                    items[index].expectedRevision = revision
+                    items[index].delivery = .ready
+                }
+                error = "The message is ready with the conversation context you last opened. Choose Send now when you are ready."
+            } catch { self.error = "The pending message changed. Reopen it before using the latest context." }
             return
         }
         guard !sendingNow else { return }
@@ -1303,6 +1328,14 @@ final class ChatModel {
                     : "Delivery is not confirmed. Check the conversation before copying this message into a new draft. An unknown receipt is not proof it was never sent." }
                 return false
             }
+            guard item.delivery != .needsReview, item.expectedRevision != nil else {
+                publish(try ChatOutboxStore.shared.update(reference) { items in
+                    if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].delivery = .needsReview }
+                })
+                authorizedQueueItems.remove(item.id)
+                if current() { error = "Review the live conversation, then choose Use latest context in Pending messages. Your message has not been sent." }
+                return false
+            }
             guard current(), !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !item.attachments.isEmpty else { return false }
             if stopCurrent, selected?.running == true {
                 await stop()
@@ -1330,14 +1363,15 @@ final class ChatModel {
             do {
                 let updated = try await Bridge.sendChat(id: conversationID, text: item.text,
                     attachmentIDs: resolved.map(\.id), clientMessageID: item.id,
-                    clientMessageCreatedAt: firstAttemptAt, peer: targetPeer)
+                    clientMessageCreatedAt: firstAttemptAt, expectedRevision: item.expectedRevision, peer: targetPeer)
                 accepted = true
-                let remaining = try ChatOutboxStore.shared.update(reference) { $0.removeAll { $0.id == item.id } }
+                let remaining = try ChatOutboxStore.shared.accept(item, revision: updated.sendRevision, for: reference)
                 publish(remaining)
                 clearSubmittedDraft(item, reference: reference)
                 authorizedQueueItems.remove(item.id)
                 if current() {
                     replace(updated)
+                    contextRevision = updated.sendRevision
                     await loadEvents(id: conversationID, reset: false, generation: generation)
                 }
                 return true
@@ -1346,7 +1380,11 @@ final class ChatModel {
                 authorizedQueueItems.remove(item.id)
                 publish(try ChatOutboxStore.shared.update(reference) { items in
                     if let index = items.firstIndex(where: { $0.id == item.id }) {
-                        items[index].delivery = accepted || Bridge.isDeliveryUnknown(error) ? .deliveryUnknown : .failed
+                        if case BridgeError.core(code: "conversation_changed", message: _) = error {
+                            items[index].delivery = .needsReview
+                        } else {
+                            items[index].delivery = accepted || Bridge.isDeliveryUnknown(error) ? .deliveryUnknown : .failed
+                        }
                     }
                 })
                 if current() { self.error = accepted || Bridge.isDeliveryUnknown(error)
@@ -1912,11 +1950,13 @@ final class ChatModel {
         guard !pagingUnavailable else {
             return await loadEvents(id: id, reset: true, generation: generation)
         }
+        let requestedRevision = selected?.sendRevision
         do {
             let page = try await Bridge.chatEventPage(
                 id: id, cursor: nil, limit: Self.openPageEvents, peer: peer
             )
             guard selectionMatches(id: id, generation: generation) else { return false }
+            if let requestedRevision { contextRevision = max(contextRevision ?? 0, requestedRevision) }
             eventsEpoch &+= 1
             events = page.events
             // A live page is the conversation again, not a copy of it.
@@ -1935,7 +1975,7 @@ final class ChatModel {
             reachedStart = !page.hasEarlier && !page.events.isEmpty
             warmMarkdown()
             settleNotifications()
-            keepOfflineCopy(id: id, title: selected?.title, page: page)
+            keepOfflineCopy(id: id, title: selected?.title, page: page, sendRevision: requestedRevision)
             var pulled = 0
             while displayItems.count < Self.openDisplayItems,
                   hasEarlier,
@@ -2069,6 +2109,7 @@ final class ChatModel {
 
     @discardableResult
     private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async -> Bool {
+        let requestedRevision = selected?.sendRevision
         let requestedOffset = reset ? 0 : offset
         let requestedCursor = reset ? nil : tailCursor
         do {
@@ -2085,6 +2126,7 @@ final class ChatModel {
                 }
                 return opened
             }
+            if let requestedRevision { contextRevision = max(contextRevision ?? 0, requestedRevision) }
             tailCursor = chunk.tailCursor
             // A poll that found nothing new must not write anything back. The
             // write is what redraws the transcript, and most polls of a
@@ -2105,7 +2147,8 @@ final class ChatModel {
                 reachedStart = !chunk.events.isEmpty
                 keepOfflineCopy(
                     id: id, title: selected?.title,
-                    page: ChatEventPage(events: chunk.events, nextOffset: chunk.nextOffset, tailCursor: chunk.tailCursor)
+                    page: ChatEventPage(events: chunk.events, nextOffset: chunk.nextOffset, tailCursor: chunk.tailCursor),
+                    sendRevision: requestedRevision
                 )
             } else {
                 events.append(contentsOf: chunk.events)
@@ -2131,12 +2174,12 @@ final class ChatModel {
     /// and the live conversation is unaffected. Only the newest page is kept;
     /// earlier pages stay on the host, and the copy says so through the
     /// page's own `hasEarlier` flag.
-    private func keepOfflineCopy(id: String, title: String?, page: ChatEventPage) {
+    private func keepOfflineCopy(id: String, title: String?, page: ChatEventPage, sendRevision: UInt64?) {
         guard let reference = currentReference, reference.itemID == id else { return }
         let title = title ?? "Conversation"
         let backend = selected?.backend
         Task {
-            await WorkCacheStore.shared.saveConversation(reference: reference, title: title, page: page, backend: backend)
+            await WorkCacheStore.shared.saveConversation(reference: reference, title: title, page: page, backend: backend, sendRevision: sendRevision)
         }
     }
 
@@ -2155,6 +2198,7 @@ final class ChatModel {
     }
 
     private func applySavedCopy(_ copy: CachedRecordPayload) {
+        contextRevision = copy.sendRevision
         eventsEpoch &+= 1
         events = copy.page.events
         reconcileOutgoing()

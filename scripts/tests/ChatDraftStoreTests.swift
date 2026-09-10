@@ -290,7 +290,8 @@ final class Notified: @unchecked Sendable {
         let submission = ChatDraftSubmission(conversationID: "sending", peer: "host-a",
             scope: alice, reference: sendingReference, generation: 7,
             text: sendingDraft.text, draftText: sendingDraft.text,
-            attachments: sendingDraft.attachments, messageID: sendingDraft.messageID)
+            attachments: sendingDraft.attachments, messageID: sendingDraft.messageID, expectedRevision: 9)
+        assert(submission.expectedRevision == 9)
         func lifecycleSave(_ reference: WorkReference, chat: String, text: String) {
             guard !submission.owns(reference: reference, conversationID: chat,
                                    peer: "host-a", scope: alice) else { return }

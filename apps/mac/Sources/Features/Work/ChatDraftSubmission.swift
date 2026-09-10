@@ -14,6 +14,7 @@ struct ChatDraftSubmission {
     let draftText: String
     let attachments: [ChatAttachment]
     let messageID: String?
+    var expectedRevision: UInt64? = nil
 
     func owns(reference: WorkReference?, conversationID: String?, peer: String?,
               scope: WorkReference.Scope?) -> Bool {

@@ -70,13 +70,14 @@ enum Bridge {
             WorkReference(scope: scope, hostIdentity: host, workspaceID: "folder", kind: .conversation, itemID: "chat")
         }
         let page = ChatEventPage(events: [.init(seq: 1, text: "Saved words")], nextOffset: 42, hasEarlier: true)
-        await store.saveConversation(reference: ref(), title: "My work", page: page, backend: "codex")
+        await store.saveConversation(reference: ref(), title: "My work", page: page, backend: "codex", sendRevision: 17)
         assert(Bridge.writes == 1)
         settings.enabled = false
         await store.saveConversation(reference: ref(), title: "Replacement", page: page)
         assert(Bridge.writes == 1)
         // Turning saving off preserves access to previously kept text.
         let saved = await store.savedConversation(for: ref())
+        assert(saved?.sendRevision == 17)
         assert(saved?.title == "My work" && saved?.backend == "codex")
         assert(saved?.page.events.first?.text == "Saved words" && saved?.page.hasEarlier == true)
         let keysBefore = WorkCacheKey.keys.count
@@ -88,6 +89,7 @@ enum Bridge {
         settings.enabled = true
         await store.saveConversation(reference: ref(), title: "Empty", page: .init(events: [], nextOffset: 0, hasEarlier: false))
         let old = await store.savedConversation(for: ref())
+        assert(old?.sendRevision == nil)
         assert(old?.backend == nil && old?.page.events.isEmpty == true)
         // The production bridge does not install a custom Date strategy.
         // A malformed saved timestamp must fail rather than claim a fresh copy.

@@ -2687,6 +2687,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var lastMessageAtMs: Int64?
     /// `user` or `agent`; optional for hosts predating recent chats.
     var lastMessageAuthor: String?
+    var sendRevision: UInt64?
     var running: Bool
 
     /// A saved page has no live setup or permissions. These inert values are
@@ -2714,11 +2715,12 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case personaID = "personaId"
         case model, effort, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
-        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running
+        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        sendRevision = try c.decodeIfPresent(UInt64.self, forKey: .sendRevision)
         id = try c.decode(String.self, forKey: .id)
         workspaceID = try c.decode(String.self, forKey: .workspaceID)
         title = try c.decode(String.self, forKey: .title)

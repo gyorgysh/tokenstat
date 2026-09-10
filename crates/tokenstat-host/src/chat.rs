@@ -1884,6 +1884,12 @@ impl Store {
         }
         if client_message_id.is_some() {
             crate::chat_receipts::validate_created_at(client_message_created_at_ms, now_ms())?;
+            if expected_revision.is_none() {
+                return Err(DispatchError::new(
+                    "send_upgrade_required",
+                    "Update this client and review the conversation before sending. Its saved message is missing the conversation revision.",
+                ));
+            }
         }
         if expected_revision.is_some_and(|expected| expected != chat.send_revision) {
             return Err(DispatchError::new(

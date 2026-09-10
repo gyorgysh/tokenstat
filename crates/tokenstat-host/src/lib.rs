@@ -203,4 +203,7 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 13 makes acceptance durable and serialized, reports unresolved
 /// launches as `needsRecovery`, and requires `clientMessageCreatedAtMs` for
 /// previously unseen message IDs so expired receipts cannot authorize replay.
-pub const PROTOCOL_VERSION: &str = "13";
+/// Version 14 adds `sendRevision` to conversations and requires
+/// `expectedRevision` for unseen message IDs. Stale context is refused before
+/// launch while existing receipts remain available for reconciliation.
+pub const PROTOCOL_VERSION: &str = "14";

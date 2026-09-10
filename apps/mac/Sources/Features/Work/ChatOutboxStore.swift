@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 
 struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
-    enum Delivery: String, Codable, Sendable { case waiting, sending, deliveryUnknown, failed }
+    enum Delivery: String, Codable, Sendable { case waiting, sending, deliveryUnknown, failed, needsReview, ready }
     var id: String
     var text: String
     var attachments: [ChatAttachment]
@@ -11,6 +11,8 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     /// Fixed at the first attempt, including retries of a refused send.
     var firstAttemptAt: Date? = nil
     var attemptedAt: Date? = nil
+    /// Captured at user intent. Missing legacy context requires explicit review.
+    var expectedRevision: UInt64? = nil
     var whenConnected = false
     var sourceDraftText: String? = nil
 
@@ -44,6 +46,21 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
             .appendingPathComponent("tokenstat-drafts", isDirectory: true)
         file = self.directory.appendingPathComponent("outbox.v1.json")
         self.byteLimit = min(max(1, byteLimit), 8 * 1024 * 1024)
+    }
+
+    /// Advance only untouched successors of this exact accepted context.
+    /// Receipt recovery does not call this: its current host revision might
+    /// include somebody else's later work.
+    func accept(_ item: ChatQueuedMessage, revision: UInt64?, for reference: WorkReference) throws -> [ChatQueuedMessage] {
+        try update(reference) { items in
+            items.removeAll { $0.id == item.id }
+            guard let expected = item.expectedRevision, expected < UInt64.max,
+                  revision == expected + 1 else { return }
+            for index in items.indices where items[index].delivery == .waiting
+                && items[index].expectedRevision == expected {
+                items[index].expectedRevision = revision
+            }
+        }
     }
 
     func items(for reference: WorkReference) throws -> [ChatQueuedMessage] {

@@ -86,6 +86,8 @@ struct ChatQueueStrip: View {
         if offline, items.first?.needsReceipt == true { return "Delivery needs checking · Reconnect to review" }
         if offline { return items.first?.whenConnected == true ? "Waiting for connection · Cancel by removing the copy" : "Paused · Reconnect to review delivery" }
         if items.first?.needsReceipt == true { return "Delivery needs checking" }
+        if items.first?.delivery == .needsReview { return "Review the conversation before sending" }
+        if items.first?.delivery == .ready { return "Ready · Choose Send now when you are ready" }
         if paused { return "Paused on this device · Choose Send now to continue" }
         return items.count <= 1 ? "Waiting to send after this turn" : "Waiting to send after this turn · \(items.count)"
     }
@@ -294,6 +296,12 @@ private struct ChatQueueRow: View {
             if item.needsReceipt {
                 Text("The host has not confirmed this message. Check delivery, or copy its text after reviewing the conversation. Removing this copy does not cancel a message already sent.")
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+            } else if item.delivery == .needsReview {
+                Text("Review the live conversation first. Use latest context prepares this message without sending it.")
+                    .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+            } else if item.delivery == .ready {
+                Text("Ready with the conversation context you last opened. Send when you are ready.")
+                    .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             } else if item.delivery == .failed {
                 Text("The last attempt was refused. Your message is still here.")
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
@@ -302,10 +310,16 @@ private struct ChatQueueRow: View {
                 Button("Copy", .copy) { copyText() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                 Spacer(minLength: 0)
-                Button(item.needsReceipt ? "Check delivery" : "Send now", .send, action: onSendNow)
+                Group {
+                    if item.delivery == .needsReview {
+                        Button("Use latest context", .refresh, action: onSendNow)
+                    } else {
+                        Button(item.needsReceipt ? "Check delivery" : "Send now", .send, action: onSendNow)
+                    }
+                }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .disabled(offline)
-                    .help(item.needsReceipt ? "Ask the host whether it accepted this message" : "Stop this turn so this message goes out next")
+                    .help(item.needsReceipt ? "Ask the host whether it accepted this message" : item.delivery == .needsReview ? "Prepare this message using the conversation you last opened, without sending it" : "Stop this turn so this message goes out next")
                 Button(item.needsReceipt ? "Remove copy" : "Remove", .delete, action: onRemove)
                     .buttonStyle(DestructiveButtonStyle(small: true))
                     .environment(\.compactActions, compact)

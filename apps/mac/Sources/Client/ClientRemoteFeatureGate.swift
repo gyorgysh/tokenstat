@@ -61,7 +61,7 @@ enum RemoteHostFeature {
         case .provisioning: 7
         case .inviteCode: 7
         case .agentSignIn: 9
-        case .confirmedSend: 13
+        case .confirmedSend: 14
         case .handoff: 12
         case .workSearch: 12
         }

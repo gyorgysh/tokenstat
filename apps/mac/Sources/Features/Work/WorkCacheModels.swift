@@ -27,16 +27,18 @@ struct CachePutResult: Decodable, Sendable {
 }
 
 struct CachedRecordPayload: Decodable, Sendable {
+    var sendRevision: UInt64?
     var backend: String?
     var title: String
     var savedAt: Date
     var revision: String
     var page: ChatEventPage
 
-    enum CodingKeys: String, CodingKey { case backend, title, savedAt, revision, page }
+    enum CodingKeys: String, CodingKey { case backend, title, savedAt, revision, page, sendRevision }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        sendRevision = try values.decodeIfPresent(UInt64.self, forKey: .sendRevision)
         backend = try values.decodeIfPresent(String.self, forKey: .backend)
         title = try values.decode(String.self, forKey: .title)
         revision = try values.decode(String.self, forKey: .revision)

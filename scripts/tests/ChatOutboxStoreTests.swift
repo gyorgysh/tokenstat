@@ -27,16 +27,18 @@ struct ChatAttachment: Codable, Equatable, Sendable { let id: String; let name: 
         try second.update(ref()) { $0[0].text = "Edited in another window" }
         let checked4 = try first.items(for: ref())[0].text == "Edited in another window"
         assert(checked4)
-        try first.update(ref()) { $0[0].delivery = .sending; $0[0].firstAttemptAt = Date(timeIntervalSince1970: 40); $0[0].attemptedAt = Date(timeIntervalSince1970: 42) }
+        try first.update(ref()) { $0[0].expectedRevision = 7; $0[0].delivery = .sending; $0[0].firstAttemptAt = Date(timeIntervalSince1970: 40); $0[0].attemptedAt = Date(timeIntervalSince1970: 42) }
         let reopened = ChatOutboxStore(directory: root)
         let held = try reopened.items(for: ref())[0]
         assert(held.id == message.id && held.needsReceipt && !held.canEdit)
         assert(held.attemptedAt == Date(timeIntervalSince1970: 42))
+        assert(held.expectedRevision == 7)
         assert(held.firstAttemptAt == Date(timeIntervalSince1970: 40))
         // Existing persisted messages have no firstAttemptAt. They remain
         // readable and retain attemptedAt for the protocol migration.
         let legacy = Data(#"{"id":"legacy","text":"keep me","attachments":[],"delivery":"failed","attemptedAt":42,"whenConnected":false}"#.utf8)
         let decoded = try JSONDecoder().decode(ChatQueuedMessage.self, from: legacy)
+        assert(decoded.expectedRevision == nil)
         assert(decoded.firstAttemptAt == nil && decoded.attemptedAt != nil)
         assert(first.beginDelivery(ref()))
         assert(!first.beginDelivery(ref()))
@@ -63,6 +65,26 @@ struct ChatAttachment: Codable, Equatable, Sendable { let id: String; let name: 
         assert(checked6)
         let checked7 = try first.items(for: ref("host-b")).count == 1
         assert(checked7)
+        // Our acknowledged turn advances its untouched successors only.
+        let sequence = ref("sequence")
+        var accepted = message
+        accepted.expectedRevision = 5
+        var successor = ChatQueuedMessage(id: "next", text: "Next words", attachments: [])
+        successor.expectedRevision = 5
+        var otherContext = successor
+        otherContext.id = "other-context"
+        otherContext.expectedRevision = 4
+        var review = successor
+        review.id = "review"
+        review.delivery = .needsReview
+        try first.update(sequence) { $0 = [accepted, successor, otherContext, review] }
+        let advanced = try first.accept(accepted, revision: 6, for: sequence)
+        assert(advanced.map(\.expectedRevision) == [6, 4, 5])
+        let persistedSequence = try reopened.items(for: sequence)
+        assert(persistedSequence == advanced)
+        try first.update(sequence) { $0 = [accepted, successor] }
+        let unrelated = try first.accept(accepted, revision: 8, for: sequence)
+        assert(unrelated[0].expectedRevision == 5)
         let mode = try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent("outbox.v1.json").path)[.posixPermissions] as? NSNumber
         assert(mode?.intValue == 0o600)
         print("Outbox: durable delivery state, host/account isolation, merged window edits, delivery ownership, failed-write preservation and private files passed")
