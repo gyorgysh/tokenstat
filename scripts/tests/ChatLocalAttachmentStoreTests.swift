@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with WorkReference.swift ChatLocalAttachmentStore.swift ChatDraftStore.swift.
+// Compile with WorkReference.swift ChatLocalAttachmentStore.swift ChatDraftStore.swift. OriginalFileCoordination.swift.
 import Foundation
 struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
     var id: String; var name: String; var mediaType: String?; var size: UInt64?

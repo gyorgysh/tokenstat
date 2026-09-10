@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with WorkReference.swift ChatOutboxStore.swift.
+// Compile with WorkReference.swift ChatOutboxStore.swift. OriginalFileCoordination.swift.
 import Foundation
 
 struct ChatAttachment: Codable, Equatable, Sendable { let id: String; let name: String }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with WorkReference.swift ChatDraftStore.swift
+// Compile with WorkReference.swift ChatDraftStore.swift OriginalFileCoordination.swift.
 // ChatDraftTransition.swift ChatDraftSubmission.swift.
 import Foundation
 

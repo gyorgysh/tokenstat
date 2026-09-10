@@ -26,6 +26,7 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
 @MainActor final class ChatOutboxStore {
     static let shared = ChatOutboxStore()
     static let capacity = 20
+    private let originalAccess: OriginalFileCoordination.Registration
     private let directory: URL
     private let file: URL
     private let byteLimit: Int
@@ -42,9 +43,11 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     enum Failure: Error { case invalid, full, unavailable, conflict }
 
     init(directory: URL? = nil, byteLimit: Int = 8 * 1024 * 1024) {
-        self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("tokenstat-drafts", isDirectory: true)
-        file = self.directory.appendingPathComponent("outbox.v1.json")
+        self.directory = base
+        originalAccess = OriginalFileCoordination.Registration(directory: base)
+        file = base.appendingPathComponent("outbox.v1.json")
         self.byteLimit = min(max(1, byteLimit), 8 * 1024 * 1024)
     }
 
@@ -120,6 +123,7 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     }
 
     private func read() throws -> Envelope {
+        _ = try originalAccess.get()
         guard FileManager.default.fileExists(atPath: file.path) else { return Envelope() }
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
@@ -135,6 +139,7 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     }
 
     private func locked<T>(_ work: () throws -> T) throws -> T {
+        _ = try originalAccess.get()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                attributes: [.posixPermissions: 0o700])
         let lock = Darwin.open(directory.appendingPathComponent("outbox.lock").path, O_CREAT | O_RDWR, 0o600)

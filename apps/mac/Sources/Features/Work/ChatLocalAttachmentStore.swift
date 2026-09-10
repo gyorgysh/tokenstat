@@ -8,6 +8,7 @@ actor ChatLocalAttachmentStore {
     static let shared = ChatLocalAttachmentStore()
     static let maximumBytes = 12 * 1024 * 1024
     private let directory: URL
+    private let originalAccess: OriginalFileCoordination.Registration
     private struct File: Codable {
         let reference: WorkReference
         let attachment: ChatAttachment
@@ -27,11 +28,14 @@ actor ChatLocalAttachmentStore {
         }
     }
     init(directory: URL? = nil) {
-        self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("tokenstat-drafts/files", isDirectory: true)
+        self.directory = base
+        originalAccess = OriginalFileCoordination.Registration(directory: directory == nil ? base.deletingLastPathComponent() : base)
     }
     nonisolated static func isLocal(_ attachment: ChatAttachment) -> Bool { attachment.id.hasPrefix("local-draft:") }
     private func location(_ id: String, reference: WorkReference) throws -> URL {
+        _ = try originalAccess.get()
         guard let key = WorkReferenceKey.conversation(reference), !id.isEmpty, id.utf8.count <= 256 else { throw Failure.invalid }
         let digest = SHA256.hash(data: Data((key + "|" + id).utf8)).map { String(format: "%02x", $0) }.joined()
         return directory.appendingPathComponent(digest + ".json")
@@ -64,6 +68,8 @@ actor ChatLocalAttachmentStore {
         owner.anchor = nil
         let url = try location(attachment.id, reference: owner)
         guard !removals.contains(url), uploads[url] == nil else { throw Failure.invalid }
+        let activity = OriginalFileCoordination.use(try originalAccess.get(), file: url)
+        defer { withExtendedLifetime(activity) {} }
         let encoded = try JSONEncoder().encode(File(reference: owner, attachment: attachment, data: data, uploaded: attachment))
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         #if os(macOS)
@@ -81,6 +87,8 @@ actor ChatLocalAttachmentStore {
         let url = try location(attachment.id, reference: reference)
         guard !removals.contains(url) else { throw Failure.invalid }
         if let existing = uploads[url] { return try await existing.value }
+        let activity = OriginalFileCoordination.use(try originalAccess.get(), file: url)
+        defer { withExtendedLifetime(activity) {} }
         let file = try load(attachment, reference: reference)
         if let uploaded = file.uploaded { return uploaded }
         let task = Task {
@@ -116,6 +124,7 @@ actor ChatLocalAttachmentStore {
         var hasUnreadableFiles = false
     }
     func retained(in scope: WorkReference.Scope) throws -> RetainedListing {
+        _ = try originalAccess.get()
         guard FileManager.default.fileExists(atPath: directory.path) else { return RetainedListing() }
         let urls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
         var result = RetainedListing()
@@ -145,16 +154,19 @@ actor ChatLocalAttachmentStore {
         guard uploads[url] == nil, removals.insert(url).inserted else { throw Failure.invalid }
         defer { removals.remove(url) }
         _ = try load(retained.attachment, reference: retained.reference)
+        let participant = try originalAccess.get()
         try await MainActor.run {
-            guard try check() else { throw Failure.inUse }
-            // No await after checking the references. Every live window writes
-            // draft/outbox intent on this same actor, including unsaved drafts.
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            let encoded = try handle.read(upToCount: 17 * 1024 * 1024) ?? Data()
-            guard encoded.count < 17 * 1024 * 1024,
-                  Data(SHA256.hash(data: encoded)) == retained.fingerprint else { throw Failure.invalid }
-            try FileManager.default.removeItem(at: url)
+            try OriginalFileCoordination.whileSoleParticipant(participant, removing: url) {
+                guard try check() else { throw Failure.inUse }
+                // No await after checking the references. Every live window writes
+                // draft/outbox intent on this same actor, including unsaved drafts.
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                let encoded = try handle.read(upToCount: 17 * 1024 * 1024) ?? Data()
+                guard encoded.count < 17 * 1024 * 1024,
+                      Data(SHA256.hash(data: encoded)) == retained.fingerprint else { throw Failure.invalid }
+                try FileManager.default.removeItem(at: url)
+            }
         }
     }
     func read(_ attachment: ChatAttachment, reference: WorkReference) throws -> Data {

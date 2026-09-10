@@ -67,6 +67,7 @@ final class ChatDraftStore {
     private(set) var occupied: Set<String> = []
 
     @ObservationIgnored private var drafts: [String: ChatDraft] = [:]
+    private let originalAccess: OriginalFileCoordination.Registration
     private let directory: URL
     private let file: URL
     private nonisolated static let queue = DispatchQueue(label: "ai.tokenstat.drafts", qos: .utility)
@@ -82,9 +83,11 @@ final class ChatDraftStore {
         let base = directory ?? FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         )[0].appendingPathComponent("tokenstat-drafts", isDirectory: true)
+        originalAccess = OriginalFileCoordination.Registration(directory: base)
         self.directory = base
         file = base.appendingPathComponent("drafts.v1.json")
         do {
+            _ = try originalAccess.get()
             drafts = try Self.queue.sync { try Self.read(file, byteLimit: self.byteLimit) }
         } catch {
             saveFailed = true
@@ -157,6 +160,7 @@ final class ChatDraftStore {
     /// record rather than storing emptiness.
     func save(text: String, attachments: [ChatAttachment], for reference: WorkReference,
               at date: Date = Date(), newMessage: Bool = false) {
+        guard (try? originalAccess.get()) != nil else { saveFailed = true; return }
         guard let key = Self.key(reference) else { return }
         let draft = ChatDraft(reference: reference,
                               text: text,

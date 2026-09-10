@@ -141,6 +141,8 @@ struct WorkOriginalFilesSheet: View {
         } catch ChatLocalAttachmentStore.Failure.inUse {
             message = "This file is now used by a draft or pending message. It has been kept."
             await refresh()
+        } catch let error as OriginalFileCoordination.Failure {
+            message = error.localizedDescription
         } catch { message = "The file changed or could not be removed. It has been kept; reopen this sheet to review it again." }
     }
 }
