@@ -30,6 +30,7 @@ struct ClientSetupAgentStep: View {
     @State private var failure: ClientSetupFailure?
     @State private var supported: Bool?
     @State private var session: ClientTerminalSession?
+    @State private var loadGeneration = UUID()
 
     private var peer: String? { model.expectedPeer }
 
@@ -97,7 +98,12 @@ struct ClientSetupAgentStep: View {
         }
         .navigationTitle("Agent")
         .accessibilityIdentifier("setup.agents")
-        .task { await load() }
+        .task(id: peer) {
+            supported = nil
+            profiles = []
+            await load()
+        }
+        .onDisappear { loadGeneration = UUID() }
         .fullScreenCover(item: $session) { open in
             ClientTerminalScreen(
                 session: open,
@@ -123,8 +129,16 @@ struct ClientSetupAgentStep: View {
             loading = false
             return
         }
+        let generation = UUID()
+        loadGeneration = generation
         loading = true
-        defer { loading = false }
+        failure = nil
+        defer {
+            if loadGeneration == generation { loading = false }
+        }
+        func isCurrent() -> Bool {
+            !Task.isCancelled && loadGeneration == generation && self.peer == peer
+        }
         // Asked every time, and only a definite answer is remembered. A peer
         // that cannot be reached is not an old peer: this step is entered
         // seconds after a server came up, which is exactly when the tunnel is
@@ -133,15 +147,23 @@ struct ClientSetupAgentStep: View {
         if supported != true {
             do {
                 let version = try await Bridge.peerProtocolVersion(peer)
+                guard isCurrent() else { return }
                 supported = version >= RemoteHostFeature.agentSignIn.minimumProtocol
             } catch {
+                guard isCurrent() else { return }
                 failure = ClientSetupFailure.from(error)
                 return
             }
         }
         guard supported == true else { return }
-        do { profiles = try await ClientRemote.launcherCatalog(peer: peer) }
-        catch { failure = ClientSetupFailure.from(error) }
+        do {
+            let loaded = try await ClientRemote.launcherCatalog(peer: peer)
+            guard isCurrent() else { return }
+            profiles = loaded
+        } catch {
+            guard isCurrent() else { return }
+            failure = ClientSetupFailure.from(error)
+        }
     }
 
     private func install(_ profile: RemoteLaunchProfile) async {
