@@ -126,7 +126,7 @@ enum ChatInbox {
             return nil
         }
         if isDirectory.boolValue { return .folder }
-        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+        guard let data = boundedFileData(from: url), !data.isEmpty else { return nil }
         return .attachment(prepared(
             ChatInboxItem(
                 data: data,
@@ -136,7 +136,26 @@ enum ChatInbox {
         ))
     }
 
+    /// Read one extra byte so oversized imports reach the existing refusal
+    /// without allocating the whole file. This prefix must never be staged.
+    static func boundedFileData(from url: URL) -> Data? {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+              values.isRegularFile == true,
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        do {
+            var result = Data()
+            while result.count <= maxBytes {
+                let chunk = try handle.read(upToCount: min(64 * 1024, maxBytes + 1 - result.count)) ?? Data()
+                if chunk.isEmpty { break }
+                result.append(chunk)
+            }
+            return result
+        } catch { return nil }
+    }
+
     static func prepared(_ item: ChatInboxItem) -> ChatInboxItem {
+        guard item.data.count <= maxBytes else { return item }
         let type = (item.mediaType ?? "").lowercased()
         let ext = (item.name as NSString).pathExtension.lowercased()
         let needsPNG = type.contains("heic")
@@ -455,7 +474,7 @@ actor ChatAttachmentCache {
               let date = values.contentModificationDate,
               Date().timeIntervalSince(date) < lifetime,
               let size = values.fileSize, size > 0, size <= ChatInbox.maxBytes,
-              let data = try? Data(contentsOf: url)
+              let data = ChatInbox.boundedFileData(from: url), data.count <= ChatInbox.maxBytes
         else { return nil }
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
         return data
