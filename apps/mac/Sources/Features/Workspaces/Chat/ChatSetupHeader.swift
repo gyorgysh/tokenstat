@@ -23,6 +23,7 @@ struct ChatSetupHeader: View {
                 form
             }
         }
+        .disabled(model.savedCopy != nil)
         .onAppear { enforceBypassOnly() }
         .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }
     }
@@ -176,7 +177,7 @@ struct ChatSetupHeader: View {
         Binding(
             get: { chat.backend },
             set: { next in
-                Task {
+                performSetupChange(model: model, chat: chat) {
                     if model.backend(for: next)?.gateTier == "bypassOnly" {
                         await model.update(backend: next, autonomy: "bypass")
                     } else {
@@ -190,28 +191,28 @@ struct ChatSetupHeader: View {
     private var modelBinding: Binding<String> {
         Binding(
             get: { chat.model ?? "" },
-            set: { next in Task { await model.update(model: next) } }
+            set: { next in performSetupChange(model: model, chat: chat) { await model.update(model: next) } }
         )
     }
 
     private var effortBinding: Binding<String> {
         Binding(
             get: { chat.effort ?? "" },
-            set: { next in Task { await model.update(effort: next) } }
+            set: { next in performSetupChange(model: model, chat: chat) { await model.update(effort: next) } }
         )
     }
 
     private var modeBinding: Binding<String> {
         Binding(
             get: { chat.mode },
-            set: { next in Task { await model.update(mode: next) } }
+            set: { next in performSetupChange(model: model, chat: chat) { await model.update(mode: next) } }
         )
     }
 
     private var bypassBinding: Binding<Bool> {
         Binding(
             get: { chat.autonomy == "bypass" },
-            set: { next in Task { await model.update(autonomy: next ? "bypass" : "standard") } }
+            set: { next in performSetupChange(model: model, chat: chat) { await model.update(autonomy: next ? "bypass" : "standard") } }
         )
     }
 
@@ -219,14 +220,14 @@ struct ChatSetupHeader: View {
         Binding(
             get: { chat.personaID ?? "" },
             set: { id in
-                Task { await model.applyPersona(model.personas.first { $0.id == id }) }
+                performSetupChange(model: model, chat: chat) { await model.applyPersona(model.personas.first { $0.id == id }) }
             }
         )
     }
 
     private func enforceBypassOnly() {
         guard isBypassOnly, chat.autonomy != "bypass", !chat.running else { return }
-        Task { await model.update(autonomy: "bypass") }
+        performSetupChange(model: model, chat: chat) { await model.update(autonomy: "bypass") }
     }
 }
 
@@ -257,6 +258,10 @@ struct ChatComposerControls: View {
             }
             .onAppear { enforceBypassOnly() }
             .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }
+            .onChange(of: model.currentReference) { _, _ in pickingAgent = false }
+            .onChange(of: model.savedCopy != nil) { _, saved in
+                if saved { pickingAgent = false }
+            }
     }
 
     @ViewBuilder
@@ -337,20 +342,20 @@ struct ChatComposerControls: View {
     private var modeBinding: Binding<String> {
         Binding(
             get: { chat.mode },
-            set: { next in Task { await model.update(mode: next) } }
+            set: { next in performSetupChange(model: model, chat: chat) { await model.update(mode: next) } }
         )
     }
 
     private var autonomyBinding: Binding<String> {
         Binding(
             get: { chat.autonomy },
-            set: { next in Task { await model.update(autonomy: next) } }
+            set: { next in performSetupChange(model: model, chat: chat) { await model.update(autonomy: next) } }
         )
     }
 
     private func enforceBypassOnly() {
         guard isBypassOnly, chat.autonomy != "bypass", !chat.running else { return }
-        Task { await model.update(autonomy: "bypass") }
+        performSetupChange(model: model, chat: chat) { await model.update(autonomy: "bypass") }
     }
 }
 
@@ -586,9 +591,14 @@ struct ChatAgentPanel: View {
 
     private func pick(_ choice: ChatAgentChoices.Choice) {
         guard !updating, !locked else { return }
+        let choices = self.choices
+        let owner = model.currentReference
         updating = true
         Task {
             defer { updating = false }
+            guard let owner, model.currentReference == owner,
+                  model.selected?.id == chat.id, model.savedCopy == nil,
+                  model.selected?.running == false else { return }
             await choices.apply(choice)
         }
     }
@@ -688,5 +698,20 @@ struct ChatCompactPills: View {
         .padding(3)
         .chatControlChrome(cornerRadius: 10)
         .fixedSize(horizontal: true, vertical: true)
+    }
+}
+
+/// Capture before scheduling so a control cannot apply to a later selection.
+@MainActor
+private func performSetupChange(
+    model: ChatModel, chat: ChatConversation,
+    operation: @escaping @MainActor () async -> Void
+) {
+    let owner = model.currentReference
+    Task {
+        guard let owner, model.currentReference == owner,
+              model.selected?.id == chat.id, model.savedCopy == nil,
+              model.selected?.running == false else { return }
+        await operation()
     }
 }
