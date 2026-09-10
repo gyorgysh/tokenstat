@@ -21,6 +21,7 @@ struct ChatInstructionsCard: View {
     @State private var draft = ""
     @State private var showingAdded = false
     @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -56,7 +57,7 @@ struct ChatInstructionsCard: View {
             }
 
             Button {
-                withAnimation(.easeOut(duration: 0.14)) { showingAdded.toggle() }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { showingAdded.toggle() }
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.right")
