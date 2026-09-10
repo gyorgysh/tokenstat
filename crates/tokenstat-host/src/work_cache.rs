@@ -23,6 +23,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
@@ -46,6 +47,9 @@ pub const DEFAULT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// One record's plaintext, sealed as one message. A conversation page with
 /// rendered text fits; a repository never does, which is also enforcement.
 const MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
+// Format safety ceiling, separate from user quotas. Allows the supported
+// 1,000 MB cache plus Base64 and metadata overhead without unbounded I/O.
+const MAX_STORE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_ID_LEN: usize = 256;
 const MAX_SCOPE_LEN: usize = 160;
 
@@ -166,14 +170,26 @@ fn load() -> Result<(Store, bool), String> {
     let path = path();
     let marker = path.with_extension("repaired");
     let take_marker = || fs::remove_file(&marker).is_ok();
-    let body = match fs::read(&path) {
-        Ok(body) => body,
+    let file = match fs::File::open(&path) {
+        Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok((Store::default(), take_marker()));
         }
         Err(e) => return Err(e.to_string()),
     };
-    match serde_json::from_slice::<Store>(&body) {
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_STORE_BYTES {
+        return Err("saved work file exceeds supported size or is not a regular file".into());
+    }
+    let mut reader = BufReader::new(file).take(MAX_STORE_BYTES + 1);
+    let decoded = serde_json::from_reader::<_, Store>(&mut reader);
+    // The descriptor may grow after metadata was checked. Exhausting this
+    // bound is a size failure, never evidence that the file should be repaired.
+    if reader.limit() == 0 {
+        return Err("saved work file exceeds supported size".into());
+    }
+    drop(reader);
+    match decoded {
         Ok(store)
             if store.schema_version == 1
                 || (store.schema_version == 0 && store.scopes.is_empty()) =>
@@ -182,6 +198,7 @@ fn load() -> Result<(Store, bool), String> {
             Ok((store, take_marker()))
         }
         Ok(_) => Err("unsupported work cache version".into()),
+        Err(error) if error.is_io() => Err(error.to_string()),
         Err(_) => {
             let quarantine = path.with_extension("corrupt.json");
             fs::rename(&path, &quarantine)
@@ -192,8 +209,34 @@ fn load() -> Result<(Store, bool), String> {
     }
 }
 
+struct LimitedWriter<W> {
+    inner: W,
+    remaining: u64,
+}
+
+impl<W: Write> Write for LimitedWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            return Err(std::io::Error::other(
+                "saved work file exceeds supported size",
+            ));
+        }
+        let written = self.inner.write(bytes)?;
+        self.remaining -= written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 // Caller holds the transaction lock from before load through replacement.
 fn save(store: &mut Store) -> Result<(), String> {
+    save_bounded(store, MAX_STORE_BYTES)
+}
+
+fn save_bounded(store: &mut Store, limit: u64) -> Result<(), String> {
     store.schema_version = 1;
     let path = path();
     if let Some(parent) = path.parent() {
@@ -207,10 +250,15 @@ fn save(store: &mut Store) -> Result<(), String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    use std::io::Write;
     let mut file = options.open(&temp).map_err(|e| e.to_string())?;
-    file.write_all(&serde_json::to_vec(store).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    {
+        let mut writer = LimitedWriter {
+            inner: BufWriter::new(&mut file),
+            remaining: limit,
+        };
+        serde_json::to_writer(&mut writer, store).map_err(|error| error.to_string())?;
+        writer.flush().map_err(|error| error.to_string())?;
+    }
     file.sync_all().map_err(|e| e.to_string())?;
     drop(file);
     #[cfg(unix)]
@@ -1180,6 +1228,40 @@ mod tests {
             let listed = list("s").expect("list");
             assert_eq!(listed["repaired"], json!(true));
             assert_eq!(listed["records"].as_array().unwrap().len(), 0);
+        });
+    }
+
+    #[test]
+    fn oversized_store_is_refused_without_reading_or_quarantining_it() {
+        with_path(fresh_path(), || {
+            let file = fs::File::create(path()).unwrap();
+            file.set_len(MAX_STORE_BYTES + 1).unwrap();
+            drop(file);
+            assert!(list("s").unwrap_err().contains("supported size"));
+            assert!(put(&params("s", "new")).is_err());
+            assert_eq!(fs::metadata(path()).unwrap().len(), MAX_STORE_BYTES + 1);
+            assert!(!path().with_extension("corrupt.json").exists());
+        });
+    }
+
+    #[test]
+    fn bounded_serialization_preserves_previous_store_on_overflow() {
+        with_path(fresh_path(), || {
+            put(&params("s", "kept")).unwrap();
+            let original = fs::read(path()).unwrap();
+            let mut store: Store = serde_json::from_slice(&original).unwrap();
+            save_bounded(&mut store, original.len() as u64).unwrap();
+            assert_eq!(fs::read(path()).unwrap(), original);
+            assert!(save_bounded(&mut store, original.len() as u64 - 1).is_err());
+            assert_eq!(fs::read(path()).unwrap(), original);
+            assert!(
+                get(&KeyedParams {
+                    key: KEY.into(),
+                    scope: "s".into(),
+                    id: "kept".into()
+                })
+                .is_ok()
+            );
         });
     }
 
