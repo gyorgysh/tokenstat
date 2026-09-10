@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ClientSetupState.swift. No account, network or credentials used.
+// Compile with ClientSetupState.swift and ClientSetupStore.swift. No account or network used.
 //
 // The two stubs below stand in for `ActionIcon` and `BridgeError`, which live
 // in files that pull in the whole app. They mirror only what this file uses.
@@ -28,7 +28,37 @@ struct ClientSetupStateTests {
         drafts()
         failures()
         scopes()
+        try storedDrafts()
         print("ClientSetupStateTests passed")
+    }
+
+    static func storedDrafts() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ClientSetupStore(directory: directory)
+        let saved = draft()
+        try store.save(saved)
+        let restored = try store.load(scope: saved.scope)
+        precondition(restored == saved)
+        let other = try store.load(scope: scope(account: "another"))
+        precondition(other == nil)
+        var oversized = saved
+        oversized.fingerprint = String(repeating: "x", count: 40_000)
+        do {
+            try store.save(oversized)
+            preconditionFailure("An oversized checkpoint must not replace readable progress")
+        } catch ClientSetupDraftError.invalid {}
+        let retained = try store.load(scope: saved.scope)
+        precondition(retained == saved)
+        let file = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)[0]
+        try Data(repeating: 120, count: 1024 * 1024).write(to: file)
+        do {
+            _ = try store.load(scope: saved.scope)
+            preconditionFailure("An oversized file must be refused")
+        } catch ClientSetupDraftError.invalid {}
+        try store.remove(scope: saved.scope)
+        let removed = try store.load(scope: saved.scope)
+        precondition(removed == nil)
     }
 
     static func identities() {

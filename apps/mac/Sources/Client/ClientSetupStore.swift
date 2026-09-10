@@ -5,6 +5,7 @@ import Foundation
 
 /// Small, atomic, account-scoped checkpoints. This store never receives secrets.
 struct ClientSetupStore {
+    private static let maximumBytes = 32_768
     var directory: URL
 
     init(directory: URL? = nil) {
@@ -16,8 +17,10 @@ struct ClientSetupStore {
     func load(scope: ClientSetupScope) throws -> ClientSetupDraft? {
         let url = try fileURL(scope: scope)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let data = try Data(contentsOf: url)
-        guard data.count <= 32_768 else { throw ClientSetupDraftError.invalid }
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        let data = try file.read(upToCount: Self.maximumBytes + 1) ?? Data()
+        guard data.count <= Self.maximumBytes else { throw ClientSetupDraftError.invalid }
         let draft = try JSONDecoder().decode(ClientSetupDraft.self, from: data)
         guard draft.version == ClientSetupDraft.currentVersion else {
             throw ClientSetupDraftError.unsupportedVersion
@@ -29,9 +32,10 @@ struct ClientSetupStore {
 
     func save(_ draft: ClientSetupDraft) throws {
         try draft.validate()
+        let data = try JSONEncoder().encode(draft)
+        guard data.count <= Self.maximumBytes else { throw ClientSetupDraftError.invalid }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
-        let data = try JSONEncoder().encode(draft)
         let url = try fileURL(scope: draft.scope)
         try data.write(to: url, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
