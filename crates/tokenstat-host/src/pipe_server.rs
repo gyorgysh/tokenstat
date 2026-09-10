@@ -136,6 +136,7 @@ pub fn serve(listener: PipeListener, session: Session) -> Result<(), String> {
         crate::automations::start_scheduler();
         crate::workflows::start_scheduler();
         crate::sync_scheduler::start(Arc::clone(&shared));
+        crate::host_update::start_scheduler();
     }
 
     crate::host_policy::start_runtime();

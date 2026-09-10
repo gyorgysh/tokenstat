@@ -488,6 +488,10 @@ struct ClientDeviceDetailView: View {
                     reach
                 }
                 identity
+                // Which release that computer runs, and the button that moves
+                // it. A server has no application to update and nobody at the
+                // keyboard, so this is the only place it can be done from.
+                software
                 // The same explanation the Workspaces tab carries, with this
                 // machine's key beside it: somebody reading a device page is
                 // asking what a connection to it actually is.
@@ -613,6 +617,20 @@ struct ClientDeviceDetailView: View {
         .padding(Theme.Space.m)
         .cardSurface()
         .accessibilityElement(children: .combine)
+    }
+
+    /// The release a paired host runs. Only for a host, and only while it is
+    /// awake: a machine that cannot be reached cannot be asked, and this phone
+    /// is not a host at all.
+    @ViewBuilder
+    private var software: some View {
+        if !isThisDevice,
+           let key = machine.publicIdentity,
+           !key.isEmpty,
+           machine.isHost,
+           machine.online == true {
+            HostUpdateCard(peer: key)
+        }
     }
 
     /// Power, CPU and memory after a hop to an awake host. This phone is

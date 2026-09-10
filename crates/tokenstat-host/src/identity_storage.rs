@@ -26,6 +26,14 @@ impl Drop for Guard {
 }
 
 pub(crate) fn lock(name: &str, mutex: &'static Mutex<()>) -> Result<Guard, String> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || name.contains('\0')
+    {
+        return Err("Invalid storage lock name".into());
+    }
     let directory = tokenstat_identity::identity_dir().map_err(|error| error.to_string())?;
     lock_at(&directory.join(name), mutex)
 }

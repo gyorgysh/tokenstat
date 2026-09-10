@@ -209,6 +209,10 @@ ALLOWED = [
     # mode pills: the chosen one is marked by its fill, and a glyph on each
     # would be one symbol repeated across a row of three.
     ("Client/ClientHomeEditor.swift", "preset = option"),
+    # A ranking row. The whole card is the label and the row already carries
+    # its value bar and counts; a glyph on every row would repeat one symbol
+    # down the list.
+    ("Features/Insights/InsightsView.swift", "Button { select(row) } label:"),
 ]
 
 # `, .save)` is the usual shape. `.icon` covers a button whose glyph is chosen

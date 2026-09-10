@@ -214,7 +214,7 @@ struct InsightsView: View {
 
     private func rankingCard(title: String, rows: [Bucket], tab: InsightsModel.Tab) -> some View {
         Card(title: title, subtitle: "Ranked by tokens · share of this breakdown", mark: tab == .harnesses ? "mark_automation" : "mark_insights",
-             accessory: AnyView(Button("View all (\(rows.count))") { model.tab = tab }
+             accessory: AnyView(Button("View all (\(rows.count))", .more) { model.tab = tab }
                 .buttonStyle(.plain).font(Theme.caption).foregroundStyle(Theme.accent)), fillsHeight: true) {
             InsightRanking(rows: rows, isHarness: tab == .harnesses, showsValue: tab == .models) { row in
                 model.tab = tab

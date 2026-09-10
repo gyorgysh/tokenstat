@@ -248,7 +248,7 @@ pub fn search(
     let context = Context {
         scope: owner.scope.clone(),
         requester: owner.requester.clone(),
-        generation: u64::from_le_bytes(hash[..8].try_into().expect("SHA256 length")),
+        generation: u64::from_le_bytes(hash.first_chunk::<8>().copied().unwrap_or_default()),
     };
     let now = Instant::now();
     let offset = if request.cursor.is_some() {

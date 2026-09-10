@@ -302,6 +302,96 @@ fn apply_now() {
     apply_hosting(hosting_active_now());
 }
 
+/// Whether something will start this daemon again if it stops now.
+///
+/// A different question from [`supervisor_restarts_on_clean_exit`], and it
+/// needs the opposite answer when nothing is known, which is why the two
+/// cannot be one boolean.
+///
+/// That one asks "would exiting bounce me", so an unreadable launch agent has
+/// to mean yes: guessing no there drops a daemon into an exit loop. This asks
+/// "may I stop, expecting to be started", so an unreadable launch agent has to
+/// mean no: guessing yes here takes the machine offline for good, in the
+/// middle of the update somebody asked for.
+///
+/// Both fall back to staying up. They just spell it differently.
+///
+/// Positive evidence only, per platform, and never under test: a test binary
+/// has no supervisor and must never be exited.
+pub(crate) fn supervisor_would_restart_this_process() -> bool {
+    if cfg!(test) {
+        return false;
+    }
+    platform_would_restart()
+}
+
+/// A loaded launch agent with KeepAlive on is the only launchd arrangement
+/// that starts this again by itself. With Always-on off the app owns the
+/// helper's lifetime and starts one when somebody opens it.
+#[cfg(target_os = "macos")]
+fn platform_would_restart() -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
+    let path = PathBuf::from(home).join("Library/LaunchAgents/ai.tokenstat.hostd.plist");
+    fs::read_to_string(path)
+        .map(|text| plist_restarts_on_clean_exit(&text))
+        .unwrap_or(false)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn platform_would_restart() -> bool {
+    systemd_unit_restarts_always()
+}
+
+/// The per-user task carries a restart count only where Always-on is on.
+/// See scripts/install-host-task.ps1.
+#[cfg(windows)]
+fn platform_would_restart() -> bool {
+    always_on()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn platform_would_restart() -> bool {
+    false
+}
+
+/// Whether an installed unit says systemd will bring this back.
+///
+/// The user unit first, because that is what `tokenstat host install` writes
+/// for an ordinary account, then the system one.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn systemd_unit_restarts_always() -> bool {
+    let user = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".config/systemd/user/tokenstat-host.service"));
+    let candidates = user
+        .into_iter()
+        .chain([PathBuf::from("/etc/systemd/system/tokenstat-host.service")]);
+    candidates.into_iter().any(|path| {
+        fs::read_to_string(path)
+            .map(|text| unit_restarts_always(&text))
+            .unwrap_or(false)
+    })
+}
+
+/// `Restart=always` in a unit body, ignoring commented lines.
+///
+/// Split out so it can be tested without a systemd machine.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+pub(crate) fn unit_restarts_always(text: &str) -> bool {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .any(|line| {
+            let mut parts = line.splitn(2, '=');
+            let (Some(key), Some(value)) = (parts.next(), parts.next()) else {
+                return false;
+            };
+            key.trim().eq_ignore_ascii_case("Restart")
+                && value.trim().eq_ignore_ascii_case("always")
+        })
+}
+
 /// True when the installed supervisor would start this process again
 /// after a clean exit. A stale KeepAlive=true plus `exit(0)` is a loop.
 #[cfg(all(unix, not(test)))]
@@ -659,6 +749,34 @@ mod tests {
             std::env::temp_dir().join(format!("tokenstat-no-owner-{}.lock", std::process::id()));
         let _ = fs::remove_file(&path);
         assert!(!owner_present_at(&path));
+    }
+
+    /// The two supervisor questions need opposite answers when nothing is
+    /// known, and both of those answers mean "stay up". Reading one as the
+    /// other is how a daemon updates itself into being gone.
+    #[test]
+    fn an_unknown_supervisor_is_never_taken_as_permission_to_exit() {
+        // Under test the answer is always no, whatever this machine has
+        // installed, because a test binary has no supervisor at all.
+        assert!(!supervisor_would_restart_this_process());
+    }
+
+    #[test]
+    fn a_unit_promises_a_restart_only_when_it_says_so() {
+        let always = "[Service]\nExecStart=/x\nRestart=always\nRestartSec=2\n";
+        assert!(unit_restarts_always(always));
+        assert!(unit_restarts_always("[Service]\n  Restart=always  \n"));
+        assert!(unit_restarts_always("[Service]\nRestart = always\n"));
+        assert!(unit_restarts_always("[Service]\nrestart=Always\n"));
+        for other in [
+            "[Service]\nExecStart=/x\n",
+            "[Service]\nRestart=on-failure\n",
+            "[Service]\n# Restart=always\n",
+            "[Service]\n#Restart = always\n",
+            "",
+        ] {
+            assert!(!unit_restarts_always(other), "{other:?}");
+        }
     }
 
     #[test]

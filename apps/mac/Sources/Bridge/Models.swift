@@ -1557,6 +1557,51 @@ struct HostStats: Codable, Sendable, Hashable {
     var ramTotalBytes: UInt64?
 }
 
+/// What a host knows about its own release. See `host.updateCheck`.
+///
+/// `hostVersion` is what the daemon process is *running*, which after an
+/// applied update is not what is on disk. That is the whole reason
+/// `restartPending` exists as a separate field rather than being inferred
+/// from a version comparison.
+struct HostUpdateState: Codable, Sendable, Hashable {
+    var hostVersion: String
+    var protocolVersion: String
+    var latest: String
+    var newer: Bool
+    var htmlUrl: String
+    var autoApply: Bool
+    var restartPending: Bool
+    var liveWork: Int
+    /// Whether stopping the daemon would get it started again. False means an
+    /// update installs but cannot come into use on its own.
+    var canRestart: Bool
+    /// True where the desktop application owns the helper, so updating means
+    /// staging the application's download rather than replacing binaries.
+    var appManaged: Bool
+    var appImage: String?
+}
+
+/// What one `host.updateApply` did.
+///
+/// Every field is optional because two different things answer here: a host
+/// that replaced its own pair, and an application-managed helper that staged a
+/// download instead. Neither shape is a subset of the other.
+struct HostUpdateResult: Codable, Sendable, Hashable {
+    var from: String? = nil
+    var to: String? = nil
+    var hostBinaryUpdated: Bool? = nil
+    /// The daemon is about to stop and be started again. The connection
+    /// dropping after this is the update working, not failing.
+    var restarting: Bool? = nil
+    var restartPending: Bool? = nil
+    var liveWork: Int? = nil
+    var canRestart: Bool? = nil
+    var appManaged: Bool? = nil
+    var appImage: String? = nil
+    var hostVersion: String? = nil
+    var detail: String? = nil
+}
+
 /// A machine on the account.
 ///
 /// Field names follow the server (`id`, `label`, `last_sync_at`), not this

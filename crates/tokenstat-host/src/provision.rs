@@ -253,7 +253,7 @@ fn journal_output(command: &mut std::process::Command) -> Result<String, String>
         if output.is_err() {
             let _ = child.kill();
         }
-        let status = child.wait().map_err(|error| error.to_string())?;
+        let status = wait_bounded(&mut child).map_err(|error| error.to_string())?;
         let errors = errors
             .join()
             .map_err(|_| "Journal error reader stopped")??;
@@ -263,6 +263,29 @@ fn journal_output(command: &mut std::process::Command) -> Result<String, String>
         }
         Ok(output)
     })
+}
+
+/// Wait for a helper with a bound, so a hung reader cannot hang dispatch.
+///
+/// `journalctl` with a line count normally exits at once. If it does not,
+/// kill it and report that rather than blocking the caller forever.
+#[cfg(any(target_os = "linux", test))]
+fn wait_bounded(child: &mut std::process::Child) -> std::io::Result<std::process::ExitStatus> {
+    use std::time::{Duration, Instant};
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match child.try_wait()? {
+            Some(status) => return Ok(status),
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Could not read the journal: timed out",
+                ));
+            }
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
 }
 
 #[cfg(any(target_os = "linux", test))]

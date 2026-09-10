@@ -21,6 +21,7 @@ enum RemoteHostFeature {
     case confirmedSend
     case handoff
     case workSearch
+    case hostUpdate
 
     var title: String {
         switch self {
@@ -35,6 +36,7 @@ enum RemoteHostFeature {
         case .confirmedSend: "Confirming a sent message"
         case .handoff: "Handoff"
         case .workSearch: "Search work"
+        case .hostUpdate: "Updating this computer"
         }
     }
 
@@ -64,6 +66,10 @@ enum RemoteHostFeature {
         case .confirmedSend: 14
         case .handoff: 12
         case .workSearch: 12
+        // Added inside 14, before any host spoke it. The released hosts are
+        // on 6, so "says 14" and "has this" are the same statement and there
+        // was nothing to bump.
+        case .hostUpdate: 14
         }
     }
 
@@ -80,6 +86,7 @@ enum RemoteHostFeature {
         case .confirmedSend: "checkmark.message.fill"
         case .handoff: "arrow.left.arrow.right"
         case .workSearch: "magnifyingglass"
+        case .hostUpdate: "arrow.down.circle"
         }
     }
 

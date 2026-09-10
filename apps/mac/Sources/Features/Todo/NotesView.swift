@@ -250,7 +250,7 @@ struct NotesView: View {
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
                 if !search.isEmpty {
-                    Button("Clear search") { search = "" }
+                    Button("Clear search", .dismiss) { search = "" }
                         .buttonStyle(.plain).foregroundStyle(Theme.accent)
                 } else if !showingArchive {
                     Text("Capture your first note above. You can turn it into a task later.")

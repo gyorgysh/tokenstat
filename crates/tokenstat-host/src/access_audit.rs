@@ -34,6 +34,11 @@ pub(crate) enum Authority {
     Install,
     /// A code minted at the console and redeemed by a device.
     Invite,
+    /// An approved device, reaching this machine over the tunnel.
+    ///
+    /// Not a door a local caller may claim: [`Authority::parse`] refuses it,
+    /// so it appears in the log only where this crate wrote it itself.
+    Device,
 }
 
 impl Authority {
@@ -42,6 +47,7 @@ impl Authority {
             Self::Console => "console",
             Self::Install => "install",
             Self::Invite => "invite",
+            Self::Device => "device",
         }
     }
 

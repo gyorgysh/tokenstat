@@ -466,7 +466,56 @@ fn download_asset(
 }
 
 /// Download, verify, and replace the current executable.
+/// The pair this installs is the CLI and the daemon beside it, so the path it
+/// is given has to be the CLI's.
+///
+/// Checked rather than trusted. A caller that gets this wrong does not fail,
+/// it installs one binary over the other and finds out at the next restart,
+/// which is the worst possible moment and names no cause.
+fn require_cli_path(dest: &Path) -> Result<(), UpdateError> {
+    let expected = if cfg!(windows) {
+        "tokenstat.exe"
+    } else {
+        "tokenstat"
+    };
+    let name = dest
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    // Case-insensitively on Windows, where two spellings are one path.
+    let matches = if cfg!(windows) {
+        name.eq_ignore_ascii_case(expected)
+    } else {
+        name == expected
+    };
+    if !matches {
+        return Err(UpdateError::Message(format!(
+            "refusing to update {}: an update replaces {expected} and the daemon beside it, \
+             so this is not a path it may be pointed at",
+            dest.display()
+        )));
+    }
+    Ok(())
+}
+
 pub fn apply_update() -> Result<ApplyReport, UpdateError> {
+    let dest = std::env::current_exe()
+        .map_err(|e| UpdateError::Message(format!("cannot locate current binary: {e}")))?;
+    apply_update_to(&dest)
+}
+
+/// The same update, with the command line tool's path given rather than read
+/// from `current_exe`.
+///
+/// `current_exe` is the right answer only for the CLI replacing itself. What
+/// this installs is a pair: the CLI at `dest`, and the daemon beside it. Point
+/// it at the daemon and it writes the CLI's bytes to the daemon's path, and
+/// nothing downstream notices, because `verify_candidate` checks a version
+/// number and that `--help` says "tokenstat", which both binaries do. The next
+/// service restart then runs the CLI as the daemon. So the path is a
+/// parameter, and the one shape it is allowed to have is checked below.
+pub fn apply_update_to(dest: &Path) -> Result<ApplyReport, UpdateError> {
+    require_cli_path(dest)?;
     let check = check_latest()?;
     if !check.newer {
         return Err(UpdateError::Message(format!(
@@ -504,9 +553,7 @@ pub fn apply_update() -> Result<ApplyReport, UpdateError> {
     let archive_path = tmp.join(asset_name);
     fs::write(&archive_path, &archive_bytes)?;
     let extracted = extract_binary(&archive_path, &tmp)?;
-    let dest = std::env::current_exe()
-        .map_err(|e| UpdateError::Message(format!("cannot locate current binary: {e}")))?;
-    if !is_safe_replace_path(&dest) {
+    if !is_safe_replace_path(dest) {
         return Err(UpdateError::Message(format!(
             "refusing to replace {} (install via cargo/homebrew, or copy to ~/.local/bin first)",
             dest.display()
@@ -515,7 +562,7 @@ pub fn apply_update() -> Result<ApplyReport, UpdateError> {
     // A previous cycle may have been unable to delete the binary it replaced
     // (Windows keeps a running image locked against deletion). Clear it now,
     // while nothing is holding it, rather than leaving it forever.
-    sweep_replaced_binary(&dest);
+    sweep_replaced_binary(dest);
 
     make_runnable(&extracted)?;
     #[cfg(target_os = "macos")]
@@ -532,23 +579,23 @@ pub fn apply_update() -> Result<ApplyReport, UpdateError> {
     // wrong-architecture asset, or a missing system library all pass a hash and
     // then fail on first use, by which point the working binary is gone. So run
     // the candidate and make it prove itself before it replaces anything.
-    verify_candidate(&extracted, &check.latest, &dest)?;
+    verify_candidate(&extracted, &check.latest, dest)?;
 
     let host_binary_updated = cfg!(unix) && extracted.with_file_name("tokenstat-hostd").is_file();
     #[cfg(unix)]
-    replace_unix_release(&extracted, &dest, &check.latest)?;
+    replace_unix_release(&extracted, dest, &check.latest)?;
     #[cfg(not(unix))]
-    replace_executable(&extracted, &dest)?;
+    replace_executable(&extracted, dest)?;
     #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("xattr").args(["-cr"]).arg(&dest).status();
+        let _ = Command::new("xattr").args(["-cr"]).arg(dest).status();
     }
 
     let _ = fs::remove_dir_all(&tmp);
     Ok(ApplyReport {
         from: check.current,
         to: check.latest,
-        path: dest,
+        path: dest.to_path_buf(),
         host_binary_updated,
     })
 }
@@ -1005,6 +1052,15 @@ pub enum ScheduledUpdate {
 /// and a scan's soft check earlier in the day would otherwise cancel this run.
 /// It still touches the stamp, so scans stay quiet afterwards.
 pub fn scheduled_update() -> Result<ScheduledUpdate, UpdateError> {
+    let dest = std::env::current_exe().unwrap_or_default();
+    scheduled_update_to(&dest)
+}
+
+/// The scheduled update, for a caller whose own executable is not the CLI.
+///
+/// The daemon runs this on its own timer and must replace the CLI beside it,
+/// not itself. See [`apply_update_to`].
+pub fn scheduled_update_to(dest: &Path) -> Result<ScheduledUpdate, UpdateError> {
     if !auto_apply_enabled() {
         return Ok(ScheduledUpdate::Disabled);
     }
@@ -1022,14 +1078,13 @@ pub fn scheduled_update() -> Result<ScheduledUpdate, UpdateError> {
     if !check.newer {
         return Ok(ScheduledUpdate::UpToDate(check.current));
     }
-    let dest = std::env::current_exe().unwrap_or_default();
-    if !is_safe_replace_path(&dest) {
+    if !is_safe_replace_path(dest) {
         return Ok(ScheduledUpdate::NotOurs {
             latest: check.latest,
-            path: dest,
+            path: dest.to_path_buf(),
         });
     }
-    let report = apply_update()?;
+    let report = apply_update_to(dest)?;
     Ok(ScheduledUpdate::Applied(report))
 }
 
@@ -1300,6 +1355,31 @@ fn touch_check_stamp() -> Result<(), UpdateError> {
 
 #[cfg(test)]
 mod tests {
+    /// The daemon calls this, and its own `current_exe` is the wrong answer.
+    ///
+    /// Nothing further down would catch the mistake: `verify_candidate` reads a
+    /// version number and looks for "tokenstat" in `--help`, and the CLI and
+    /// the daemon both satisfy that. The failure would be a daemon path holding
+    /// the CLI's bytes, discovered at the next restart.
+    #[test]
+    fn an_update_may_only_be_pointed_at_the_command_line_tool() {
+        use super::require_cli_path;
+        use std::path::Path;
+
+        assert!(require_cli_path(Path::new("/home/a/.local/bin/tokenstat")).is_ok());
+        for wrong in [
+            "/home/a/.local/bin/tokenstat-hostd",
+            "/home/a/.local/bin/tokenstat-hostd.exe",
+            "/home/a/.local/bin/",
+            "/home/a/.local/bin/tokenstatd",
+        ] {
+            let error = require_cli_path(Path::new(wrong))
+                .expect_err(&format!("{wrong} must be refused"))
+                .to_string();
+            assert!(error.contains("refusing to update"), "{wrong}: {error}");
+        }
+    }
+
     use super::*;
 
     #[test]

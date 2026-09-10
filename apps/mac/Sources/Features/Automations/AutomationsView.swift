@@ -781,7 +781,7 @@ private struct AutomationRow: View {
                 Button("Run history", .history) { showingHistory = true }
                 Button("Edit automation", .edit) { editing = true }
                 Divider()
-                Button("Delete automation", role: .destructive) { confirmingDelete = true }
+                Button("Delete automation", .delete, role: .destructive) { confirmingDelete = true }
             } label: {
                 Image(systemName: "ellipsis").frame(width: 24, height: 24)
             }

@@ -155,7 +155,7 @@ struct HostStatsBar: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)
-        .hostStatsSurface()
+        .machineCardSurface()
         .accessibilityElement(children: .combine)
         .task(id: "\(peer ?? "local")-\(online)-\(local)") {
             guard local || (online && peer != nil) else { return }
@@ -293,9 +293,12 @@ struct HostStatsBar: View {
     }
 }
 
-private extension View {
+extension View {
     /// Opaque panel on both platforms. `cardSurface` is iOS-only.
-    func hostStatsSurface() -> some View {
+    ///
+    /// Shared by the readings bar and the update card, so it is named for what
+    /// it is rather than for whichever of them asked first.
+    func machineCardSurface() -> some View {
         #if os(macOS)
         background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             .overlay {

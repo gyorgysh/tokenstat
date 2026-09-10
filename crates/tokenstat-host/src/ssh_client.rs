@@ -10,7 +10,7 @@ use russh::client;
 use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{ChannelMsg, Disconnect};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::DispatchError;
 use tokio::sync::mpsc;
@@ -1110,38 +1110,46 @@ mod tests {
         let mut status = None;
         assert!(!provision_message(ChannelMsg::Eof, &mut out, &mut status).unwrap());
         assert!(provision_result(&out, status).is_err());
-        assert!(!provision_message(
-            ChannelMsg::ExitStatus { exit_status: 23 },
-            &mut out,
-            &mut status
-        )
-        .unwrap());
+        assert!(
+            !provision_message(
+                ChannelMsg::ExitStatus { exit_status: 23 },
+                &mut out,
+                &mut status
+            )
+            .unwrap()
+        );
         assert!(provision_message(ChannelMsg::Close, &mut out, &mut status).unwrap());
-        assert!(provision_result(&out, status)
-            .unwrap_err()
-            .message
-            .contains("exit 23"));
+        assert!(
+            provision_result(&out, status)
+                .unwrap_err()
+                .message
+                .contains("exit 23")
+        );
         assert!(provision_message(ChannelMsg::Failure, &mut out, &mut status).is_err());
 
         status = Some(0);
-        assert!(!provision_message(
-            ChannelMsg::Data {
-                data: b"ready".to_vec().into()
-            },
-            &mut out,
-            &mut status
-        )
-        .unwrap());
+        assert!(
+            !provision_message(
+                ChannelMsg::Data {
+                    data: b"ready".to_vec().into()
+                },
+                &mut out,
+                &mut status
+            )
+            .unwrap()
+        );
         assert_eq!(provision_result(&out, status).unwrap(), "ready");
         let before = out.clone();
-        assert!(provision_message(
-            ChannelMsg::Data {
-                data: vec![b'x'; 16 * 1024].into()
-            },
-            &mut out,
-            &mut status
-        )
-        .is_err());
+        assert!(
+            provision_message(
+                ChannelMsg::Data {
+                    data: vec![b'x'; 16 * 1024].into()
+                },
+                &mut out,
+                &mut status
+            )
+            .is_err()
+        );
         assert_eq!(out, before, "a truncated result must not look successful");
     }
 

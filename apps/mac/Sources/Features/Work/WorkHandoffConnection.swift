@@ -60,14 +60,20 @@ final class WorkHandoffConnection {
     }
 
     func makeModel() -> WorkHandoffModel {
-        WorkHandoffModel(reference: reference, ownsDestination: { [self] in isCurrent },
-            fetch: { [self] in
+        WorkHandoffModel(reference: reference, ownsDestination: { [weak self] in self?.isCurrent ?? false },
+            fetch: { [weak self] in
+                guard let self else {
+                    throw Unavailable(message: "Open this conversation again to continue sharing.")
+                }
                 try await prepare()
                 let result = try await Bridge.workHandoff(workspaceID: reference.workspaceID,
                     conversationID: conversationID, peer: peer)
                 try requireCurrent()
                 return result
-            }, put: { [self] request in
+            }, put: { [weak self] request in
+                guard let self else {
+                    throw Unavailable(message: "Open this conversation again to continue sharing.")
+                }
                 try await prepare()
                 let result = try await Bridge.putWorkHandoff(workspaceID: reference.workspaceID,
                     conversationID: conversationID, request: request, peer: peer)

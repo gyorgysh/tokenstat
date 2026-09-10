@@ -126,6 +126,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
         do {
             fresh = try open()
         } catch {
+            abandonReservation()
             throw Self.unreachable(path: path)
         }
         do {
@@ -158,10 +159,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// number of people clicking, never by pollers.
     func callUrgent(method: String, params: String, patience: TimeInterval) throws -> String {
         let request = Self.line(method: method, params: params)
+        reserveUrgent()
         let fresh: Connection
         do {
             fresh = try open()
         } catch {
+            abandonReservation()
             throw Self.unreachable(path: path)
         }
         do {
@@ -297,8 +300,13 @@ final class SocketTransport: Transport, @unchecked Sendable {
         lock.unlock()
     }
 
-    /// A connection to use for one call: a pooled one, a new one, or nil when
-    /// the ceiling is reached and the caller should open its own path.
+    /// A connection to use for one call: a pooled one, a new one's reserved
+    /// slot, or a wait for a free slot.
+    ///
+    /// Returns a pooled connection, or nil with a slot already reserved for a
+    /// fresh one. Reserving under the lock is what keeps a burst from opening
+    /// one connection per thread past the ceiling: the count moves before the
+    /// lock is released, not after the connect finishes.
     ///
     /// Throws only when the wait for a free slot ran out, which is the same
     /// silence the call itself would have reported.
@@ -308,7 +316,10 @@ final class SocketTransport: Transport, @unchecked Sendable {
         let deadline = Date().addingTimeInterval(patience)
         while true {
             if let pooled = idle.popLast() { return pooled }
-            if live < Self.maxLive { return nil }
+            if live < Self.maxLive {
+                live += 1
+                return nil
+            }
             // Every connection is busy. Waiting is right: opening more is what
             // turns a burst into a thread storm on the daemon.
             if !lock.wait(until: deadline) {
@@ -317,13 +328,29 @@ final class SocketTransport: Transport, @unchecked Sendable {
         }
     }
 
-    /// Open a connection against the ceiling. The caller has no pooled one.
+    /// Open a connection for a slot reserved by `acquire` or `reserveUrgent`.
+    /// The caller owns the reservation: a failed connect must call
+    /// `abandonReservation`, a finished call must go through `release`.
     private func open() throws -> Connection {
-        let connection = try Connection(path: path)
+        try Connection(path: path)
+    }
+
+    /// Urgent calls bypass the ceiling but not the accounting: the daemon
+    /// still runs a thread per connection, so the slot is counted from before
+    /// the connect, exactly like `acquire`.
+    private func reserveUrgent() {
         lock.lock()
         live += 1
         lock.unlock()
-        return connection
+    }
+
+    /// Give back a reservation whose connect failed, before any connection
+    /// existed to release.
+    private func abandonReservation() {
+        lock.lock()
+        live -= 1
+        lock.broadcast()
+        lock.unlock()
     }
 
     private func release(_ connection: Connection, reusable: Bool) {

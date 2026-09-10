@@ -189,10 +189,30 @@ pub fn owned_by_primary(my_key: &str) -> bool {
 /// who just typed the command.
 pub fn ensure_may_serve(socket: &Path) -> Result<Role, String> {
     let role = role_for(socket);
-    hold_identity_lock().map_err(|_| refusal(socket))?;
+    // The primary decides first, and the lock never gets to overrule it.
+    //
+    // Taking the lock above this line made the installed host refuse to start
+    // whenever a leftover development daemon held it, and
+    // `watch_for_the_installed_host` only stands a secondary down once a
+    // primary answers on the default socket. So neither could move: the
+    // primary exited, its supervisor started it again two seconds later, and
+    // the secondary waited for a primary that was being prevented from
+    // existing. The whole point of this module is that the installed host
+    // wins.
+    //
+    // Best effort here rather than required. A primary does not need the lock
+    // to keep a second primary out, because two daemons cannot both bind the
+    // default socket and `bind` already refuses the second one. What holding
+    // it buys is the *next* secondary being refused immediately instead of
+    // waiting on a `remote.status` probe, so it is worth taking late as well
+    // as early.
     if role == Role::Primary {
+        if hold_identity_lock().is_err() {
+            hold_identity_lock_when_free();
+        }
         return Ok(role);
     }
+    hold_identity_lock().map_err(|_| refusal(socket))?;
     // Loaded rather than passed in: the key is what decides this, and a caller
     // that had to fetch it first could get the comparison wrong in a way this
     // module could not stop.
@@ -209,6 +229,33 @@ pub fn ensure_may_serve(socket: &Path) -> Result<Role, String> {
         return Err(refusal(socket));
     }
     Ok(role)
+}
+
+/// Keep asking for the identity lock in the background.
+///
+/// Only a primary does this, and only when a secondary held the lock at
+/// startup. That secondary stands down on its own within twenty seconds of
+/// this daemon answering on the default socket, and this is what picks the
+/// lock up afterwards so a later secondary is refused at once rather than
+/// after a probe.
+///
+/// Silent. Nothing is wrong while this is still trying: the machine already
+/// has its host, and this is only tidying up who holds a file.
+fn hold_identity_lock_when_free() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(|| {
+        for _ in 0..30 {
+            std::thread::sleep(Duration::from_secs(10));
+            if hold_identity_lock().is_ok() {
+                return;
+            }
+        }
+        STARTED.store(false, Ordering::Release);
+    });
 }
 
 /// Exclusive lock on this identity directory.
@@ -296,6 +343,35 @@ pub fn refusal(socket: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The defect this ordering exists to prevent.
+    ///
+    /// A leftover development daemon holds the identity lock for its whole
+    /// life. If the lock is consulted before the role, the installed host
+    /// refuses to start, and `watch_for_the_installed_host` only stands a
+    /// secondary down once a primary answers on the default socket. Neither
+    /// side can then move: the primary's supervisor restarts it every couple
+    /// of seconds forever, and the secondary waits for something it is
+    /// preventing.
+    ///
+    /// Asserted on the lock being held by this very process, which is the
+    /// strongest form of "somebody else has it" available in one test: the
+    /// second call cannot succeed, and a primary must still be allowed
+    /// through.
+    #[test]
+    fn a_held_identity_lock_never_keeps_the_installed_host_out() {
+        crate::test_identity::isolated(|| {
+            // First call takes it and keeps it for the process lifetime.
+            hold_identity_lock().expect("a fresh identity directory is free");
+            let default = crate::server::default_socket_path().expect("a data directory");
+            assert_eq!(role_for(&default), Role::Primary);
+            assert_eq!(
+                ensure_may_serve(&default),
+                Ok(Role::Primary),
+                "the daemon on the default socket must start even when the lock is taken"
+            );
+        });
+    }
 
     /// The installed daemon's path is the one that must always win, whatever
     /// order the two happened to start in.

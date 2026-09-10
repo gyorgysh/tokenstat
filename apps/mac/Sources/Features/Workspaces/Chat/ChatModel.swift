@@ -340,7 +340,8 @@ final class ChatModel {
             setDraft(stored.text)
             attachments = stored.attachments
             let attachmentLoadGeneration = draftAttachmentLoadGeneration
-            Task {
+            Task { [weak self] in
+                guard let self else { return }
                 for attachment in stored.attachments {
                     let data = try? await ChatLocalAttachmentStore.shared.read(attachment, reference: reference)
                     guard self.draftAttachmentLoadGeneration == attachmentLoadGeneration,

@@ -220,7 +220,7 @@ struct TodoView: View {
                 .font(Theme.caption).tint(Theme.accent)
                 .help("High-priority tasks and failed runs")
             if hasFilters {
-                Button("Clear") { search = ""; agentFilter = ""; attentionOnly = false }
+                Button("Clear", .dismiss) { search = ""; agentFilter = ""; attentionOnly = false }
                     .buttonStyle(.plain).foregroundStyle(Theme.accent).font(Theme.caption)
             }
             Spacer(minLength: 0)

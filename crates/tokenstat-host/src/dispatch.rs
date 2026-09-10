@@ -2958,6 +2958,9 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
     if let Some(answer) = crate::host_policy::call(method, params) {
         return Some(answer.map_err(DispatchError::from));
     }
+    if let Some(answer) = crate::host_update::call(method, params) {
+        return Some(answer.map_err(DispatchError::from));
+    }
     if let Some(answer) = crate::host_stats::call(method, params) {
         return Some(answer.map_err(DispatchError::from));
     }

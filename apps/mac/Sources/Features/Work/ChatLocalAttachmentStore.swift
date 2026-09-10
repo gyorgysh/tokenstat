@@ -97,6 +97,7 @@ actor ChatLocalAttachmentStore {
         if let uploaded = file.uploaded { return uploaded }
         let task = Task {
             let uploaded = try await upload(file.data)
+            try Task.checkCancellation()
             guard !Self.isLocal(uploaded) else { throw Failure.invalid }
             var updated = file
             updated.uploaded = uploaded

@@ -114,6 +114,7 @@ struct MachinesInspector: View {
                     )
                 }
                 HostStatsBar(local: true)
+                HostUpdateCard(local: true)
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -134,6 +135,7 @@ struct MachinesInspector: View {
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     HostStatsBar(peer: peer.key, online: true)
+                    HostUpdateCard(peer: peer.key)
                 }
 
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -175,9 +177,11 @@ struct MachinesInspector: View {
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                     HostStatsBar(local: true)
+                    HostUpdateCard(local: true)
                 } else if let peer = model.peer(for: machine) {
                     if machine.online == true, let key = machine.publicIdentity, !key.isEmpty {
                         HostStatsBar(peer: key, online: true)
+                        HostUpdateCard(peer: key)
                     }
                     peerActions(peer, machine: machine)
                 } else if model.canConnect(machine) {

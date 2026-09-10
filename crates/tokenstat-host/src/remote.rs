@@ -2526,8 +2526,18 @@ fn is_attachment_transfer(method: &str) -> bool {
 fn purpose_for_method(method: &str) -> ChannelPurpose {
     if method.starts_with("chat.") {
         ChannelPurpose::Chat
-    } else if ["workspace.", "work.", "todo.", "note.", "workflow.", "automation.", "pulls."]
-        .iter().any(|prefix| method.starts_with(prefix)) {
+    } else if [
+        "workspace.",
+        "work.",
+        "todo.",
+        "note.",
+        "workflow.",
+        "automation.",
+        "pulls.",
+    ]
+    .iter()
+    .any(|prefix| method.starts_with(prefix))
+    {
         ChannelPurpose::Workspace
     } else if method.starts_with("pty.") {
         ChannelPurpose::Pty
@@ -3521,8 +3531,21 @@ mod tests {
             purpose_for_method("workspace.list"),
             ChannelPurpose::Workspace
         );
-        for method in ["workspace.log", "workspace.show", "workspace.diff", "workspace.summary", "work.continuity.attachments", "workflow.list", "automation.runs", "todo.list"] {
-            assert_eq!(purpose_for_method(method), ChannelPurpose::Workspace, "{method}");
+        for method in [
+            "workspace.log",
+            "workspace.show",
+            "workspace.diff",
+            "workspace.summary",
+            "work.continuity.attachments",
+            "workflow.list",
+            "automation.runs",
+            "todo.list",
+        ] {
+            assert_eq!(
+                purpose_for_method(method),
+                ChannelPurpose::Workspace,
+                "{method}"
+            );
         }
         assert_eq!(purpose_for_method("stream.open"), ChannelPurpose::Unknown);
         assert_eq!(purpose_for_method(""), ChannelPurpose::Unknown);

@@ -10,10 +10,11 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 /// Thirty days. A client returning later than this is starting again rather
 /// than resending, and a receipt that is gone is not evidence that the turn
@@ -198,18 +199,20 @@ impl Operation {
 /// It survives ordinary acceptance calls and releases automatically on exit.
 /// The file stays in the root so conversation removal cannot replace its inode.
 pub(crate) struct RunnerLease {
-    _lock: FileLock,
+    _lock: Option<FileLock>,
+    _path: PathBuf,
 }
 
 impl RunnerLease {
     pub(crate) fn try_acquire(root: &Path, id: &str) -> Result<Option<Self>, String> {
         let name = digest(id, &[]).replace(':', "-");
+        let path = root.join(format!("runner-{name}.lock"));
         let file = private_options()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(root.join(format!("runner-{name}.lock")))
+            .open(&path)
             .map_err(|error| error.to_string())?;
         #[cfg(unix)]
         {
@@ -231,9 +234,106 @@ impl RunnerLease {
         if !crate::win32::try_lock(&file, false, true) {
             return Ok(None);
         }
+        tracked_running_leases()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(path.clone());
         Ok(Some(Self {
-            _lock: FileLock(file),
+            _lock: Some(FileLock(file)),
+            _path: path,
         }))
+    }
+}
+
+impl Drop for RunnerLease {
+    fn drop(&mut self) {
+        let _ = self._lock.take();
+        tracked_running_leases()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self._path);
+    }
+}
+
+static TRACKED_RUNNING_LEASES: LazyLock<Mutex<HashSet<PathBuf>>> = LazyLock::new(Default::default);
+
+fn tracked_running_leases() -> &'static Mutex<HashSet<PathBuf>> {
+    &TRACKED_RUNNING_LEASES
+}
+
+/// How many conversations have a runner holding a lease right now.
+///
+/// Read by the update path. Replacing the files on disk is free, because the
+/// running daemon keeps the image it started with, but a restart ends every
+/// agent turn this daemon owns. So it has to know whether it owns any.
+///
+/// Counted from the leases themselves rather than from a second tally kept
+/// beside them, so this cannot disagree with what `try_acquire` believes. A
+/// directory that will not open cannot be scanned, so fall back to what this
+/// process holds itself: that never invents work owned elsewhere, and it never
+/// reports a quiet machine while this process is running a turn.
+pub(crate) fn running_count(root: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return tracked_running_leases()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .len();
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with("runner-") && name.ends_with(".lock"))
+                && lease_is_held(&entry.path())
+        })
+        .count()
+}
+
+/// Whether somebody else holds this lease.
+///
+/// Taken and released immediately where it is free: the question is whose it
+/// is, and holding it would make the answer wrong for the next asker.
+fn lease_is_held(path: &Path) -> bool {
+    {
+        let tracked = tracked_running_leases()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if tracked.contains(path) {
+            return true;
+        }
+    }
+
+    let Ok(file) = private_options()
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(path)
+    else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return true;
+        }
+        unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+        false
+    }
+    #[cfg(windows)]
+    {
+        if !crate::win32::try_lock(&file, false, true) {
+            return true;
+        }
+        crate::win32::unlock(&file);
+        false
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = file;
+        false
     }
 }
 
@@ -525,5 +625,16 @@ mod tests {
         assert!(!valid_id("has|a|separator"));
         assert!(!valid_id("../escape"));
         assert!(!valid_id(&"x".repeat(MAX_ID + 1)));
+    }
+
+    #[test]
+    fn running_count_is_true_while_a_runner_lease_is_held() {
+        let root = tempfile::tempdir().unwrap();
+        let lease = RunnerLease::try_acquire(root.path(), "a-runner")
+            .unwrap()
+            .expect("runner lease");
+        assert_eq!(running_count(root.path()), 1);
+        drop(lease);
+        assert_eq!(running_count(root.path()), 0);
     }
 }

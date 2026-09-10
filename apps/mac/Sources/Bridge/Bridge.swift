@@ -1528,6 +1528,12 @@ extension Bridge {
     static func attachToChat(id: String, file: URL, peer: String? = nil) async throws -> ChatAttachment {
         let access = file.startAccessingSecurityScopedResource()
         defer { if access { file.stopAccessingSecurityScopedResource() } }
+        // Bound before decoding: `Data(contentsOf:)` reads the whole file, and
+        // an attachment must fit in one request in any case.
+        if let values = try? file.resourceValues(forKeys: [.fileSizeKey]),
+           let size = values.fileSize, size > 25 * 1024 * 1024 {
+            throw BridgeError.core(code: "attachment_too_large", message: "This file is too large to attach (\(size / 1_048_576) MB). Files must be under 25 MB.")
+        }
         let data = try Data(contentsOf: file)
         return try await attachToChat(
             id: id,
@@ -2872,6 +2878,45 @@ extension Bridge {
 
     static func hostStats(peer: String) async throws -> HostStats {
         try await onPeer(peer, "host.stats", as: HostStats.self)
+    }
+
+    static func hostUpdateCheck() async throws -> HostUpdateState {
+        try await background("host.updateCheck", patience: Patience.standard, as: HostUpdateState.self)
+    }
+
+    /// What a paired computer knows about its own release.
+    ///
+    /// Sessionless on the host, so this answers on a machine whose archive
+    /// will not open, which is one of the machines most in need of an update.
+    static func hostUpdateCheck(peer: String) async throws -> HostUpdateState {
+        try await onPeer(peer, "host.updateCheck", patience: Patience.standard, as: HostUpdateState.self)
+    }
+
+    /// Move a host to the newest release.
+    ///
+    /// `restartNow` ends the terminals and agent turns that host owns, so only
+    /// pass it where a person has been told that and said yes. Left off, the
+    /// host installs and waits for a quiet moment.
+    ///
+    /// Patient: this downloads an archive, checks it, proves the new binaries
+    /// run and only then replaces anything.
+    static func hostUpdateApply(restartNow: Bool = false) async throws -> HostUpdateResult {
+        try await background(
+            "host.updateApply",
+            ["restartNow": restartNow],
+            patience: Patience.long,
+            as: HostUpdateResult.self
+        )
+    }
+
+    static func hostUpdateApply(peer: String, restartNow: Bool = false) async throws -> HostUpdateResult {
+        try await onPeer(
+            peer,
+            "host.updateApply",
+            ["restartNow": restartNow],
+            patience: Patience.long,
+            as: HostUpdateResult.self
+        )
     }
 
     /// The wire version spoken by a paired host.
