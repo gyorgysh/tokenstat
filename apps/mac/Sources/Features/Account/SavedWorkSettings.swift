@@ -24,6 +24,7 @@ struct SavedWorkSettings: View {
     @State private var retentionDays = WorkCacheSettings.shared.retentionDays
     @State private var budgetMB = WorkCacheSettings.shared.budgetMB
     @State private var offlineBudgetMB = WorkCacheSettings.shared.offlineBudgetMB
+    @State private var refreshGeneration = UUID()
 
     var body: some View {
         card
@@ -32,7 +33,10 @@ struct SavedWorkSettings: View {
                 if let scope = WorkSessionContext.shared.readingScope { WorkOriginalFilesSheet(scope: scope).id(scope) }
             }
             .sheet(isPresented: $showOlderDrafts) { WorkLegacyDraftsSheet() }
-            .task(id: scope) { bytes = nil; records = nil; pinned = nil; await refresh() }
+            .task(id: scope) {
+                bytes = nil; records = nil; pinned = nil; cleared = false; message = nil
+                await refresh()
+            }
             .sheet(isPresented: $showManagement, onDismiss: { Task { await refresh() } }) {
                 if let scope { WorkCacheManagementSheet(scope: scope) }
             }
@@ -209,11 +213,14 @@ struct SavedWorkSettings: View {
             : "\(records) saved items (\(size)\(kept)) on this device"
     }
 
-    private func refresh() async {
+    private func refresh(afterFailedClear: Bool = false) async {
+        guard !clearing || afterFailedClear else { return }
+        let generation = UUID()
+        refreshGeneration = generation
         guard let scope else { bytes = nil; records = nil; pinned = nil; return }
         do {
             let stats = try await Bridge.cacheStats(scope: WorkCache.scope(for: scope))
-            guard self.scope == scope, !Task.isCancelled else { return }
+            guard refreshGeneration == generation, self.scope == scope, !Task.isCancelled else { return }
             bytes = stats.bytes
             records = stats.records
             pinned = stats.pinned
@@ -221,6 +228,7 @@ struct SavedWorkSettings: View {
             message = enabled && WorkCacheKey.key(for: WorkCache.scope(for: scope)) == nil
                 ? "Secure storage is unavailable. Unlock this device and try again. Work cannot be saved until its encryption key is available." : nil
         } catch {
+            guard refreshGeneration == generation, self.scope == scope, !Task.isCancelled else { return }
             if !WorkCacheStore.isUnavailable(error) {
                 message = "Saved work could not be measured. Try again."
             }
@@ -232,10 +240,14 @@ struct SavedWorkSettings: View {
 
     private func clear() async {
         guard let scope, !clearing else { return }
+        refreshGeneration = UUID()
         clearing = true
         cleared = false
         message = nil
-        defer { clearing = false }
+        defer {
+            clearing = false
+            if self.scope != scope { Task { await refresh() } }
+        }
         do {
             _ = try await Bridge.cacheClearScope(scope: WorkCache.scope(for: scope))
             guard self.scope == scope, !Task.isCancelled else { return }
@@ -243,7 +255,7 @@ struct SavedWorkSettings: View {
             records = 0
             cleared = true
         } catch {
-            await refresh()
+            await refresh(afterFailedClear: true)
             if self.scope == scope { message = "Some saved work could not be removed. Try again." }
         }
     }
