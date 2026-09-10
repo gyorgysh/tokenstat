@@ -212,10 +212,16 @@ fn readiness_in(
     // An empty or unreadable file is not a login, but it is not proof of one
     // being absent either: a half-written store is a state a person should be
     // told about rather than sent to sign in over.
-    let Ok(raw) = std::fs::read_to_string(&path) else {
+    let Ok(raw) = read_store(&path) else {
         return (Readiness::Unknown, None);
     };
-    if raw.trim().is_empty() {
+    // A partially written or empty JSON store is not positive evidence of
+    // a saved login. This still describes local storage, not online validity.
+    if !serde_json::from_str::<Value>(&raw)
+        .ok()
+        .and_then(|value| value.as_object().map(|fields| !fields.is_empty()))
+        .unwrap_or(false)
+    {
         return (Readiness::Unknown, None);
     }
     match store.expiry.and_then(|read| read(&raw)) {
@@ -232,13 +238,35 @@ fn codex_uses_keyring(home: &Path, env: &dyn Fn(&str) -> Option<PathBuf>) -> boo
         Some(dir) => dir.join("config.toml"),
         None => home.join(".codex/config.toml"),
     };
-    let Ok(raw) = std::fs::read_to_string(config) else {
-        return false;
+    let raw = match read_store(&config) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        // Unreadable configuration cannot prove that credentials belong in
+        // a file. Keep readiness unknown instead of prompting another login.
+        Err(_) => return true,
     };
     raw.lines()
         .map(str::trim)
         .filter(|line| line.starts_with("cli_auth_credentials_store"))
         .any(|line| line.contains("keyring") || line.contains("auto"))
+}
+
+/// Credential/config inspection is small even if a broken tool writes a huge
+/// file. Enforce the limit on the reader, including files growing during read.
+fn read_store(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    const MAX_BYTES: u64 = 1024 * 1024;
+    let mut raw = String::new();
+    std::fs::File::open(path)?
+        .take(MAX_BYTES + 1)
+        .read_to_string(&mut raw)?;
+    if raw.len() as u64 > MAX_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "agent configuration exceeds the inspection limit",
+        ));
+    }
+    Ok(raw)
 }
 
 fn existing_store(
@@ -289,6 +317,35 @@ pub(crate) fn describe(id: &str, installed: bool) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_and_oversized_stores_cannot_confirm_a_login() {
+        for body in ["{", "not json", "{}", "null", "[]"] {
+            let home = home_with(".codex/auth.json", body);
+            assert_eq!(
+                readiness_in("codex", true, home.path(), 0, &no_env).0,
+                Readiness::Unknown
+            );
+        }
+        let home = home_with(
+            ".codex/auth.json",
+            &format!(r#"{{"padding":"{}"}}"#, "x".repeat(1024 * 1024)),
+        );
+        assert_eq!(
+            readiness_in("codex", true, home.path(), 0, &no_env).0,
+            Readiness::Unknown
+        );
+        std::fs::remove_file(home.path().join(".codex/auth.json")).unwrap();
+        std::fs::write(
+            home.path().join(".codex/config.toml"),
+            "x".repeat(1024 * 1024 + 1),
+        )
+        .unwrap();
+        assert_eq!(
+            readiness_in("codex", true, home.path(), 0, &no_env).0,
+            Readiness::Unknown
+        );
+    }
 
     #[test]
     fn a_tool_that_is_not_here_is_never_asked_about_its_login() {
