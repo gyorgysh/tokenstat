@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
 # Build tokenstat-ffi into TokenstatFFI.xcframework for the Apple app.
 #
@@ -72,7 +73,10 @@ build_group() {
         if installed "$t"; then
             echo "  building $t ${features:-(all features)}"
             # shellcheck disable=SC2086
-            cargo build --profile release-ffi -p tokenstat-ffi $features --target "$t"
+            # This function is called in an && list, where Bash disables
+            # errexit inside the entire function. Never package a stale archive
+            # after a compiler failure.
+            cargo build --profile release-ffi -p tokenstat-ffi $features --target "$t" || exit $?
             built+=("target/$t/release-ffi/$LIB")
         else
             echo "  skipping $t (run: rustup target add $t)"
@@ -81,8 +85,8 @@ build_group() {
 
     [ ${#built[@]} -gt 0 ] || return 1
 
-    mkdir -p "$STAGE/$name"
-    lipo -create "${built[@]}" -output "$STAGE/$name/$LIB"
+    mkdir -p "$STAGE/$name" || exit $?
+    lipo -create "${built[@]}" -output "$STAGE/$name/$LIB" || exit $?
     return 0
 }
 
