@@ -79,6 +79,12 @@ final class HomeModel {
     /// What each vendor says is left of its plan.
     var planLimits: [ProviderLimits] = []
     var isLoadingLimits = false
+    private var planUsageError: String?
+    private var planLimitsError: String?
+    var planErrorMessage: String? { planLimitsError ?? planUsageError }
+    private(set) var hasLoadedPlanLimits = false
+    private var limitsGeneration: UInt64 = 0
+    private let layout = HomeLayout.shared
 
     /// Archive-backed plan usage, by source. Separate from the vendor limits
     /// above: this is what the logs recorded, that is what the vendor reports.
@@ -179,17 +185,8 @@ final class HomeModel {
                 scope: scope.wire,
                 force: refreshAccountGrid
             )
-            // Plan usage still comes from the local archive. The iOS client
-            // has none. `archiveOnly` turns that refusal into empty rather
-            // than into an error banner over a heatmap that loaded well.
-            async let plan = Self.archiveOnly {
-                try await Bridge.report(group: .source, query: Query(billing: "plan"))
-            }
-
-            // Published one at a time, in the order the screen draws them,
-            // rather than held back until all three have answered. The heatmap
-            // is the largest thing on Home and the first query to return, so
-            // waiting for the other two only kept it behind a blur for longer.
+            // The shared calendar drives the greeting, profile and summaries.
+            // Plan-card queries run separately, only while that section is shown.
             let grid = try await calendar
             self.calendar = grid
             // Only null means the account/archive has no records. A grid
@@ -228,7 +225,6 @@ final class HomeModel {
                 }
             }
 
-            self.planBySource = try await plan
             errorMessage = nil
             lastLoadedAt = Date()
             hostRetryCount = 0
@@ -298,6 +294,7 @@ final class HomeModel {
         softInvalidateForRefresh()
         await load(quiet: true)
         if let pinned, let fresh = cell(on: pinned) { select(day: fresh) }
+        await loadPlanLimits()
     }
 
     /// Clear per-day caches but keep the Inspector's current content on
@@ -547,15 +544,61 @@ final class HomeModel {
 
     /// Vendor plan limits, loaded on their own.
     ///
-    /// Never with the archive: one of these providers is a network call, and
-    /// the archive reloads on every period change on the other screen.
+    /// These queries belong to the limits section. Archive plan usage can
+    /// publish before a slower provider reply, without delaying the calendar.
     func loadPlanLimits() async {
+        guard !layout.hidden.contains(.limits), !Task.isCancelled, !isLoadingLimits else { return }
+        limitsGeneration &+= 1
+        let generation = limitsGeneration
+        func current() -> Bool {
+            generation == limitsGeneration && !layout.hidden.contains(.limits) && !Task.isCancelled
+        }
         isLoadingLimits = true
-        defer { isLoadingLimits = false }
-        let skip = Set((try? await Bridge.limitsSync())?.skip ?? [])
-        let all = (try? await Bridge.usageLimits()) ?? []
-        planLimits = all.filter { !skip.contains($0.source) }
+        defer { if generation == limitsGeneration { isLoadingLimits = false } }
+        // Only desktop plan cards use the local archive breakdown. Phones
+        // have no archive and must not initiate that query for a hidden card.
+        async let usage: Void = loadPlanUsage(generation: generation)
+        do {
+            let settings = try await Bridge.limitsSync()
+            guard current() else { return }
+            let all = try await Bridge.usageLimits()
+            guard current() else { return }
+            let skip = Set(settings.skip)
+            planLimits = all.filter { !skip.contains($0.source) }
+            hasLoadedPlanLimits = true
+            planLimitsError = nil
+        } catch {
+            guard current() else { return }
+            planLimitsError = error.localizedDescription
+        }
+        await usage
     }
+
+    /// A hidden section cannot publish an older request or start its next read.
+    func hidePlanLimits() {
+        limitsGeneration &+= 1
+        isLoadingLimits = false
+        planUsageError = nil
+        planLimitsError = nil
+    }
+
+    private func loadPlanUsage(generation: UInt64) async {
+        #if os(macOS)
+        guard generation == limitsGeneration, !layout.hidden.contains(.limits), !Task.isCancelled else { return }
+        do {
+            let rows = try await Self.archiveOnly {
+                try await Bridge.report(group: .source, query: Query(billing: "plan"))
+            }
+            guard generation == limitsGeneration, !layout.hidden.contains(.limits), !Task.isCancelled else { return }
+            planBySource = rows
+            planUsageError = nil
+        } catch {
+            guard generation == limitsGeneration, !layout.hidden.contains(.limits), !Task.isCancelled else { return }
+            planUsageError = error.localizedDescription
+        }
+        #endif
+    }
+
 }
 
 /// Insights-shaped breakdown for one local day.

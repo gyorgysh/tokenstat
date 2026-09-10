@@ -24,14 +24,20 @@ import SwiftUI
 struct ClientLimitsCard: View {
     let providers: [ProviderLimits]
     let isLoading: Bool
+    var errorMessage: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             ClientSectionTitle(title: "Plan limits", mark: "mark_plan")
 
+            if errorMessage != nil {
+                Text("Plan readings could not be refreshed. Pull to try again.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+            }
             if isLoading {
                 ClientWireframe.Rows(count: 2)
-            } else if readable.isEmpty {
+            } else if readable.isEmpty && errorMessage == nil {
                 // Not an error. A host posts readings only when "Share plan
                 // limits with my devices" is on, and only after a limits
                 // refresh or sync. Until then the honest line is empty, not zero.

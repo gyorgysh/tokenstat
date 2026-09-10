@@ -13,6 +13,7 @@ import SwiftUI
 /// instead.
 struct ClientHomeEditor: View {
     @Bindable var layout: HomeLayout
+    var emptyReason: (HomeSection) -> String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var keyboardSection: HomeSection?
@@ -24,7 +25,8 @@ struct ClientHomeEditor: View {
     @State private var announcement = ""
     @AccessibilityFocusState private var focusedSection: HomeSection?
 
-    init(layout: HomeLayout) {
+    init(layout: HomeLayout, emptyReason: @escaping (HomeSection) -> String? = { _ in nil }) {
+        self.emptyReason = emptyReason
         self.layout = layout
         _order = State(initialValue: layout.order)
         _hidden = State(initialValue: layout.hidden)
@@ -183,7 +185,7 @@ struct ClientHomeEditor: View {
                     Text(section.label)
                         .font(ClientType.body)
                         .foregroundStyle(on ? .primary : .secondary)
-                    Text(section.detail)
+                    Text(emptyReason(section) ?? section.detail)
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }

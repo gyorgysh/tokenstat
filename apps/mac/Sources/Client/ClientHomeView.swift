@@ -75,9 +75,12 @@ struct ClientHomeView: View {
             // and asking for one would only produce a refusal to render.
             model.scope = .allMachines
             await model.load()
-            // After the grid, not beside it. The heatmap is what the screen is
-            // for and it should not queue behind a provider read that has
-            // nothing to say yet on a phone.
+        }
+        .onChange(of: layout.hidden.contains(.limits)) { _, hidden in
+            if hidden { model.hidePlanLimits() }
+        }
+        .task(id: layout.hidden.contains(.limits)) {
+            guard !layout.hidden.contains(.limits) else { return }
             await model.loadPlanLimits()
         }
         // The connection came back. Fetch now rather than leaving somebody
@@ -93,7 +96,7 @@ struct ClientHomeView: View {
             DayDetailSheet(day: day)
         }
         .sheet(isPresented: $customizing) {
-            ClientHomeEditor(layout: layout)
+            ClientHomeEditor(layout: layout, emptyReason: emptyReason)
         }
     }
 
@@ -127,9 +130,24 @@ struct ClientHomeView: View {
             if model.calendar != nil {
                 ClientLimitsCard(
                     providers: model.planLimits,
-                    isLoading: model.isLoadingLimits
+                    isLoading: model.isLoadingLimits,
+                    errorMessage: model.planErrorMessage
                 )
             }
+        }
+    }
+
+    private func emptyReason(_ section: HomeSection) -> String? {
+        switch section {
+        case .continueWork where ClientRecentPlaces.shared.places(in: account.account?.recentPlacesScope).isEmpty:
+            return "Appears after you open a folder or conversation."
+        case .pinnedWork where PinnedWorkStore.shared.pins(in: account.account?.pinnedWorkScope).isEmpty:
+            return "Pin a folder or conversation to keep it here."
+        case .machines where (account.account?.machines ?? []).isEmpty:
+            return "Appears when your account has linked devices."
+        case .limits where model.hasLoadedPlanLimits && !model.planLimits.contains(where: \.hasWindows) && model.planErrorMessage == nil:
+            return "Readings appear after a linked computer shares plan limits."
+        default: return nil
         }
     }
 

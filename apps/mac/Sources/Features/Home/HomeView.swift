@@ -110,8 +110,11 @@ struct HomeView: View {
             // Archive first: heatmap and streaks. Vendor limits load after.
             await model.load()
         }
-        .task {
-            guard model.planLimits.isEmpty else { return }
+        .onChange(of: layout.hidden.contains(.limits)) { _, hidden in
+            if hidden { model.hidePlanLimits() }
+        }
+        .task(id: layout.hidden.contains(.limits)) {
+            guard !layout.hidden.contains(.limits) else { return }
             await Self.waitForHost()
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
@@ -151,6 +154,7 @@ struct HomeView: View {
         case .activity:
             activity
         case .limits:
+            if let message = model.planErrorMessage { ErrorBanner(message: message) }
             panels(width: width)
             if limitsPending { panelPlaceholder }
         }
@@ -164,7 +168,7 @@ struct HomeView: View {
             return "Pin a folder from the sidebar or a conversation from its toolbar."
         case .machines where (account.account?.machines ?? []).isEmpty:
             return "Appears when your account has linked devices."
-        case .limits where panels.isEmpty && !limitsPending:
+        case .limits where model.hasLoadedPlanLimits && panels.isEmpty && !limitsPending && model.planErrorMessage == nil:
             return "Appears when a connected plan has usage to show."
         default: return nil
         }
@@ -312,7 +316,8 @@ struct HomeView: View {
     /// on screen there is nothing to talk about yet, and a hint that appears
     /// before the first reading arrives looks like an error.
     private var showsLimitsSyncHint: Bool {
-        !limitsSyncHintDismissed
+        !layout.hidden.contains(.limits)
+            && !limitsSyncHintDismissed
             && account.signedIn
             && !account.limitsSyncEnabled
             && !PlanLimits.visible(model.planLimits).isEmpty
