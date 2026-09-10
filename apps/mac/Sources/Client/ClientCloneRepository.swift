@@ -34,6 +34,8 @@ struct ClientCloneRepository: View {
     @State private var error: String?
     @State private var picking = false
     @State private var statusAttempt = 0
+    @State private var visible = false
+    @State private var requestGeneration = 0
 
     private var ready: Bool {
         !url.trimmingCharacters(in: .whitespaces).isEmpty && parent != nil
@@ -56,6 +58,18 @@ struct ClientCloneRepository: View {
             }
         }
         .task { await defaultParent() }
+        .onAppear { visible = true }
+        .onDisappear { visible = false; requestGeneration &+= 1 }
+        .onChange(of: WorkSessionContext.shared.scope) { _, _ in
+            requestGeneration &+= 1
+            session = nil
+            status = nil
+            parent = nil
+            url = ""
+            name = ""
+            error = nil
+            dismiss()
+        }
     }
 
     private var form: some View {
@@ -195,13 +209,16 @@ struct ClientCloneRepository: View {
     /// Start at the machine's own home, so the common case needs no picking.
     private func defaultParent() async {
         guard parent == nil else { return }
+        let scope = WorkSessionContext.shared.scope
         let suggested = try? await Bridge.browse(peer: peer, path: nil).path
-        guard parent == nil, !Task.isCancelled else { return }
+        guard parent == nil, !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
         parent = suggested
     }
 
     private func start() async {
-        guard let parent else { return }
+        guard visible, !Task.isCancelled, !working, session == nil, ready,
+              let parent, let scope = WorkSessionContext.shared.scope else { return }
+        let generation = requestGeneration
         working = true
         error = nil
         defer { working = false }
@@ -212,8 +229,14 @@ struct ClientCloneRepository: View {
                 parent: parent,
                 name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : name
             )
+            guard visible, !Task.isCancelled, generation == requestGeneration,
+                  scope == WorkSessionContext.shared.scope else { return }
             session = ClientTerminalSession(peer: peer, info: info)
-        } catch { self.error = ClientSetupModel.readable(error) }
+        } catch {
+            guard visible, !Task.isCancelled, generation == requestGeneration,
+                  scope == WorkSessionContext.shared.scope else { return }
+            self.error = ClientSetupModel.readable(error)
+        }
     }
 
     /// The machine registers the folder itself when git exits, so this asks it
