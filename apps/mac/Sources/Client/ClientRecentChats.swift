@@ -273,8 +273,19 @@ struct ClientRecentChatView: View {
     @State private var hostProtocol: Int?
     @State private var liveItemExists: Bool?
     @State private var loadingLive = false
+    @State private var visible = false
+    @State private var loadGeneration: UInt64 = 0
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
+
+    private struct LoadIdentity: Equatable {
+        let scope: WorkReference.Scope?
+        let peer: String
+        let workspace: String
+        let chat: String
+        let linked: Bool
+        let saved: Bool
+    }
 
     private var machine: Machine? {
         account.account?.machines.first { $0.publicIdentity == peer }
@@ -301,23 +312,36 @@ struct ClientRecentChatView: View {
                 ClientEmptyState(kind: .unreachable, title: "Workspace access is required",
                     message: "Allow this device on \(hostName), then check again to return to this conversation.",
                     actionTitle: "Check again", actionIcon: .refresh,
-                    action: { Task { await load() } })
+                    action: { retry() })
                     .padding(Theme.Space.m)
             } else if availability == .unsupportedHost, let hostProtocol {
                 RemoteHostFeatureUpdateView(feature: .chat, hostName: hostName,
-                    hostProtocol: hostProtocol, retry: { Task { await load() } })
+                    hostProtocol: hostProtocol, retry: { retry() })
             } else if availability == .itemDeleted {
                 thread
             } else if needsSavedCopy, machine != nil, account.signedIn {
-                thread.task { await loadSaved() }
+                thread
             } else if model.savedCopy != nil, machine != nil, account.signedIn {
                 // Reconnecting does not replace the reader or send its draft.
                 thread
             } else {
                 ClientPlaceAvailability(peer: peer, hostName: hostName) {
-                    thread.task { await load() }
+                    thread
                 }
             }
+        }
+        .task(id: LoadIdentity(scope: WorkSessionContext.shared.scope,
+                               peer: peer, workspace: workspaceID, chat: chatID,
+                               linked: machine != nil, saved: needsSavedCopy)) {
+            visible = true
+            loadGeneration &+= 1
+            loadingLive = false
+            if needsSavedCopy { await loadSaved() } else { await load() }
+        }
+        .onDisappear {
+            visible = false
+            loadGeneration &+= 1
+            loadingLive = false
         }
     }
 
@@ -332,9 +356,7 @@ struct ClientRecentChatView: View {
                 )
             } else if let error = model.error {
                 ClientErrorCard(message: ClientTunnelCopy.display(error, host: hostName)) {
-                    Task {
-                        if needsSavedCopy { await loadSaved() } else { await load() }
-                    }
+                    retry()
                 }
                 .padding(Theme.Space.m)
             } else if savedUnavailable {
@@ -380,15 +402,26 @@ struct ClientRecentChatView: View {
         }
     }
 
+    private func retry() {
+        let generation = loadGeneration
+        Task {
+            guard visible, generation == loadGeneration else { return }
+            if needsSavedCopy { await loadSaved() } else { await load() }
+        }
+    }
+
     private func loadSaved() async {
-        guard model.savedCopy == nil, model.selected == nil, !savedUnavailable,
+        let generation = loadGeneration
+        guard visible, !Task.isCancelled, account.signedIn, machine != nil,
+              model.savedCopy == nil, model.selected == nil, !savedUnavailable,
               let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
         else { return }
         // A pending live list has already adopted its folder. Load the copy
         // into a fresh reader so that request cannot overwrite offline work.
         let reader = ChatModel()
         let opened = await reader.loadSavedConversation(reference)
-        guard !Task.isCancelled, reference.scope == WorkSessionContext.shared.scope,
+        guard visible, generation == loadGeneration, !Task.isCancelled,
+              reference.scope == WorkSessionContext.shared.scope,
               needsSavedCopy, model.selected == nil else { return }
         if opened { model = reader }
         savedUnavailable = !opened
@@ -396,16 +429,18 @@ struct ClientRecentChatView: View {
     }
 
     private func load() async {
-        guard !loadingLive, !needsSavedCopy, model.savedCopy == nil else { return }
+        guard visible, !loadingLive, !needsSavedCopy, model.savedCopy == nil else { return }
+        let generation = loadGeneration
         loadingLive = true
-        defer { loadingLive = false }
+        defer { if generation == loadGeneration { loadingLive = false } }
         guard !peer.isEmpty, !workspaceID.isEmpty, !chatID.isEmpty else {
             loaded = true
             return
         }
         guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
         func stillCurrent() -> Bool {
-            !Task.isCancelled && scope == WorkSessionContext.shared.scope
+            visible && generation == loadGeneration && !Task.isCancelled
+                && scope == WorkSessionContext.shared.scope
                 && machine != nil && account.signedIn && !needsSavedCopy && model.savedCopy == nil
         }
         guard stillCurrent() else { return }
