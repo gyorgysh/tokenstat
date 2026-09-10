@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 import CryptoKit
+import Darwin
 
 /// Original draft files are user writing. Cache eviction and sign-out never
 /// remove them. Each file belongs to one complete conversation reference.
@@ -57,6 +58,7 @@ actor ChatLocalAttachmentStore {
         let handle = try FileHandle(forWritingTo: url)
         defer { try? handle.close() }
         try handle.synchronize()
+        try Self.synchronizeDirectory(directory)
         return attachment
     }
     /// Keep an explicitly imported host file under the same descriptor. It
@@ -81,6 +83,7 @@ actor ChatLocalAttachmentStore {
         let handle = try FileHandle(forWritingTo: url)
         defer { try? handle.close() }
         try handle.synchronize()
+        try Self.synchronizeDirectory(directory)
     }
     func resolve(_ attachment: ChatAttachment, reference: WorkReference,
                  upload: @escaping @Sendable (Data) async throws -> ChatAttachment) async throws -> ChatAttachment {
@@ -106,6 +109,7 @@ actor ChatLocalAttachmentStore {
             let handle = try FileHandle(forWritingTo: url)
             defer { try? handle.close() }
             try handle.synchronize()
+            try Self.synchronizeDirectory(directory)
             return uploaded
         }
         uploads[url] = task
@@ -169,6 +173,13 @@ actor ChatLocalAttachmentStore {
             }
         }
     }
+    private nonisolated static func synchronizeDirectory(_ directory: URL) throws {
+        let descriptor = Darwin.open(directory.path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+        defer { Darwin.close(descriptor) }
+        guard Darwin.fsync(descriptor) == 0 else { throw CocoaError(.fileWriteUnknown) }
+    }
+
     func read(_ attachment: ChatAttachment, reference: WorkReference) throws -> Data {
         try load(attachment, reference: reference).data
     }
