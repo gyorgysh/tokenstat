@@ -1366,17 +1366,39 @@ mod tests {
         use super::require_cli_path;
         use std::path::Path;
 
-        assert!(require_cli_path(Path::new("/home/a/.local/bin/tokenstat")).is_ok());
-        for wrong in [
-            "/home/a/.local/bin/tokenstat-hostd",
-            "/home/a/.local/bin/tokenstat-hostd.exe",
-            "/home/a/.local/bin/",
-            "/home/a/.local/bin/tokenstatd",
-        ] {
-            let error = require_cli_path(Path::new(wrong))
-                .expect_err(&format!("{wrong} must be refused"))
+        // The binary's own name is platform shaped, so the paths under test
+        // have to be as well: a Unix path is the wrong answer on Windows and
+        // the test would assert a refusal it never meant.
+        let (ok, wrong);
+        if cfg!(windows) {
+            ok = vec![
+                "C:\\Users\\a\\.local\\bin\\tokenstat.exe",
+                "C:\\Users\\a\\.local\\bin\\TOKENSTAT.EXE",
+            ];
+            wrong = vec![
+                "C:\\Users\\a\\.local\\bin\\tokenstat-hostd.exe",
+                "C:\\Users\\a\\.local\\bin\\tokenstat-hostd",
+                "C:\\Users\\a\\.local\\bin\\tokenstat",
+                "C:\\Users\\a\\.local\\bin\\",
+                "C:\\Users\\a\\.local\\bin\\tokenstatd.exe",
+            ];
+        } else {
+            ok = vec!["/home/a/.local/bin/tokenstat"];
+            wrong = vec![
+                "/home/a/.local/bin/tokenstat-hostd",
+                "/home/a/.local/bin/tokenstat-hostd.exe",
+                "/home/a/.local/bin/",
+                "/home/a/.local/bin/tokenstatd",
+            ];
+        }
+        for path in ok {
+            assert!(require_cli_path(Path::new(path)).is_ok(), "{path}");
+        }
+        for path in wrong {
+            let error = require_cli_path(Path::new(path))
+                .expect_err(&format!("{path} must be refused"))
                 .to_string();
-            assert!(error.contains("refusing to update"), "{wrong}: {error}");
+            assert!(error.contains("refusing to update"), "{path}: {error}");
         }
     }
 
