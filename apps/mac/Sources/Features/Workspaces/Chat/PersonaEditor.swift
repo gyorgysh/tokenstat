@@ -15,6 +15,8 @@ struct PersonaEditor: View {
     @State private var isNew = true
     @State private var drafter = ""
     @State private var improving = false
+    @State private var saving = false
+    @State private var editorOwner: ChatModel.PersonaContext?
     @State private var failure: String?
     @State private var draftGeneration: UInt64 = 0
 
@@ -64,6 +66,11 @@ struct PersonaEditor: View {
             if improving {
                 improvingRow
             }
+            if saving {
+                Text("Saving changes…")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+            }
             if let failure {
                 Text(failure)
                     .font(Theme.caption)
@@ -75,7 +82,24 @@ struct PersonaEditor: View {
             workspaceDefaultRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .disabled(saving || editableContext == nil)
         .onAppear(perform: openDefault)
+        .onDisappear { draftGeneration &+= 1 }
+        .onChange(of: model.personaContext) { _, current in
+            if let current {
+                if let editorOwner,
+                   (editorOwner.scope != current.scope
+                    || editorOwner.workspaceID != current.workspaceID
+                    || editorOwner.peer != current.peer) {
+                    close()
+                } else if editorOwner == nil {
+                    editorOwner = current
+                    openDefault()
+                }
+            } else if !model.isLoading {
+                close()
+            }
+        }
         .onChange(of: model.personas.map(\.id)) { _, _ in
             reconcileSelection()
         }
@@ -90,7 +114,7 @@ struct PersonaEditor: View {
             )
             Button("New persona", .create) { startNew() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
-                .disabled(improving)
+                .disabled(improving || saving)
         }
     }
 
@@ -117,7 +141,7 @@ struct PersonaEditor: View {
                 selection: defaultBinding
             )
             .frame(maxWidth: 200)
-            .disabled(improving)
+            .disabled(improving || saving)
         }
     }
 
@@ -133,11 +157,10 @@ struct PersonaEditor: View {
         Binding(
             get: { model.defaultPersonaID ?? "" },
             set: { id in
-                failure = nil
-                Task {
-                    await model.setDefaultPersona(model.personas.first { $0.id == id })
-                    consumeError()
-                }
+                let persona = model.personas.first { $0.id == id }
+                mutate({ owner in
+                    try await model.setDefaultPersona(persona, owner: owner)
+                }, completion: { _ in })
             }
         )
     }
@@ -169,11 +192,11 @@ struct PersonaEditor: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField("Name", text: $draft.name)
                     .themedFieldBox()
-                    .disabled(improving)
+                    .disabled(improving || saving)
                 HStack(spacing: Theme.Space.s) {
                     Button("Reroll", .refresh) { rerollFace() }
                         .buttonStyle(SecondaryButtonStyle(small: true))
-                        .disabled(improving)
+                        .disabled(improving || saving)
                     if isDefault {
                         Text("Default")
                             .font(Theme.caption.weight(.medium))
@@ -188,7 +211,7 @@ struct PersonaEditor: View {
                         .controlSize(.mini)
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
-                        .disabled(improving)
+                        .disabled(improving || saving)
                         .help("Off, this persona belongs to this folder. On, every folder can pick it.")
                 }
             }
@@ -206,7 +229,7 @@ struct PersonaEditor: View {
                 minHeight: 88,
                 maxHeight: 96
             )
-            .disabled(improving)
+            .disabled(improving || saving)
             .overlay(alignment: .topLeading) {
                 if draft.systemPrompt.isEmpty {
                     Text("Someone who explains Rust errors patiently and never rewrites more than I asked for")
@@ -230,7 +253,7 @@ struct PersonaEditor: View {
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
                         .background(Theme.accentSoft, in: Capsule())
-                        .disabled(improving)
+                        .disabled(improving || saving)
                 }
             }
         }
@@ -272,7 +295,7 @@ struct PersonaEditor: View {
         if canDelete {
             Button("Delete", .delete, role: .destructive) { deleteCurrent() }
                 .buttonStyle(DestructiveButtonStyle(small: true))
-                .disabled(improving)
+                .disabled(improving || saving)
         }
         Spacer()
         Button("Improve with agent", .persona) { improve() }
@@ -290,7 +313,7 @@ struct PersonaEditor: View {
                 if canDelete {
                     Button("Delete", .delete, role: .destructive) { deleteCurrent() }
                         .buttonStyle(DestructiveButtonStyle())
-                        .disabled(improving)
+                        .disabled(improving || saving)
                 }
                 Spacer(minLength: 0)
             }
@@ -315,6 +338,14 @@ struct PersonaEditor: View {
 
     // MARK: - State
 
+    private var editableContext: ChatModel.PersonaContext? {
+        guard let current = model.personaContext, let editorOwner,
+              current.scope == editorOwner.scope,
+              current.workspaceID == editorOwner.workspaceID,
+              current.peer == editorOwner.peer else { return nil }
+        return current
+    }
+
     private var isDefault: Bool {
         !isNew && !draft.id.isEmpty && draft.id == model.defaultPersonaID
     }
@@ -324,11 +355,12 @@ struct PersonaEditor: View {
     }
 
     private var canSave: Bool {
-        !improving && !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !improving && !saving && editableContext != nil
+            && !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var canImprove: Bool {
-        !improving
+        !improving && !saving && editableContext != nil
             && !drafter.isEmpty
             && !draft.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -378,6 +410,7 @@ struct PersonaEditor: View {
     // MARK: - Behaviour
 
     private func openDefault() {
+        if editorOwner == nil { editorOwner = model.personaContext }
         if drafter.isEmpty || !draftBackends.contains(where: { $0.id == drafter }) {
             drafter = draftBackends.first?.id ?? ""
         }
@@ -385,7 +418,7 @@ struct PersonaEditor: View {
     }
 
     private func reconcileSelection() {
-        guard !improving else { return }
+        guard !improving, !saving else { return }
         if !isNew, !draft.id.isEmpty, model.personas.contains(where: { $0.id == draft.id }) {
             return
         }
@@ -429,65 +462,75 @@ struct PersonaEditor: View {
         guard !name.isEmpty else { return }
         var persona = draft
         persona.name = name
-        failure = nil
-        Task {
-            if let saved = await model.savePersona(persona) {
-                select(saved)
-            } else {
-                consumeError()
-            }
-        }
+        mutate({ owner in
+            try await model.savePersona(persona, owner: owner)
+        }, completion: { saved in select(saved) })
     }
 
     private func deleteCurrent() {
+        guard canDelete else { return }
         let persona = draft
-        failure = nil
-        Task {
-            await model.removePersona(persona)
-            if model.error == nil {
-                reconcileSelection()
-            } else {
-                consumeError()
-            }
-        }
+        mutate({ owner in
+            try await model.removePersona(persona, owner: owner)
+        }, completion: { _ in reconcileSelection() })
     }
 
-    private func consumeError() {
-        if let error = model.error {
-            failure = error
-            model.error = nil
+    /// Capture ownership before scheduling, serialize writes, and keep errors
+    /// local to this sheet rather than consuming another chat operation's error.
+    private func mutate<Value>(
+        _ operation: @escaping (ChatModel.PersonaContext) async throws -> Value,
+        completion: @escaping (Value) -> Void
+    ) {
+        guard !saving, !improving, let owner = editableContext else { return }
+        let generation = draftGeneration
+        failure = nil
+        saving = true
+        Task {
+            defer {
+                if generation == draftGeneration { saving = false }
+            }
+            guard generation == draftGeneration, model.personaContext == owner else { return }
+            do {
+                let value = try await operation(owner)
+                guard generation == draftGeneration, model.personaContext == owner else { return }
+                saving = false
+                completion(value)
+            } catch {
+                guard generation == draftGeneration, model.personaContext == owner,
+                      !(error is CancellationError) else { return }
+                failure = error.localizedDescription
+            }
         }
     }
 
     private func improve() {
         let brief = draft.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !brief.isEmpty, !drafter.isEmpty else { return }
+        guard canImprove, !brief.isEmpty, let owner = editableContext else { return }
         failure = nil
         let snapshotName = draft.name
-        let snapshotBrief = draft.systemPrompt
         let backend = drafter
         let suppliedName = snapshotName.trimmingCharacters(in: .whitespacesAndNewlines)
         draftGeneration &+= 1
         let generation = draftGeneration
         improving = true
         Task {
-            let result = await model.draftPersona(
-                brief: brief,
-                backend: backend,
-                name: suppliedName.isEmpty ? nil : suppliedName
-            )
-            guard generation == draftGeneration else { return }
-            improving = false
-            if let result {
-                if suppliedName.isEmpty {
-                    draft.name = result.name
-                }
+            defer {
+                if generation == draftGeneration { improving = false }
+            }
+            guard generation == draftGeneration, model.personaContext == owner else { return }
+            do {
+                let result = try await model.draftPersona(
+                    brief: brief, backend: backend,
+                    name: suppliedName.isEmpty ? nil : suppliedName, owner: owner
+                )
+                guard generation == draftGeneration, model.personaContext == owner else { return }
+                improving = false
+                if suppliedName.isEmpty { draft.name = result.name }
                 draft.systemPrompt = result.systemPrompt
-            } else {
-                draft.name = snapshotName
-                draft.systemPrompt = snapshotBrief
-                failure = model.error ?? "That agent did not return a persona. Try another, or write it yourself."
-                model.error = nil
+            } catch {
+                guard generation == draftGeneration, model.personaContext == owner else { return }
+                improving = false
+                if !(error is CancellationError) { failure = error.localizedDescription }
             }
         }
     }

@@ -1066,18 +1066,14 @@ final class ChatModel {
 
     /// Ask an agent for a starting point, from a sentence about what the
     /// persona should be good at. Returns a draft for a form, never a save.
-    func draftPersona(brief: String, backend: String, name: String? = nil) async -> ChatPersonaDraft? {
-        do {
-            return try await Bridge.draftChatPersona(
-                brief: brief,
-                backend: backend,
-                name: name,
-                peer: peer
-            )
-        } catch {
-            self.error = error.localizedDescription
-            return nil
-        }
+    func draftPersona(brief: String, backend: String, name: String? = nil,
+                      owner: PersonaContext) async throws -> ChatPersonaDraft {
+        try requirePersonaContext(owner)
+        let result = try await Bridge.draftChatPersona(
+            brief: brief, backend: backend, name: name, peer: owner.peer
+        )
+        try requirePersonaContext(owner)
+        return result
     }
 
     func remove(_ chat: ChatConversation) async {
@@ -1590,51 +1586,55 @@ final class ChatModel {
         }
     }
 
-    func savePersona(_ persona: ChatPersona) async -> ChatPersona? {
-        do {
-            let saved = try await Bridge.saveChatPersona(
-                persona,
-                workspaceID: workspaceID,
-                peer: peer
-            )
-            if let index = personas.firstIndex(where: { $0.id == saved.id }) {
-                personas[index] = saved
-            } else {
-                personas.append(saved)
-            }
-            return saved
-        } catch {
-            self.error = error.localizedDescription
-            return nil
-        }
+    /// Workspace ownership does not require a selected conversation: personas
+    /// can also be managed before the first chat is created.
+    struct PersonaContext: Equatable {
+        let generation: UInt64
+        let scope: WorkReference.Scope
+        let workspaceID: String
+        let peer: String?
     }
 
-    func removePersona(_ persona: ChatPersona) async {
-        do {
-            try await Bridge.removeChatPersona(id: persona.id, peer: peer)
-            personas.removeAll { $0.id == persona.id }
-        } catch {
-            self.error = error.localizedDescription
-        }
+    var personaContext: PersonaContext? {
+        guard !isLoading, savedCopy == nil, let workspaceID,
+              let scope = continuityScope, scope == WorkSessionContext.shared.scope else { return nil }
+        return PersonaContext(generation: loadGeneration, scope: scope,
+                              workspaceID: workspaceID, peer: peer)
     }
 
-    /// Choose the persona new chats in this workspace inherit, or none.
-    ///
-    /// Nil is a real choice and it persists. Before, "no persona" lasted one
-    /// conversation: the host read a workspace with no default as one nobody
-    /// had set up yet and made a fresh persona for the next chat.
-    func setDefaultPersona(_ persona: ChatPersona?) async {
-        guard let workspaceID else { return }
-        do {
-            let saved = try await Bridge.setDefaultChatPersona(
-                workspaceID: workspaceID,
-                personaID: persona?.id ?? "",
-                peer: peer
-            )
-            defaultPersonaID = saved?.id
-        } catch {
-            self.error = error.localizedDescription
+    private func requirePersonaContext(_ owner: PersonaContext) throws {
+        guard !Task.isCancelled, personaContext == owner else { throw CancellationError() }
+    }
+
+    func savePersona(_ persona: ChatPersona, owner: PersonaContext) async throws -> ChatPersona {
+        try requirePersonaContext(owner)
+        let saved = try await Bridge.saveChatPersona(
+            persona, workspaceID: owner.workspaceID, peer: owner.peer
+        )
+        try requirePersonaContext(owner)
+        if let index = personas.firstIndex(where: { $0.id == saved.id }) {
+            personas[index] = saved
+        } else {
+            personas.append(saved)
         }
+        return saved
+    }
+
+    func removePersona(_ persona: ChatPersona, owner: PersonaContext) async throws {
+        try requirePersonaContext(owner)
+        try await Bridge.removeChatPersona(id: persona.id, peer: owner.peer)
+        try requirePersonaContext(owner)
+        personas.removeAll { $0.id == persona.id }
+    }
+
+    /// Nil explicitly persists "no persona" for new chats in this workspace.
+    func setDefaultPersona(_ persona: ChatPersona?, owner: PersonaContext) async throws {
+        try requirePersonaContext(owner)
+        let saved = try await Bridge.setDefaultChatPersona(
+            workspaceID: owner.workspaceID, personaID: persona?.id ?? "", peer: owner.peer
+        )
+        try requirePersonaContext(owner)
+        defaultPersonaID = saved?.id
     }
 
     /// An idle conversation can receive a turn from another device. Keep
