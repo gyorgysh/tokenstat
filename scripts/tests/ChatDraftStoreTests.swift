@@ -19,6 +19,20 @@ final class Notified: @unchecked Sendable {
 
 @main struct ChatDraftStoreTests {
     @MainActor static func main() {
+        if CommandLine.arguments.count == 4, CommandLine.arguments[1] == "draft-writer" {
+            let directory = URL(fileURLWithPath: CommandLine.arguments[2])
+            let author = CommandLine.arguments[3]
+            let store = ChatDraftStore(directory: directory)
+            let scope = WorkReference.Scope.account(origin: "https://example.com", handle: "alice")!
+            for index in 0..<25 {
+                let reference = WorkReference(scope: scope, hostIdentity: "host-a", workspaceID: "folder-1",
+                    kind: .conversation, itemID: "\(author)-\(index)")
+                store.save(text: "\(author)-\(index)", attachments: [], for: reference)
+                store.settle()
+                assert(!store.saveFailed)
+            }
+            return
+        }
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("drafts-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -327,6 +341,27 @@ final class Notified: @unchecked Sendable {
         assert(ChatDraftTransition.resolve(incoming: "one", reference: nil,
             current: "one", currentReference: one) == .swap(nil))
 
-        print("Chat drafts: ownership, relaunch, merge, removal, corruption, quiet marks, message names and composer transitions passed")
+        let processRoot = root.appendingPathComponent("processes", isDirectory: true)
+        var children: [Process] = []
+        for author in 0..<4 {
+            let child = Process()
+            child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+            child.arguments = ["draft-writer", processRoot.path, "writer-\(author)"]
+            try! child.run()
+            children.append(child)
+        }
+        for child in children {
+            child.waitUntilExit()
+            assert(child.terminationStatus == 0)
+        }
+        let concurrent = ChatDraftStore(directory: processRoot)
+        assert(concurrent.drafts(in: alice).count == 100)
+        for author in 0..<4 {
+            for index in 0..<25 {
+                let id = "writer-\(author)-\(index)"
+                assert(concurrent.draft(for: reference(chat: id))?.text == id)
+            }
+        }
+        print("Chat drafts: ownership, relaunch, process merge, removal, corruption, quiet marks, message names and composer transitions passed")
     }
 }

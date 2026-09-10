@@ -7,6 +7,7 @@ import UIKit
 #endif
 import Foundation
 import Observation
+import Darwin
 
 /// A message somebody started writing and has not sent.
 ///
@@ -234,6 +235,20 @@ final class ChatDraftStore {
 
         func flush(file: URL, directory: URL, byteLimit: Int) {
             do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700])
+                // Keep this inode across atomic replacements and empty stores.
+                // The serial queue coordinates windows; this lock coordinates processes.
+                let lock = Darwin.open(directory.appendingPathComponent("drafts.lock").path,
+                                       O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
+                guard lock >= 0 else { throw CocoaError(.fileWriteUnknown) }
+                defer { Darwin.close(lock) }
+                var region = flock()
+                region.l_type = Int16(F_WRLCK)
+                region.l_whence = Int16(SEEK_SET)
+                while Darwin.fcntl(lock, F_SETLKW, &region) == -1 {
+                    guard errno == EINTR else { throw CocoaError(.fileWriteUnknown) }
+                }
                 var merged = try ChatDraftStore.read(file, byteLimit: byteLimit)
                 for (key, mutation) in pending {
                     switch mutation {
