@@ -3390,7 +3390,26 @@ pub struct EventPage {
 /// Cheap despite reading the file, because usage is a few dozen records out
 /// of thousands and a substring test skips the rest without parsing them.
 fn usage_totals(path: &Path) -> Result<Value, String> {
-    let bytes = fs::read(path).unwrap_or_default();
+    use std::io::Read;
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(crate::work_transcript_identity::UsageTotals::default().value());
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let maximum = PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.len() > maximum {
+        return Err("conversation transcript is not a bounded regular file".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(maximum + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > maximum {
+        return Err("conversation transcript exceeds the usage reading limit".into());
+    }
     let text = String::from_utf8_lossy(&bytes);
     let mut totals = crate::work_transcript_identity::UsageTotals::default();
     for line in text.lines() {
@@ -3689,6 +3708,30 @@ fn next_send_revision(revision: u64) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_reader_bounds_files_and_does_not_hide_read_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("events.ndjson");
+        assert_eq!(usage_totals(&path).unwrap()["turns"], 0);
+        fs::write(&path, b"{\"event\":{\"kind\":\"usage\",\"input\":42}}\n").unwrap();
+        assert_eq!(usage_totals(&path).unwrap()["input"], 42);
+        let maximum = PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64;
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(maximum + 1)
+            .unwrap();
+        assert!(usage_totals(&path).is_err());
+        assert_eq!(fs::metadata(&path).unwrap().len(), maximum + 1);
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(usage_totals(&path).is_err());
+        let not_directory = root.path().join("file");
+        fs::write(&not_directory, b"file").unwrap();
+        assert!(usage_totals(&not_directory.join("events.ndjson")).is_err());
+    }
 
     /// A throwaway archive of `count` records, each a little different in
     /// length and some of them multi-byte, so a page boundary that split a
