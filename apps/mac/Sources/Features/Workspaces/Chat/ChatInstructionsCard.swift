@@ -29,6 +29,7 @@ struct ChatInstructionsCard: View {
                 .foregroundStyle(.tertiary)
 
             ThemedEditor(text: $draft, font: Theme.callout, minHeight: 76, maxHeight: 220)
+                .disabled(model.savedCopy != nil)
                 .focused($focused)
                 .overlay(alignment: .topLeading) {
                     if draft.isEmpty {
@@ -49,6 +50,7 @@ struct ChatInstructionsCard: View {
                 Spacer(minLength: 0)
                 if changed {
                     Button("Save", .save) { commit() }
+                        .disabled(model.savedCopy != nil)
                         .buttonStyle(AccentButtonStyle(small: true))
                 }
             }
@@ -126,6 +128,11 @@ struct ChatInstructionsCard: View {
 
     private func commit() {
         let brief = draft
-        Task { await model.update(systemPrompt: brief) }
+        let owner = model.currentReference
+        Task {
+            guard let owner, model.currentReference == owner,
+                  model.selected?.id == chat.id, model.savedCopy == nil else { return }
+            await model.update(systemPrompt: brief)
+        }
     }
 }

@@ -104,6 +104,7 @@ struct ChatInspector: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField("Title", text: $titleDraft)
                     .themedFieldBox()
+                    .disabled(model.savedCopy != nil)
                     .focused($titleFocused)
                     .onSubmit { commitTitle(chat) }
                 HStack(spacing: Theme.Space.s) {
@@ -153,7 +154,7 @@ struct ChatInspector: View {
                     FlowLayout(spacing: 6, rowSpacing: 6) {
                         ForEach(chat.allowedTools, id: \.self) { tool in
                             allowChip(tool) {
-                                Task {
+                                change(chat) {
                                     await model.update(
                                         allowedTools: chat.allowedTools.filter { $0 != tool }
                                     )
@@ -162,7 +163,7 @@ struct ChatInspector: View {
                         }
                         ForEach(chat.allowedShellPrefixes, id: \.self) { prefix in
                             allowChip(prefix) {
-                                Task {
+                                change(chat) {
                                     await model.update(
                                         allowedShellPrefixes: chat.allowedShellPrefixes.filter { $0 != prefix }
                                     )
@@ -181,6 +182,7 @@ struct ChatInspector: View {
                 .font(Theme.caption.weight(.medium))
                 .foregroundStyle(Theme.accent)
             Button("Remove", .dismiss) { remove() }
+                .disabled(model.savedCopy != nil)
                 .buttonStyle(.plain)
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
@@ -207,12 +209,21 @@ struct ChatInspector: View {
         }
     }
 
+    private func change(_ chat: ChatConversation, operation: @escaping @MainActor () async -> Void) {
+        let owner = model.currentReference
+        Task { @MainActor in
+            guard let owner, model.currentReference == owner,
+                  model.selected?.id == chat.id, model.savedCopy == nil else { return }
+            await operation()
+        }
+    }
+
     private func commitTitle(_ chat: ChatConversation) {
         let title = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, title != chat.title else {
             if title.isEmpty { titleDraft = chat.title }
             return
         }
-        Task { await model.update(title: title) }
+        change(chat) { await model.update(title: title) }
     }
 }
