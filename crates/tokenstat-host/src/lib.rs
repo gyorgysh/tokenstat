@@ -77,6 +77,7 @@ pub(crate) mod fs_browse;
 pub(crate) mod harness_config;
 pub(crate) mod host_policy;
 pub(crate) mod host_stats;
+pub(crate) mod identity_storage;
 pub(crate) mod keep_awake;
 #[cfg(feature = "local-host")]
 pub(crate) mod launcher;

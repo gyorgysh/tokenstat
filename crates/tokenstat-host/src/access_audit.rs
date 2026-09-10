@@ -79,6 +79,7 @@ pub(crate) struct Entry {
 /// what anybody actually reads. The trim keeps the newest half so it happens
 /// rarely rather than on every write.
 const MAX_LINES: usize = 4000;
+static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn path() -> Result<PathBuf, String> {
     tokenstat_identity::identity_dir()
@@ -101,6 +102,9 @@ fn write(
     label: Option<&str>,
     by: Authority,
 ) -> Result<(), String> {
+    // Append and trim are one transaction. A policy caller may already have
+    // released its lock, and another process may be recording independently.
+    let _guard = crate::identity_storage::lock("workspace-access.lock", &WRITES)?;
     let entry = Entry {
         at: jiff::Timestamp::now().to_string(),
         event: event.to_owned(),

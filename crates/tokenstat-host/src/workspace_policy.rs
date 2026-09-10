@@ -311,6 +311,10 @@ pub(crate) fn set_allowed(peer_id: &str, allow: bool) -> Result<(), String> {
 
 static MUTATION: Mutex<()> = Mutex::new(());
 
+fn mutation_lock() -> Result<crate::identity_storage::Guard, String> {
+    crate::identity_storage::lock("workspace-policy.lock", &MUTATION)
+}
+
 pub(crate) fn set_allowed_by(peer_id: &str, allow: bool, by: Authority) -> Result<(), String> {
     // Label resolved outside the lock; the locked helper falls back to the
     // cache-only lookup if none was supplied.
@@ -324,9 +328,7 @@ fn set_allowed_by_with_label(
     by: Authority,
     label: Option<String>,
 ) -> Result<(), String> {
-    let _guard = MUTATION
-        .lock()
-        .map_err(|_| "Workspace access lock is unavailable")?;
+    let _guard = mutation_lock()?;
     set_allowed_locked_with_label(peer_id, allow, by, label)
 }
 
@@ -525,9 +527,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             // every other access call for the timeout.
             let label = crate::remote::account_peer_label_hex(&peer);
             let review_demo = crate::screen_policy::signed_into_review_demo();
-            let _guard = MUTATION
-                .lock()
-                .map_err(|_| "Workspace access lock is unavailable")?;
+            let _guard = mutation_lock()?;
             // Nothing to read. Workspace access is one grant with no half to
             // ask for, and the peer comes from the connection, so a device has
             // nothing it could usefully say here.
@@ -590,9 +590,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             // dispatch is reached; and the grant is an ordinary row, listed
             // and revocable in Devices and gone the moment the round closes.
             if review_demo {
-                let _guard = MUTATION
-                    .lock()
-                    .map_err(|_| "Workspace access lock is unavailable")?;
+                let _guard = mutation_lock()?;
                 set_allowed_locked_with_label(&peer, true, Authority::Console, label)?;
                 return Ok(json!({"pending": false, "granted": true, "reviewDemo": true}));
             }
@@ -606,9 +604,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             let by = Authority::parse(p.via.as_deref())?;
             // Resolve outside the lock; the audit label is best-effort.
             let label = crate::remote::account_peer_label_hex(&p.peer_id);
-            let _guard = MUTATION
-                .lock()
-                .map_err(|_| "Workspace access lock is unavailable")?;
+            let _guard = mutation_lock()?;
             set_allowed_locked_with_label(&p.peer_id, p.allow, by, label)?;
             Ok(json!({"saved": true}))
         }
@@ -622,9 +618,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         "workspace.access.invite" => {
             crate::request_context::refuse_remote("workspace access invites")?;
             let code = mint_code()?;
-            let _guard = MUTATION
-                .lock()
-                .map_err(|_| "Workspace access lock is unavailable")?;
+            let _guard = mutation_lock()?;
             let mut store = load()?;
             let replaced = store.invite.is_some();
             let expires_at = now_secs() + PENDING_TTL;
@@ -658,9 +652,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             // never run while MUTATION is held.
             let label = crate::remote::account_peer_label_hex(&peer);
             let now = now_secs();
-            let _guard = MUTATION
-                .lock()
-                .map_err(|_| "Workspace access lock is unavailable")?;
+            let _guard = mutation_lock()?;
             let mut store = load()?;
             if store.recent(&peer, "redeem") >= MAX_REDEEMS_PER_HOUR {
                 return Err(
@@ -719,10 +711,12 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             // Consumed on the first success, whether or not this device was
             // already allowed, so a code cannot be used twice. Consuming under
-            // the lock is what makes concurrent redemptions single-use; the
-            // grant below takes the lock again and cannot double-consume.
+            // the lock is what makes concurrent redemptions single-use. Keep
+            // it through the grant so a later revocation cannot be overwritten
+            // by the second half of this redemption.
             store.invite = None;
             save(&store)?;
+            set_allowed_locked_with_label(&peer, true, Authority::Invite, label.clone())?;
             let label_clone = label.clone();
             drop(_guard);
             access_audit::record(
@@ -731,7 +725,6 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 label_clone.as_deref(),
                 Authority::Invite,
             );
-            set_allowed_by_with_label(&peer, true, Authority::Invite, label)?;
             Ok(json!({"granted": true}))
         }
         _ => Err(format!("unknown workspace access method: {method}")),
@@ -740,6 +733,94 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn independent_processes_preserve_grants_and_audit_records() {
+        let root = tempfile::tempdir().unwrap();
+        // The first new record triggers compaction while other writers append.
+        let log = root.path().join("workspace-access.log");
+        let history = (0..4000)
+            .map(|n| format!("{{\"event\":\"old-{n}\"}}\n"))
+            .collect::<String>();
+        std::fs::write(&log, history).unwrap();
+        let mut children: Vec<_> = (0..4)
+            .map(|worker| {
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "workspace_policy::tests::identity_writer_child",
+                        "--ignored",
+                    ])
+                    .env("TOKENSTAT_IDENTITY_DIR", root.path())
+                    .env("TOKENSTAT_TEST_IDENTITY_WRITER", worker.to_string())
+                    .stdout(std::process::Stdio::null())
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        for child in &mut children {
+            assert!(child.wait().unwrap().success());
+        }
+        let policy: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.path().join("workspace-policy.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(policy["allowed"].as_array().unwrap().len(), 80);
+        let log = std::fs::read_to_string(log).unwrap();
+        let records: Vec<serde_json::Value> = log
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        for n in 1..=80 {
+            let peer = format!("{n:064x}");
+            assert!(
+                policy["allowed"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&serde_json::json!(peer))
+            );
+            assert_eq!(
+                records
+                    .iter()
+                    .filter(|record| record["event"] == "granted" && record["device"] == peer)
+                    .count(),
+                1
+            );
+        }
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record["event"] == "requested")
+                .count(),
+            80
+        );
+        assert!(records.len() <= 4000);
+    }
+
+    #[test]
+    #[ignore = "private identity writer launched by the parent regression"]
+    fn identity_writer_child() {
+        let worker: usize = std::env::var("TOKENSTAT_TEST_IDENTITY_WRITER")
+            .unwrap()
+            .parse()
+            .unwrap();
+        for index in 1..=20 {
+            let peer = format!("{:064x}", worker * 20 + index);
+            super::set_allowed_by_with_label(
+                &peer,
+                true,
+                crate::access_audit::Authority::Console,
+                Some("Test device".into()),
+            )
+            .unwrap();
+            crate::access_audit::record(
+                "requested",
+                Some(&peer),
+                None,
+                crate::access_audit::Authority::Console,
+            );
+        }
+    }
+
     /// Isolate process-global host roots and singletons from every other test.
     #[cfg(feature = "local-host")]
     #[test]
