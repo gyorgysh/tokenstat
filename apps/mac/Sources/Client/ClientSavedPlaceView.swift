@@ -122,7 +122,7 @@ struct ClientSavedPlaceView: View {
                 message: terminal == nil ? "The session is no longer running on \(hostName)." : "Return to your session on \(hostName).",
                 actionTitle: terminal == nil ? nil : "Open terminal",
                 actionIcon: .reopen,
-                action: terminal == nil ? nil : { Task { await load() } }
+                action: terminal == nil ? nil : { Task { await load(reopen: true) } }
             )
             .padding(Theme.Space.m)
         } else {
@@ -130,11 +130,13 @@ struct ClientSavedPlaceView: View {
         }
     }
 
-    private func load() async {
+    private func load(reopen: Bool = false) async {
         // Once per place: availability rebuilds recreate `destination` and its
         // `.task`, and without this each rebuild re-pairs and re-raises the
         // tunnel while the person sits on the screen.
-        guard !loading, loadedPlaceID != place.id,
+        // An explicit reopen must fetch the existing session again: dismissal
+        // stopped the previous attachment, which cannot be reused.
+        guard !loading, reopen || loadedPlaceID != place.id,
               let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
         func stillCurrent() -> Bool {
             !Task.isCancelled && WorkSessionContext.shared.scope == scope
