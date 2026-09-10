@@ -178,6 +178,7 @@ private struct ChatPendingMessagesSheet: View {
 
     #if os(macOS)
     @State private var draggingID: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// One card per message, no section box. The sheet subtitle already says
     /// where these go and in what order; the footnote keeps what Send now
@@ -208,8 +209,28 @@ private struct ChatPendingMessagesSheet: View {
                 .foregroundStyle(.tertiary)
                 .frame(width: 20, height: 30)
                 .contentShape(.rect)
-                .help("Drag to reorder")
+                .help("Drag to reorder, or focus and press Command–Up or Command–Down")
+                .focusable()
                 .accessibilityLabel("Reorder message")
+                .accessibilityValue("Message \(items.firstIndex(where: { $0.id == item.id }).map { $0 + 1 } ?? 1) of \(items.count)")
+                .accessibilityActions {
+                    if items.first?.id != item.id {
+                        Button("Move up") { shift(item, by: -1) }
+                    }
+                    if items.last?.id != item.id {
+                        Button("Move down") { shift(item, by: 1) }
+                    }
+                }
+                .onKeyPress(.upArrow, phases: .down) { press in
+                    guard press.modifiers.contains(.command) else { return .ignored }
+                    shift(item, by: -1)
+                    return .handled
+                }
+                .onKeyPress(.downArrow, phases: .down) { press in
+                    guard press.modifiers.contains(.command) else { return .ignored }
+                    shift(item, by: 1)
+                    return .handled
+                }
                 .onDrag {
                     draggingID = item.id
                     return NSItemProvider(object: item.id as NSString)
@@ -231,9 +252,17 @@ private struct ChatPendingMessagesSheet: View {
                 targetID: item.id,
                 items: items,
                 draggingID: $draggingID,
+                reduceMotion: reduceMotion,
                 onMove: onMove
             )
         )
+    }
+    private func shift(_ item: ChatQueuedMessage, by offset: Int) {
+        guard let from = items.firstIndex(where: { $0.id == item.id }),
+              items.indices.contains(from + offset) else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+            onMove(IndexSet(integer: from), offset > 0 ? from + offset + 1 : from + offset)
+        }
     }
     #endif
 }
@@ -246,6 +275,7 @@ private struct QueueDropDelegate: DropDelegate {
     let targetID: String
     let items: [ChatQueuedMessage]
     @Binding var draggingID: String?
+    let reduceMotion: Bool
     let onMove: (IndexSet, Int) -> Void
 
     func dropEntered(info: DropInfo) {
@@ -254,7 +284,7 @@ private struct QueueDropDelegate: DropDelegate {
               let to = items.firstIndex(where: { $0.id == targetID }),
               from != to
         else { return }
-        withAnimation {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
             onMove(IndexSet(integer: from), to > from ? to + 1 : to)
         }
     }
