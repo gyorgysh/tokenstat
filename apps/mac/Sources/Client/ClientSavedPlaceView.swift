@@ -16,9 +16,32 @@ struct ClientPlaceAvailability<Content: View>: View {
         account.account?.machines.first { $0.publicIdentity == peer }
     }
 
+    private var availability: WorkDestinationResolver.Availability {
+        WorkDestinationResolver.availability(.init(
+            accountVerified: account.signedIn,
+            hostLinked: machine != nil,
+            connected: !connectivity.isOffline && machine?.online != false
+        ))
+    }
+
     var body: some View {
         Group {
-            if connectivity.isOffline || machine?.online == false {
+            switch availability {
+            case .live:
+                content()
+            case .hostRemoved:
+                ClientEmptyState(
+                    kind: .unreachable, title: "This machine is no longer linked",
+                    message: "You can find the machines on your account in Devices."
+                )
+                .padding(Theme.Space.m)
+            case .accessRequired:
+                ClientEmptyState(
+                    kind: .unreachable, title: "Verify your account",
+                    message: "Verify your account before returning to this machine. Your place is kept on this device."
+                )
+                .padding(Theme.Space.m)
+            default:
                 ClientEmptyState(
                     kind: .unreachable,
                     title: connectivity.isOffline ? "You are offline" : "\(hostName) is asleep",
@@ -30,14 +53,6 @@ struct ClientPlaceAvailability<Content: View>: View {
                     action: connectivity.isOffline ? nil : { Task { await account.load() } }
                 )
                 .padding(Theme.Space.m)
-            } else if account.account != nil && machine == nil {
-                ClientEmptyState(
-                    kind: .unreachable, title: "This machine is no longer linked",
-                    message: "You can find the machines on your account in Devices."
-                )
-                .padding(Theme.Space.m)
-            } else {
-                content()
             }
         }
         .background(Theme.background)
@@ -108,7 +123,13 @@ struct ClientSavedPlaceView: View {
         // Once per place: availability rebuilds recreate `destination` and its
         // `.task`, and without this each rebuild re-pairs and re-raises the
         // tunnel while the person sits on the screen.
-        guard !loading, loadedPlaceID != place.id else { return }
+        guard !loading, loadedPlaceID != place.id,
+              let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
+        func stillCurrent() -> Bool {
+            !Task.isCancelled && WorkSessionContext.shared.scope == scope
+                && account.account?.machines.contains { $0.publicIdentity == place.id.peer } == true
+        }
+        guard stillCurrent() else { return }
         loading = true
         defer { loading = false }
         error = nil
@@ -116,20 +137,27 @@ struct ClientSavedPlaceView: View {
             // Home has never needed a tunnel. A cold-start tap must establish
             // one here, just as opening the host from Devices does.
             await ClientDeviceName.publish()
+            guard stillCurrent() else { return }
             _ = try await Bridge.pair(key: place.id.peer, label: hostName, address: "")
+            guard stillCurrent() else { return }
             _ = try await Bridge.setTunnel(true)
-            guard try await Bridge.workspaceAccessAllowed(peer: place.id.peer) else {
+            guard stillCurrent() else { return }
+            let allowed = try await Bridge.workspaceAccessAllowed(peer: place.id.peer)
+            guard stillCurrent() else { return }
+            guard allowed else {
                 needsAccess = true
                 loadedPlaceID = place.id
                 return
             }
             if place.id.kind == .workspace, let workspace = place.id.workspaceID {
                 var value = try await ClientRemote.status(peer: place.id.peer, workspace: workspace)
+                guard stillCurrent() else { return }
                 value.id = "remote:\(place.id.peer):\(workspace)"
                 value.machineID = place.id.peer
                 folder = value
             } else if place.id.kind == .terminal, let id = place.id.itemID {
                 let sessions = try await ClientRemote.ptyList(peer: place.id.peer)
+                guard stillCurrent() else { return }
                 if let info = sessions.first(where: { $0.id == id && $0.alive }) {
                     terminal = ClientTerminalSession(peer: place.id.peer, info: info)
                     showTerminal = true
@@ -140,6 +168,7 @@ struct ClientSavedPlaceView: View {
             loaded = true
             loadedPlaceID = place.id
         } catch {
+            guard stillCurrent() else { return }
             self.error = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
     }

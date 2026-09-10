@@ -4,6 +4,36 @@ import Foundation
 /// Pure identifier routing shared by chat loads and sidebar actions. Resolving
 /// a local destination deliberately produces nil; nil is not a missing route.
 enum WorkDestinationResolver {
+    /// Availability facts come from the current account and destination, never
+    /// from a remembered label. Revocation outranks a retained local copy.
+    enum Availability: Equatable, Sendable {
+        case live, savedCopy, reconnecting, accessRequired, hostRemoved
+        case itemDeleted, unsupportedHost, unavailable
+    }
+
+    struct AvailabilityFacts: Sendable {
+        var accountVerified = false
+        var hostLinked = false
+        var accessAllowed: Bool? = nil
+        var supported: Bool? = nil
+        var itemExists: Bool? = nil
+        var connected = false
+        var savedCopy = false
+        var reconnecting = false
+    }
+
+    static func availability(_ facts: AvailabilityFacts) -> Availability {
+        guard facts.accountVerified else { return .accessRequired }
+        guard facts.hostLinked else { return .hostRemoved }
+        if facts.accessAllowed == false { return .accessRequired }
+        if facts.itemExists == false { return .itemDeleted }
+        if facts.supported == false { return .unsupportedHost }
+        if facts.connected { return .live }
+        if facts.savedCopy { return .savedCopy }
+        if facts.reconnecting { return .reconnecting }
+        return .unavailable
+    }
+
     /// Anchors choose a reading position, not a different conversation.
     /// Missing or malformed references never match, including nil with nil.
     static func sameConversation(_ a: WorkReference?, _ b: WorkReference?) -> Bool {

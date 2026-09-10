@@ -47,6 +47,31 @@ import Foundation
             peer: "host-a", workspaceID: "other-folder") == nil)
         assert(WorkDestinationResolver.requestedConversation(reference(alice, "host-a", "same-folder", ""),
             scope: alice, peer: "host-a", workspaceID: "same-folder") == nil)
+        // Verified revocations take precedence over stale copies or connectivity.
+        var facts = WorkDestinationResolver.AvailabilityFacts()
+        assert(WorkDestinationResolver.availability(facts) == .accessRequired)
+        facts.savedCopy = true
+        facts.accountVerified = true
+        assert(WorkDestinationResolver.availability(facts) == .hostRemoved)
+        facts.hostLinked = true
+        assert(WorkDestinationResolver.availability(facts) == .savedCopy)
+        facts.accessAllowed = false
+        assert(WorkDestinationResolver.availability(facts) == .accessRequired)
+        facts.accessAllowed = true
+        facts.itemExists = false
+        assert(WorkDestinationResolver.availability(facts) == .itemDeleted)
+        facts.itemExists = true
+        facts.supported = false
+        assert(WorkDestinationResolver.availability(facts) == .unsupportedHost)
+        facts.supported = true
+        facts.connected = true
+        assert(WorkDestinationResolver.availability(facts) == .live)
+        facts.connected = false
+        facts.savedCopy = false
+        facts.reconnecting = true
+        assert(WorkDestinationResolver.availability(facts) == .reconnecting)
+        facts.reconnecting = false
+        assert(WorkDestinationResolver.availability(facts) == .unavailable)
         store.remember(first)
         otherWindow.remember(reference(alice, "host-b", "same-folder", "chat-b"))
         otherWindow.remember(reference(bob, "host-a", "same-folder", "bob-chat"))

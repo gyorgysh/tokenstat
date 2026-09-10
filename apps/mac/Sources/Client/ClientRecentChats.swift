@@ -367,22 +367,30 @@ struct ClientRecentChatView: View {
             return
         }
         guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
+        func stillCurrent() -> Bool {
+            !Task.isCancelled && scope == WorkSessionContext.shared.scope
+                && machine != nil && account.signedIn
+        }
+        guard stillCurrent() else { return }
         savedUnavailable = false
         do {
             await ClientDeviceName.publish()
+            guard stillCurrent() else { return }
             _ = try await Bridge.pair(key: peer, label: hostName, address: "")
+            guard stillCurrent() else { return }
             _ = try await Bridge.setTunnel(true)
+            guard stillCurrent() else { return }
             let allowed = try await Bridge.workspaceAccessAllowed(peer: peer)
-            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            guard stillCurrent() else { return }
             guard allowed else {
                 model.error = "Workspace access is required. Allow this device on \(hostName) to open the conversation."
                 return
             }
             await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
-            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            guard stillCurrent() else { return }
             loaded = true
         } catch {
-            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            guard stillCurrent() else { return }
             model.error = error.localizedDescription
         }
     }
