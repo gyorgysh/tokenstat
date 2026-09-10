@@ -33,6 +33,7 @@ struct RootView: View {
     /// on every visit meant reading the archive back and landing above the
     /// latest turn, with the empty state's character on screen in between.
     @State private var mountedChatFolder: String?
+    @State private var showingChatOverview = false
     /// The folder whose pull requests are mounted, for the same reason. A
     /// list that reloads from GitHub on every visit is a skeleton every visit,
     /// and the filters and the open pull go back to their defaults with it.
@@ -203,6 +204,14 @@ struct RootView: View {
                     selectWorkspace(next)
                 } else {
                     navigate(to: .global(.home))
+                }
+            }
+            .onChange(of: model.selected) { _, selected in
+                guard route.isGlobal(.insights), selected != nil else { return }
+                isInspectorPresented = true
+                if !inspectorFits {
+                    isOverlayVisible = true
+                    overlayHeldByPress = true
                 }
             }
             .onChange(of: todo.selectionGeneration) { _, _ in
@@ -884,11 +893,26 @@ struct RootView: View {
             case .workspace(_, .notes):
                 notesInspector
             case .workspace(_, .chat):
+                #if os(macOS)
+                if showingChatOverview {
+                    VStack(spacing: 0) {
+                        InspectorChromeBar(onClose: { closeInspector() }) {
+                            InspectorTitle(title: "Chat", symbol: "bubble.left.and.bubble.right")
+                            Spacer(minLength: 0)
+                        }
+                        InspectorEmptyState(systemImage: "bubble.left.and.bubble.right", title: "Pick a conversation", subtitle: "Open a chat to see its agent, settings, and context here.", tint: Theme.accent)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }.background(Theme.background)
+                } else {
+                    ChatInspector(model: chat, folder: workspaces.folders.first { $0.id == route.workspaceID }, onClose: { closeInspector() })
+                }
+                #else
                 ChatInspector(
                     model: chat,
                     folder: workspaces.folders.first { $0.id == route.workspaceID },
                     onClose: { closeInspector() }
                 )
+                #endif
             case .workspace(_, .workflows), .global(.workflows):
                 WorkflowsInspector(
                     model: workflows,
@@ -957,7 +981,7 @@ struct RootView: View {
             case .global(.account):
                 EmptyView()
             case .workspacesOverview:
-                WorkspacesOverviewPlaceholder()
+                WorkspacesOverviewPlaceholder(onClose: { closeInspector() })
             }
         }
     }
@@ -1680,7 +1704,9 @@ struct RootView: View {
                                         workspacePendingChatRemoval = folder
                                     } : nil
                                 ) {
-                                    openSection(section, in: folder.id)
+                                    openSection(section, in: folder.id) {
+                                        if section == .chat { showingChatOverview = true }
+                                    }
                                 }
                                 if section == .chat {
                                     chatHistoryRows(for: folder)
@@ -1872,17 +1898,6 @@ struct RootView: View {
             #endif
             UpdateCard(update: appUpdate)
             Rectangle().fill(Theme.border).frame(height: 1)
-            // The up-to-date confirmation is a card in `UpdateCard`; only the
-            // other check results are captions.
-            if let notice = appUpdate.checkNotice,
-               notice != AppUpdateModel.upToDateMessage {
-                Text(notice)
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.vertical, Theme.Space.xs)
-            }
             accountRow
                 .padding(.horizontal, Theme.Space.s)
                 .padding(.vertical, Theme.Space.s)
@@ -2123,6 +2138,7 @@ struct RootView: View {
                     workspaceName: folder?.name,
                     git: folder?.git,
                     onBranchChanged: { await workspaces.refresh() },
+                    showingOverview: $showingChatOverview,
                     isActive: showsChat
                 )
                 .opacity(showsChat ? 1 : 0)
@@ -2188,7 +2204,8 @@ struct RootView: View {
                 workspaceID: id,
                 workspaceName: folder?.name,
                 git: folder?.git,
-                onBranchChanged: { await workspaces.refresh() }
+                onBranchChanged: { await workspaces.refresh() },
+                showingOverview: .constant(false)
             )
             #endif
         case let .workspace(id, .pulls):
@@ -2517,6 +2534,7 @@ struct RootView: View {
                 // without the route test a conversation stayed marked under
                 // Notes, Home or a server, beside whatever row you did pick.
                 isSelected: chat.selected?.id == conversation.id
+                    && !showingChatOverview
                     && route == .workspace(id: folder.id, section: .chat),
                 select: {
                     if isCurrent {
@@ -2638,6 +2656,9 @@ struct RootView: View {
         then update: (() -> Void)? = nil
     ) {
         navigate(to: .workspace(id: folderID, section: section)) {
+            #if os(macOS)
+            if section == .chat { showingChatOverview = false }
+            #endif
             workspaces.selectedID = folderID
             lastSection[folderID] = section
             expandedWorkspaces.insert(folderID)

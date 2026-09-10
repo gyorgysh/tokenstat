@@ -103,6 +103,11 @@ struct WorkflowsView: View {
                         ErrorBanner(message: error) { Task { await model.load() } }
                     }
                     intro
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.s), count: 3), spacing: Theme.Space.s) {
+                        ActivitySummaryTile(title: "Saved workflows", value: model.scoped.count, symbol: "point.3.connected.trianglepath.dotted")
+                        ActivitySummaryTile(title: "Total steps", value: model.scoped.reduce(0) { $0 + $1.nodes.count }, symbol: "square.stack.3d.up")
+                        ActivitySummaryTile(title: "Running", value: model.scopedRuns.filter { $0.status == "running" }.count, symbol: "play.circle")
+                    }
                     builderCard
                     if let draft = model.draft, draft.id.isEmpty {
                         draftCard(draft)
@@ -134,7 +139,9 @@ struct WorkflowsView: View {
                         }
                         .transition(.opacity)
                     } else if filtered.isEmpty && model.draft == nil {
-                        nothingYet
+                        if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            ContentUnavailableView.search(text: search)
+                        } else { nothingYet }
                     } else {
                         librarySections
                     }
@@ -190,7 +197,7 @@ struct WorkflowsView: View {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text("Workflows")
                     .font(Theme.font(24, weight: .semibold))
-                Text("A map of agents, automations, HTTP and commands. Describe a run, review the draft, then save. It never starts on its own.")
+                Text("Connect agents, commands, and automations into reusable runs.")
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -221,13 +228,12 @@ struct WorkflowsView: View {
 
     private var builderCard: some View {
         Card(
-            title: "Workflow builder",
-            subtitle: "Describe a run and a cheap local agent drafts the steps, or lay them out yourself.",
+            title: "Design a workflow",
+            subtitle: "Describe the outcome. Review the generated steps before saving or running.",
             mark: "mark_workflow"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 designCard
-                manualCard
             }
         }
     }
@@ -293,21 +299,24 @@ struct WorkflowsView: View {
 
     private var designCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Describe the run")
-                .font(Theme.callout.weight(.medium))
-            Text("A cheap local agent turns the description into steps. It writes a draft you review, and it never starts the run.")
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            WidthReader { width in
+            let layout = width >= 720 ? AnyLayout(HStackLayout(alignment: .top, spacing: Theme.Space.l)) : AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.m))
+            layout {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("What should happen?").font(Theme.callout.weight(.medium))
                 TextField("Rewrite the prompt, plan it, build it, then review", text: $designPrompt, axis: .vertical)
                     .textFieldStyle(.themedMultiline)
-                    .lineLimit(3...8)
+                    .lineLimit(6...10)
                     .focused($designFocused)
                     .disabled(model.isDesigning)
                 if !designRecipes.isEmpty {
                     examplesSection
                 }
+                Text("Prefer to build visually? Start a blank draft from the header.")
+                    .font(Theme.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                Text("Draft configuration").font(Theme.callout.weight(.medium))
                 WorkflowDesignPickers(
                     agents: WorkflowRecipes.designAgents(from: model.pickerBackends(keeping: designBackend)),
                     folders: folders,
@@ -317,8 +326,9 @@ struct WorkflowsView: View {
                     workspaceID: $designWorkspaceID
                 )
                 HStack(spacing: Theme.Space.s) {
+                    if model.isDesigning { ProgressView().controlSize(.small) }
                     Spacer()
-                    Button(model.isDesigning ? "Designing" : "Design", .create) {
+                    Button(model.isDesigning ? "Designing…" : "Generate draft", .create) {
                         Task {
                             await model.design(
                                 prompt: designPrompt,
@@ -337,6 +347,12 @@ struct WorkflowsView: View {
                             || WorkflowRecipes.designAgents(from: model.pickerBackends()).isEmpty
                     )
                 }
+            }
+            .padding(Theme.Space.m)
+            .frame(width: width >= 720 ? 290 : nil)
+            .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
+            }
             }
         }
     }
@@ -374,16 +390,11 @@ struct WorkflowsView: View {
                 symbol: "point.3.connected.trianglepath.dotted",
                 title: "No workflows yet",
                 message: """
-                Describe a run above. A cheap local backend drafts the graph. \
-                You review it, then save. Automations stay: a workflow can \
-                include one as a step.
+                Your saved workflows will appear here. Describe an outcome above \
+                or start a blank draft to arrange the steps on a canvas.
                 """
             ) {
-                Button("Blank draft", .create) {
-                    model.startBlank(scope: defaultScope, workspaceID: defaultWorkspaceID)
-                }
-                .buttonStyle(AccentButtonStyle())
-                .disabled(!model.canStartNewDraft)
+                EmptyView()
             }
         }
     }

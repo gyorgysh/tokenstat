@@ -28,6 +28,8 @@ struct WorkspacesOverviewView: View {
 
     /// Which machine's folders are showing. Nil is all of them.
     @State private var scope: String?
+    @State private var search = ""
+    @State private var alphabetical = false
 
     private struct MachineScope: Hashable {
         var id: String?
@@ -51,18 +53,28 @@ struct WorkspacesOverviewView: View {
     }
 
     private var shown: [WorkspaceFolder] {
-        guard let scope else { return folders }
-        if scope == "local" { return folders.filter { !$0.isRemote } }
-        return folders.filter { $0.isRemote && ($0.machineID ?? "remote") == scope }
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = folders.filter { folder in
+            let matchesScope = scope == nil || (scope == "local" ? !folder.isRemote : folder.isRemote && (folder.machineID ?? "remote") == scope)
+            return matchesScope && (query.isEmpty || folder.name.localizedCaseInsensitiveContains(query)
+                || folder.path.localizedCaseInsensitiveContains(query)
+                || (folder.machineLabel?.localizedCaseInsensitiveContains(query) ?? false))
+        }
+        return alphabetical ? result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } : result
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+        DetailChromeBar {
+            ToolbarIconButton(systemImage: "plus", help: "Add folder") { onAdd() }
+        }
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack(alignment: .center, spacing: Theme.Space.m) {
+                    FeatureMark(name: "mark_archive", tint: Theme.accent, size: 28)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("All folders")
-                            .font(Theme.title3.weight(.semibold))
+                            .font(Theme.font(24, weight: .semibold))
                         Text(summaryLine)
                             .font(Theme.callout)
                             .foregroundStyle(.secondary)
@@ -80,15 +92,31 @@ struct WorkspacesOverviewView: View {
                     Button("Add folder", .create) { onAdd() }
                         .buttonStyle(AccentButtonStyle(small: true))
                 }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.s), count: 3), spacing: Theme.Space.s) {
+                    ActivitySummaryTile(title: "Workspaces", value: folders.count, symbol: "folder")
+                    ActivitySummaryTile(title: "Local folders", value: folders.filter { !$0.isRemote }.count, symbol: "laptopcomputer")
+                    ActivitySummaryTile(title: "Remote folders", value: folders.filter(\.isRemote).count, symbol: "network")
+                }
+                HStack(spacing: Theme.Space.s) {
+                    HStack(spacing: Theme.Space.s) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search folders, paths, or machines", text: $search).textFieldStyle(.plain)
+                    }
+                    .padding(Theme.Space.s)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
+                    Picker("Sort", selection: $alphabetical) {
+                        Text("Your order").tag(false)
+                        Text("Name A–Z").tag(true)
+                    }.labelsHidden().frame(width: 135)
+                }
                 if folders.isEmpty {
                     emptyState
                 } else if shown.isEmpty {
-                    Text("No folders on this machine.")
-                        .font(Theme.body)
-                        .foregroundStyle(.secondary)
+                    ContentUnavailableView.search(text: search)
                 } else {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 250), spacing: Theme.Space.m)],
+                        columns: [GridItem(.adaptive(minimum: 300), spacing: Theme.Space.m)],
                         spacing: Theme.Space.m
                     ) {
                         ForEach(shown) { folder in
@@ -97,8 +125,9 @@ struct WorkspacesOverviewView: View {
                     }
                 }
             }
-            .padding(Theme.Space.l)
+            .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
         }
         .background(Theme.background)
         .onChange(of: folders.map(\.id)) { _, _ in
@@ -142,6 +171,12 @@ struct WorkspacesOverviewView: View {
                 fillsHeight: true
             ) {
                 VStack(alignment: .leading, spacing: 4) {
+                    Text(folder.path)
+                        .font(Theme.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help(folder.path)
+                        .padding(.bottom, Theme.Space.s)
                     if !folder.exists {
                         Text("Folder missing")
                             .font(Theme.callout.weight(.medium))
@@ -166,6 +201,26 @@ struct WorkspacesOverviewView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
+                    if let summary = summaries[folder.id] {
+                        HStack(spacing: Theme.Space.m) {
+                            Label("\(summary.tasks) tasks", systemImage: "checklist")
+                            if let notes = summary.notes {
+                                Label("\(notes) notes", systemImage: "note.text")
+                            }
+                        }
+                        .font(Theme.caption).foregroundStyle(.secondary)
+                        .padding(.top, Theme.Space.s)
+                    }
+                    ThemeRule().padding(.vertical, Theme.Space.s)
+                    HStack {
+                        if let changed = summaries[folder.id]?.changed {
+                            Text(changed == 0 ? "No pending changes" : "\(changed) changed files")
+                                .foregroundStyle(changed == 0 ? Theme.accent : Theme.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Label("Open workspace", systemImage: "arrow.up.right")
+                            .foregroundStyle(Theme.accent)
+                    }.font(Theme.caption.weight(.medium))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -217,20 +272,18 @@ struct WorkspacesOverviewView: View {
 /// The column exists here, so it says what it is waiting for rather than
 /// standing blank: pick a card and this becomes that folder's inspector.
 struct WorkspacesOverviewPlaceholder: View {
+    var onClose: () -> Void
     var body: some View {
-        VStack(spacing: Theme.Space.s) {
-            Image(systemName: "folder")
-                .font(Theme.font(22, weight: .medium))
-                .foregroundStyle(.tertiary)
-            Text("Select a folder")
-                .font(Theme.body.weight(.medium))
-            Text("Pick one from the overview to see it here.")
-                .font(Theme.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        VStack(spacing: 0) {
+            InspectorChromeBar(onClose: onClose) {
+                InspectorTitle(title: "Workspace", symbol: "folder")
+                Spacer(minLength: 0)
+            }
+            InspectorEmptyState(mark: "mark_archive", title: "Pick a folder", subtitle: "Open a workspace to see its details and tools here.")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(Theme.Space.l)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.background)
     }
 }
 

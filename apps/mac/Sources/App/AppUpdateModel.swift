@@ -19,12 +19,13 @@ final class AppUpdateModel {
     /// sidebar so the card can own the "up to date" state instead of a caption.
     static let upToDateMessage = "You are on the latest version."
 
-    /// Where an update has got to. The interface shows something only in the
-    /// last two, because the ones before it are not the user's business.
+    /// Real update milestones, shown by the sidebar activity card.
     enum Stage: Equatable {
         case idle
         case checking
-        /// Found, and being fetched and checked.
+        /// Fetching the disk image and checking its checksum.
+        case downloading
+        /// Verifying the application and putting it in place.
         case installing
         /// In place. Restarting is all that is left.
         case readyToRelaunch
@@ -50,7 +51,9 @@ final class AppUpdateModel {
         return nil
     }
 
-    var isChecking: Bool { stage == .checking || stage == .installing }
+    var isChecking: Bool { stage == .checking || stage == .downloading || stage == .installing }
+
+    private var noticeGeneration = 0
 
     /// What a hand-triggered check found, for a moment.
     ///
@@ -70,7 +73,9 @@ final class AppUpdateModel {
     /// previous check came back with nothing. That guard exists so the launch
     /// check happens once; a person pressing the item means now.
     func checkNow() async {
-        guard !isChecking else { return }
+        guard !isChecking, !isReady else { return }
+        noticeGeneration += 1
+        let generation = noticeGeneration
         checkNotice = nil
         let before = release?.latest
         stage = .idle
@@ -87,7 +92,7 @@ final class AppUpdateModel {
         }
 
         try? await Task.sleep(for: .seconds(6))
-        checkNotice = nil
+        if generation == noticeGeneration { checkNotice = nil }
     }
 
     /// Check, and install what is found.
@@ -106,16 +111,16 @@ final class AppUpdateModel {
                 return
             }
         } catch {
-            // An update check is not worth a banner. No network is the common
-            // reason and the user already knows.
-            stage = .idle
+            // A failed request cannot truthfully report "up to date".
+            stage = .failed(error.localizedDescription)
             return
         }
 
         #if os(macOS)
-        stage = .installing
+        stage = .downloading
         do {
             let downloaded = try await Bridge.appUpdateDownload()
+            stage = .installing
             // Off the main actor: mounting an image and copying a bundle would
             // otherwise freeze the window for the whole of it.
             try await Task.detached(priority: .utility) {

@@ -21,6 +21,24 @@ struct ClientChatView: View {
 
     @State private var model = ChatModel()
     @State private var loaded = false
+    @State private var search = ""
+    @State private var agent = ""
+    @State private var runningOnly = false
+    @State private var alphabetical = false
+    @State private var retainedThread: ChatConversation?
+
+    private var filteredChats: [ChatConversation] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.chats.filter {
+            (agent.isEmpty || $0.backend == agent) && (!runningOnly || $0.running)
+                && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query)
+                    || (model.backend(for: $0.backend)?.label ?? $0.backend).localizedCaseInsensitiveContains(query)
+                    || ($0.model?.localizedCaseInsensitiveContains(query) ?? false))
+        }.sorted {
+            alphabetical ? $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                : ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
+        }
+    }
     /// The conversation being read, shown in place of the list.
     ///
     /// Not a push, and that is the point. A pushed screen outlives the screen
@@ -48,16 +66,21 @@ struct ClientChatView: View {
     private var place: String { folderName.isEmpty ? "this folder" : folderName }
 
     var body: some View {
-        Group {
-            if let opened {
+        ZStack {
+            if let thread = opened ?? retainedThread {
                 ClientChatThread(
                     model: model,
-                    chatID: opened.id,
+                    chatID: thread.id,
                     folderName: folderName,
                     hostName: hostName,
-                    onBack: { self.opened = nil }
+                    isActive: opened != nil,
+                    onBack: { retainedThread = opened; self.opened = nil }
                 )
-            } else {
+                .opacity(opened == nil ? 0 : 1)
+                .allowsHitTesting(opened != nil)
+                .accessibilityHidden(opened == nil)
+            }
+            if opened == nil {
                 list
             }
         }
@@ -102,7 +125,29 @@ struct ClientChatView: View {
             refreshKey: "workspace-chat-\(workspaceID)",
             reload: { await reload() }
         ) {
-            ForEach(model.chats) { chat in
+            ClientOverviewFacts(facts: [("Conversations", "\(model.chats.count)"), ("Running", "\(model.chats.filter(\.running).count)"), ("Agents", "\(Set(model.chats.map(\.backend)).count)")]).clientCardRow()
+            HStack {
+                Menu {
+                    Picker("Agent", selection: $agent) {
+                        Text("All agents").tag("")
+                        ForEach(Set(model.chats.map(\.backend)).sorted(), id: \.self) { id in
+                            Text(model.backend(for: id)?.label ?? id).tag(id)
+                        }
+                    }
+                    Toggle("Running only", isOn: $runningOnly)
+                    Picker("Sort", selection: $alphabetical) {
+                        Text("Recent first").tag(false)
+                        Text("Title A–Z").tag(true)
+                    }
+                } label: { Label("Filter & sort", systemImage: "line.3.horizontal.decrease") }
+                .frame(minHeight: 44)
+                Spacer()
+                Text("\(filteredChats.count) shown").font(ClientType.caption).foregroundStyle(.secondary)
+            }.clientCardRow()
+            if filteredChats.isEmpty {
+                Text("No matching conversations. Adjust your search or filters.").font(ClientType.label).foregroundStyle(.secondary).clientCardRow()
+            }
+            ForEach(filteredChats) { chat in
                 Button {
                     opened = chat
                 } label: {
@@ -115,6 +160,7 @@ struct ClientChatView: View {
                 }
             }
         }
+        .searchable(text: $search, prompt: "Titles, agents, or models")
         .safeAreaInset(edge: .top, spacing: 0) {
             if showReconnect {
                 ClientReconnectBanner(offline: !refreshing && connectivity.status == .offline)
@@ -157,6 +203,7 @@ struct ClientChatView: View {
             Text("The transcript stays on \(hostName.isEmpty ? "the computer" : hostName) until you delete it. This cannot be undone.")
         }
         .task {
+            guard !loaded else { return }
             await reload()
             guard !Task.isCancelled, model.error == nil,
                   model.isReady(for: workspaceID), model.peer == peer else { return }
@@ -190,7 +237,7 @@ struct ClientChatView: View {
                     Text(chat.title)
                         .font(ClientType.label.weight(.medium))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     // Words waiting in this thread. The mark reads the draft
                     // store itself, so this list is not rebuilt every time
                     // somebody pauses typing in one of them.
@@ -200,6 +247,8 @@ struct ClientChatView: View {
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.accent)
                     .lineLimit(1)
+                RelativeTimeText(date: Date(timeIntervalSince1970: Double(chat.lastMessageAtMs ?? chat.updatedAtMs) / 1000), unitsStyle: .abbreviated)
+                    .font(ClientType.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             Image(systemName: ActionIcon.next.symbol)
@@ -316,6 +365,7 @@ struct ClientChatThread: View {
     /// How to leave, when this is shown in place of the chat list rather than
     /// pushed on top of it. `PullDetailView` takes the same closure for the
     /// same reason.
+    var isActive = true
     var onBack: (() -> Void)?
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
@@ -472,23 +522,23 @@ struct ClientChatThread: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { model.saveDraftNow() }
-            else { Task { await model.resumeWaitingConnection() } }
-            guard phase == .active else { return }
+            else if isActive { Task { await model.resumeWaitingConnection() } }
+            guard phase == .active, isActive else { return }
             Task { await foregroundRefresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await foregroundRefresh() }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
-        .navigationTitle(chat?.title ?? "Chat")
+        .navigationTitle(isActive ? (chat?.title ?? "Chat") : "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if let onBack {
+            if isActive, let onBack {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: onBack) { ActionIcon.back.label("Chats") }
                 }
             }
-            if chat != nil && (pinReference != nil || model.savedCopy == nil) {
+            if isActive && chat != nil && (pinReference != nil || model.savedCopy == nil) {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 0) {
                         PinToggleButton(
@@ -508,7 +558,7 @@ struct ClientChatThread: View {
         .sheet(isPresented: $showingSetup) {
             setupSheet
         }
-        .task {
+        .task(id: chatID) {
             // A first task offered by setup, put in the composer rather than
             // sent. Only into an empty one, only once, and only for the folder
             // setup opened: any other thread mounting first must not consume it.
@@ -529,11 +579,11 @@ struct ClientChatThread: View {
                 ClientChatReadState.shared.markRead(peer: model.peer, chat: current)
             }
         }
-        .task(id: "\(chatID)-\(scenePhase == .active)") {
+        .task(id: "\(chatID)-\(scenePhase == .active)-\(isActive)") {
             // Backgrounded chats stop polling. Every mounted conversation
             // otherwise polls every 2s indefinitely, churning the view graph
             // for a screen nobody sees.
-            guard scenePhase == .active else { return }
+            guard scenePhase == .active, isActive else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: model.pollInterval)
                 guard !Task.isCancelled else { return }
@@ -550,7 +600,11 @@ struct ClientChatThread: View {
                     workspaceID: workspace, workspaceName: folderName, kind: .chat, itemID: id
                 )
             }
-            UserPresence.shared.chatSurface(showing: id.isEmpty ? nil : id)
+            UserPresence.shared.chatSurface(showing: !isActive || id.isEmpty ? nil : id)
+        }
+        .onChange(of: isActive) { _, active in
+            UserPresence.shared.chatSurface(showing: active ? chatID : nil)
+            if !active { model.saveDraftNow() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await model.resumeWaitingConnection() }
@@ -571,13 +625,13 @@ struct ClientChatThread: View {
         }
         // The host is on the other computer and cannot see this screen. Until
         // it is told, a turn finishing here pushed to this very phone.
-        .watching(conversationID: chatID, peer: model.peer, isActive: model.savedCopy == nil)
+        .watching(conversationID: chatID, peer: model.peer, isActive: isActive && model.savedCopy == nil)
         // Optimistic while offline. A modal for a failure the recovery pass
         // is about to erase is a popup, not information: the strip says
         // reconnecting, the foreground refresh retries, and anything still
         // broken once back online raises its own error then.
         .alert("Chat unavailable", isPresented: Binding(
-            get: { model.error != nil && connectivity.status != .offline },
+            get: { isActive && model.error != nil && connectivity.status != .offline },
             set: { if !$0 { model.error = nil } }
         )) {
             Button("OK", role: .cancel) { model.error = nil }

@@ -7,55 +7,106 @@
 
 import SwiftUI
 
-/// The one thing an update asks of a person: restart when you are ready.
-///
-/// It sits above the account row rather than arriving as a sheet, because a
-/// sheet interrupts and this does not need to. The new version is already on
-/// disk by the time this appears, so the card is not a request to go and get
-/// something, it is a switch that has been left within reach.
-///
-/// Nothing here appears while the update is being found or fetched. Somebody
-/// who never restarts should never learn that any of that happened.
+/// Sidebar activity for real updater stages. Download bytes are not exposed by
+/// the host, so progress is indeterminate rather than an invented percentage.
 struct UpdateCard: View {
     var update: AppUpdateModel
 
     @Environment(\.openURL) private var openURL
+    @State private var showCheckingProgress = false
 
     var body: some View {
-        if update.isReady {
-            row(
-                title: "Relaunch to update",
-                subtitle: "v\(update.latest)",
-                symbol: "arrow.triangle.2.circlepath"
-            ) {
-                update.relaunch()
+        Group {
+        if update.isChecking {
+            if update.stage != .checking || showCheckingProgress {
+                progressCard
             }
-        } else if update.failure != nil, update.isAvailable {
-            // The automatic path did not work. Two ways forward, both in front
-            // of the person: retry the install here, or take the download page
-            // that always works.
+        } else if update.isReady {
+            readyCard
+        } else if update.failure != nil {
             failedCard
-        } else if update.isRetrying {
-            status(
-                title: "Trying again…",
-                subtitle: "Re-downloading v\(update.latest)",
-                symbol: "arrow.triangle.2.circlepath",
-                tint: Theme.accent,
-                spinner: true
-            )
         } else if update.checkNotice == AppUpdateModel.upToDateMessage {
-            // A manual check that found nothing is a confirmation, not a
-            // non-event, so it gets the same card treatment as the other
-            // update states rather than a flat caption.
-            status(
-                title: "Up to date",
-                subtitle: "v\(update.current)",
-                symbol: "checkmark.seal.fill",
-                // Brand purple, not a generic success green: this is a
-                // tokenstat confirmation, not a system-level one.
-                tint: Theme.accent
-            )
+            status(title: "Up to date", subtitle: "v\(update.current)",
+                   symbol: "checkmark.seal.fill", tint: Theme.accent)
         }
+        }
+        .task(id: update.stage == .checking) {
+            showCheckingProgress = false
+            guard update.stage == .checking else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(400))
+                guard !Task.isCancelled, update.stage == .checking else { return }
+                showCheckingProgress = true
+            } catch { }
+        }
+    }
+
+    private var progressTitle: String {
+        switch update.stage {
+        case .checking: return "Checking for updates"
+        case .downloading: return "Downloading update"
+        default: return "Preparing update"
+        }
+    }
+
+    private var progressDetail: String {
+        switch update.stage {
+        case .checking: return "Looking for the latest release…"
+        case .downloading: return "Fetching v\(update.latest) securely…"
+        default: return "Verifying and installing v\(update.latest)…"
+        }
+    }
+
+    private var progressStep: Int {
+        switch update.stage {
+        case .checking: return 0
+        case .downloading: return 1
+        default: return 2
+        }
+    }
+
+    private var progressCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                ProgressView().controlSize(.small).tint(Theme.accent)
+                Text(progressTitle).font(Theme.callout.weight(.medium))
+            }
+            Text(progressDetail).font(Theme.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 4) {
+                ForEach(0..<3) { step in
+                    Capsule().fill(step <= progressStep ? Theme.accent : Theme.accent.opacity(0.15))
+                        .frame(height: 3)
+                }
+            }.accessibilityHidden(true)
+            Text("You can keep working.").font(Theme.caption2).foregroundStyle(.secondary)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.accent.opacity(0.35)))
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.bottom, Theme.Space.s)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var readyCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Label("Ready to restart", systemImage: "checkmark.circle.fill")
+                .font(Theme.callout.weight(.medium)).foregroundStyle(Theme.accent)
+            Text("v\(update.latest) is installed. Restart when you’re ready to use it.")
+                .font(Theme.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Restart now", .refresh) { update.relaunch() }
+                .buttonStyle(AccentButtonStyle(small: true))
+                .help("Restarts tokenstat to finish the update. Save your work first.")
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.accent.opacity(0.35)))
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.bottom, Theme.Space.s)
     }
 
     /// A non-interactive confirmation row, for states that have no action.
@@ -114,13 +165,14 @@ struct UpdateCard: View {
                     .font(Theme.fixed(15))
                     .foregroundStyle(Theme.warning)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Update didn't finish")
+                    Text(update.isAvailable ? "Update didn’t finish" : "Couldn’t check for updates")
                         .font(Theme.callout.weight(.medium))
                         .foregroundStyle(.primary)
-                    Text("v\(update.latest) could not install itself")
+                    Text(update.failure ?? "Please try again.")
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(3)
+                        .help(update.failure ?? "")
                 }
                 Spacer(minLength: Theme.Space.s)
             }
@@ -131,12 +183,14 @@ struct UpdateCard: View {
                 .buttonStyle(AccentButtonStyle(small: true))
                 .help("Try the automatic install again")
 
+                if update.isAvailable {
                 Button("Manual", .download) {
                     if let url = update.downloadURL { openURL(url) }
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(update.downloadURL == nil)
                 .help("Open the download page and install by hand")
+                }
             }
         }
         .padding(.horizontal, Theme.Space.m)
@@ -151,46 +205,4 @@ struct UpdateCard: View {
         .padding(.bottom, Theme.Space.s)
     }
 
-    private func row(
-        title: String,
-        subtitle: String,
-        symbol: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: Theme.Space.s) {
-                Image(systemName: symbol)
-                    .font(Theme.fixed(15))
-                    .foregroundStyle(Theme.accent)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(Theme.callout.weight(.medium))
-                        .foregroundStyle(.primary)
-                    Text(subtitle)
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: Theme.Space.s)
-                Image(systemName: "arrow.right")
-                    .font(Theme.font(12, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, Theme.Space.s)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardRadius)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            )
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, Theme.Space.s)
-        .padding(.bottom, Theme.Space.s)
-        .help(update.isReady
-            ? "Start the new version. Anything unsaved in a terminal goes with it."
-            : "Open the download page")
-    }
 }

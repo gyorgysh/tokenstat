@@ -608,6 +608,7 @@ struct ClientWorkspaceTasksView: View {
     @State private var errorMessage: String?
     @State private var loaded = false
     @State private var composing = false
+    @State private var search = ""
     /// Finished work, off by default. The board hides it on the Mac too, but
     /// the phone had no way to ask for it at all.
     @State private var showingArchive = false
@@ -618,7 +619,8 @@ struct ClientWorkspaceTasksView: View {
     /// see `ClientWorkspaceNotesView`. A list of work with a second list of
     /// things to remember underneath it was two screens in a trench coat.
     private var tasks: [TodoCard] {
-        cards.filter { $0.kind != .note && ($0.column == "archive") == showingArchive }
+        cards.filter { $0.kind != .note && ($0.column == "archive") == showingArchive
+            && (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.notes.localizedCaseInsensitiveContains(search)) }
     }
 
     var body: some View {
@@ -627,7 +629,7 @@ struct ClientWorkspaceTasksView: View {
             errorMessage: errorMessage,
             isLoaded: loaded,
             isEmpty: tasks.isEmpty,
-            emptyText: showingArchive ? "Nothing archived" : "No cards yet",
+            emptyText: !search.isEmpty ? "No matching tasks" : showingArchive ? "Nothing archived" : "No cards yet",
             emptyArt: .tasks,
             emptyMessage: showingArchive
                 ? "Cards you put away in this folder show up here."
@@ -637,10 +639,15 @@ struct ClientWorkspaceTasksView: View {
             emptyAction: showingArchive ? nil : { composing = true },
             reload: { await load() }
         ) {
+            if !showingArchive {
+                ClientOverviewFacts(facts: Self.columns.map { id, label in
+                    (label, "\(cards.filter { $0.kind != .note && $0.column == id }.count)")
+                }).clientCardRow()
+            }
             ForEach(Self.columns, id: \.0) { id, label in
                 let group = tasks.filter { showingArchive || $0.column == id }
                 if !showingArchive, !group.isEmpty {
-                    sectionHeading(label)
+                    sectionHeading("\(label) · \(group.count)")
                     ForEach(group) { card in
                         row(card)
                     }
@@ -653,6 +660,7 @@ struct ClientWorkspaceTasksView: View {
                 }
             }
         }
+        .searchable(text: $search, prompt: "Search tasks")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Add", .create) { composing = true }
@@ -881,6 +889,7 @@ struct ClientWorkspaceWorkflowsView: View {
     @State private var runs: [WorkflowRunRecord] = []
     @State private var errorMessage: String?
     @State private var loaded = false
+    @State private var search = ""
 
     var body: some View {
         ClientSectionList(
@@ -894,7 +903,11 @@ struct ClientWorkspaceWorkflowsView: View {
             refreshKey: "workspace-workflows-\(workspaceID)",
             reload: { await load() }
         ) {
-            ForEach(graphs) { graph in
+            ClientOverviewFacts(facts: [("Workflows", "\(graphs.count)"), ("Running", "\(runs.filter(\.isLive).count)")])
+            if !search.isEmpty && !graphs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) }) {
+                Text("No matching workflows").foregroundStyle(.secondary)
+            }
+            ForEach(graphs.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }) { graph in
                 NavigationLink {
                     ClientWorkflowDetailView(
                         peer: peer,
@@ -918,6 +931,7 @@ struct ClientWorkspaceWorkflowsView: View {
                 .buttonStyle(.plain)
             }
         }
+        .searchable(text: $search, prompt: "Search workflows")
         .task { await load() }
     }
 
@@ -948,6 +962,7 @@ struct ClientWorkspaceAutomationsView: View {
     @State private var runs: [RunRecord] = []
     @State private var errorMessage: String?
     @State private var loaded = false
+    @State private var search = ""
 
     var body: some View {
         ClientSectionList(
@@ -961,7 +976,11 @@ struct ClientWorkspaceAutomationsView: View {
             refreshKey: "workspace-automations-\(workspaceID)",
             reload: { await load() }
         ) {
-            ForEach(jobs) { job in
+            ClientOverviewFacts(facts: [("Enabled", "\(jobs.filter(\.enabled).count)"), ("Running", "\(runs.filter(\.isRunning).count)"), ("Paused", "\(jobs.filter { !$0.enabled }.count)")])
+            if !search.isEmpty && !jobs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) || $0.prompt.localizedCaseInsensitiveContains(search) }) {
+                Text("No matching automations").foregroundStyle(.secondary)
+            }
+            ForEach(jobs.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.prompt.localizedCaseInsensitiveContains(search) }) { job in
                 NavigationLink {
                     ClientAutomationDetailView(
                         peer: peer,
@@ -982,6 +1001,7 @@ struct ClientWorkspaceAutomationsView: View {
                 .buttonStyle(.plain)
             }
         }
+        .searchable(text: $search, prompt: "Search automations")
         .task { await load() }
     }
 

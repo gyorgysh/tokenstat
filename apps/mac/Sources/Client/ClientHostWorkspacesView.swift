@@ -25,6 +25,7 @@ struct ClientHostWorkspacesView: View {
     /// Which folder chooser is showing, if any. Chats and sessions live
     /// inside folders, so starting one means picking the folder first.
     @State private var starting: WorkspaceSection?
+    @State private var search = ""
 
     /// A machine with no desktop app, which changes what "it is not answering"
     /// means and what somebody can do about it. Read from what the machine
@@ -179,7 +180,8 @@ struct ClientHostWorkspacesView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 2)
                         .padding(.top, Theme.Space.s)
-                    ForEach(model.folders) { folder in
+                    ClientAdaptiveCards {
+                    ForEach(model.folders.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.path.localizedCaseInsensitiveContains(search) }) { folder in
                         NavigationLink {
                             ClientWorkspaceDetailView(
                                 peer: peerKey,
@@ -190,6 +192,7 @@ struct ClientHostWorkspacesView: View {
                             ClientFolderRow(folder: folder)
                         }
                         .buttonStyle(.plain)
+                    }
                     }
                 }
 
@@ -239,6 +242,7 @@ struct ClientHostWorkspacesView: View {
         }
         .background(Theme.background)
         .navigationTitle(hostName)
+        .searchable(text: $search, prompt: "Search folders or paths")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("host-\(peerKey)") {

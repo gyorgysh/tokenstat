@@ -449,6 +449,28 @@ extension Color {
 
 /// A titled panel. Used for every block in the content column so they share one
 /// corner radius and one border treatment.
+/// Compact, consistently sized facts for activity and library screens.
+struct ActivitySummaryTile: View {
+    let title: String
+    let value: Int
+    let symbol: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Image(systemName: symbol)
+                .font(Theme.font(15, weight: .medium))
+                .foregroundStyle(Theme.accent)
+            Text(value.formatted())
+                .font(Theme.font(26, weight: .semibold)).monospacedDigit()
+            Text(title).font(Theme.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    }
+}
+
 struct Card<Content: View>: View {
     var title: String
     var subtitle: String?

@@ -8,6 +8,41 @@
 #if !os(macOS)
 import SwiftUI
 
+/// A single column on phones and in narrow split panes; roomier grids on iPad.
+struct ClientAdaptiveCards<Content: View>: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        WidthReader { width in
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: min(width > 0 ? width : 320, typeSize.isAccessibilitySize ? 600 : 320)), spacing: Theme.Space.m)], spacing: Theme.Space.m) {
+            content()
+        }
+        }
+    }
+}
+
+struct ClientOverviewFacts: View {
+    var facts: [(String, String)]
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.m) { items }
+            VStack(alignment: .leading, spacing: Theme.Space.s) { items }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+        .accessibilityElement(children: .combine)
+    }
+    private var items: some View {
+        ForEach(facts.indices, id: \.self) { index in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(facts[index].1).font(ClientType.rowFigure).foregroundStyle(Theme.accent)
+                Text(facts[index].0).font(ClientType.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
 /// Shared leading tile size for folder and session cards.
 private enum ClientRowMark {
     static let size: CGFloat = 26

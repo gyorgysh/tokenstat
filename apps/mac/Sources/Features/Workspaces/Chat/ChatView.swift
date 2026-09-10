@@ -3,6 +3,129 @@
 import OSLog
 import SwiftUI
 
+private struct ChatConversationOverview: View {
+    @Bindable var model: ChatModel
+    let workspaceID: String
+    var workspaceName: String?
+    var onOpen: (ChatConversation) -> Void
+    var onNew: () -> Void
+    @State private var search = ""
+    @State private var backend = ""
+    @State private var runningOnly = false
+    @State private var alphabetical = false
+
+    private var conversations: [ChatConversation] {
+        model.folderID == workspaceID ? model.chats : []
+    }
+
+    private func agentName(_ id: String) -> String {
+        model.backends.first { $0.id == id }?.label ?? id
+    }
+
+    private var shown: [ChatConversation] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return conversations.filter {
+            (backend.isEmpty || $0.backend == backend) && (!runningOnly || $0.running)
+                && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query)
+                    || agentName($0.backend).localizedCaseInsensitiveContains(query)
+                    || ($0.model?.localizedCaseInsensitiveContains(query) ?? false))
+        }.sorted {
+            if alphabetical { return $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            return ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                HStack(spacing: Theme.Space.s) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .foregroundStyle(Theme.accent).font(Theme.font(22))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Conversations").font(Theme.font(24, weight: .semibold))
+                        Text("Find and resume work in \(workspaceName ?? "this workspace").")
+                            .font(Theme.callout).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("New chat", .create, action: onNew).buttonStyle(AccentButtonStyle())
+                        .disabled(model.isLoading || model.folderID != workspaceID)
+                }
+                if let error = model.error {
+                    Text(error).font(Theme.callout).foregroundStyle(Theme.warning)
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.s), count: 3), spacing: Theme.Space.s) {
+                    ActivitySummaryTile(title: "Conversations", value: conversations.count, symbol: "bubble.left.and.bubble.right")
+                    ActivitySummaryTile(title: "Running", value: conversations.filter(\.running).count, symbol: "play.circle")
+                    ActivitySummaryTile(title: "Agents used", value: Set(conversations.map(\.backend)).count, symbol: "sparkles")
+                }
+                HStack(spacing: Theme.Space.s) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search titles, agents, or models", text: $search).textFieldStyle(.plain)
+                }
+                .padding(Theme.Space.s)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
+                HStack(spacing: Theme.Space.m) {
+                    Picker("Agent", selection: $backend) {
+                        Text("All agents").tag("")
+                        ForEach(Set(conversations.map(\.backend)).sorted(), id: \.self) { id in
+                            Text(agentName(id)).tag(id)
+                        }
+                    }.frame(maxWidth: 200)
+                    Toggle("Running only", isOn: $runningOnly).toggleStyle(.button)
+                    Spacer(minLength: 0)
+                    Picker("Sort", selection: $alphabetical) {
+                        Text("Recent first").tag(false)
+                        Text("Title A–Z").tag(true)
+                    }.labelsHidden().frame(width: 145)
+                }
+                if model.isLoading || model.folderID != workspaceID {
+                    Skeleton.CardPlaceholder(rows: 3)
+                } else if conversations.isEmpty {
+                    ContentUnavailableView("No conversations yet", systemImage: "bubble.left.and.bubble.right", description: Text("Start a chat to work with an agent in this workspace."))
+                } else if shown.isEmpty {
+                    ContentUnavailableView("No matching conversations", systemImage: "magnifyingglass", description: Text("Try another search or adjust the filters."))
+                } else {
+                    Text("\(shown.count) conversations").font(Theme.caption).foregroundStyle(.secondary)
+                    LazyVStack(spacing: Theme.Space.s) {
+                        ForEach(shown) { conversation in
+                            Button { onOpen(conversation) } label: {
+                                HStack(spacing: Theme.Space.m) {
+                                    HarnessMark(id: conversation.backend, size: 40)
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
+                                            .font(Theme.font(14, weight: .semibold)).lineLimit(2)
+                                        HStack(spacing: Theme.Space.s) {
+                                            Text(agentName(conversation.backend)).foregroundStyle(Theme.accent)
+                                            if let name = conversation.model, !name.isEmpty { Text(name).lineLimit(1) }
+                                            if conversation.running { Label("Running", systemImage: "play.fill").foregroundStyle(Theme.secondary) }
+                                        }.font(Theme.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: Theme.Space.s)
+                                    Text(Date(timeIntervalSince1970: Double(conversation.lastMessageAtMs ?? conversation.updatedAtMs) / 1000), style: .relative)
+                                        .font(Theme.caption).foregroundStyle(.secondary)
+                                    Image(systemName: "chevron.right").font(Theme.caption).foregroundStyle(.tertiary)
+                                }
+                                .padding(Theme.Space.m)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+                                .contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
+            }.padding(Theme.Space.m)
+        }
+        .background(Theme.background)
+        .onChange(of: workspaceID) { _, _ in
+            search = ""
+            backend = ""
+            runningOnly = false
+        }
+    }
+}
+
 struct ChatView: View {
     @Bindable var model: ChatModel
     let workspaceID: String
@@ -15,6 +138,7 @@ struct ChatView: View {
     /// Refresh the folder after a checkout, so the chip and everything else
     /// reading git agree about where the folder now is.
     var onBranchChanged: (() async -> Void)? = nil
+    @Binding var showingOverview: Bool
     /// Whether this pane is the one in front.
     ///
     /// The Mac keeps it mounted behind other screens so a transcript and the
@@ -82,7 +206,10 @@ struct ChatView: View {
                     }
                 }
             ) {
-                if model.selected != nil, let reference = model.currentReference {
+                ToolbarIconButton(systemImage: "rectangle.grid.1x2", help: "All conversations", isAccent: showingOverview) {
+                    showingOverview.toggle()
+                }
+                if !showingOverview, model.selected != nil, let reference = model.currentReference {
                     let pinned = pins.isPinned(reference)
                     let full = pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity
                     ToolbarIconButton(
@@ -106,7 +233,7 @@ struct ChatView: View {
                         }
                     }
                 }
-                if model.currentReference != nil, model.savedCopy == nil {
+                if !showingOverview, model.currentReference != nil, model.savedCopy == nil {
                     ToolbarIconButton(systemImage: ActionIcon.device.symbol, help: "Continue on another device") {
                         showingHandoff = true
                     }
@@ -116,7 +243,7 @@ struct ChatView: View {
                     ToolbarIconButton(
                         systemImage: step < 0 ? "chevron.up" : "chevron.down",
                         help: step < 0 ? "Previous conversation (↑ or ⌥⌘↑)" : "Next conversation (↓ or ⌥⌘↓)",
-                        isEnabled: isActive && target != nil
+                        isEnabled: isActive && !showingOverview && target != nil
                     ) {
                         guard let target else { return }
                         Task { await model.select(target) }
@@ -124,10 +251,14 @@ struct ChatView: View {
                     .keyboardShortcut(step < 0 ? .upArrow : .downArrow, modifiers: [.command, .option])
                 }
                 ToolbarIconButton(systemImage: "plus", help: "New chat") {
-                    Task { await model.create() }
+                    Task { if await model.create() != nil { showingOverview = false } }
                 }
             }
             #endif
+            // Keep the transcript mounted while browsing the library so its
+            // scroll view, rendered rows, and attachment views retain identity.
+            ZStack {
+            VStack(spacing: 0) {
             if let chat = model.selected {
                 if isActive, model.savedCopy == nil {
                     WorkHandoffOffer(chat: model) { showingHandoff = true }
@@ -228,6 +359,25 @@ struct ChatView: View {
                 // time this pane was rebuilt.
                 ChatPaneOpening()
             }
+            }
+            .opacity(showingOverview ? 0 : 1)
+            .allowsHitTesting(!showingOverview)
+            .accessibilityHidden(showingOverview)
+            if showingOverview {
+                ChatConversationOverview(model: model, workspaceID: workspaceID, workspaceName: workspaceName) { conversation in
+                    if model.selected?.id == conversation.id {
+                        showingOverview = false
+                    } else {
+                        Task {
+                            await model.select(conversation)
+                            showingOverview = false
+                        }
+                    }
+                } onNew: {
+                    Task { if await model.create() != nil { showingOverview = false } }
+                }
+            }
+            }
         }
         .background(Theme.background)
         .onDrop(of: ChatInbox.dropTypes, isTargeted: $paneDropTargeted) { providers in
@@ -241,7 +391,7 @@ struct ChatView: View {
         }
         #if os(macOS)
         .background {
-            ChatNavigationKeys(isActive: isActive) { step in
+            ChatNavigationKeys(isActive: isActive && !showingOverview) { step in
                 guard let target = model.adjacentConversation(step) else { return false }
                 Task { await model.select(target) }
                 return true
@@ -263,7 +413,7 @@ struct ChatView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
         #if os(macOS)
         .onExitCommand {
-            if model.busy { Task { await model.stop() } }
+            if !showingOverview, model.busy { Task { await model.stop() } }
         }
         #endif
         #if !os(macOS)

@@ -18,6 +18,7 @@ struct ClientWorkflowWorkspace: View {
     let folderName: String
 
     @State private var session: ClientWorkflowSession
+    @State private var search = ""
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String) {
         self.peer = peer
@@ -66,6 +67,12 @@ struct ClientWorkflowWorkspace: View {
     private var list: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("Workflows").font(ClientType.sectionTitle)
+                TextField("Search workflows", text: $search).textFieldStyle(.roundedBorder)
+                if session.loaded {
+                    Text("\(session.graphs.count) workflows · \(session.runs.filter(\.isLive).count) running")
+                        .font(ClientType.caption).foregroundStyle(.secondary)
+                }
                 if let errorMessage = session.errorMessage {
                     ClientErrorCard(message: errorMessage) {
                         Task { await session.load() }
@@ -82,7 +89,7 @@ struct ClientWorkflowWorkspace: View {
                         message: "Graphs are drawn on the Mac. Bind one to this folder and its runs land here."
                     )
                 } else {
-                    ForEach(session.graphs) { graph in
+                    ForEach(session.graphs.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }) { graph in
                         Button {
                             session.selectGraph(graph.id)
                         } label: {
@@ -130,6 +137,8 @@ struct ClientWorkflowWorkspace: View {
     private var runColumn: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Label("Run details", systemImage: "play.circle").font(ClientType.sectionTitle).foregroundStyle(Theme.accent)
+                ThemeRule()
                 if let graph = session.selectedGraph {
                     Text(graph.name)
                         .font(ClientType.sectionTitle)

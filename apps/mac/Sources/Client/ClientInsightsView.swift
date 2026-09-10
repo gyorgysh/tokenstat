@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import SwiftUI
+import Charts
 
 // The client is iOS and iPadOS only.
 #if !os(macOS)
@@ -89,6 +90,27 @@ struct ClientInsightsView: View {
                 )
             } else {
                 summary(rows)
+                if model.cut == .day {
+                    let days = rows.sorted { $0.key < $1.key }
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        Text("Daily activity").font(ClientType.sectionTitle)
+                        Text("Tokens per day · cache included").font(ClientType.caption).foregroundStyle(.secondary)
+                        Chart(days) { day in
+                            BarMark(x: .value("Day", day.key), y: .value("Tokens", day.counters.total))
+                                .foregroundStyle(Theme.accent.gradient)
+                                .cornerRadius(3)
+                                .accessibilityLabel(day.key)
+                                .accessibilityValue("\(formatTokens(day.counters.total)) tokens")
+                        }
+                        .chartXAxis(.hidden)
+                        .frame(height: 180)
+                        HStack {
+                            Text(days.first?.key ?? "")
+                            Spacer()
+                            Text(days.last?.key ?? "")
+                        }.font(ClientType.caption).foregroundStyle(.secondary)
+                    }.padding(Theme.Space.m).cardSurface()
+                }
                 let shown = filtered(rows)
                 if shown.isEmpty {
                     Text("Nothing matches \"\(search)\".")
@@ -101,8 +123,10 @@ struct ClientInsightsView: View {
                     // largest row is a steadier reference than the total: with
                     // 40 models every bar would otherwise be a sliver.
                     let peak = shown.map(\.valueMicros).max() ?? 1
+                    ClientAdaptiveCards {
                     ForEach(shown) { row in
                         InsightRow(row: row, cut: model.cut, peak: peak)
+                    }
                     }
                 }
             }
@@ -135,6 +159,11 @@ struct ClientInsightsView: View {
             Text("at list rates, across every device")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
+            ClientOverviewFacts(facts: [
+                ("Tokens", formatTokens(rows.reduce(0) { $0 + $1.counters.total })),
+                ("Events", rows.reduce(0) { $0 + $1.events }.formatted()),
+                (model.cut.plural.capitalized, "\(rows.count)")
+            ]).padding(.top, Theme.Space.s)
             // A remembered answer says so. The numbers are real, they are just
             // not this minute's, and a figure with no date is a quiet claim to
             // be current.

@@ -23,6 +23,9 @@ struct NotesView: View {
     @State private var showingArchive = false
     @State private var picked: TodoModel.NoteScope = .all
     @State private var converting: TodoCard?
+    @State private var search = ""
+    @State private var sortByTitle = false
+    @AppStorage("notes.gridLayout") private var gridLayout = true
     @FocusState private var writing: Bool
 
     var body: some View {
@@ -32,11 +35,13 @@ struct NotesView: View {
                     systemImage: "plus",
                     help: "Write a note"
                 ) {
+                    showingArchive = false
                     writing = true
-                    if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        save()
-                    }
                 }
+                ToolbarIconButton(
+                    systemImage: gridLayout ? "list.bullet" : "square.grid.2x2",
+                    help: gridLayout ? "Show notes as a list" : "Show notes as cards"
+                ) { gridLayout.toggle() }
                 ToolbarIconButton(
                     systemImage: showingArchive ? "archivebox.fill" : "archivebox",
                     help: showingArchive
@@ -55,7 +60,8 @@ struct NotesView: View {
                 ErrorBanner(message: error) { Task { await model.load() } }
                     .padding(Theme.Space.m)
             }
-            composer
+            if !showingArchive { composer }
+            libraryBar
             if workspaceID == nil {
                 scopeBar
             }
@@ -106,45 +112,111 @@ struct NotesView: View {
         return "Unassigned"
     }
 
+    private var shownNotes: [TodoCard] {
+        let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = model.notes(in: scope, archived: showingArchive).filter {
+            term.isEmpty || $0.title.localizedStandardContains(term) || $0.notes.localizedStandardContains(term)
+        }
+        return sortByTitle ? notes.sorted {
+            let comparison = $0.title.localizedStandardCompare($1.title)
+            return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
+        } : notes
+    }
+
+    private func count(in scope: TodoModel.NoteScope) -> Int {
+        model.notes(in: scope, archived: showingArchive).count
+    }
+
+    private var libraryBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.m) { libraryTitle; Spacer(); searchField; sortPicker }
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HStack { libraryTitle; Spacer(); sortPicker }
+                searchField
+            }
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+    }
+
+    private var libraryTitle: some View {
+        HStack(spacing: Theme.Space.s) {
+            Text(showingArchive ? "Archived notes" : "Your notes")
+                .font(Theme.headline)
+            Text("\(shownNotes.count)")
+                .font(Theme.numeric(11, weight: .medium))
+                .foregroundStyle(Theme.secondary)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Theme.secondary.opacity(0.1), in: Capsule())
+        }.fixedSize()
+    }
+
+    private var searchField: some View {
+        HStack(spacing: Theme.Space.s) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search notes", text: $search).textFieldStyle(.plain)
+            if !search.isEmpty {
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Clear note search")
+            }
+        }
+        .font(Theme.callout).padding(8)
+        .frame(minWidth: 160, maxWidth: 300)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+    }
+
+    private var sortPicker: some View {
+        AppMenuPicker(options: [(value: false, label: "Newest first"), (value: true, label: "Title A–Z")],
+                      selection: $sortByTitle)
+            .frame(width: 130).help("Sort notes")
+    }
+
     /// One line, always at the top, always ready. The plus in the chrome
     /// focuses it; Add is always visible so the field is not the only way in.
     private var composer: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
-                Image(systemName: "square.and.pencil")
-                    .foregroundStyle(Theme.accent)
-                TextField("Something worth remembering", text: $draft)
+                FeatureMark(name: "mark_note", tint: Theme.secondary, size: 22)
+                Text("Quick note").font(Theme.callout.weight(.semibold))
+                Spacer()
+                Label(destinationName, systemImage: "folder")
+                    .font(Theme.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            HStack(spacing: Theme.Space.s) {
+                TextField("Capture an idea, a decision, or something to follow up…", text: $draft)
                     .textFieldStyle(.plain)
                     .font(Theme.fit(14))
                     .focused($writing)
                     .onSubmit { save() }
-                Button("Add", .create) { save() }
+                if saving { ProgressView().controlSize(.small) }
+                Button("Save note", .create) { save() }
                     .buttonStyle(AccentButtonStyle())
                     .disabled(saving || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            Text("Saves to \(destinationName).")
+            Text("Return to save · Select a note to edit its full text")
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
         }
         .padding(Theme.Space.m)
-        .background(Theme.panel)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.border).frame(height: 1)
-        }
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(writing ? Theme.accent.opacity(0.5) : Theme.border))
+        .padding(Theme.Space.m)
     }
 
     private var scopeBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ChoiceChip(title: "All", isSelected: picked == .all) {
+                ChoiceChip(title: "All · \(count(in: .all))", isSelected: picked == .all) {
                     picked = .all
                 }
-                ChoiceChip(title: "Unassigned", isSelected: picked == .unassigned) {
+                ChoiceChip(title: "Unassigned · \(count(in: .unassigned))", isSelected: picked == .unassigned) {
                     picked = .unassigned
                 }
                 ForEach(folders) { folder in
                     ChoiceChip(
-                        title: folder.name,
+                        title: "\(folder.name) · \(count(in: .workspace(folder.id)))",
                         isSelected: picked == .workspace(folder.id)
                     ) {
                         picked = .workspace(folder.id)
@@ -161,18 +233,27 @@ struct NotesView: View {
 
     @ViewBuilder
     private var list: some View {
-        let shown = model.notes(in: scope, archived: showingArchive)
-        if shown.isEmpty {
+        let shown = shownNotes
+        if !model.hasLoaded && model.errorMessage == nil {
+            VStack(spacing: Theme.Space.m) {
+                Skeleton.CardPlaceholder(rows: 3)
+                Skeleton.CardPlaceholder(rows: 3)
+                Spacer()
+            }.padding(Theme.Space.m)
+        } else if shown.isEmpty {
             VStack(spacing: Theme.Space.s) {
                 Spacer()
                 Image(systemName: "note.text")
                     .font(Theme.font(30, weight: .light))
                     .foregroundStyle(Theme.accent.opacity(0.5))
-                Text(emptyTitle)
+                Text(search.isEmpty ? emptyTitle : "No matching notes")
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
-                if !showingArchive {
-                    Text("Type above and press return, or the plus.")
+                if !search.isEmpty {
+                    Button("Clear search") { search = "" }
+                        .buttonStyle(.plain).foregroundStyle(Theme.accent)
+                } else if !showingArchive {
+                    Text("Capture your first note above. You can turn it into a task later.")
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -181,9 +262,12 @@ struct NotesView: View {
             .frame(maxWidth: .infinity)
         } else {
             ScrollView {
-                LazyVStack(spacing: Theme.Space.s) {
-                    ForEach(shown) { note in
-                        row(note)
+                WidthReader { width in
+                    let columns = gridLayout ? min(shown.count, max(1, min(3, Int(width / 340)))) : 1
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.m, alignment: .top), count: columns), spacing: Theme.Space.m) {
+                        ForEach(shown) { note in
+                            row(note)
+                        }
                     }
                 }
                 .padding(Theme.Space.m)
@@ -203,6 +287,27 @@ struct NotesView: View {
     private func row(_ note: TodoCard) -> some View {
         let selected = model.selectedCardID == note.id
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                FeatureMark(name: "mark_note", tint: Theme.secondary, size: 22)
+                Label(placeName(for: note), systemImage: "folder")
+                    .font(Theme.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 0)
+                Menu {
+                    Button("Open note", .edit) { model.selectCard(note.id) }
+                    if showingArchive {
+                        Button("Restore", .restore) { Task { await model.archiveNote(note, archived: false) } }
+                    } else {
+                        Button("Make a task", .move) { converting = note }
+                        Divider()
+                        Button("Archive", .archive) { Task { await model.archiveNote(note, archived: true) } }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis").foregroundStyle(Theme.accent)
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("Note actions")
+            }
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 VStack(alignment: .leading, spacing: 3) {
                     // Not selectable any more. Selectable text hit-tests the
@@ -212,48 +317,39 @@ struct NotesView: View {
                     // words opened the pane. The pane is where the text can be
                     // read and copied now.
                     Text(note.title)
-                        .font(Theme.fit(13))
+                        .font(Theme.font(15, weight: .semibold))
+                        .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if !note.notes.isEmpty {
                         Text(note.notes)
                             .font(Theme.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(gridLayout ? 5 : 2)
+                            .lineSpacing(3)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    HStack(spacing: 6) {
-                        Text(placeName(for: note))
-                            .font(Theme.caption2)
-                            .foregroundStyle(.tertiary)
-                        Text("·")
-                            .font(Theme.caption2)
-                            .foregroundStyle(.tertiary)
-                        RelativeTimeText(
-                            date: Date(timeIntervalSince1970: Double(note.createdAtMs) / 1000),
-                            unitsStyle: .abbreviated
-                        )
-                        .font(Theme.caption2)
-                        .foregroundStyle(.tertiary)
-                    }
-                }
-                if showingArchive {
-                    Button("Restore", .restore) {
-                        Task { await model.archiveNote(note, archived: false) }
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                } else {
-                    Button("Archive", .archive) {
-                        Task { await model.archiveNote(note, archived: true) }
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
                 }
             }
-            if !showingArchive {
-                Button("Make a task", .move) {
-                    converting = note
+            Spacer(minLength: Theme.Space.s)
+            ThemeRule().opacity(0.5)
+            HStack {
+                RelativeTimeText(
+                    date: Date(timeIntervalSince1970: Double(note.createdAtMs) / 1000),
+                    unitsStyle: .abbreviated
+                )
+                .font(Theme.caption2).foregroundStyle(.secondary)
+                .help(Date(timeIntervalSince1970: Double(note.createdAtMs) / 1000).formatted(date: .long, time: .shortened))
+                Spacer()
+                if showingArchive {
+                    Button("Restore", .restore) { Task { await model.archiveNote(note, archived: false) } }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                } else {
+                    Button("Make a task", .move) { converting = note }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
                 }
-                .buttonStyle(SecondaryButtonStyle())
             }
         }
+        .frame(maxWidth: .infinity, minHeight: gridLayout ? 185 : nil, maxHeight: .infinity, alignment: .topLeading)
         .padding(Theme.Space.m)
         .background(
             selected ? Theme.accentSoft : Theme.panel,

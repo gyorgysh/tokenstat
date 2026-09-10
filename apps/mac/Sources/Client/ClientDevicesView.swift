@@ -29,6 +29,7 @@ struct ClientDevicesView: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @State private var model = ClientDevicesModel()
     @State private var showSetup = false
+    @State private var search = ""
 
     private var machines: [Machine] { account.account?.machines ?? [] }
 
@@ -93,7 +94,8 @@ struct ClientDevicesView: View {
                 if !machines.isEmpty {
                     header
                     alwaysOnHost
-                    ForEach(sorted) { machine in
+                    ClientAdaptiveCards {
+                    ForEach(sorted.filter { search.isEmpty || ($0.label ?? "").localizedCaseInsensitiveContains(search) || ($0.platform ?? "").localizedCaseInsensitiveContains(search) }) { machine in
                         NavigationLink {
                             ClientDeviceDetailView(
                                 machine: machine,
@@ -112,6 +114,7 @@ struct ClientDevicesView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    }
                     if let message = model.errorMessage {
                         // The list still drew. What failed is the share of
                         // spend beside each name, which is worth one quiet line
@@ -128,6 +131,7 @@ struct ClientDevicesView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
+        .searchable(text: $search, prompt: "Search devices")
         .fullScreenCover(isPresented: $showSetup) {
             ClientSetupWizard()
         }

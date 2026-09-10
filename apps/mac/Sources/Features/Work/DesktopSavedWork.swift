@@ -51,6 +51,7 @@ struct DesktopSavedConversation: View {
             if current {
                 if available {
                     ChatView(model: model, workspaceID: model.folderID ?? destination.reference.workspaceID,
+                             showingOverview: .constant(false),
                              loadsWorkspace: false)
                 } else if loaded {
                     Text("This conversation has no readable saved copy on this Mac. Reconnect its machine and open the folder to read it live.")

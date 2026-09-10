@@ -33,6 +33,8 @@ struct ClientWorkspaceNotesView: View {
     @State private var errorMessage: String?
     @State private var loaded = false
     @State private var showingArchive = false
+    @State private var search = ""
+    @State private var alphabetical = false
     @State private var pendingDelete: TodoCard?
     @State private var editing: TodoCard?
     @State private var editText = ""
@@ -45,7 +47,8 @@ struct ClientWorkspaceNotesView: View {
     private var notes: [TodoCard] {
         cards
             .filter { $0.kind == .note && ($0.column == "archive") == showingArchive }
-            .sorted { $0.createdAtMs > $1.createdAtMs }
+            .filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.notes.localizedCaseInsensitiveContains(search) }
+            .sorted { alphabetical ? $0.title.localizedStandardCompare($1.title) == .orderedAscending : $0.createdAtMs > $1.createdAtMs }
     }
 
     private var archivedCount: Int {
@@ -67,7 +70,17 @@ struct ClientWorkspaceNotesView: View {
             list
         }
         .background(Theme.background)
+        .searchable(text: $search, prompt: "Search notes")
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Sort notes", selection: $alphabetical) {
+                        Text("Newest first").tag(false)
+                        Text("Title A–Z").tag(true)
+                    }
+                } label: { Image(systemName: "arrow.up.arrow.down") }
+                .accessibilityLabel("Sort notes")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(
                     showingArchive ? "Show notes" : "Show archive",
@@ -144,7 +157,7 @@ struct ClientWorkspaceNotesView: View {
             errorMessage: errorMessage,
             isLoaded: loaded,
             isEmpty: notes.isEmpty,
-            emptyText: showingArchive ? "Nothing archived" : "No notes yet",
+            emptyText: !search.isEmpty ? "No matching notes" : showingArchive ? "Nothing archived" : "No notes yet",
             emptyArt: .notes,
             emptyMessage: showingArchive
                 ? "Notes you put away in \(place) show up here."
@@ -179,10 +192,14 @@ struct ClientWorkspaceNotesView: View {
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(note.title)
-                    .font(ClientType.label)
+                    .font(ClientType.label.weight(.semibold))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .multilineTextAlignment(.leading)
+                    .lineLimit(4)
+                if !note.notes.isEmpty {
+                    Text(note.notes).font(ClientType.caption).foregroundStyle(.secondary).lineLimit(3)
+                }
                 RelativeTimeText(
                     date: Date(timeIntervalSince1970: Double(note.createdAtMs) / 1000),
                     unitsStyle: .abbreviated

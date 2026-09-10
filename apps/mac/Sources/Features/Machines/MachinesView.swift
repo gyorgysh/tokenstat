@@ -22,10 +22,10 @@ import AppKit
 /// compare, and one code to paste. The raw facts stay one disclosure away for
 /// whoever is debugging their own network.
 struct MachinesView: View {
-        @State private var confirmForget: Peer?
+    @State private var confirmForget: Peer?
     @State private var confirmRevoke: Peer?
 
-@Bindable var model: MachinesModel
+    @Bindable var model: MachinesModel
     /// Where to send somebody who clicks the SSH card. The shell decides which
     /// section they land on, because this card asks for "servers" and has no
     /// business picking between Hosts and Keys.
@@ -50,6 +50,7 @@ struct MachinesView: View {
     var body: some View {
         VStack(spacing: 0) {
             DetailChromeBar {
+                sshAccess
                 if model.remoteReachAllowed {
                     ToolbarIconButton(
                         systemImage: "plus",
@@ -67,7 +68,6 @@ struct MachinesView: View {
                     if !Bridge.isHosted {
                         hostSetup
                     }
-                    sshAccess
                     if model.remoteReachAllowed {
                         remoteReadyContent
                     } else {
@@ -161,19 +161,11 @@ struct MachinesView: View {
     }
 
     private var sshAccessLabel: some View {
-        HStack(spacing: Theme.Space.m) {
-            Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("SSH hosts").font(Theme.headline)
-                Text("Saved servers, keys and command snippets")
-                    .font(Theme.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-        }
-        .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+        Label("SSH hosts", systemImage: "terminal")
+            .font(Theme.callout.weight(.medium))
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, Theme.Space.s)
+            .help("Saved servers, keys and command snippets")
     }
 
     /// The full pairing screen: approvals, this machine, peers, add, e2e.
@@ -193,16 +185,41 @@ struct MachinesView: View {
         if !model.pending.isEmpty {
             waitingForApproval
         }
-        thisMachine
-        DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
-        #if os(macOS)
-        alwaysOnHost
-        #endif
         if !model.accountMachines.isEmpty {
             accountDevices
         }
-        if !unlistedKnown.isEmpty {
-            knownMachines
+        WidthReader { width in
+            #if os(macOS)
+            if !unlistedKnown.isEmpty, width >= 820 {
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    knownMachines.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    alwaysOnHost.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: Theme.Space.m) {
+                    if !unlistedKnown.isEmpty { knownMachines }
+                    alwaysOnHost
+                }
+            }
+            #else
+            if !unlistedKnown.isEmpty { knownMachines }
+            #endif
+        }
+        DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
+        WidthReader { width in
+            if width >= 820 {
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    thisMachine.frame(maxWidth: .infinity)
+                    DevicePermissionCard(peers: [], localOnly: true)
+                        .frame(maxWidth: .infinity)
+                }
+            } else {
+                VStack(spacing: Theme.Space.m) {
+                    thisMachine
+                    DevicePermissionCard(peers: [], localOnly: true)
+                }
+            }
         }
         // Account-linked machines already appear above. Pairing is only
         // needed for a machine that is not on the account yet, so the
@@ -337,8 +354,8 @@ struct MachinesView: View {
 
     private var thisMachine: some View {
         Card(
-            title: "This device",
-            subtitle: "One simple identity for every connection.",
+            title: "Connection settings",
+            subtitle: "Identity and remote access for this Mac",
             mark: "mark_device"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -361,17 +378,6 @@ struct MachinesView: View {
                                     .font(Theme.font(13, weight: .medium))
                                     .foregroundStyle(Theme.accent)
                                     .textSelection(.enabled)
-                            }
-                        }
-                        if model.pairingCode != nil {
-                            LabeledContent("Connection invite") {
-                                Button {
-                                    model.copyInvite()
-                                } label: {
-                                    ActionIcon.copy.label("Copy")
-                                }
-                                .buttonStyle(AccentButtonStyle(small: true))
-                                .help("Paste this in the other machine's Add device box")
                             }
                         }
                     }
@@ -651,7 +657,7 @@ struct MachinesView: View {
     }
 
     private var knownMachines: some View {
-        Card(title: "Other approved devices", subtitle: "Devices that are paired with this Mac but not on the account.", mark: "mark_device") {
+        Card(title: "Other approved devices", subtitle: "Devices that are paired with this Mac but not on the account.", mark: "mark_device", fillsHeight: true) {
             VStack(spacing: Theme.Space.s) {
                 ForEach(unlistedKnown) { peer in
                     PeerRow(
@@ -660,7 +666,7 @@ struct MachinesView: View {
                         symbol: model.peerSymbol(for: peer),
                         isSelected: model.selectedKind == .peer(peer.key)
                     ) {
-                        HStack(spacing: Theme.Space.s) {
+                        Menu {
                             if peer.trust == .approved {
                                 Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
                                     .buttonStyle(SecondaryButtonStyle())
@@ -670,7 +676,11 @@ struct MachinesView: View {
                             }
                             Button("Forget", .delete, role: .destructive) { confirmForget = peer }
                                 .buttonStyle(SecondaryButtonStyle())
+                        } label: {
+                            Image(systemName: "ellipsis").foregroundStyle(Theme.accent)
+                                .padding(8).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 6))
                         }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     }
                     .onTapGesture { model.selectPeer(peer) }
                 }
@@ -705,7 +715,8 @@ struct MachinesView: View {
         Card(
             title: "Always-on host",
             subtitle: "Whether the host helper stays up after you quit",
-            mark: "mark_host"
+            mark: "mark_host",
+            fillsHeight: true
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let policy = model.hostPolicy {
@@ -770,8 +781,8 @@ struct MachinesView: View {
     #endif
 
     private var accountDevices: some View {
-        Card(title: "Account-linked devices", subtitle: "Connect to any computer on this account in one click, over the tunnel. Phones are listed too, and dial you rather than the other way round.", mark: "mark_device") {
-            VStack(spacing: 0) {
+        Card(title: "Your devices", subtitle: "Select a device for connection details. Phones and tablets connect to this Mac.", mark: "mark_device") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: Theme.Space.m)], spacing: Theme.Space.m) {
                 ForEach(model.listedAccountMachines) { machine in
                     // Phones are shown but never dialled: a client reaches a
                     // host, not the reverse (P5). Hiding them made a device
@@ -790,10 +801,13 @@ struct MachinesView: View {
                     let symbol = machine.isHost
                         ? (isSelf ? "laptopcomputer" : "desktopcomputer")
                         : "iphone"
-                    HStack(spacing: Theme.Space.s) {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    HStack(alignment: .top, spacing: Theme.Space.s) {
                         Image(systemName: symbol)
                             .foregroundStyle(isSelf ? Theme.accent : .secondary)
-                            .frame(width: 24)
+                            .font(Theme.font(22))
+                            .frame(width: 42, height: 42)
+                            .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
                         if isSelf {
                             // This machine's own presence: the accent colour
                             // when the tunnel is actually up (so the row reads
@@ -845,11 +859,9 @@ struct MachinesView: View {
                                     .font(Theme.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            if let id = machine.machineID {
-                                Text(id)
-                                    .font(Theme.mono(11))
-                                    .foregroundStyle(.tertiary)
-                                    .textSelection(.enabled)
+                            if let words = linkedPeer(for: machine)?.words {
+                                Text(words).font(Theme.caption2).foregroundStyle(.secondary)
+                                    .lineLimit(1).truncationMode(.middle)
                             }
                             // The detail line sits under the name, on its own
                             // row: the presence light is the quick read, this
@@ -858,77 +870,23 @@ struct MachinesView: View {
                                 .font(Theme.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        if isSelf {
-                            // No Connect and no revoke: you are sitting at it.
-                            // It does get a Rename, and it is the one row that
-                            // most needs one. The name of the computer you are
-                            // on was editable from a field further up the page
-                            // and from nowhere in the list where every other
-                            // device offers it, so the machine whose name was
-                            // wrong was the only one that looked unnameable.
-                            Button("Rename", .edit) {
-                                renamingID = machine.machineID
-                            }
-                            .buttonStyle(SecondaryButtonStyle(small: true))
-                            .labelStyle(.iconOnly)
-                            .help("Call this computer something")
-                        } else if !machine.isHost {
-                            // A phone is never dialled from here, so it has no
-                            // Connect. It can still be turned away, and this is
-                            // the row that has to offer it: a phone on the
-                            // account is listed here, so its access cannot only
-                            // be revocable from a card further down the page.
-                            phoneAccess(for: machine)
-                        } else {
-                            if let peer = model.peer(for: machine) {
-                                if model.isConnected(machine) {
-                                    Button("Disconnect", .disconnect) {
-                                        model.disconnect(peer)
-                                    }
-                                    .buttonStyle(SecondaryButtonStyle(small: true))
-                                    .help("Removes this device's workspaces from the sidebar")
-                                } else {
-                                    accountPeerActions(peer, machine: machine)
-                                }
-                            } else if let key = machine.publicIdentity, !key.isEmpty {
-                                // Offline machines cannot answer a dial. Showing
-                                // Connect here was a button whose only outcome
-                                // was a failure.
-                                if model.canConnect(machine) {
-                                    Button("Connect", .connect) { Task { await model.connect(machine) } }
-                                        .buttonStyle(AccentButtonStyle(small: true))
-                                        .help("Connects through the tunnel from anywhere")
-                                }
-                            }
-                            // Any device on the account, not only this one:
-                            // a server that only ever ran the CLI cannot be
-                            // renamed from itself without an ssh session.
-                            Button("Rename", .edit) {
-                                renamingID = machine.machineID
-                            }
-                            .buttonStyle(SecondaryButtonStyle(small: true))
-                            .labelStyle(.iconOnly)
-                            .help("Call this device something on this account")
-                            Button {
-                                pendingUnlink = machine
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(Theme.font(11))
-                            }
-                            .buttonStyle(SecondaryButtonStyle(small: true))
-                            .help("Remove from account (deletes its uploaded history)")
-                        }
+                        Spacer(minLength: 0)
                     }
-                    .padding(.vertical, Theme.Space.s)
+                    Spacer(minLength: 0)
+                    deviceActions(machine, isSelf: isSelf)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(Theme.Space.m)
                     .background(
                         model.selectedKind == .account(machine.machineID ?? machine.id)
-                            ? Theme.rowSelected
-                            : Color.clear
+                            ? Theme.rowSelected : Theme.background,
+                        in: RoundedRectangle(cornerRadius: Theme.cardRadius)
                     )
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius)
+                        .strokeBorder(model.selectedKind == .account(machine.machineID ?? machine.id)
+                            ? Theme.accent.opacity(0.5) : Theme.border, lineWidth: 1))
                     .contentShape(.rect)
                     .onTapGesture { model.selectAccount(machine) }
-                    if machine.id != model.listedAccountMachines.last?.id { ThemeRule() }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -936,35 +894,49 @@ struct MachinesView: View {
         .animation(.easeOut(duration: 0.22), value: model.accountMachines.isEmpty)
     }
 
-    /// Approve, revoke and forget for a phone listed on the account.
-    ///
-    /// Never Connect: a client reaches a host, not the reverse (P5).
-    @ViewBuilder
-    private func phoneAccess(for machine: Machine) -> some View {
-        if let peer = linkedPeer(for: machine) {
-            switch peer.trust {
-            case .approved:
-                Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
-                    .help("Stops that device from reaching this Mac")
-            case .pending, .revoked:
-                Button("Approve", .approve) { Task { await model.approve(peer) } }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
+    private func deviceActions(_ machine: Machine, isSelf: Bool) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            if machine.isHost, !isSelf {
+                if let peer = model.peer(for: machine) {
+                    if model.isConnected(machine) {
+                        Button("Disconnect", .disconnect) { model.disconnect(peer) }
+                            .buttonStyle(SecondaryButtonStyle(small: true))
+                    } else {
+                        accountPeerActions(peer, machine: machine)
+                    }
+                } else if let key = machine.publicIdentity, !key.isEmpty, model.canConnect(machine) {
+                    Button("Connect", .connect) { Task { await model.connect(machine) } }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                }
             }
-            Button("Forget", .delete, role: .destructive) { confirmForget = peer }
-                .buttonStyle(SecondaryButtonStyle(small: true))
-                .help("Removes the pairing. That device has to knock again.")
+            Spacer(minLength: 0)
+            Menu {
+                Button("Rename", .edit) { renamingID = machine.machineID }
+                if !isSelf {
+                    if !machine.isHost, let peer = linkedPeer(for: machine) {
+                        Divider()
+                        if peer.trust == .approved {
+                            Button("Revoke access", .revoke, role: .destructive) { confirmRevoke = peer }
+                        } else {
+                            Button("Approve", .approve) { Task { await model.approve(peer) } }
+                        }
+                        Button("Forget pairing", .delete, role: .destructive) { confirmForget = peer }
+                    } else if machine.isHost {
+                        Divider()
+                        Button("Remove from account", .delete, role: .destructive) { pendingUnlink = machine }
+                    }
+                }
+            } label: {
+                Label("Manage", systemImage: "ellipsis")
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.accent.opacity(0.2)))
+            .help("Manage \(model.resolvedName(for: machine) ?? machine.displayName)")
         }
-        // Whatever else a phone row offers, it can be named. Two devices both
-        // called "iPad" is the list this account actually has, and the row
-        // that can be revoked and forgotten was the row that could not be
-        // told apart from its neighbour.
-        Button("Rename", .edit) {
-            renamingID = machine.machineID
-        }
-        .buttonStyle(SecondaryButtonStyle(small: true))
-        .labelStyle(.iconOnly)
-        .help("Call this device something on this account")
     }
 
     /// The peer record for an account machine, matched on identity only.
@@ -1147,6 +1119,7 @@ struct MachinesView: View {
 /// because it is the broadest of the three.
 private struct DevicePermissionCard: View {
     let peers: [Peer]
+    var localOnly = false
     @State private var permissions: [String: ScreenPermission] = [:]
     /// Peer keys allowed to open the work here.
     @State private var workspaceAllowed: Set<String> = []
@@ -1157,30 +1130,10 @@ private struct DevicePermissionCard: View {
     #endif
 
     var body: some View {
-        if !peers.isEmpty {
-            Card(title: "What each device may do", subtitle: "Each device is allowed independently. Watching the screen is Legend.", mark: "mark_device") {
-                VStack(spacing: Theme.Space.s) {
-                    // Says where the switch comes from, for somebody reading
-                    // this card cold. A device does not need to be told what to
-                    // ask for, and nobody has to be told what to switch on.
-                    Text("A device can ask from its own screen. The request appears at the top of this page, and you can also switch one on here.")
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(peers) { peer in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(peer.label).font(Theme.callout.weight(.medium))
-                                Text(peer.words ?? peer.fingerprint).font(Theme.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Toggle("Workspaces", isOn: workspaceBinding(peer)).toggleStyle(.switch)
-                            Toggle("View", isOn: binding(peer, control: false)).toggleStyle(.switch)
-                            Toggle("Control", isOn: binding(peer, control: true)).toggleStyle(.switch)
-                                .disabled(permissions[peer.key]?.view != true)
-                        }
-                    }
+        Group {
+            if localOnly {
+                Card(title: "Local permissions", subtitle: "Screen sharing and incoming files on this Mac", mark: "mark_device") {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
                     #if os(macOS)
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -1216,20 +1169,83 @@ private struct DevicePermissionCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     #endif
+                        if let error { Text(error).font(Theme.caption).foregroundStyle(Theme.danger) }
+                    }
+                }
+            } else if !peers.isEmpty {
+                Card(title: "Device permissions", subtitle: "Choose what each approved device can access on this Mac", mark: "mark_device") {
+                    WidthReader { width in
+                        permissionTable(compact: width < 620)
+                    }
+                    Text("Control requires View. Devices can also request access; pending requests appear at the top of this page.")
+                        .font(Theme.caption).foregroundStyle(.secondary)
                     if let error { Text(error).font(Theme.caption).foregroundStyle(Theme.danger) }
                 }
             }
-            .task { await load() }
-            #if os(macOS)
-            // A grant made in System Settings never tells the app. Re-reading
-            // when the window comes forward is what makes the card say
-            // "granted" without a relaunch.
-            .onReceive(
-                NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
-            ) { _ in Task { await access.refresh() } }
-            .task { await access.refresh() }
-            #endif
         }
+        .task(id: peers.map(\.key)) { await load() }
+        #if os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await access.refresh() }
+        }
+        .task { await access.refresh() }
+        #endif
+    }
+
+    private func permissionTable(compact: Bool) -> some View {
+        VStack(spacing: 0) {
+            if !compact {
+                HStack {
+                    Text("DEVICE").frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(["WORKSPACES", "VIEW", "CONTROL"], id: \.self) { title in
+                        Text(title).frame(width: 105)
+                    }
+                }
+                .font(Theme.sectionHeader).foregroundStyle(.secondary)
+                .padding(.bottom, Theme.Space.s)
+            }
+            ForEach(peers) { peer in
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    HStack {
+                        peerIdentity(peer)
+                        if !compact {
+                            Spacer(minLength: Theme.Space.s)
+                            permissionSwitches(peer, compact: false)
+                        }
+                    }
+                    if compact { permissionSwitches(peer, compact: true) }
+                }
+                .padding(.vertical, Theme.Space.s)
+                if peer.id != peers.last?.id { ThemeRule().opacity(0.6) }
+            }
+        }
+    }
+
+    private func peerIdentity(_ peer: Peer) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(peer.label).font(Theme.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+            Text(peer.words ?? peer.fingerprint).font(Theme.caption).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+        }
+    }
+
+    private func permissionSwitches(_ peer: Peer, compact: Bool) -> some View {
+        HStack(spacing: 0) {
+            permissionSwitch("Workspaces", peer: peer, value: workspaceBinding(peer), compact: compact)
+            permissionSwitch("View", peer: peer, value: binding(peer, control: false), compact: compact)
+            permissionSwitch("Control", peer: peer, value: binding(peer, control: true), compact: compact)
+                .disabled(permissions[peer.key]?.view != true)
+                .help("Control requires screen viewing access")
+        }
+    }
+
+    private func permissionSwitch(_ title: String, peer: Peer, value: Binding<Bool>, compact: Bool) -> some View {
+        VStack(spacing: 5) {
+            if compact { Text(title).font(Theme.caption).foregroundStyle(.secondary) }
+            Toggle(title, isOn: value).toggleStyle(.switch).labelsHidden()
+                .accessibilityLabel("\(peer.label): \(title)")
+        }
+        .frame(width: 105)
     }
 
     #if os(macOS)

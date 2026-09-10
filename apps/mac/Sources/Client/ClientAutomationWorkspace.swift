@@ -16,6 +16,7 @@ struct ClientAutomationWorkspace: View {
     let folderName: String
 
     @State private var session: ClientAutomationSession
+    @State private var search = ""
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String) {
         self.peer = peer
@@ -64,6 +65,12 @@ struct ClientAutomationWorkspace: View {
     private var list: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("Automations").font(ClientType.sectionTitle)
+                TextField("Search automations", text: $search).textFieldStyle(.roundedBorder)
+                if session.loaded {
+                    Text("\(session.jobs.filter(\.enabled).count) enabled · \(session.runs.filter(\.isRunning).count) running")
+                        .font(ClientType.caption).foregroundStyle(.secondary)
+                }
                 if let errorMessage = session.errorMessage {
                     ClientErrorCard(message: errorMessage) {
                         Task { await session.load() }
@@ -80,7 +87,7 @@ struct ClientAutomationWorkspace: View {
                         message: "Jobs are set up on the Mac. This folder's runs land here."
                     )
                 } else {
-                    ForEach(session.jobs) { job in
+                    ForEach(session.jobs.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.prompt.localizedCaseInsensitiveContains(search) }) { job in
                         Button {
                             session.selectJob(job.id)
                         } label: {
@@ -157,6 +164,8 @@ struct ClientAutomationWorkspace: View {
     private var runColumn: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Label("Run details", systemImage: "play.circle").font(ClientType.sectionTitle).foregroundStyle(Theme.accent)
+                ThemeRule()
                 ClientAutomationActions(session: session)
                 if let run = session.selectedRun {
                     StatusPill(status: run.status, text: run.endedLabel)

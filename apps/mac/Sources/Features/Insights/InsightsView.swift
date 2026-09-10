@@ -152,8 +152,8 @@ struct InsightsView: View {
         // Sharp wireframe of the overview. Real content replaces it with
         // `.smoothIn` when the first report lands; no blur veil.
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Card(title: "Daily volume", subtitle: "Tokens per day, cache included", mark: "mark_insights") {
-                Skeleton.Bar(width: nil, height: 160)
+            Card(title: "Usage over time", subtitle: "Daily tokens · cache included", mark: "mark_insights") {
+                Skeleton.Bar(width: nil, height: 260)
             }
             WidthReader { width in
                 skeletonTriple(width: width)
@@ -163,84 +163,62 @@ struct InsightsView: View {
     }
 
     private var overview: some View {
-        // The plan limit and plan usage cards used to open this screen. They
-        // moved to Home: "what is left of the allowance" is asked before the
-        // work, not while reading a report about it.
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Card(title: "Daily volume", subtitle: "Tokens per day, cache included", mark: "mark_insights") {
-                DailyChart(rows: model.daily)
-            }
-
-            // Three across once there is room, and never fewer cards than
-            // there are lists: below the three-across width the project list
-            // moves underneath the pair instead of vanishing, and below the
-            // two-across width all three stack.
-            WidthReader { width in
-                layoutTriple(width: width)
-            }
-        }
-    }
-
-    /// The three breakdown lists, reflowing by width instead of dropping one.
-    @ViewBuilder
-    private func layoutTriple(width: CGFloat) -> some View {
-        if width >= .threeAcrossWidth {
-            HStack(alignment: .top, spacing: Theme.Space.s) {
-                topModelsCard
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                byHarnessCard
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                byProjectCard
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }
-            // The row takes the tallest card's height, and the cards in it
-            // fill that, exactly like the quota panels on Home. Without the
-            // fixed size the row would grow to whatever height was going
-            // spare and every card with it.
-            .fixedSize(horizontal: false, vertical: true)
-        } else if width >= .twoColumnWidth {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                HStack(alignment: .top, spacing: Theme.Space.s) {
-                    topModelsCard
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    byHarnessCard
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            if let totals = model.totals {
+                WidthReader { width in
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: width >= 760 ? 4 : (width >= 380 ? 2 : 1)), spacing: 12) {
+                    InsightMetric(title: "Total tokens", value: formatTokens(totals.counters.total),
+                                  detail: "Including reported cache usage", symbol: "chart.bar.fill")
+                    InsightMetric(title: "List-rate value", value: model.periodValue.formatted,
+                                  detail: "Token valuation · not billed", symbol: "dollarsign.circle")
+                        .help(model.periodValue.caveat ?? "Value at published model rates, not actual spending.")
+                    InsightMetric(title: "Sessions", value: totals.sessions.formatted(),
+                                  detail: "\(totals.events.formatted()) recorded events", symbol: "bubble.left.and.bubble.right")
+                    InsightMetric(title: "Active days", value: totals.days.formatted(),
+                                  detail: "\(formatTokens(totals.days > 0 ? totals.counters.total / totals.days : 0)) tokens / active day", symbol: "calendar")
                 }
-                .fixedSize(horizontal: false, vertical: true)
-                byProjectCard
+                }
+                if let caveat = model.periodValue.caveat {
+                    Text(caveat).font(Theme.caption).foregroundStyle(.secondary)
+                }
             }
-        } else {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                topModelsCard
-                byHarnessCard
-                byProjectCard
+            Card(title: "Usage over time", subtitle: "Daily tokens · cache included", mark: "mark_insights") {
+                DailyChart(rows: model.daily)
+                HStack {
+                    if let peak = model.daily.max(by: { $0.counters.total < $1.counters.total }) {
+                        Label("Peak: \(formatTokens(peak.counters.total)) · \(peak.key)", systemImage: "arrow.up.right")
+                    }
+                    Spacer()
+                    Text("\(model.daily.count) recorded days")
+                }
+                .font(Theme.caption).foregroundStyle(.secondary)
+            }
+            WidthReader { width in
+                if width >= 680 {
+                    HStack(alignment: .top, spacing: Theme.Space.m) {
+                        rankingCard(title: "Top models", rows: model.byModel, tab: .models)
+                        rankingCard(title: "By harness", rows: model.bySource, tab: .harnesses)
+                    }.fixedSize(horizontal: false, vertical: true)
+                } else {
+                    VStack(spacing: Theme.Space.m) {
+                        rankingCard(title: "Top models", rows: model.byModel, tab: .models)
+                        rankingCard(title: "By harness", rows: model.bySource, tab: .harnesses)
+                    }
+                }
+            }
+            if !model.byProject.isEmpty {
+                rankingCard(title: "Project activity", rows: model.byProject, tab: .projects)
             }
         }
     }
 
-    private var topModelsCard: some View {
-        Card(title: "Top models", subtitle: "List-rate value", mark: "mark_insights", fillsHeight: true) {
-            MiniList(rows: model.byModel, showsValue: true, monospaced: true)
-        }
-    }
-
-    private var byHarnessCard: some View {
-        Card(title: "By harness", subtitle: "Which agent produced the tokens", mark: "mark_automation", fillsHeight: true) {
-            MiniList(
-                rows: model.bySource,
-                showsValue: false,
-                monospaced: false,
-                isHarness: true
-            )
-        }
-    }
-
-    /// The project list, or nothing when the archive has no projects yet.
-    @ViewBuilder
-    private var byProjectCard: some View {
-        if !model.byProject.isEmpty {
-            Card(title: "By project", subtitle: "Where the work happened", mark: "mark_archive", fillsHeight: true) {
-                MiniList(rows: model.byProject, showsValue: false, monospaced: true)
+    private func rankingCard(title: String, rows: [Bucket], tab: InsightsModel.Tab) -> some View {
+        Card(title: title, subtitle: "Ranked by tokens · share of this breakdown", mark: tab == .harnesses ? "mark_automation" : "mark_insights",
+             accessory: AnyView(Button("View all (\(rows.count))") { model.tab = tab }
+                .buttonStyle(.plain).font(Theme.caption).foregroundStyle(Theme.accent)), fillsHeight: true) {
+            InsightRanking(rows: rows, isHarness: tab == .harnesses, showsValue: tab == .models) { row in
+                model.tab = tab
+                model.selected = row
             }
         }
     }
@@ -447,47 +425,68 @@ private struct BreakdownRow: View {
     }
 }
 
-/// A short list for the overview cards.
-private struct MiniList: View {
-    var rows: [Bucket]
-    var showsValue: Bool
-    var monospaced: Bool
-    var isHarness: Bool = false
-    var limit: Int = 6
+private struct InsightMetric: View {
+    let title: String
+    let value: String
+    let detail: String
+    let symbol: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: symbol).font(Theme.callout).foregroundStyle(.secondary)
+            Text(value).font(Theme.numeric(28, weight: .semibold))
+                .foregroundStyle(Color.primary).lineLimit(1).minimumScaleFactor(0.65)
+            Text(detail).font(Theme.caption).foregroundStyle(.secondary).lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct InsightRanking: View {
+    let rows: [Bucket]
+    let isHarness: Bool
+    let showsValue: Bool
+    let select: (Bucket) -> Void
+
+    private var total: Double { rows.reduce(0) { $0 + Double($1.counters.total) } }
+    private var peak: Double { Double(rows.map(\.counters.total).max() ?? 0) }
 
     var body: some View {
         if rows.isEmpty {
             EmptyHint(text: "Nothing recorded yet.")
         } else {
-            VStack(spacing: Theme.Space.s) {
-                ForEach(rows.prefix(limit)) { row in
-                    HStack(spacing: Theme.Space.m) {
-                        if isHarness {
-                            HarnessMark(id: row.key, size: 15)
+            VStack(spacing: 14) {
+                ForEach(rows.prefix(6)) { row in
+                    Button { select(row) } label: {
+                        VStack(spacing: 7) {
+                            HStack(spacing: 8) {
+                                if isHarness { HarnessMark(id: row.key, size: 16) }
+                                Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? "unknown" : row.key))
+                                    .font(isHarness ? Theme.font(13) : Theme.mono(12))
+                                    .lineLimit(1).truncationMode(.middle)
+                                Spacer(minLength: 4)
+                                Text(formatTokens(row.counters.total)).font(Theme.numeric(12, weight: .medium))
+                                Text((total > 0 ? Double(row.counters.total) / total : 0).formatted(.percent.precision(.fractionLength(1))))
+                                    .font(Theme.numeric(11)).foregroundStyle(.secondary).frame(width: 48, alignment: .trailing)
+                            }
+                            GeometryReader { geo in
+                                Capsule().fill(Theme.accent.opacity(0.08))
+                                Capsule().fill(Theme.accent.gradient)
+                                    .frame(width: geo.size.width * (peak > 0 ? Double(row.counters.total) / peak : 0))
+                            }.frame(height: 5).accessibilityHidden(true)
+                            HStack {
+                                Text("\(row.sessions.formatted()) sessions")
+                                Spacer()
+                                if showsValue { Text("\(row.value.formatted) at list rates").help(row.value.caveat ?? "") }
+                            }.font(Theme.caption2).foregroundStyle(.secondary)
                         }
-                        Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? "unknown" : row.key))
-                            .font(monospaced ? Theme.mono(12) : Theme.font(13))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(formatTokens(row.counters.total))
-                            .font(Theme.numeric(12))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 58, alignment: .trailing)
-                        if showsValue {
-                            Text(row.value.formatted)
-                                .font(Theme.numeric(12))
-                                .lineLimit(1)
-                                .frame(width: 84, alignment: .trailing)
-                                .help(row.value.caveat ?? "")
-                        }
-                    }
-                }
-                if rows.count > limit {
-                    Text("and \(rows.count - limit) more")
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    .help("Inspect \(row.key)")
                 }
             }
         }
@@ -497,6 +496,7 @@ private struct MiniList: View {
 private struct DailyChart: View {
     var rows: [Bucket]
     @State private var selectedDay: String?
+    @State private var showsValue = false
 
     /// Every nth day, so labels never collide however long the period is.
     private var labelledDays: [String] {
@@ -526,10 +526,20 @@ private struct DailyChart: View {
                 text: "The days you picked have no events. Try a wider range."
             )
         } else {
+            VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(showsValue ? "Daily value at published rates · not billed" : "Daily token volume")
+                    .font(Theme.caption).foregroundStyle(.secondary)
+                Spacer()
+                Picker("Chart metric", selection: $showsValue) {
+                    Text("Tokens").tag(false)
+                    Text("List-rate value").tag(true)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 210)
+            }
             Chart(rows) { row in
                 BarMark(
                     x: .value("Day", row.key),
-                    y: .value("Tokens", Double(row.counters.total)),
+                    y: .value("Usage", showsValue ? Double(row.valueMicros) / 1_000_000 : Double(row.counters.total)),
                     // Capped, not proportional. A categorical axis gives every
                     // bar an equal share of the plot, so filtering to one day
                     // drew a single bar the width of the card: a block, with no
@@ -544,28 +554,13 @@ private struct DailyChart: View {
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
                 }
             }
-            .chartXAxis {
-                // Chart's automatic count still crowds: with 30 categorical
-                // bars it wants a label per bar and they overlap into an
-                // unreadable smear. Pick the marks explicitly from the data,
-                // roughly eight across whatever the period is, and drop the
-                // year since every bar shares it.
-                AxisMarks(values: labelledDays) { value in
-                    AxisValueLabel {
-                        if let day = value.as(String.self) {
-                            Text(shortDay(day))
-                                .font(Theme.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
+            .chartXAxis(.hidden)
             .chartYAxis {
                 AxisMarks { value in
                     AxisGridLine().foregroundStyle(Theme.border)
                     AxisValueLabel {
                         if let tokens = value.as(Double.self) {
-                            Text(formatTokens(UInt64(max(0, tokens)))).font(Theme.caption2)
+                            Text(showsValue ? tokens.formatted(.currency(code: "USD").precision(.fractionLength(0))) : formatTokens(UInt64(max(0, tokens)))).font(Theme.caption2)
                         }
                     }
                 }
@@ -579,6 +574,26 @@ private struct DailyChart: View {
             // rescale the axis the way an annotation could.
             .chartOverlay { proxy in
                 GeometryReader { geo in
+                    if let frame = proxy.plotFrame {
+                        ForEach(labelledDays, id: \.self) { day in
+                            if let x = proxy.position(forX: day) {
+                                Text(shortDay(day)).font(Theme.caption2).foregroundStyle(.secondary)
+                                    .position(x: geo[frame].minX + x, y: geo[frame].maxY + 12)
+                            }
+                        }
+                    }
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                guard let frame = proxy.plotFrame, geo[frame].contains(location) else {
+                                    selectedDay = nil
+                                    return
+                                }
+                                selectedDay = proxy.value(atX: location.x - geo[frame].minX, as: String.self)
+                            case .ended: selectedDay = nil
+                            }
+                        }
                     if let row = hoveredRow,
                        let plotFrame = proxy.plotFrame,
                        let x = proxy.position(forX: row.key) {
@@ -598,7 +613,9 @@ private struct DailyChart: View {
                     }
                 }
             }
-            .frame(height: 170)
+            .frame(height: 260)
+            .padding(.bottom, 20)
+            }
         }
     }
 
@@ -611,6 +628,7 @@ private struct DailyChart: View {
                 .font(Theme.caption2)
                 .foregroundStyle(.secondary)
             Text(row.value.formatted)
+                .help(row.value.caveat ?? "Value at list rates, not billed")
                 .font(Theme.numeric(10, weight: .medium))
                 .foregroundStyle(Theme.accent)
         }

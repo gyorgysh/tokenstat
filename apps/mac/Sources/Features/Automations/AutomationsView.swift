@@ -32,6 +32,7 @@ struct AutomationsView: View {
     @AppStorage("automations.examplesExpanded") private var examplesExpandedStored = ""
     @State private var schedulerJustSaved = false
     @State private var schedulerSaving = false
+    @State private var schedulerExpanded = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,7 +50,14 @@ struct AutomationsView: View {
                         ErrorBanner(message: error) { Task { await model.load() } }
                     }
                     intro
-                    schedulerCard
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.s), count: 4), spacing: Theme.Space.s) {
+                        ActivitySummaryTile(title: "Enabled jobs", value: model.scoped.filter(\.enabled).count, symbol: "bolt")
+                        ActivitySummaryTile(title: "Running", value: model.scopedRuns.filter { $0.status == "running" }.count, symbol: "play.circle")
+                        ActivitySummaryTile(title: "Queued", value: model.scopedRuns.filter { $0.status == "queued" }.count, symbol: "clock")
+                        ActivitySummaryTile(title: "Paused jobs", value: model.scoped.filter { !$0.enabled }.count, symbol: "pause.circle")
+                    }
+                    schedulerSummary
+                    if schedulerExpanded || model.queueDirty { schedulerCard }
                     // A search box, not a rounded text field with the icon glued
                     // on top: the overlay sat on the field's leading edge and
                     // overlapped the placeholder and the first typed characters.
@@ -85,7 +93,9 @@ struct AutomationsView: View {
                         }
                         .transition(.opacity)
                     } else if filteredJobs.isEmpty {
-                        nothingYet
+                        if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            ContentUnavailableView.search(text: search)
+                        } else { nothingYet }
                     } else {
                         taskSection("Active", jobs: filteredJobs.filter(\.enabled))
                         taskSection("Paused", jobs: filteredJobs.filter { !$0.enabled })
@@ -166,7 +176,7 @@ struct AutomationsView: View {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text("Automations")
                     .font(Theme.font(24, weight: .semibold))
-                Text("Schedule an agent a job, a folder, and a time. It runs in the background and stops at your limit.")
+                Text("Scheduled agent jobs, execution status, and recent activity.")
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -175,6 +185,25 @@ struct AutomationsView: View {
             Button("Schedule a job", .create) { creating = true }
             .buttonStyle(AccentButtonStyle())
         }
+    }
+
+    private var schedulerSummary: some View {
+        HStack(spacing: Theme.Space.s) {
+            FeatureMark(name: "mark_scheduler", tint: Theme.accent, size: 26)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Scheduler defaults").font(Theme.callout.weight(.semibold))
+                Text("\(model.queueNoLimit ? "No time limit" : model.queueBudgetMinutes + " min per job") · \(model.queueMaxConcurrent == "0" ? "Unlimited concurrent jobs" : model.queueMaxConcurrent + " concurrent jobs")")
+                    .font(Theme.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button(schedulerExpanded ? "Done" : "Configure", systemImage: "slider.horizontal.3") {
+                withAnimation(.easeInOut(duration: 0.2)) { schedulerExpanded.toggle() }
+            }
+            .buttonStyle(SecondaryButtonStyle())
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
     private var schedulerCard: some View {
@@ -434,7 +463,7 @@ struct AutomationsView: View {
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, Theme.Space.xs)
             WidthReader { width in
-            VStack(spacing: 0) {
+            VStack(spacing: Theme.Space.s) {
                 ForEach(jobs) { job in
                     AutomationRow(job: job, model: model,
                                   folders: folders,
@@ -443,12 +472,11 @@ struct AutomationsView: View {
                                   isSelected: model.selectedJobID == job.id,
                                   onSelect: { model.selectJob(job.id) },
                                   onViewRun: { model.selectRun($0) })
-                    if job.id != jobs.last?.id { ThemeRule() }
+                    .padding(Theme.Space.s)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
                 }
             }
-            .padding(.horizontal, Theme.Space.s)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
             }
         })
     }
@@ -456,7 +484,7 @@ struct AutomationsView: View {
     private var recentRuns: some View {
         Card(
             title: "Recent runs",
-            subtitle: "The latest result from each scheduled job.",
+            subtitle: "The five most recent executions in this scope.",
             mark: "mark_automation"
         ) {
             VStack(spacing: 0) {
@@ -567,7 +595,7 @@ struct AutomationsView: View {
                 .fill(Self.statusTint(run.status))
                 .frame(width: 8, height: 8)
             Text(run.name)
-                .font(Theme.callout.weight(.medium))
+                .font(Theme.font(15, weight: .semibold))
             Text(model.backends.first { $0.id == run.backend }?.label ?? run.backend)
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
@@ -631,7 +659,6 @@ private struct AutomationRow: View {
     @State private var confirmingDelete = false
     @State private var showingHistory = false
     @State private var editing = false
-    @State private var isDeleteHovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -750,25 +777,18 @@ private struct AutomationRow: View {
                 Button("Run now", .run) { Task { await model.run(job) } }
                     .buttonStyle(AccentButtonStyle(small: true))
             }
-            Button("History", .history) { showingHistory = true }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-            Button("Edit", .edit) { editing = true }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-            Button(role: .destructive) { confirmingDelete = true } label: {
-                Image(systemName: "trash")
-                    .foregroundStyle(isDeleteHovering ? Theme.danger : .secondary)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        Theme.danger.opacity(isDeleteHovering ? 0.14 : 0),
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    )
+            Menu {
+                Button("Run history", .history) { showingHistory = true }
+                Button("Edit automation", .edit) { editing = true }
+                Divider()
+                Button("Delete automation", role: .destructive) { confirmingDelete = true }
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 24, height: 24)
             }
-            .buttonStyle(.borderless)
-            .onHover { isDeleteHovering = $0 }
-            .help("Remove automation")
-            .accessibilityLabel("Delete \(job.name)")
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("Actions for \(job.name)")
         }
         .sheet(isPresented: $showingHistory) {
             AutomationHistorySheet(job: job, model: model, onView: onViewRun)
