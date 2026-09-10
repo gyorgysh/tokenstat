@@ -60,6 +60,8 @@ enum WorkCacheKey {
         await release.value; await pending.value
         assert(first.payload.queries.isEmpty && Bridge.stored == nil)
         await first.remember(query: "kept until sign out")
+        assert(first.payload.queries == ["kept until sign out"])
+        assert(Bridge.stored?.queries == ["kept until sign out"], "New searches must not restore history cleared from another window")
         WorkSearchHistory.invalidate(except: nil)
         assert(first.payload.queries.isEmpty)
         await first.remember(query: "stale window")

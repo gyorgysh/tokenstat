@@ -128,7 +128,17 @@ struct WorkCacheManagementSheet: View {
         busy = true
         failure = nil
         do {
-            if remove { _ = try await Bridge.cacheRemove(scope: record.scope, id: record.id) }
+            if remove, record.kind == "searchHistory" {
+                // Clear the shared in-memory history and drain pending saves,
+                // so an open search cannot write the removed entries back.
+                let history = WorkSearchHistory.shared(for: scope)
+                await history.clear()
+                if let message = history.failure {
+                    busy = false
+                    if current { failure = message }
+                    return
+                }
+            } else if remove { _ = try await Bridge.cacheRemove(scope: record.scope, id: record.id) }
             else { _ = try await Bridge.cachePin(scope: record.scope, id: record.id, pinned: !record.pinned) }
             busy = false
             await load()
