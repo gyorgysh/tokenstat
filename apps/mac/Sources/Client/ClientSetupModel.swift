@@ -83,6 +83,7 @@ final class ClientSetupModel {
     private(set) var prepared = false
     private(set) var resumingInstallation = false
     @ObservationIgnored private var scope: ClientSetupScope?
+    var activeScope: ClientSetupScope? { prepared ? scope : nil }
     @ObservationIgnored private var draftID = UUID()
 
     /// This device's public key, which is what `--allow` grants.

@@ -150,6 +150,7 @@ struct ClientSetupCloudDoor: View {
     @State private var imported: Int?
     @State private var working = false
     @State private var error: String?
+    @State private var generation = UUID()
 
     var body: some View {
         ScrollView {
@@ -180,6 +181,7 @@ struct ClientSetupCloudDoor: View {
                     // grey pill, which is the one piece of chrome on this
                     // screen wearing somebody else's palette.
                     SegmentedTabs(options: Provider.allCases, selection: $provider)
+                        .disabled(working)
                     if provider == .digitalOcean {
                         Text("Read-only API token")
                             .font(ClientType.caption).foregroundStyle(.secondary)
@@ -248,6 +250,11 @@ struct ClientSetupCloudDoor: View {
         .background(Theme.background)
         .navigationTitle("Cloud")
         .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            generation = UUID()
+            working = false
+            token = ""
+        }
 
     }
 
@@ -292,9 +299,15 @@ struct ClientSetupCloudDoor: View {
     }
 
     private func load() async {
+        guard !working, let scope = model.activeScope else { return }
+        let request = UUID()
+        generation = request
+        func isCurrent() -> Bool {
+            !Task.isCancelled && generation == request && model.activeScope == scope
+        }
         working = true
         error = nil
-        defer { working = false }
+        defer { if generation == request { working = false } }
         do {
             let result: SSHHostImport = provider == .digitalOcean
                 ? try await Bridge.importDigitalOcean(token: token, username: username)
@@ -303,15 +316,11 @@ struct ClientSetupCloudDoor: View {
                     region: region.isEmpty ? nil : region,
                     username: username
                 )
-            // Saved through the model, which is what also puts them in the
-            // encrypted vault, so an import from the phone reaches every other
-            // device the same way a hand-typed server does.
-            for host in result.hosts {
-                guard await library.save(host: host) != nil else {
-                    throw BridgeError.core(code: "not_saved",
-                        message: library.error ?? "The server could not be saved. Try again.")
-                }
-            }
+            guard isCurrent() else { return }
+            // Import already writes the local SSH library. Refresh those rows
+            // without issuing a second save for every imported server.
+            await library.reload()
+            guard isCurrent() else { return }
             guard !result.hosts.isEmpty else {
                 throw BridgeError.core(code: "no_servers",
                     message: "No servers were found. Check the account token or enter a server address instead.")
@@ -321,6 +330,7 @@ struct ClientSetupCloudDoor: View {
             token = ""
             imported = result.imported
         } catch {
+            guard isCurrent() else { return }
             self.error = ClientSetupModel.readable(error)
         }
     }

@@ -33,6 +33,7 @@ struct ClientSetupByHand: View {
     @State private var working = false
     @State private var error: String?
     @State private var copied = false
+    @State private var generation = UUID()
 
     var body: some View {
         ScrollView {
@@ -104,6 +105,10 @@ struct ClientSetupByHand: View {
         .navigationBarTitleDisplayMode(.inline)
 
         .task { await prepare() }
+        .onDisappear {
+            generation = UUID()
+            working = false
+        }
     }
 
     private func codeCard(_ code: PairingCode) -> some View {
@@ -146,17 +151,24 @@ struct ClientSetupByHand: View {
     }
 
     private func prepare() async {
-        guard line == nil, !working else { return }
+        guard line == nil, !working, let scope = model.activeScope else { return }
+        let request = UUID()
+        generation = request
+        func isCurrent() -> Bool {
+            !Task.isCancelled && generation == request && model.activeScope == scope
+        }
         working = true
         error = nil
-        defer { working = false }
+        defer { if generation == request { working = false } }
         do {
             try await model.chooseAvailableMachineName()
+            guard isCurrent() else { return }
             let key = try await Bridge.machineIdentity().key
+            guard isCurrent() else { return }
             model.prepareManualInstall()
             let minted = try await Bridge.mintPairingCode()
-            code = minted
-            line = try await Bridge.installLine(
+            guard isCurrent() else { return }
+            let preparedLine = try await Bridge.installLine(
                 allow: key,
                 name: model.machineName.isEmpty ? nil : model.machineName,
                 agents: model.agents,
@@ -164,7 +176,11 @@ struct ClientSetupByHand: View {
                 codeFile: false,
                 code: minted.code
             )
+            guard isCurrent() else { return }
+            code = minted
+            line = preparedLine
         } catch {
+            guard isCurrent() else { return }
             self.error = ClientSetupModel.readable(error)
         }
     }
