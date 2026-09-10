@@ -315,7 +315,13 @@ final class WorkSearchModel {
             }
         } catch WorkSearchQuery.Invalid.tooLong {
             liveScheduler?.update(query: query, kinds: filter.kinds)
+            // The scheduler cancelled this query. Returning to the previous
+            // valid text must schedule it again, even if its identity matches.
+            liveIdentity = nil
             liveHits = [:]
+            livePages = [:]
+            liveFailures = []
+            liveAnswered = []
             guard run == queryGeneration, isCurrent() else { return }
             total = 0
             pendingPage = nil
