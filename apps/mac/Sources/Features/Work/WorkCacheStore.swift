@@ -33,7 +33,7 @@ final class WorkCacheStore {
         guard await WorkCacheAccess.canSave(reference), settings.saves(reference), reference.kind == .conversation,
               let recordID = WorkCache.recordID(for: reference),
               let itemID = reference.itemID,
-              let key = WorkCacheKey.key(for: WorkCache.scope(for: reference.scope)),
+              let key = await WorkCacheAccess.keyForSaving(reference),
               let pageData = try? JSONEncoder().encode(page),
               let pageObject = try? JSONSerialization.jsonObject(with: pageData) as? [String: Any]
         else { return }
@@ -46,7 +46,7 @@ final class WorkCacheStore {
         else { return }
         if let backend { payload["backend"] = backend }
         _ = try? await Bridge.cachePut(
-            key: WorkCacheKey.encoded(key), scope: WorkCache.scope(for: reference.scope),
+            key: key, scope: WorkCache.scope(for: reference.scope),
             id: recordID, kind: "conversation", itemId: itemID,
             revision: revision, payload: payload
         )

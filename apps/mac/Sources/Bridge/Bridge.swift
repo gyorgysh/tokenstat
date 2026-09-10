@@ -1243,6 +1243,28 @@ extension Bridge {
         key: String, scope: String, id: String, kind: String, itemId: String,
         revision: String?, payload: [String: Any]
     ) async throws -> CachePutResult {
+        let generation = await WorkCacheMutationQueue.shared.generation(scope: scope)
+        let encoded = try JSONSerialization.data(withJSONObject: payload)
+        return try await WorkCacheMutationQueue.shared.run(scope: scope, expectedGeneration: generation) {
+            guard let payload = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else { throw WorkCacheError.encoding }
+            return try await cachePutOrdered(key: key, scope: scope, id: id, kind: kind, itemId: itemId, revision: revision, payload: payload)
+        }
+    }
+
+    private static func cachePutOrdered(key: String, scope: String, id: String, kind: String, itemId: String,
+                                        revision: String?, payload: [String: Any]) async throws -> CachePutResult {
+        let authorized = await MainActor.run {
+            let currentOwner = kind == "searchHistory" ? WorkSessionContext.shared.readingScope : WorkSessionContext.shared.scope
+            guard let owner = currentOwner, WorkCache.scope(for: owner) == scope,
+                  let existing = WorkCacheKey.existingKey(for: scope), WorkCacheKey.encoded(existing) == key else { return false }
+            if kind == "searchHistory" {
+                return UserDefaults.standard.bool(forKey: "work.search.history.enabled." + scope)
+            }
+            guard let reference = WorkCache.reference(recordID: id, scope: owner)
+                ?? WorkSavedPreview.reference(recordID: id, scope: owner) else { return false }
+            return WorkCacheAccess.canSave(reference) && WorkCacheSettings.shared.saves(reference)
+        }
+        guard authorized else { throw CancellationError() }
         var params: [String: Any] = [
             "key": key, "scope": scope, "id": id, "kind": kind,
             "itemId": itemId, "payload": payload,
@@ -1294,6 +1316,12 @@ extension Bridge {
     }
 
     static func cacheRemove(scope: String, id: String) async throws -> CacheRemoveResult {
+        return try await WorkCacheMutationQueue.shared.run(scope: scope, invalidating: true) {
+            try await cacheRemoveOrdered(scope: scope, id: id)
+        }
+    }
+
+    private static func cacheRemoveOrdered(scope: String, id: String) async throws -> CacheRemoveResult {
         let mutation = await WorkSearchCache.shared.beginMutation()
         do {
             let result = try await background(
@@ -1309,6 +1337,12 @@ extension Bridge {
     }
 
     static func cachePin(scope: String, id: String, pinned: Bool) async throws -> CachePinResult {
+        return try await WorkCacheMutationQueue.shared.run(scope: scope) {
+            try await cachePinOrdered(scope: scope, id: id, pinned: pinned)
+        }
+    }
+
+    private static func cachePinOrdered(scope: String, id: String, pinned: Bool) async throws -> CachePinResult {
         let mutation = await WorkSearchCache.shared.beginMutation()
         do {
             let result = try await background(
@@ -1332,6 +1366,13 @@ extension Bridge {
     }
 
     static func cacheClearScope(scope: String) async throws -> CacheClearResult {
+        await WorkSearchHistory.forgetCached(scope: scope)
+        return try await WorkCacheMutationQueue.shared.run(scope: scope, invalidating: true) {
+            try await cacheClearScopeOrdered(scope: scope)
+        }
+    }
+
+    private static func cacheClearScopeOrdered(scope: String) async throws -> CacheClearResult {
         let mutation = await WorkSearchCache.shared.beginMutation()
         do {
             let result = try await background("cache.clearScope", ["scope": scope], as: CacheClearResult.self)

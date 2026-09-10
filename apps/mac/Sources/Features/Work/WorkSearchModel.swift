@@ -195,7 +195,7 @@ final class WorkSearchModel {
          liveFetch: WorkSearchLiveScheduler.Fetch? = nil, cache: WorkSearchCache = .shared,
          ownsSession: @escaping () -> Bool) {
         self.scope = scope
-        self.history = WorkSearchHistory(scope: scope)
+        self.history = WorkSearchHistory.shared(for: scope)
         self.localHost = localHost.flatMap { machines[$0] == nil ? nil : $0 }
         self.liveFetch = liveFetch
         self.folders = folders

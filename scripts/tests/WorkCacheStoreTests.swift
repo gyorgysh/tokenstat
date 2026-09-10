@@ -12,6 +12,9 @@ struct ChatEventPage: Codable, Sendable {
 enum WorkCacheAccess {
     static func canSave(_ reference: WorkReference) async -> Bool { true }
     static func canRead(_ reference: WorkReference) async -> Bool { true }
+    static func keyForSaving(_ reference: WorkReference) async -> String? {
+        WorkCacheKey.key(for: WorkCache.scope(for: reference.scope)).map(WorkCacheKey.encoded)
+    }
 }
 enum BridgeError: Error { case core(code: String, message: String) }
 enum WorkCacheKey {

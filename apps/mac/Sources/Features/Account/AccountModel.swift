@@ -26,6 +26,7 @@ final class AccountModel {
             let previous = WorkSessionContext.shared.scope
             WorkSessionContext.shared.update(account: account)
             if previous != WorkSessionContext.shared.scope {
+                WorkSearchHistory.invalidate(except: WorkSessionContext.shared.scope)
                 // Full downloaded files and OS preview copies are reconstructible.
                 // Clear them when ownership changes and invalidate in-flight writes.
                 Task { try? await ChatAttachmentCache.shared.purge() }
