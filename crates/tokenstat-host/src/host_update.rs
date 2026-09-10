@@ -57,7 +57,7 @@
 //! subprocess is a worse thing to own than one repeated download in a window
 //! the following restart closes for good.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -120,12 +120,21 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
 /// is also the check that catches a half install: a daemon copied somewhere on
 /// its own cannot be updated, and saying so names the actual problem.
 fn cli_path() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    cli_path_for(&exe)
+}
+
+/// The command line tool beside a daemon binary.
+///
+/// Split out so it can be tested without depending on where the test runner
+/// itself was built: on some platforms the test binary's own directory holds
+/// a same-named file, which would make `current_exe` look installed.
+fn cli_path_for(exe: &Path) -> Result<PathBuf, String> {
     let name = if cfg!(windows) {
         "tokenstat.exe"
     } else {
         "tokenstat"
     };
-    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let path = exe.with_file_name(name);
     if !path.is_file() {
         return Err(format!(
@@ -448,10 +457,19 @@ mod tests {
     /// problem or a permission problem.
     #[test]
     fn an_update_needs_the_command_line_tool_beside_the_daemon() {
-        // The test binary's own directory has no `tokenstat` beside it.
-        let error = cli_path().expect_err("a test binary has no CLI sibling");
+        let cli = if cfg!(windows) {
+            "tokenstat.exe"
+        } else {
+            "tokenstat"
+        };
+        let root = tempfile::tempdir().unwrap();
+        let daemon = root.path().join("tokenstat-hostd");
+        std::fs::write(&daemon, []).unwrap();
+        let error = cli_path_for(&daemon).expect_err("a daemon alone is a half install");
         assert!(error.contains("not beside this daemon"), "{error}");
         assert!(error.contains("one place"), "{error}");
+        std::fs::write(root.path().join(cli), []).unwrap();
+        assert_eq!(cli_path_for(&daemon).unwrap(), root.path().join(cli));
     }
 
     /// A test binary has no supervisor, so nothing in here may ever decide to

@@ -3396,6 +3396,16 @@ fn usage_totals(path: &Path) -> Result<Value, String> {
     let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // A missing transcript is a new conversation, which genuinely has
+            // no usage. But an ancestor that exists and is not a directory
+            // means the transcript is unreachable rather than absent, and
+            // that must error instead of reporting a zero that is not real.
+            // The open error alone cannot tell them apart: Unix reports a
+            // file used as a directory distinctly, Windows reports both
+            // cases as not found.
+            if blocked_ancestor(path) {
+                return Err("conversation transcript is not reachable".into());
+            }
             return Ok(crate::work_transcript_identity::UsageTotals::default().value());
         }
         Err(error) => return Err(error.to_string()),
@@ -3426,6 +3436,25 @@ fn usage_totals(path: &Path) -> Result<Value, String> {
         )?)?;
     }
     Ok(totals.value())
+}
+
+/// Whether `path` can never name a file because something above it exists
+/// and is not a directory.
+///
+/// Follows links: a symlink to a directory is a way through, not a wall.
+/// A dangling link reads as missing rather than blocked, which keeps a new
+/// conversation's empty totals rather than erroring on a path that simply
+/// is not there yet.
+fn blocked_ancestor(path: &Path) -> bool {
+    let mut current = path.parent();
+    while let Some(ancestor) = current {
+        match fs::metadata(ancestor) {
+            Ok(metadata) if !metadata.is_dir() => return true,
+            _ => {}
+        }
+        current = ancestor.parent();
+    }
+    false
 }
 
 struct ChatTemporary(PathBuf);
