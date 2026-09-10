@@ -148,7 +148,7 @@ struct ClientChatComposer: View {
             urlDropTargeted = targeted
             reportDropTarget()
         }
-        .animation(.easeOut(duration: 0.16), value: dropTargeted)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropTargeted)
         .fileImporter(
             isPresented: $importing,
             allowedContentTypes: [.item],

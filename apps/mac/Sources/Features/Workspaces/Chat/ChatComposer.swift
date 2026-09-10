@@ -269,18 +269,27 @@ struct ChatAttachmentTile: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             tile
-            Button("Remove", .dismiss) { onRemove() }
-                .buttonStyle(.plain)
-                .environment(\.compactActions, true)
-                .font(Theme.fixed(8, weight: .bold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 18, height: 18)
-                .background(Theme.panel, in: Circle())
-                .overlay { Circle().strokeBorder(Theme.border, lineWidth: 1) }
-                .offset(x: 5, y: -5)
+            Button(action: onRemove) {
+                ActionIcon.dismiss.label("Remove")
+                    .font(Theme.fixed(8, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 18, height: 18)
+                    .background(Theme.panel, in: Circle())
+                    .overlay { Circle().strokeBorder(Theme.border, lineWidth: 1) }
+                    #if !os(macOS)
+                    .frame(width: 44, height: 44, alignment: .topTrailing)
+                    .contentShape(Rectangle())
+                    #endif
+            }
+            .buttonStyle(.plain)
+            .environment(\.compactActions, true)
+            .accessibilityLabel("Remove \(attachment.name)")
+            #if os(macOS)
+            .offset(x: 5, y: -5)
+            #endif
         }
         .help(unavailable ? "The original is not saved on this device. Reconnect or remove it and attach the original again." : attachment.name)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(attachment.name)
     }
 
