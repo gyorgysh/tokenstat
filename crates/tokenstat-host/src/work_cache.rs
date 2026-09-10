@@ -248,9 +248,17 @@ fn open(
         .map_err(|_| "wrong cache key or damaged record".to_string())
 }
 
-fn evict_expired(store: &mut Store, now: i64, retention_ms: i64) -> Vec<String> {
+fn evict_expired(
+    store: &mut Store,
+    now: i64,
+    retention_ms: i64,
+    selected_scope: Option<&str>,
+) -> Vec<String> {
     let mut evicted = Vec::new();
     for (scope, records) in store.scopes.iter_mut() {
+        if selected_scope.is_some_and(|selected| selected != scope) {
+            continue;
+        }
         let stale: Vec<String> = records
             .iter()
             .filter(|(_, record)| {
@@ -426,7 +434,7 @@ fn put(params: &PutParams) -> Result<Value, String> {
     let budget = params.budget_bytes.unwrap_or(DEFAULT_BUDGET_BYTES);
 
     let (mut store, repaired) = load()?;
-    let expired = evict_expired(&mut store, now, retention);
+    let expired = evict_expired(&mut store, now, retention, None);
 
     let (nonce, ciphertext) = seal(&key, &params.scope, &params.id, &plaintext)?;
     let bytes = (b64decode(&ciphertext).map_err(|e| e.to_string())?.len()
@@ -660,10 +668,7 @@ fn evict(scope: Option<&str>, now: i64, retention_ms: i64) -> Result<Value, Stri
         }
     }
     let (mut store, repaired) = load()?;
-    let mut evicted = evict_expired(&mut store, now, retention_ms);
-    if let Some(scope) = scope {
-        evicted.retain(|id| id.starts_with(&format!("{scope}|")));
-    }
+    let evicted = evict_expired(&mut store, now, retention_ms, scope);
     save(&mut store)?;
     Ok(json!({"evicted": evicted, "repaired": repaired}))
 }
@@ -847,6 +852,44 @@ mod tests {
                     id: "c1".into()
                 })
                 .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn scoped_eviction_preserves_other_accounts_and_global_eviction_reports_them() {
+        with_path(fresh_path(), || {
+            for scope in ["account", "account|other", "another"] {
+                put(&params(scope, "old")).unwrap();
+            }
+            let result = call(
+                "cache.evict",
+                &json!({"scope": "account", "nowMs": 2000, "retentionMs": 500}).to_string(),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(result["evicted"], json!(["account|old"]));
+            assert!(
+                list("account").unwrap()["records"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+            for scope in ["account|other", "another"] {
+                assert_eq!(list(scope).unwrap()["records"].as_array().unwrap().len(), 1);
+                assert!(
+                    get(&KeyedParams {
+                        key: KEY.into(),
+                        scope: scope.into(),
+                        id: "old".into(),
+                    })
+                    .is_ok()
+                );
+            }
+            let global = evict(None, 2000, 500).unwrap();
+            assert_eq!(
+                global["evicted"],
+                json!(["account|other|old", "another|old"])
             );
         });
     }
