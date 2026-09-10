@@ -72,6 +72,7 @@ final class ChatModel {
     var attachmentPreviews: [String: Data] = [:]
     private(set) var stagingAttachments = 0
     private(set) var missingDraftAttachments: Set<String> = []
+    private var draftAttachmentLoadGeneration = UUID()
     /// Agent-returned file bytes, loaded lazily from the chat's owning host.
     /// The transcript only persists descriptors, so remote files work exactly
     /// like local ones without exposing a host filesystem path to SwiftUI.
@@ -239,6 +240,8 @@ final class ChatModel {
         setDraft(shared.text)
         attachments = files
         attachmentPreviews = [:]
+        missingDraftAttachments = []
+        draftAttachmentLoadGeneration = UUID()
         ChatDraftStore.shared.save(text: draft, attachments: files, for: reference, newMessage: true)
         return true
     }
@@ -320,6 +323,7 @@ final class ChatModel {
         case .keep:
             break
         case let .swap(reference):
+            draftAttachmentLoadGeneration = UUID()
             setDraft("")
             attachments = []
             attachmentPreviews = [:]
@@ -330,10 +334,12 @@ final class ChatModel {
             }
             setDraft(stored.text)
             attachments = stored.attachments
+            let attachmentLoadGeneration = draftAttachmentLoadGeneration
             Task {
                 for attachment in stored.attachments {
                     let data = try? await ChatLocalAttachmentStore.shared.read(attachment, reference: reference)
-                    guard self.draftReference == reference, self.attachments.contains(attachment) else { return }
+                    guard self.draftAttachmentLoadGeneration == attachmentLoadGeneration,
+                          self.draftReference == reference, self.attachments.contains(attachment) else { return }
                     if let data {
                         if let preview = ChatThumbnail.make(from: data) { self.attachmentPreviews[attachment.id] = preview }
                     } else { self.missingDraftAttachments.insert(attachment.id) }
