@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+// Compile with WorkReference.swift, WorkSearchText.swift, WorkSearchLive.swift.
 import Foundation
 
 @main struct WorkSearchLiveTests {
