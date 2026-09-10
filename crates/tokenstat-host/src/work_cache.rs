@@ -148,9 +148,9 @@ fn load() -> Result<(Store, bool), String> {
     }
 }
 
+// Caller holds the transaction lock from before load through replacement.
 fn save(store: &mut Store) -> Result<(), String> {
     store.schema_version = 1;
-    let _guard = lock().lock().map_err(|_| "work cache lock poisoned")?;
     let path = path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -404,6 +404,7 @@ fn meta(scope: &str, record: &Record) -> Value {
 }
 
 fn put(params: &PutParams) -> Result<Value, String> {
+    let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
     if !valid_token(&params.scope, MAX_SCOPE_LEN) {
         return Err("invalid cache scope".into());
     }
@@ -521,6 +522,7 @@ fn put(params: &PutParams) -> Result<Value, String> {
 }
 
 fn get(params: &KeyedParams) -> Result<Value, String> {
+    let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
     if !valid_token(&params.scope, MAX_SCOPE_LEN) || !valid_token(&params.id, MAX_ID_LEN) {
         return Err("invalid cache scope".into());
     }
@@ -548,6 +550,7 @@ fn get(params: &KeyedParams) -> Result<Value, String> {
 }
 
 fn list(scope: &str) -> Result<Value, String> {
+    let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
     if !valid_token(scope, MAX_SCOPE_LEN) {
         return Err("invalid cache scope".into());
     }
@@ -573,6 +576,7 @@ fn list(scope: &str) -> Result<Value, String> {
 }
 
 fn remove(params: &ScopeParams, id: &str) -> Result<Value, String> {
+    let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
     if !valid_token(&params.scope, MAX_SCOPE_LEN) || !valid_token(id, MAX_ID_LEN) {
         return Err("invalid cache scope".into());
     }
@@ -594,6 +598,7 @@ fn remove(params: &ScopeParams, id: &str) -> Result<Value, String> {
 }
 
 fn pin(params: &PinParams) -> Result<Value, String> {
+    let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
     if !valid_token(&params.scope, MAX_SCOPE_LEN) {
         return Err("invalid cache scope".into());
     }
@@ -624,6 +629,7 @@ fn pin(params: &PinParams) -> Result<Value, String> {
 }
 
 fn stats(scope: Option<&str>) -> Result<Value, String> {
+    let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
     if let Some(scope) = scope {
         if !valid_token(scope, MAX_SCOPE_LEN) {
             return Err("invalid cache scope".into());
@@ -665,6 +671,7 @@ fn stats(scope: Option<&str>) -> Result<Value, String> {
 }
 
 fn clear_scope(scope: &str) -> Result<Value, String> {
+    let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
     if !valid_token(scope, MAX_SCOPE_LEN) {
         return Err("invalid cache scope".into());
     }
@@ -679,6 +686,7 @@ fn clear_scope(scope: &str) -> Result<Value, String> {
 }
 
 fn evict(scope: Option<&str>, now: i64, retention_ms: i64) -> Result<Value, String> {
+    let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
     if let Some(scope) = scope {
         if !valid_token(scope, MAX_SCOPE_LEN) {
             return Err("invalid cache scope".into());
@@ -810,6 +818,56 @@ mod tests {
         let _ = fs::remove_file(&path);
         let _ = fs::remove_file(path.with_extension("corrupt.json"));
         let _ = fs::remove_file(path.with_extension("repaired"));
+    }
+
+    #[test]
+    #[ignore = "child process entry point"]
+    fn concurrent_cache_writer() {
+        let writer = std::env::var("TOKENSTAT_CACHE_TEST_WRITER").expect("test writer");
+        for index in 0..20 {
+            put(&params("kept", &format!("writer-{writer}-{index}"))).unwrap();
+            if index == 10 {
+                clear_scope("removed").unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn concurrent_processes_preserve_writes_and_scope_removal() {
+        with_path(fresh_path(), || {
+            put(&params("removed", "old")).unwrap();
+            let mut children: Vec<_> = (0..4)
+                .map(|writer| {
+                    std::process::Command::new(std::env::current_exe().unwrap())
+                        .args([
+                            "--ignored",
+                            "--exact",
+                            "work_cache::tests::concurrent_cache_writer",
+                        ])
+                        .env("TOKENSTAT_CACHE_TEST_WRITER", writer.to_string())
+                        .stdout(std::process::Stdio::null())
+                        .spawn()
+                        .unwrap()
+                })
+                .collect();
+            for child in &mut children {
+                assert!(child.wait().unwrap().success());
+            }
+            assert_eq!(stats(Some("kept")).unwrap()["records"], 80);
+            assert_eq!(stats(Some("removed")).unwrap()["records"], 0);
+            for writer in 0..4 {
+                for index in 0..20 {
+                    assert!(
+                        get(&KeyedParams {
+                            key: KEY.into(),
+                            scope: "kept".into(),
+                            id: format!("writer-{writer}-{index}"),
+                        })
+                        .is_ok()
+                    );
+                }
+            }
+        });
     }
 
     #[test]
