@@ -175,7 +175,16 @@ fn save(store: &mut Store) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&temp, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
     }
-    fs::rename(temp, &path).map_err(|e| e.to_string())
+    fs::rename(temp, &path).map_err(|e| e.to_string())?;
+    // Persist the replacement directory entry before acknowledging a removal
+    // or clear, matching the durable-store convention on Unix platforms.
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn now_ms() -> i64 {
