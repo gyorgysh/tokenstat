@@ -156,12 +156,12 @@ final class ChatModel {
     /// left to send them to.
     private func forgetDraft(chatID: String, folderID: String) {
         guard let owner = continuityOwner(folderID: folderID) else { return }
-        if draftConversationID == chatID {
+        let reference = WorkReference(scope: owner.scope, hostIdentity: owner.host,
+            workspaceID: owner.workspace, kind: .conversation, itemID: chatID)
+        if draftReference == reference {
             draftReference = nil
             draftConversationID = nil
         }
-        let reference = WorkReference(scope: owner.scope, hostIdentity: owner.host,
-            workspaceID: owner.workspace, kind: .conversation, itemID: chatID)
         ChatDraftStore.shared.clear(for: reference)
         // And the place somebody had reached in it. There is nothing left to
         // come back to.
