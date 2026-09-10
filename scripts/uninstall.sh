@@ -158,65 +158,73 @@ remove_schedule() {
 # may already be gone, and a unit pointing at a deleted daemon is the worst
 # thing an uninstaller can leave behind. Registered folders are never touched.
 remove_host() {
+  local home_dir="${1:-$HOME}" system_dir="${2:-/etc/systemd/system}"
+  local found=0
   case "$(uname -s)" in
     Darwin)
-      local plist="$HOME/Library/LaunchAgents/ai.tokenstat.hostd.plist"
-      local legacy="$HOME/Library/LaunchAgents/ai.tokenstat.host.plist"
-      local domain="gui/$(id -u)"
-      # Older CLI installs used a second label; converge on one daemon. A unit
-      # pointing at a deleted binary is the worst leftover an uninstaller can
-      # leave, so retire both.
+      local domain="gui/$(id -u)" unit loaded
       for unit in "ai.tokenstat.hostd" "ai.tokenstat.host"; do
-        local unit_plist="$HOME/Library/LaunchAgents/${unit}.plist"
-        if [ -f "$unit_plist" ] || launchctl print "${domain}/${unit}" >/dev/null 2>&1; then
+        local unit_plist="$home_dir/Library/LaunchAgents/${unit}.plist"
+        loaded=0
+        if launchctl print "${domain}/${unit}" >/dev/null 2>&1; then loaded=1; fi
+        if [ -f "$unit_plist" ] || [ "$loaded" = 1 ]; then
           say "removing the always-on host (${unit})"
-          launchctl bootout "${domain}/${unit}" 2>/dev/null || true
-          launchctl bootout "${domain}" "${unit}" 2>/dev/null || true
-          rm -f "$unit_plist"
+          if [ "$loaded" = 1 ] && ! launchctl bootout "${domain}/${unit}"; then
+            warn "could not stop ${unit}; its configuration and binaries were kept. Retry after resolving the launchctl error."
+            return 1
+          fi
+          rm -f "$unit_plist" || return 1
+          found=1
         fi
       done
-      if [ -f "$plist" ] || [ -f "$legacy" ] || launchctl print "${domain}/ai.tokenstat.hostd" >/dev/null 2>&1; then
-        rm -f "$HOME/Library/Logs/tokenstat/hostd.out.log" \
-              "$HOME/Library/Logs/tokenstat/hostd.err.log"
-        ok "host service removed"
-      else
-        say "no always-on host found"
+      if [ "$found" = 1 ]; then
+        rm -f "$home_dir/Library/Logs/tokenstat/hostd.out.log" \
+              "$home_dir/Library/Logs/tokenstat/hostd.err.log" || return 1
       fi
       ;;
     Linux)
+      local user_unit="$home_dir/.config/systemd/user/tokenstat-host.service"
+      local system_unit="$system_dir/tokenstat-host.service"
+      if [ -f "$system_unit" ] && [ "$(id -u)" != 0 ]; then
+        warn "a system host is installed at $system_unit; remove it as root before deleting its binaries"
+        return 1
+      fi
       if ! command -v systemctl >/dev/null 2>&1; then
+        if [ -f "$user_unit" ] || [ -f "$system_unit" ]; then
+          warn "systemctl is unavailable; host configuration and binaries were kept"
+          return 1
+        fi
         return 0
       fi
-      local user_unit="$HOME/.config/systemd/user/tokenstat-host.service"
-      local system_unit="/etc/systemd/system/tokenstat-host.service"
-      local found=0
       if [ -f "$user_unit" ]; then
         say "removing the always-on host"
-        systemctl --user disable --now tokenstat-host.service 2>/dev/null || true
-        rm -f "$user_unit"
-        systemctl --user daemon-reload 2>/dev/null || true
+        if ! systemctl --user disable --now tokenstat-host.service; then
+          warn "could not stop the user host; its configuration and binaries were kept. Retry from a login session with a working user service manager."
+          return 1
+        fi
+        rm -f "$user_unit" || return 1
+        systemctl --user daemon-reload || return 1
         systemctl --user reset-failed tokenstat-host.service 2>/dev/null || true
         found=1
       fi
       if [ -f "$system_unit" ]; then
-        if [ "$(id -u)" = "0" ]; then
-          say "removing the always-on system host"
-          systemctl disable --now tokenstat-host.service 2>/dev/null || true
-          rm -f "$system_unit"
-          systemctl daemon-reload 2>/dev/null || true
-          systemctl reset-failed tokenstat-host.service 2>/dev/null || true
-          found=1
-        else
-          warn "a system host is installed at $system_unit; remove it as root"
+        say "removing the always-on system host"
+        if ! systemctl disable --now tokenstat-host.service; then
+          warn "could not stop the system host; its configuration and binaries were kept"
+          return 1
         fi
-      fi
-      if [ "$found" = "1" ]; then
-        ok "host service removed"
-      else
-        say "no always-on host found"
+        rm -f "$system_unit" || return 1
+        systemctl daemon-reload || return 1
+        systemctl reset-failed tokenstat-host.service 2>/dev/null || true
+        found=1
       fi
       ;;
   esac
+  if [ "$found" = 1 ]; then
+    ok "host service removed"
+  else
+    say "no always-on host found"
+  fi
 }
 
 remove_binary() {
@@ -275,7 +283,7 @@ main() {
   echo
 
   remove_schedule
-  remove_host
+  remove_host || return 1
   remove_binary
 
   if [ "$PURGE" = "1" ]; then

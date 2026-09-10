@@ -169,6 +169,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Failed replacements preserve the installed pair
         run: bash scripts/tests/install-release-pair.sh
+      - name: Failed service stops preserve host binaries
+        run: bash scripts/tests/uninstall-host.sh
 
   # The client's state, without a simulator. These are plain executables that
   # compile a handful of real sources with their own stubs, so they run in
