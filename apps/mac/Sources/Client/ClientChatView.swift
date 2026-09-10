@@ -240,8 +240,9 @@ struct ClientChatView: View {
     }
 
     private func create() async {
-        await model.create()
-        opened = model.selected
+        guard let created = await model.create(), model.selected?.id == created.id,
+              model.folderID == workspaceID else { return }
+        opened = created
     }
 
     /// A notification named this conversation. Only consume it if it is in

@@ -914,14 +914,16 @@ final class ChatModel {
         await openEvents(id: selected.id, generation: generation)
     }
 
-    func create() async {
-        guard let workspaceID else { return }
+    @discardableResult
+    func create() async -> ChatConversation? {
+        guard let workspaceID else { return nil }
         let context = loadGeneration
+        let selection = selectionGeneration
         let targetPeer = peer
         do {
             if backends.isEmpty {
                 let loaded = try await Bridge.chatBackends(peer: targetPeer)
-                guard context == loadGeneration else { return }
+                guard context == loadGeneration else { return nil }
                 backends = loaded
             }
             let saved = lastLaunchChoice
@@ -949,12 +951,14 @@ final class ChatModel {
                 personaID: rememberedPersonaID(saved),
                 peer: targetPeer
             )
-            guard context == loadGeneration else { return }
+            guard context == loadGeneration else { return nil }
             chats.insert(chat, at: 0)
             if let folderID { storeChatListCache(chats, folderID: folderID) }
-            await select(chat)
+            if selection == selectionGeneration { await select(chat) }
+            return chat
         } catch {
             if context == loadGeneration { self.error = error.localizedDescription }
+            return nil
         }
     }
 

@@ -879,10 +879,10 @@ struct ChatView: View {
             if destination == nil {
                 guard model.currentReference == nil, model.folderID == folder, model.peer == peer,
                       WorkSessionContext.shared.readingScope == scope else { return }
-                await model.create()
+                guard let created = await model.create(), let folder else { return }
                 guard model.folderID == folder, model.peer == peer,
                       WorkSessionContext.shared.readingScope == scope else { return }
-                destination = model.currentReference
+                destination = model.draftReference(for: created.id, in: folder)
             }
             guard let destination else { return }
             await receive(drops, owner: destination)
