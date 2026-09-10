@@ -2735,7 +2735,9 @@ struct ChatEditState: Equatable {
 enum ChatClock {
     static func duration(from startedAtMs: Int64, to endedAtMs: Int64?) -> String? {
         guard let endedAtMs else { return nil }
-        let ms = max(0, endedAtMs - startedAtMs)
+        let (elapsed, overflow) = endedAtMs.subtractingReportingOverflow(startedAtMs)
+        guard !overflow else { return nil }
+        let ms = max(0, elapsed)
         if ms < 1000 { return "\(ms)ms" }
         let seconds = Double(ms) / 1000
         if seconds < 10 {
