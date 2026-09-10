@@ -138,26 +138,44 @@ final class AccountModel {
     /// as well, and "Sent 429 rows" from a success matched the bare "429".
     var isRateLimited: Bool { lastSyncWasRateLimited }
 
-    func load() async {
+    private var accountLoadGeneration: UInt64 = 0
+
+    func load(afterSignOut: Bool = false) async {
         // A second load while one is in flight (connectivity restored + manual
         // retry) would race two writes into `account`. One at a time.
-        guard !isLoading else { return }
+        guard !isLoading, !isSigningOut || afterSignOut else { return }
         isLoading = true
-        defer { isLoading = false }
+        let generation = accountLoadGeneration
+        defer { if generation == accountLoadGeneration { isLoading = false } }
         do {
             let previous = account
             let next = try await Bridge.account()
+            guard generation == accountLoadGeneration else { return }
             account = next
             errorMessage = nil
             authCheckError = nil
             authChecked = true
-            remoteStatus = try? await Bridge.remoteStatus()
+            let verifiedScope = WorkSessionContext.shared.scope.map(WorkCache.scope)
+            await WorkCacheCleanupJournal.shared.recover(verifiedScope: verifiedScope,
+                accountKnown: !next.signedIn || verifiedScope != nil,
+                stillValid: { generation == self.accountLoadGeneration && (!self.isSigningOut || afterSignOut) },
+                deleteKey: { WorkCacheKey.delete(for: $0) },
+                clear: { _ = try await Bridge.cacheClearScope(scope: $0) })
+            guard generation == accountLoadGeneration else { return }
+            let status = try? await Bridge.remoteStatus()
+            guard generation == accountLoadGeneration else { return }
+            remoteStatus = status
             #if os(macOS)
-            applyLimitsSync((try? await Bridge.limitsSync()) ?? LimitsSyncState())
-            hostPolicy = try? await Bridge.hostPolicy()
+            let limits = (try? await Bridge.limitsSync()) ?? LimitsSyncState()
+            guard generation == accountLoadGeneration else { return }
+            applyLimitsSync(limits)
+            let policy = try? await Bridge.hostPolicy()
+            guard generation == accountLoadGeneration else { return }
+            hostPolicy = policy
             #endif
             await Self.broadcastIfEntitlementChanged(from: previous, to: next)
         } catch {
+            guard generation == accountLoadGeneration else { return }
             // Keep any previous signed-in snapshot. A later offline refresh
             // must not wipe a working session from the screen.
             authCheckError = error.localizedDescription
@@ -440,7 +458,13 @@ final class AccountModel {
             signed.handle.flatMap { WorkReference.Scope.account(origin: signed.host, handle: $0) }
         }
         do {
+            if let purgeScope { try WorkCacheCleanupJournal.shared.prepare(scope: WorkCache.scope(for: purgeScope)) }
+            accountLoadGeneration &+= 1
+            isLoading = false
             try await Bridge.signOut()
+            accountLoadGeneration &+= 1
+            isLoading = false
+            if let purgeScope { try? WorkCacheCleanupJournal.shared.confirm(scope: WorkCache.scope(for: purgeScope)) }
             lastSyncSummary = nil
             errorMessage = nil
             authCheckError = nil
@@ -466,20 +490,17 @@ final class AccountModel {
                 // Still mark checked signed-out so we do not re-enter splash.
                 authChecked = true
             }
-            await load()
-            // Saved work for that scope is removed with the sign-out, and its
-            // key with it, so the copies are unrecoverable rather than
-            // unlisted. Drafts are durable user data with their own store and
-            // stay for the account they belong to. A sign-out that never
-            // reached the host keeps everything until it completes.
-            if let purgeScope {
-                WorkAccessStore.shared.clear(scope: purgeScope)
-                let scope = WorkCache.scope(for: purgeScope)
-                _ = try? await Bridge.cacheClearScope(scope: scope)
-                WorkCacheKey.delete(for: scope)
-            }
+            if let purgeScope { WorkAccessStore.shared.clear(scope: purgeScope) }
+            await WorkCacheCleanupJournal.shared.recover(verifiedScope: nil, accountKnown: true,
+                deleteKey: { WorkCacheKey.delete(for: $0) },
+                clear: { _ = try await Bridge.cacheClearScope(scope: $0) })
+            await load(afterSignOut: true)
         } catch {
-            errorMessage = error.localizedDescription
+            let failure = error.localizedDescription
+            // Resolve an uncertain reply without trusting a pre-sign-out
+            // account load. A fresh original-account answer preserves its cache.
+            await load(afterSignOut: true)
+            if signedIn { errorMessage = failure }
         }
     }
 

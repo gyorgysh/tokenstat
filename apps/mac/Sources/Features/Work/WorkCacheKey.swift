@@ -17,6 +17,7 @@ enum WorkCacheKey {
     /// keychain itself is unavailable: saving is then skipped, never stored
     /// under a weaker key or written beside the ciphertext.
     static func key(for scope: String, generate: () -> [UInt8] = randomBytes) -> [UInt8]? {
+        guard !WorkCacheCleanupJournal.blocks(scope) else { return nil }
         if let held = load(scope: scope) { return held }
         let fresh = generate()
         guard fresh.count == 32 else { return nil }
@@ -24,19 +25,22 @@ enum WorkCacheKey {
         return fresh
     }
 
-    static func delete(for scope: String) {
-        SecItemDelete([
+    @discardableResult
+    static func delete(for scope: String) -> Bool {
+        let status = SecItemDelete([
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: scope,
         ] as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 
     /// The scope's key when one was already stored, creating nothing. Reads
     /// use this: opening a conversation must not leave a keychain entry
     /// behind for a scope that keeps nothing.
     static func existingKey(for scope: String) -> [UInt8]? {
-        load(scope: scope)
+        guard !WorkCacheCleanupJournal.blocks(scope) else { return nil }
+        return load(scope: scope)
     }
 
     /// Base64 for the wire, which takes the key as text beside the call.
