@@ -14,6 +14,8 @@ import SwiftUI
 struct ClientHomeEditor: View {
     @Bindable var layout: HomeLayout
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @FocusState private var keyboardSection: HomeSection?
 
     @State private var order: [HomeSection]
     @State private var hidden: Set<HomeSection>
@@ -123,7 +125,10 @@ struct ClientHomeEditor: View {
     }
 
     private var presetRow: some View {
-        HStack(spacing: Theme.Space.s) {
+        let arrangement = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: Theme.Space.s))
+            : AnyLayout(HStackLayout(spacing: Theme.Space.s))
+        return arrangement {
             ForEach(HomePreset.allCases) { option in
                 Button {
                     order = option.order
@@ -134,9 +139,8 @@ struct ClientHomeEditor: View {
                 } label: {
                     Text(option.label)
                         .font(ClientType.caption.weight(.medium))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .background(
                             preset == option ? Theme.accentSoft : Color.clear,
                             in: Capsule()
@@ -186,9 +190,21 @@ struct ClientHomeEditor: View {
                 Spacer(minLength: 0)
                 ThemeCheckDisc(on: on)
             }
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focused($keyboardSection, equals: section)
+        .onKeyPress(.upArrow, phases: .down) { press in
+            guard on, press.modifiers.contains(.command) else { return .ignored }
+            shift(section, by: -1)
+            return .handled
+        }
+        .onKeyPress(.downArrow, phases: .down) { press in
+            guard on, press.modifiers.contains(.command) else { return .ignored }
+            shift(section, by: 1)
+            return .handled
+        }
         .listRowBackground(Color.clear)
         .accessibilityLabel(section.label)
         .accessibilityValue(on ? "Visible, position \(place) of \(visible.count)" : "Hidden")
@@ -197,8 +213,12 @@ struct ClientHomeEditor: View {
         // keyboard both reach these.
         .accessibilityActions {
             if on {
-                Button("Move up") { shift(section, by: -1) }
-                Button("Move down") { shift(section, by: 1) }
+                if visible.first != section {
+                    Button("Move up") { shift(section, by: -1) }
+                }
+                if visible.last != section {
+                    Button("Move down") { shift(section, by: 1) }
+                }
             }
         }
     }
@@ -217,6 +237,7 @@ struct ClientHomeEditor: View {
         guard visible.indices.contains(target) else { return }
         move(from: IndexSet(integer: index), to: target > index ? target + 1 : target)
         focusedSection = section
+        keyboardSection = section
     }
 
     private func announceMove(_ section: HomeSection) {

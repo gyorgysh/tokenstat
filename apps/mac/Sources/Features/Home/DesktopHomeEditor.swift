@@ -160,8 +160,12 @@ struct DesktopHomeEditor: View {
             .accessibilityLabel(section.label)
             .accessibilityValue(accessibilityValue)
             .accessibilityActions {
-                Button("Move up") { shift(section, by: -1) }
-                Button("Move down") { shift(section, by: 1) }
+                if on && visible.first != section {
+                    Button("Move up") { shift(section, by: -1) }
+                }
+                if on && visible.last != section {
+                    Button("Move down") { shift(section, by: 1) }
+                }
             }
             .onKeyPress(.upArrow, phases: .down) { press in
                 guard press.modifiers.contains(.command) else { return .ignored }
@@ -196,10 +200,11 @@ struct DesktopHomeEditor: View {
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius)
             .strokeBorder(focused == section || dragging == section ? Theme.accent : Theme.border, lineWidth: 1))
-        .onDrop(of: [.text], delegate: HomeSectionDrop(target: section, dragging: $dragging) { source, target in
+        .onDrop(of: [HomeSectionDrop.type], delegate: HomeSectionDrop(target: section, dragging: $dragging) { source, target in
             guard !hidden.contains(source), !hidden.contains(target),
-                  let from = order.firstIndex(of: source), let to = order.firstIndex(of: target) else { return }
-            order = HomeLayout.moved(order, from: IndexSet(integer: from), to: to > from ? to + 1 : to)
+                  let from = visible.firstIndex(of: source), let to = visible.firstIndex(of: target) else { return }
+            order = HomeLayout.movedVisible(order, hidden: hidden,
+                                            from: IndexSet(integer: from), to: to > from ? to + 1 : to)
             changed(source)
         })
         .accessibilityIdentifier("home.editor.\(section.rawValue)")
@@ -245,7 +250,7 @@ private struct HomeSectionDrop: DropDelegate {
         move(dragging, target)
     }
     func performDrop(info: DropInfo) -> Bool {
-        guard dragging != nil else { return false }
+        guard validateDrop(info: info) else { return false }
         dragging = nil
         return true
     }
