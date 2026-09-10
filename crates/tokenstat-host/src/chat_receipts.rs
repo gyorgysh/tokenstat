@@ -194,6 +194,49 @@ impl Operation {
     }
 }
 
+/// A runner owns this separate lease from launch preparation through cleanup.
+/// It survives ordinary acceptance calls and releases automatically on exit.
+/// The file stays in the root so conversation removal cannot replace its inode.
+pub(crate) struct RunnerLease {
+    _lock: FileLock,
+}
+
+impl RunnerLease {
+    pub(crate) fn try_acquire(root: &Path, id: &str) -> Result<Option<Self>, String> {
+        let name = digest(id, &[]).replace(':', "-");
+        let file = private_options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join(format!("runner-{name}.lock")))
+            .map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            loop {
+                if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                    break;
+                }
+                let error = std::io::Error::last_os_error();
+                if error.kind() == std::io::ErrorKind::WouldBlock {
+                    return Ok(None);
+                }
+                if error.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(error.to_string());
+                }
+            }
+        }
+        #[cfg(windows)]
+        if !crate::win32::try_lock(&file, false, true) {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            _lock: FileLock(file),
+        }))
+    }
+}
+
 struct FileLock(File);
 impl FileLock {
     fn acquire(path: &Path, exclusive: bool) -> Result<Self, String> {

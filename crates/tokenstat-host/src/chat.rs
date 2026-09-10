@@ -436,6 +436,9 @@ impl Store {
     }
 
     fn load_at(root: PathBuf) -> Self {
+        // Freeze acceptance while deciding which persisted turns lost their
+        // owner. Failure to obtain the gate is not proof of an interruption.
+        let recovery = crate::chat_receipts::Operation::removal(&root).ok();
         let mut conversations = fs::read(root.join("conversations.json"))
             .ok()
             .and_then(|body| serde_json::from_slice::<Index>(&body).ok())
@@ -445,9 +448,12 @@ impl Store {
         let mut migrated = false;
         let mut interrupted = Vec::new();
         for chat in &mut conversations {
-            // A fresh store owns no PTYs. A persisted running bit describes
-            // the previous daemon, and cannot keep this chat busy forever.
-            if chat.running {
+            // Another daemon or in-process host may still own this turn.
+            if chat.running
+                && recovery.is_some()
+                && crate::chat_receipts::RunnerLease::try_acquire(&root, &chat.id)
+                    .is_ok_and(|lease| lease.is_some())
+            {
                 chat.running = false;
                 interrupted.push((chat.id.clone(), chat.backend.clone()));
                 migrated = true;
@@ -1222,6 +1228,9 @@ impl Store {
         {
             return Err("stop this chat before removing it".into());
         }
+        if crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_none() {
+            return Err("Another instance of tokenstat is running this conversation. Stop it there before removing it.".into());
+        }
         let _transcript = self.transcript_guard()?;
         let removed = self.edit_index_locked(&lifecycle, false, |memory, current| {
             let Some(selected) = memory.iter().find(|chat| chat.id == id) else {
@@ -1394,6 +1403,11 @@ impl Store {
                 .collect();
             if targets.iter().any(|id| active.contains(id)) {
                 return Err("stop the running chats before removing them".into());
+            }
+            for id in &targets {
+                if crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_none() {
+                    return Err("Another instance of tokenstat is running one of these conversations. Stop it there before removing them.".into());
+                }
             }
             current.retain(|chat| chat.workspace_id != workspace_id);
             Ok(targets)
@@ -1792,6 +1806,7 @@ impl Store {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .contains_key(id)
+                && crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_some()
             {
                 receipt.state = crate::chat_receipts::ReceiptState::NeedsRecovery;
             }
@@ -1911,6 +1926,8 @@ impl Store {
         {
             return Err("this chat is already responding".into());
         }
+        let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
+            .ok_or("This conversation is already running in another instance of tokenstat.")?;
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.response_output_dir(id);
         fs::create_dir_all(&response_output_dir).map_err(|e| e.to_string())?;
@@ -2227,7 +2244,7 @@ impl Store {
                 &raw_path,
                 &response_output_dir,
             );
-            let _ = store.finish_turn(&chat_id, &info.id, || {
+            let _ = store.finish_turn(&chat_id, &info.id, Some(runner), || {
                 let _ = fs::remove_dir_all(&response_output_dir);
                 if let Some(token) = turn_token {
                     store.revoke_turn_token(&token);
@@ -2275,6 +2292,12 @@ impl Store {
                 }
             }
         } else {
+            if crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_none() {
+                return Err(
+                    "Another instance of tokenstat is running this conversation. Stop it there."
+                        .into(),
+                );
+            }
             // Also terminate the transcript's open tools. Clearing only the
             // conversation bit left older clients treating a dangling tool
             // as a live turn, so Stop could never release their composer.
@@ -2371,7 +2394,13 @@ impl Store {
 
     // A following send must not reuse turn directories until their previous
     // owner has finished cleanup. A late drainer cannot retire a newer turn.
-    fn finish_turn(&self, id: &str, pty: &str, cleanup: impl FnOnce()) -> Result<(), String> {
+    fn finish_turn(
+        &self,
+        id: &str,
+        pty: &str,
+        runner: Option<crate::chat_receipts::RunnerLease>,
+        cleanup: impl FnOnce(),
+    ) -> Result<(), String> {
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         if self
             .active
@@ -2388,6 +2417,7 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
+        drop(runner);
         Ok(())
     }
 
@@ -3966,6 +3996,96 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "isolated runner ownership helper invoked by parent"]
+    fn runner_lease_process() {
+        use std::io::Read;
+        let root = PathBuf::from(std::env::var_os("TOKENSTAT_RUNNER_TEST_ROOT").unwrap());
+        let _runner = crate::chat_receipts::RunnerLease::try_acquire(&root, "owned-turn")
+            .unwrap()
+            .unwrap();
+        fs::write(root.join("runner-ready"), b"ready").unwrap();
+        let mut release = [0];
+        std::io::stdin().read_exact(&mut release).unwrap();
+        // No Rust destructors: the kernel must release ownership after a crash.
+        std::process::exit(23);
+    }
+
+    #[test]
+    fn another_process_cannot_recover_stop_or_remove_a_live_runner() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "owned-turn");
+        store.set_running("owned-turn", true).unwrap();
+        store
+            .write_receipt(
+                "owned-turn",
+                &crate::chat_receipts::key(None, "pending"),
+                crate::chat_receipts::Receipt {
+                    state: crate::chat_receipts::ReceiptState::Pending,
+                    digest: crate::chat_receipts::digest("words", &[]),
+                    at_ms: now_ms(),
+                    event_at_ms: None,
+                },
+            )
+            .unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "chat::tests::runner_lease_process", "--ignored"])
+            .env("TOKENSTAT_RUNNER_TEST_ROOT", &store.root)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !store.root.join("runner-ready").exists() {
+            assert!(child.try_wait().unwrap().is_none());
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let foreign = Arc::new(Store::load_at(store.root.clone()));
+        assert!(foreign.get("owned-turn").unwrap().running);
+        assert_eq!(
+            foreign
+                .receipt("owned-turn", "pending")
+                .unwrap()
+                .unwrap()
+                .state,
+            crate::chat_receipts::ReceiptState::Pending
+        );
+        assert!(foreign.stop("owned-turn").is_err());
+        assert!(foreign.remove("owned-turn").is_err());
+        assert!(foreign.remove_all("workspace-a").is_err());
+        assert!(!store.events_path("owned-turn").exists());
+        // Even a failed running-bit write cannot make the live lease disappear.
+        store.set_running("owned-turn", false).unwrap();
+        let error = foreign
+            .send(
+                "owned-turn",
+                "new words",
+                &[],
+                Some("new-send"),
+                Some(now_ms()),
+                Some(0),
+            )
+            .unwrap_err();
+        assert!(error.message.contains("another instance of tokenstat"));
+        store.set_running("owned-turn", true).unwrap();
+        child.stdin.take().unwrap().write_all(b"x").unwrap();
+        assert_eq!(child.wait().unwrap().code(), Some(23));
+        let recovered = Store::load_at(store.root.clone());
+        assert!(!recovered.get("owned-turn").unwrap().running);
+        assert_eq!(
+            recovered
+                .receipt("owned-turn", "pending")
+                .unwrap()
+                .unwrap()
+                .state,
+            crate::chat_receipts::ReceiptState::NeedsRecovery
+        );
+        let rows = fs::read_to_string(recovered.events_path("owned-turn")).unwrap();
+        assert!(rows.contains("interrupted"));
+    }
+
+    #[test]
     fn restarting_settles_a_turn_without_a_process() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("chat");
@@ -4582,14 +4702,22 @@ mod tests {
         fs::write(output.join("result.txt"), "turn output").unwrap();
 
         store
-            .finish_turn("cleanup", "previous-pty", || {
+            .finish_turn("cleanup", "previous-pty", None, || {
                 panic!("stale owner cleaned current files")
             })
             .unwrap();
         assert!(output.exists());
         assert!(store.get("cleanup").unwrap().running);
+        let runner =
+            crate::chat_receipts::RunnerLease::try_acquire(&store.root, "cleanup").unwrap();
+        assert!(runner.is_some());
         store
-            .finish_turn("cleanup", "current-pty", || {
+            .finish_turn("cleanup", "current-pty", runner, || {
+                assert!(
+                    crate::chat_receipts::RunnerLease::try_acquire(&store.root, "cleanup")
+                        .unwrap()
+                        .is_none()
+                );
                 assert!(store.get("cleanup").unwrap().running);
                 assert_eq!(
                     store.active.lock().unwrap().get("cleanup").unwrap(),
@@ -4598,6 +4726,11 @@ mod tests {
                 fs::remove_dir_all(&output).unwrap();
             })
             .unwrap();
+        assert!(
+            crate::chat_receipts::RunnerLease::try_acquire(&store.root, "cleanup")
+                .unwrap()
+                .is_some()
+        );
         assert!(!output.exists());
         assert!(!store.get("cleanup").unwrap().running);
         assert!(!store.active.lock().unwrap().contains_key("cleanup"));
