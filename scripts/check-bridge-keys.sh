@@ -49,6 +49,13 @@ ALLOWED = {
     ("ID", "itemID"),
 }
 
+# Swift alone encodes and decodes these sealed cache fields. The host stores
+# their opaque payload without renaming keys. Scope the exception to the file
+# because other bridge models also use the nested name Payload.
+LOCAL_FIELDS = {
+    ("Features/Work/WorkSavedPreview.swift", "Payload", "attachmentID"),
+}
+
 DECL = re.compile(
     r"^\s*(?:public\s+)?(?:struct|final class|class)\s+(\w+)\s*:([^{]*)\{", re.M
 )
@@ -102,7 +109,8 @@ def main():
                         continue
                     prop = match.group(1)
                     spelling = wanted(prop)
-                    if spelling is None or (name, prop) in ALLOWED:
+                    if (spelling is None or (name, prop) in ALLOWED
+                            or (os.path.relpath(path, ROOT).replace(os.sep, "/"), name, prop) in LOCAL_FIELDS):
                         continue
                     mapped = re.search(rf'\b{re.escape(prop)}\s*=\s*"([^"]*)"', keys)
                     if mapped is None:
