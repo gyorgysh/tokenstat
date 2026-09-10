@@ -9,6 +9,7 @@ import Observation
 final class ClientSetupCoordinator {
     private(set) var savedDraft: ClientSetupDraft?
     private(set) var working = false
+    private(set) var preparation: UUID?
     /// What went wrong, and the one thing to do about it.
     var failure: ClientSetupFailure?
 
@@ -18,6 +19,27 @@ final class ClientSetupCoordinator {
     @ObservationIgnored private var generation = UUID()
 
     init(store: ClientSetupStore = ClientSetupStore()) { self.store = store }
+
+    /// Preparation can outlive the view or be superseded by an account event.
+    /// Only its current result may load saved progress or publish a failure.
+    func beginPreparation() -> UUID {
+        clearAccount()
+        let id = UUID()
+        preparation = id
+        return id
+    }
+
+    func finishPreparation(_ id: UUID, scope: ClientSetupScope) -> Bool {
+        guard preparation == id else { return false }
+        load(scope: scope)
+        return true
+    }
+
+    func failPreparation(_ id: UUID, error: Error) {
+        guard preparation == id else { return }
+        preparation = nil
+        failure = ClientSetupFailure.from(error)
+    }
 
     func load(scope: ClientSetupScope) {
         cancel()
@@ -59,6 +81,7 @@ final class ClientSetupCoordinator {
     }
 
     func cancel() {
+        preparation = nil
         generation = UUID()
         task?.cancel()
         task = nil

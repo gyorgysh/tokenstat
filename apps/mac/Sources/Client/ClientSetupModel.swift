@@ -90,30 +90,38 @@ final class ClientSetupModel {
 
     // MARK: - Loading
 
-    func prepare(library: SSHLibraryModel) async {
+    /// Nil means this attempt was superseded or cancelled, so its caller must
+    /// not navigate or show an entry failure on its behalf.
+    @discardableResult
+    func prepare(library: SSHLibraryModel) async -> Bool? {
         prepared = false
+        let preparation = coordinator.beginPreparation()
         do {
             let key = try await Bridge.machineIdentity().key
             let account = try await Bridge.account()
+            guard coordinator.preparation == preparation else { return nil }
             if !library.loaded { await library.load() }
             try Task.checkCancellation()
             guard account.signedIn else {
                 throw BridgeError.core(code: "signed_out", message: "Sign in before setting up a machine.")
             }
-            myKey = key
             // A new account has no handle. The scope falls back to the server
             // id for the account. When that is missing too, the draft goes
             // unpersisted: an empty scope is shared, so it must never be
             // written (see checkpoint).
             let identity = ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId)
             let scope = ClientSetupScope(origin: account.host, account: identity, deviceKey: key)
+            guard coordinator.finishPreparation(preparation, scope: scope) else { return nil }
+            myKey = key
             self.scope = scope
-            coordinator.load(scope: scope)
             if machineName.isEmpty { machineName = "server" }
             prepared = true
+            return true
         } catch {
-            guard !Task.isCancelled else { return }
-            self.failure = ClientSetupFailure.from(error)
+            guard !Task.isCancelled else { return nil }
+            guard coordinator.preparation == preparation else { return nil }
+            coordinator.failPreparation(preparation, error: error)
+            return false
         }
     }
 
@@ -122,17 +130,29 @@ final class ClientSetupModel {
     /// password typed for one server never survives the switch.
     @discardableResult
     func accountChanged(_ account: Account?) -> Bool {
-        guard prepared, let scope else { return false }
-        if let account, account.signedIn,
+        let preparing = coordinator.preparation != nil
+        guard prepared || preparing || scope != nil else { return false }
+        if let scope, let account, account.signedIn,
            account.host == scope.origin,
            ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId) == scope.account {
             return false
         }
         coordinator.clearAccount()
         self.scope = nil
+        myKey = nil
         prepared = false
         password = ""
         credential = .none
+        pickedHostID = nil
+        host = SSHHost(
+            id: "", label: "", hostname: "", port: 22, username: "root",
+            initialDirectory: "~", credentialID: nil, jumpHostID: nil,
+            tags: [], provider: nil, hostKeys: []
+        )
+        machineName = ""
+        agents = ["claude_code"]
+        printInvite = false
+        draftID = UUID()
         expectedPeer = nil
         finished = nil
         resetServer()

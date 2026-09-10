@@ -183,8 +183,8 @@ struct ClientSetupWizard: View {
             return
         }
         Task { @MainActor in
-            await model.prepare(library: library)
-            if model.prepared {
+            guard let ready = await model.prepare(library: library) else { return }
+            if ready {
                 entryAttempted = false
                 path = steps
             } else {

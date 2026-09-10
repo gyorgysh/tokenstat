@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ClientSetupState.swift and ClientSetupStore.swift. No account or network used.
+// Compile with ClientSetupState.swift, ClientSetupStore.swift and ClientSetupCoordinator.swift.
 //
 // The two stubs below stand in for `ActionIcon` and `BridgeError`, which live
 // in files that pull in the whole app. They mirror only what this file uses.
@@ -23,13 +23,43 @@ enum BridgeError: LocalizedError {
 
 @main
 struct ClientSetupStateTests {
-    static func main() throws {
+    @MainActor static func main() throws {
         identities()
         drafts()
         failures()
         scopes()
         try storedDrafts()
+        try preparationLifetime()
         print("ClientSetupStateTests passed")
+    }
+
+    @MainActor static func preparationLifetime() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ClientSetupStore(directory: directory)
+        let old = draft(account: "old")
+        let current = draft(account: "current")
+        try store.save(old)
+        try store.save(current)
+        let coordinator = ClientSetupCoordinator(store: store)
+        let first = coordinator.beginPreparation()
+        let second = coordinator.beginPreparation()
+        precondition(coordinator.finishPreparation(second, scope: current.scope))
+        precondition(!coordinator.finishPreparation(first, scope: old.scope))
+        coordinator.failPreparation(first, error: ClientSetupDraftError.invalid)
+        precondition(coordinator.savedDraft == current && coordinator.failure == nil)
+        let switched = coordinator.beginPreparation()
+        coordinator.clearAccount()
+        precondition(!coordinator.finishPreparation(switched, scope: old.scope))
+        precondition(coordinator.savedDraft == nil)
+        let dismissed = coordinator.beginPreparation()
+        coordinator.cancel()
+        precondition(!coordinator.finishPreparation(dismissed, scope: current.scope))
+        coordinator.failPreparation(dismissed, error: ClientSetupDraftError.invalid)
+        precondition(coordinator.savedDraft == nil && coordinator.failure == nil)
+        let retry = coordinator.beginPreparation()
+        precondition(coordinator.finishPreparation(retry, scope: current.scope))
+        precondition(coordinator.savedDraft == current)
     }
 
     static func storedDrafts() throws {
