@@ -98,8 +98,13 @@ final class ChatModel {
     /// reason, and drafting, copying and reading carry on. A live page
     /// arriving clears it.
     private(set) var savedCopy: SavedCopyInfo?
-    /// A recheck of the machine is running from the saved-copy banner.
-    private(set) var checkingSavedCopy = false
+    /// Rechecks belong to the selection that started them. A slow previous
+    /// host must not hold the next conversation's retry button or spinner.
+    private var savedCopyCheckGeneration: UInt64?
+    var checkingSavedCopy: Bool {
+        savedCopyCheckGeneration == selectionGeneration
+            && continuityScope == WorkSessionContext.shared.scope
+    }
     /// The folder id RootView knows, which is `remote:<peer>:<id>` for a
     /// workspace on another machine. Host methods use `workspaceID` instead.
     private(set) var folderID: String?
@@ -2273,8 +2278,10 @@ final class ChatModel {
                 && selectionMatches(id: chat.id, generation: generation)
                 && currentReference == reference
         }
-        checkingSavedCopy = true
-        defer { checkingSavedCopy = false }
+        savedCopyCheckGeneration = generation
+        defer {
+            if savedCopyCheckGeneration == generation { savedCopyCheckGeneration = nil }
+        }
         do {
             try await prepareConnection?()
             guard stillCurrent() else { return }
