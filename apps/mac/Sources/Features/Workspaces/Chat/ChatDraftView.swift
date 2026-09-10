@@ -188,6 +188,8 @@ struct ChatDraftView: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard !textView.hasMarkedText(),
+                  (textView as? ChatDraftTextView)?.handlingComposition != true else { return false }
             if selector == #selector(NSResponder.insertNewline(_:)) {
                 let flags = NSApp.currentEvent?.modifierFlags ?? []
                 if flags.contains(.shift) {
@@ -238,6 +240,7 @@ final class ChatDraftTextView: NSTextView {
     var draftSend: (() -> Void)?
     var draftStop: (() -> Void)?
     var pasteAttachments: (() -> Void)?
+    private(set) var handlingComposition = false
 
     /// File and image drags belong to the composer well, which attaches them.
     /// Left alone, NSTextView swallows a drop on the text itself and inserts
@@ -304,6 +307,10 @@ final class ChatDraftTextView: NSTextView {
     override var acceptsFirstResponder: Bool { isEditable }
 
     override func insertNewline(_ sender: Any?) {
+        guard !hasMarkedText(), !handlingComposition else {
+            super.insertNewline(sender)
+            return
+        }
         let flags = NSApp.currentEvent?.modifierFlags ?? []
         if flags.contains(.shift) {
             super.insertNewline(sender)
@@ -313,6 +320,14 @@ final class ChatDraftTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        // Return confirms marked text and Escape cancels composition. Let
+        // the input method finish before treating either as a chat action.
+        guard !hasMarkedText() else {
+            handlingComposition = true
+            defer { handlingComposition = false }
+            super.keyDown(with: event)
+            return
+        }
         // Return (36) and keypad Enter (76). Command+Return also sends.
         // Escape (53) stops a running turn.
         if event.keyCode == 36 || event.keyCode == 76 {
