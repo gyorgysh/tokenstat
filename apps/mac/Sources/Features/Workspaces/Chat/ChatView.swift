@@ -190,7 +190,8 @@ struct ChatView: View {
                     ChatApprovalBar(
                         approvals: model.approvals,
                         resolve: { approval, choice in
-                            Task { await model.resolve(approval, choice: choice) }
+                            let owner = model.currentReference
+                            Task { await model.resolve(approval, choice: choice, owner: owner) }
                         },
                         showInTranscript: { approval in
                             scrollTarget = "approval-\(approval.id)"
@@ -341,7 +342,8 @@ struct ChatView: View {
                             attachmentData: attachmentData(for: item),
                             isPending: pendingApproval(item),
                             resolve: { approval, choice in
-                                Task { await model.resolve(approval, choice: choice) }
+                                let owner = model.currentReference
+                                Task { await model.resolve(approval, choice: choice, owner: owner) }
                             },
                             attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
                             attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],

@@ -1565,16 +1565,21 @@ final class ChatModel {
         } catch {}
     }
 
-    func resolve(_ approval: ChatApproval, choice: String) async {
+    func resolve(_ approval: ChatApproval, choice: String, owner: WorkReference?) async {
         // An approval resolved from old rows acts on a conversation that has
         // moved on. The snapshot shows pending approvals as text, never as
         // live controls.
-        guard savedCopy == nil else { return }
+        guard !Task.isCancelled, savedCopy == nil, let owner,
+              owner.scope == WorkSessionContext.shared.scope,
+              currentReference == owner, owner.itemID == approval.conversationID,
+              selected?.id == approval.conversationID, approval.decision == nil,
+              approvals.contains(approval) else { return }
         let generation = selectionGeneration
         do {
             _ = try await Bridge.resolveChatApproval(id: approval.id, choice: choice, peer: peer)
             guard selectionMatches(id: approval.conversationID, generation: generation) else { return }
             await loadApprovals(id: approval.conversationID, generation: generation)
+            guard selectionMatches(id: approval.conversationID, generation: generation) else { return }
             #if os(macOS)
             RunNotifications.shared.chatAttentionHandled(id: approval.conversationID)
             #endif
