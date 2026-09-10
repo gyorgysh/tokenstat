@@ -37,7 +37,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.0.0"
+    MARKETING_VERSION: "1.0.1"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -196,7 +196,9 @@ settings:
     # and the connect mark. Git stays 1.0.0.
     # 95 went up as 1.0.1 with the handle-less setup, the silent doors,
     # and the relay metered by purpose. Git stays 1.0.0.
-    # 96 is next, unspent.
+    # 96 goes up as 1.0.1 with the Windows build fixes and the meter
+    # reporting an unreachable transcript as an error instead of a zero.
+    # Git is 1.0.1 now, so the numbers agree again.
     CURRENT_PROJECT_VERSION: "96"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
