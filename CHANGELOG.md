@@ -13,8 +13,22 @@ at the end.
 
 ## [Unreleased]
 
+### Changed
+
+- On iPhone and iPad, a screen's figures each sit on their own card rather
+  than sharing one strip, and every figure and section heading carries its
+  own icon. Chat, tasks, workflows, automations, notes, insights and the
+  today and this week totals on Home all read the same way now.
+
 ### Fixed
 
+- On iPad, the account picture and the tokenstat name stay in one row at the
+  top of the sidebar, in the same place whether the window fills the screen
+  or floats.
+- The encrypted vault row, and the rename control on a device, are tall
+  enough to hit comfortably. Both were under the size a finger is entitled
+  to, and both were cramped with a pointer as well, so they grew on the Mac
+  too.
 - Installing an agent on a server works. A host started by systemd is handed
   no home directory, and everything it ran inherited that: a vendor's
   installer stopped with `HOME: parameter not set`, and a tool that did

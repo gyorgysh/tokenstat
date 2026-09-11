@@ -267,8 +267,8 @@ struct ClientHomeView: View {
 
     private func totals(_ calendar: ActivityCalendar) -> some View {
         HStack(spacing: Theme.Space.s) {
-            TotalTile(label: "Today", micros: todayValue(calendar))
-            TotalTile(label: "This week", micros: weekValue(calendar))
+            TotalTile(label: "Today", micros: todayValue(calendar), mark: "mark_day")
+            TotalTile(label: "This week", micros: weekValue(calendar), mark: "mark_week")
         }
     }
 
@@ -334,19 +334,28 @@ struct ClientHomeView: View {
 private struct TotalTile: View {
     let label: String
     let micros: UInt64
+    let mark: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(ClientType.label)
-                .foregroundStyle(.secondary)
-            Text(formatSpend(micros))
-                .font(ClientType.figureSmall)
-                .foregroundStyle(Theme.accent)
-                // A figure that moved should look like it moved.
-                .contentTransition(.numericText())
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(ClientType.label)
+                    .foregroundStyle(.secondary)
+                Text(formatSpend(micros))
+                    .font(ClientType.figureSmall)
+                    .foregroundStyle(Theme.accent)
+                    // A figure that moved should look like it moved.
+                    .contentTransition(.numericText())
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            // Top trailing, the way every other figure card on the client
+            // carries its mark. See `ClientStatPanels`.
+            FeatureMark(name: mark, size: 26)
+                // The label beside it already says which period this is.
+                .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)

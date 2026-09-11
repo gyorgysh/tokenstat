@@ -65,9 +65,16 @@ struct HostUpdateCard: View {
     }
 
     private var header: some View {
-        Text("Software")
-            .font(titleFont)
-            .accessibilityAddTraits(.isHeader)
+        // `ClientSectionTitle` is iOS only and this card is on both, so the
+        // mark and the title are paired here by hand. `FeatureMark` itself
+        // is shared.
+        HStack(spacing: Theme.Space.s) {
+            FeatureMark(name: "mark_sync", size: 22)
+                .accessibilityHidden(true)
+            Text("Software")
+                .font(titleFont)
+                .accessibilityAddTraits(.isHeader)
+        }
     }
 
     /// The platforms name their own type. `ClientType` is iOS only.

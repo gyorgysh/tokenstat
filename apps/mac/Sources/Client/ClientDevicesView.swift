@@ -533,6 +533,13 @@ struct ClientDeviceDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .topTrailing) {
+            // Top trailing, the way every other figure card carries its mark.
+            // An overlay rather than a row, because the figure under it scales
+            // itself down to fit and must keep the whole width to do that.
+            FeatureMark(name: "mark_insights", size: 26)
+                .accessibilityHidden(true)
+        }
         .padding(Theme.Space.m)
         .cardSurface()
         .accessibilityElement(children: .combine)
@@ -607,8 +614,7 @@ struct ClientDeviceDetailView: View {
 
     private var reach: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Reach")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "Reach", mark: "mark_host")
             HStack(spacing: Theme.Space.s) {
                 AwakeDot(online: isThisDevice ? true : machine.online)
                 Text(DeviceCopy.reach(machine, isThisDevice: isThisDevice))
@@ -633,8 +639,7 @@ struct ClientDeviceDetailView: View {
            !key.isEmpty,
            machine.isHost {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Folders")
-                    .font(ClientType.sectionTitle)
+                ClientSectionTitle(title: "Folders", mark: "mark_folder")
                 NavigationLink {
                     ClientFolderPicker(peer: key, hostName: DeviceCopy.name(current)) { _ in }
                 } label: {
@@ -690,8 +695,7 @@ struct ClientDeviceDetailView: View {
 
     private var identity: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("What this is")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "What this is", mark: "mark_device")
             if renaming {
                 nameField
             } else {
@@ -713,6 +717,11 @@ struct ClientDeviceDetailView: View {
                     }
                     .font(ClientType.caption.weight(.semibold))
                     .tint(Theme.accent)
+                    // Caption sized text is about twenty points tall on its
+                    // own, which is a hard thing to hit beside a name that
+                    // takes two lines. The glyph and the word stay small,
+                    // the target around them does not.
+                    .frame(minHeight: 44)
                 }
             }
             if let renameError {

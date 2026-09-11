@@ -169,6 +169,12 @@ struct SSHVaultRow: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)
+            // A row that opens a whole screen has to be comfortable to hit.
+            // At eight points of padding around one line this came out near
+            // 33, under the 44 a finger is entitled to, and it was cramped
+            // with a pointer too. The same number on both: the Mac's rows
+            // are not a different kind of target, they are the same row.
+            .frame(minHeight: 44)
             .background(background, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
             .contentShape(.rect)
