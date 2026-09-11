@@ -75,10 +75,12 @@ fn import_digital_ocean(params: &str) -> Result<Value, String> {
     let page: DropletPage = response
         .json()
         .map_err(|e| format!("DigitalOcean response was invalid: {e}"))?;
-    save_hosts(page.droplets.into_iter().filter_map(|d| {
-        let address = d.networks.v4.iter().find(|n| n.kind == "public").or_else(|| d.networks.v4.first())?.ip_address.clone();
-        Some(json!({"id":"", "label":d.name, "hostname":address, "port":22, "username":p.username, "initialDirectory":"~", "credentialID":null, "tags":["digitalocean", d.region.slug], "provider":{"kind":"digitalocean", "resourceID":d.id.to_string(), "region":d.region.slug}, "hostKeys":[]}))
-    }))
+    save_hosts(page.droplets.iter().filter_map(|d| do_host(d, &p.username)))
+}
+
+fn do_host(d: &Droplet, username: &str) -> Option<Value> {
+    let address = d.networks.v4.iter().find(|n| n.kind == "public").or_else(|| d.networks.v4.first())?.ip_address.clone();
+    Some(json!({"id":"", "label":d.name, "hostname":address, "port":22, "username":username, "initialDirectory":"~", "credentialID":null, "tags":["digitalocean", d.region.slug], "provider":{"kind":"digitalocean", "resourceId":d.id.to_string(), "region":d.region.slug}, "hostKeys":[]}))
 }
 
 fn save_hosts(hosts: impl Iterator<Item = Value>) -> Result<Value, String> {
@@ -164,7 +166,7 @@ fn aws_hosts(value: &Value, p: &AwsParams) -> Vec<Value> {
                 .and_then(|t| t.get("Value"))
                 .and_then(Value::as_str)
                 .unwrap_or(id);
-            hosts.push(json!({"id":"", "label":name, "hostname":address, "port":22, "username":p.username, "initialDirectory":"~", "credentialID":null, "tags":["aws", "ec2"], "provider":{"kind":"aws", "resourceID":id, "region":p.region}, "hostKeys":[]}));
+            hosts.push(json!({"id":"", "label":name, "hostname":address, "port":22, "username":p.username, "initialDirectory":"~", "credentialID":null, "tags":["aws", "ec2"], "provider":{"kind":"aws", "resourceId":id, "region":p.region}, "hostKeys":[]}));
         }
     }
     hosts
@@ -180,6 +182,14 @@ mod tests {
         assert_eq!(page.droplets[0].name, "web");
     }
     #[test]
+    fn imported_hosts_carry_a_provider_the_records_accept() {
+        let page: DropletPage = serde_json::from_value(json!({"droplets":[{"id":7,"name":"web","region":{"slug":"fra1"},"networks":{"v4":[{"ip_address":"203.0.113.7","type":"public"}]}}]})).unwrap();
+        let host = do_host(&page.droplets[0], "root").expect("droplet with a public address imports");
+        let provider: crate::ssh_records::ProviderRef =
+            serde_json::from_value(host["provider"].clone()).expect("provider ref deserializes");
+        assert_eq!(provider.resource_id, "7");
+    }
+    #[test]
     fn normalizes_running_ec2_instances() {
         let value = json!({"Reservations":[{"Instances":[{"InstanceId":"i-1","PublicIpAddress":"203.0.113.9","State":{"Name":"running"},"Tags":[{"Key":"Name","Value":"web"}]},{"InstanceId":"i-2","State":{"Name":"terminated"}}]}]});
         let hosts = aws_hosts(
@@ -192,7 +202,9 @@ mod tests {
         );
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0]["label"], "web");
-        assert_eq!(hosts[0]["provider"]["resourceID"], "i-1");
+        assert_eq!(hosts[0]["provider"]["resourceId"], "i-1");
+        serde_json::from_value::<crate::ssh_records::ProviderRef>(hosts[0]["provider"].clone())
+            .expect("provider ref deserializes");
     }
 
     #[test]
