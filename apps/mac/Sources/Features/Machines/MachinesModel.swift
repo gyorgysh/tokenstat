@@ -587,12 +587,12 @@ final class MachinesModel {
 
     /// Flip a peer's auto-connect from Devices, beside the connection itself.
     ///
-    /// Off drops the peer now the way Disconnect does, so the row cannot
-    /// read connected while the sweep leaves it alone. On dials when the
-    /// machine looks reachable; otherwise the sweep picks it up when it
-    /// wakes, which is what the switch promises. Without a machine record
-    /// there is no reachability to check, so the dial is attempted and
-    /// reports honestly.
+    /// Only Disconnect disconnects. Turning the switch off merely stops the
+    /// sweep dialling on its own; a live connection stays up with whatever
+    /// it last read. On dials when the machine looks reachable; otherwise
+    /// the sweep picks it up when it wakes, which is what the switch
+    /// promises. Without a machine record there is no reachability to
+    /// check, so the dial is attempted and reports honestly.
     func setAutoConnect(_ on: Bool, peer: Peer, machine: Machine? = nil) {
         WorkspacesModel.setAutoConnect(on, for: peer.key)
         if on {
@@ -600,8 +600,6 @@ final class MachinesModel {
                 return
             }
             Task { await connect(peer) }
-        } else {
-            disconnect(peer)
         }
     }
 

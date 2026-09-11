@@ -941,9 +941,8 @@ struct MachinesView: View {
     }
 
     /// Whether the sweep dials this machine on its own, beside the connection
-    /// itself rather than in a folder: turning it off here also drops the
-    /// peer now, so the row cannot read connected while the sweep leaves it
-    /// alone.
+    /// itself rather than in a folder. Off stops the dialling and leaves a
+    /// live connection alone; only Disconnect drops it.
     @ViewBuilder
     private func autoConnectRow(_ machine: Machine, isSelf: Bool) -> some View {
         if machine.isHost, !isSelf, let peer = model.peer(for: machine) {

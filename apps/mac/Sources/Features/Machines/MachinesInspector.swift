@@ -216,9 +216,8 @@ struct MachinesInspector: View {
         autoConnectToggle(peer: peer, machine: machine)
     }
 
-    /// Whether the sweep dials this peer on its own. Off drops it now, the
-    /// same as Disconnect, so the grant cannot read connected while the
-    /// sweep leaves it alone.
+    /// Whether the sweep dials this peer on its own. Off stops the dialling
+    /// and leaves a live connection alone; only Disconnect drops it.
     private func autoConnectToggle(peer: Peer, machine: Machine? = nil) -> some View {
         HStack(spacing: 6) {
             Text("Auto-connect")
