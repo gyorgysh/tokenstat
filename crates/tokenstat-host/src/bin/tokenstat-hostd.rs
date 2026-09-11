@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use tokenstat_host::{Session, ownership, server};
 
 fn main() -> ExitCode {
+    adopt_home();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -35,6 +36,45 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Put a home directory in the environment when the supervisor left none.
+///
+/// A systemd **system** service is started with PATH, USER and the journal
+/// variables and nothing else. Every child this daemon spawns inherits that,
+/// so a vendor's installer script (`sh` under `set -u`) died on
+/// `HOME: parameter not set`, `git` and `ssh` could not find their config,
+/// and an agent CLI had nowhere to write its session log. The daemon itself
+/// resolves home from the password database either way, which is why the
+/// archive landed in the right place while everything it started did not.
+///
+/// One write, at the top of `main`, before a thread or a child exists: that
+/// is the only window where setting a process-wide variable is sound, and
+/// doing it here means no spawn site has to remember. A HOME that is already
+/// set is never touched, because a value somebody chose is a decision.
+///
+/// Unix only. Windows names the home directory `USERPROFILE`, the scheduled
+/// task is per-user and always carries it, and writing a `HOME` beside it
+/// would change what git and ssh pick on a machine with no problem to fix.
+///
+/// The service unit is deliberately left alone. `Environment=HOME=%h` would
+/// only help a machine installed after this change, and a percent specifier
+/// resolved by the wrong systemd would write a home that is confidently
+/// wrong. The password database is exact, and it also fixes the hosts that
+/// are already out there.
+fn adopt_home() {
+    if cfg!(windows) {
+        return;
+    }
+    if std::env::var_os("HOME").is_some_and(|home| !home.is_empty()) {
+        return;
+    }
+    let Some(home) = tokenstat_paths::home_dir() else {
+        return;
+    };
+    // SAFETY: single-threaded. This is the first statement of `main`, so no
+    // other thread can be reading the environment concurrently.
+    unsafe { std::env::set_var("HOME", home) };
 }
 
 fn run() -> Result<(), String> {

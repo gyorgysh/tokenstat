@@ -16,11 +16,11 @@ at the end.
 ### Fixed
 
 - Installing an agent on a server works. A host started by systemd is handed
-  no home directory, so every location under it was built from an empty
-  string: a tool the installer had just put in `~/.local/bin` read as
-  missing, and the install reported that it had not arrived on the machine.
-  Sessions there are given a home directory too, so an agent can find its own
-  configuration and write its own log.
+  no home directory, and everything it ran inherited that: a vendor's
+  installer stopped with `HOME: parameter not set`, and a tool that did
+  install read as missing afterwards, because `~/.local/bin` had been built
+  from an empty string. The daemon now takes its home from the account
+  itself, so installers, agents, git and ssh all have one.
 - Another machine's folder offers its whole launcher again. Opening a remote
   folder after a local one never asked the owning machine what it could run,
   which left one shell tile and no way to install anything from the Mac. It
