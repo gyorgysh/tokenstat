@@ -33,7 +33,6 @@ struct ClientSetupServerStep: View {
             case .check: CheckStep(model: model, library: library, path: $path)
             case .install: InstallStep(model: model, library: library, path: $path)
             case .finish: FinishStep(model: model, library: library, path: $path)
-            case .agents: ClientSetupAgentStep(model: model, path: $path)
             case .project: ClientSetupProjectStep(model: model, onFinish: onFinish)
             case .byHand: ClientSetupByHand(model: model, path: $path)
             case .cloud: ClientSetupCloudDoor(model: model, library: library, path: $path)
@@ -56,7 +55,7 @@ struct StepScaffold<Content: View, Footer: View>: View {
     let title: String
     let subtitle: String
     var number: Int
-    var total = 8
+    var total = 7
     /// The step's own picture. Nil on the two steps that draw their own: the
     /// install shows a terminal, and the last one shows the machine.
     var art: SetupArtKind?
@@ -184,7 +183,6 @@ func recover(
     case .credential: path.wrappedValue = [.where, .credential]
     case .install: path.wrappedValue = [.where, .credential, .check, .install]
     case .finish: path.wrappedValue = [.where, .credential, .check, .install, .finish]
-    case .agents: path.wrappedValue = [.where, .credential, .check, .install, .finish, .agents]
     default: path.wrappedValue = [destination]
     }
 }
@@ -287,10 +285,10 @@ extension View {
 
 /// Where somebody is, in four words rather than eight numbers.
 ///
-/// "Step 3 of 8" says how much is left and nothing about what any of it is
+/// "Step 3 of 7" says how much is left and nothing about what any of it is
 /// for. The five connection screens are one thing happening, so they are one
-/// milestone, and the three that follow are the three real decisions: the
-/// machine, the agent, the project.
+/// milestone, and the two that follow are the two real decisions: the
+/// machine, the project.
 ///
 /// It is deliberately not a progress bar. Nothing here knows how long an
 /// install takes, and a bar that fills at a made-up rate is a claim.
@@ -299,7 +297,7 @@ struct SetupRail: View {
     let total: Int
 
     private static let milestones: [(name: String, last: Int)] = [
-        ("Connect", 5), ("Machine", 6), ("Agent", 7), ("Project", 8),
+        ("Connect", 5), ("Machine", 6), ("Project", 7),
     ]
 
     private var index: Int {
@@ -932,7 +930,7 @@ private struct FinishStep: View {
                 .setupPrimaryStyle()
                 .disabled(model.working || !model.canCheckMachine)
             } else {
-                Button("Continue", .next) { path.append(.agents) }
+                Button("Continue", .next) { path.append(.project) }
                     .setupPrimaryStyle()
             }
         }

@@ -492,6 +492,10 @@ struct ClientDeviceDetailView: View {
                 // it. A server has no application to update and nobody at the
                 // keyboard, so this is the only place it can be done from.
                 software
+                // Giving a machine more work after setup. The empty machine
+                // is covered from the Workspaces tab; a machine that already
+                // has folders had no way in from here.
+                work
                 // The same explanation the Workspaces tab carries, with this
                 // machine's key beside it: somebody reading a device page is
                 // asking what a connection to it actually is.
@@ -617,6 +621,45 @@ struct ClientDeviceDetailView: View {
         .padding(Theme.Space.m)
         .cardSurface()
         .accessibilityElement(children: .combine)
+    }
+
+    /// More work for a machine that already has some. Both destinations run
+    /// their own connection and dismiss themselves, so this screen keeps no
+    /// loading state for them.
+    @ViewBuilder
+    private var work: some View {
+        if !isThisDevice,
+           let key = machine.publicIdentity,
+           !key.isEmpty,
+           machine.isHost {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("Folders")
+                    .font(ClientType.sectionTitle)
+                NavigationLink {
+                    ClientFolderPicker(peer: key, hostName: DeviceCopy.name(current)) { _ in }
+                } label: {
+                    DeviceActionRow(
+                        title: "Choose a folder",
+                        subtitle: "Register a folder already on this computer.",
+                        icon: .reveal
+                    )
+                }
+                .buttonStyle(DeviceActionRowStyle())
+                NavigationLink {
+                    ClientCloneRepository(peer: key, hostName: DeviceCopy.name(current)) { _ in }
+                } label: {
+                    DeviceActionRow(
+                        title: "Clone a repository",
+                        subtitle: "Run git on this computer and register the folder.",
+                        icon: .download
+                    )
+                }
+                .buttonStyle(DeviceActionRowStyle())
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.Space.m)
+            .cardSurface()
+        }
     }
 
     /// The release a paired host runs. Only for a host, and only while it is

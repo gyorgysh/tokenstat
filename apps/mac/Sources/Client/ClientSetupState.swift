@@ -161,7 +161,7 @@ struct ClientSetupFailure: Equatable {
             case .checkCredential: .credential
             case .checkServer: .finish
             case .newCode: .install
-            case .signInToAgent: .agents
+            case .signInToAgent: .project
             case .signInToAccount, .updateMachine, .retry: nil
             }
         }
@@ -332,8 +332,6 @@ enum SetupStep: Hashable {
     case check
     case install
     case finish
-    /// The agent's own sign-in, which the machine's is not.
-    case agents
     /// The project, which is what all of it was for.
     case project
     /// For somebody who has no machine at all yet.

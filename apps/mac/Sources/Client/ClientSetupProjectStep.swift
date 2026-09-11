@@ -40,7 +40,7 @@ struct ClientSetupProjectStep: View {
             title: "Choose a project",
             subtitle: "The agent works inside one folder at a time. Bring a repository "
                 + "down onto the machine, or point at a folder it already has.",
-            number: 8,
+            number: 7,
             failure: failure,
             onDismissError: { failure = nil }
         ) {

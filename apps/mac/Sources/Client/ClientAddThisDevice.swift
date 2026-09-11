@@ -101,7 +101,7 @@ struct ClientAddThisDevice: View {
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)
             .frame(maxWidth: .infinity)
-            .background(.bar)
+            .background(Theme.background)
         }
         .onAppear { visible = true }
         .onDisappear { visible = false; reset() }

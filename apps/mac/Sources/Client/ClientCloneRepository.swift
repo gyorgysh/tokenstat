@@ -142,7 +142,7 @@ struct ClientCloneRepository: View {
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)
             .frame(maxWidth: .infinity)
-            .background(.bar)
+            .background(Theme.background)
         }
     }
 
@@ -353,7 +353,7 @@ private struct ClientFolderPickerForClone: View {
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
                 .frame(maxWidth: .infinity)
-                .background(.bar)
+                .background(Theme.background)
             }
         }
         .onAppear { visible = true }

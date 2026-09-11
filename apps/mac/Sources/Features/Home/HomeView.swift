@@ -183,21 +183,42 @@ struct HomeView: View {
     }
 
     private var usageSummary: some View {
-        Card(title: "Today and this week", subtitle: "Value at list rates · "
-             + (model.deliveredScope == .allMachines ? "All devices" : "This device"),
-             mark: "mark_insights") {
-            if model.calendar != nil {
-                HStack(alignment: .top, spacing: Theme.Space.xl) {
-                    Stat(label: "Today", value: model.todayValue.formatted, size: 20, expands: true)
-                    Stat(label: "Last 7 days", value: model.weekValue.formatted, size: 20, expands: true)
-                    if let busiest = model.calendar?.busiest {
-                        Stat(label: "Busiest", value: formatSpend(busiest.value), note: busiest.date,
-                             size: 20, expands: true)
+        // One panel per figure, like the phone's tiles. Three stats sharing
+        // one card read as one number with footnotes rather than three
+        // answers. The scope already shows in the chrome picker, so the cards
+        // carry no subtitle repeating it.
+        if model.calendar != nil {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                Card(title: "Today", mark: "mark_insights", fillsHeight: true) {
+                    Text(model.todayValue.formatted)
+                        .font(Theme.numeric(20, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                Card(title: "Last 7 days", mark: "mark_insights", fillsHeight: true) {
+                    Text(model.weekValue.formatted)
+                        .font(Theme.numeric(20, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                if let busiest = model.calendar?.busiest {
+                    Card(title: "Busiest", mark: "mark_insights", fillsHeight: true) {
+                        Text(formatSpend(busiest.value))
+                            .font(Theme.numeric(20, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(busiest.date)
+                            .font(Theme.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-            } else if model.errorMessage != nil {
+            }
+        } else if model.errorMessage != nil {
+            Card(title: "Today and this week", mark: "mark_insights") {
                 EmptyHint(text: "Usage could not be read. See the message above.")
-            } else {
+            }
+        } else {
+            Card(title: "Today and this week", mark: "mark_insights") {
                 bar(width: nil, height: 40)
             }
         }

@@ -176,10 +176,31 @@ struct ClientHostWorkspacesView: View {
                 }
 
                 if !model.folders.isEmpty {
-                    ClientSectionTitle(title: "Folders", mark: "mark_archive")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 2)
-                        .padding(.top, Theme.Space.s)
+                    HStack(alignment: .center) {
+                        ClientSectionTitle(title: "Folders", mark: "mark_archive")
+                        Spacer(minLength: Theme.Space.s)
+                        NavigationLink {
+                            ClientFolderPicker(peer: peerKey, hostName: hostName) { _ in
+                                Task { await model.connect(peerKey: peerKey, name: hostName) }
+                            }
+                        } label: {
+                            Text("Choose")
+                                .font(ClientType.caption.weight(.semibold))
+                        }
+                        .tint(Theme.accent)
+                        NavigationLink {
+                            ClientCloneRepository(peer: peerKey, hostName: hostName) { _ in
+                                Task { await model.connect(peerKey: peerKey, name: hostName) }
+                            }
+                        } label: {
+                            Text("Clone")
+                                .font(ClientType.caption.weight(.semibold))
+                        }
+                        .tint(Theme.accent)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
+                    .padding(.top, Theme.Space.s)
                     ClientAdaptiveCards {
                     ForEach(model.folders.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.path.localizedCaseInsensitiveContains(search) }) { folder in
                         NavigationLink {

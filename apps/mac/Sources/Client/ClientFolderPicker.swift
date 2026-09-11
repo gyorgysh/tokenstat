@@ -75,7 +75,7 @@ struct ClientFolderPicker: View {
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
                 .frame(maxWidth: .infinity)
-                .background(.bar)
+                .background(Theme.background)
             }
         }
         .task { await load(nil) }
