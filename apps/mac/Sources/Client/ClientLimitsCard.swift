@@ -97,7 +97,7 @@ private struct ProviderRow: View {
             }
 
             if provider.hasWindows {
-                ForEach(provider.windows) { window in
+                ForEach(Array(provider.windows.enumerated()), id: \.offset) { _, window in
                     WindowGauge(window: window)
                 }
             } else if let note = provider.note {
@@ -126,7 +126,7 @@ private struct WindowGauge: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text(window.label)
+                Text(window.displayLabel)
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -151,7 +151,7 @@ private struct WindowGauge: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(window.label), \(Int(window.percent.rounded())) percent used")
+        .accessibilityLabel("\(window.displayLabel), \(Int(window.percent.rounded())) percent used")
     }
 
     /// Severity is the renderer's decision, taken from the core's thresholds

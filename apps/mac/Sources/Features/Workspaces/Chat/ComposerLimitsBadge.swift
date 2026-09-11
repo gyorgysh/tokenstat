@@ -28,7 +28,10 @@ struct ComposerLimitsBadge: View {
     /// When vendors were last asked live, per backend across composer mounts.
     /// Per-view state resets on every conversation switch and re-fires the
     /// live probe; the throttle belongs to the backend, not the view.
+    /// Bounded: backends are a small fixed set, but a static dict must not
+    /// grow without limit if new ids ever appear.
     private static var lastLiveAttemptByBackend: [String: Date] = [:]
+    private static let liveAttemptCap = 64
 
     private var shared: [ProviderLimits] {
         providers.filter { !skip.contains($0.source) }
@@ -64,8 +67,15 @@ struct ComposerLimitsBadge: View {
                 .accessibilityHidden(true)
             if let provider {
                 let rows = ComposerLimits.badgeRows(
-                    windows: provider.windows, label: \.label, percent: \.percent)
-                if !rows.isEmpty {
+                    windows: provider.windows, label: \.label, scope: \.scope)
+                // Codex reports the account week beside the model's own, so
+                // the headline shows general only and the popover below
+                // keeps them all, secondaries included.
+                let headline = harnessCanonicalID(provider.source) == "codex"
+                    ? ComposerLimits.codexHeadlineRows(
+                        windows: provider.windows, label: \.label, scope: \.scope)
+                    : rows
+                if !headline.isEmpty {
                     Button {
                         showingDetail = true
                     } label: {
@@ -74,13 +84,13 @@ struct ComposerLimitsBadge: View {
                                 .font(Theme.font(10, weight: .semibold))
                                 .foregroundStyle(.tertiary)
                                 .accessibilityHidden(true)
-                            summary(for: rows)
+                            summary(for: headline)
                         }
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                     .help("\(harnessName(provider.source)) plan limits. Shows the full windows.")
-                    .accessibilityLabel("\(harnessName(provider.source)) limits: \(summaryText(for: rows))")
+                    .accessibilityLabel("\(harnessName(provider.source)) limits: \(summaryText(for: headline))")
                     .popover(isPresented: $showingDetail, arrowEdge: .bottom) {
                         ComposerLimitsDetail(
                             source: provider.source,
@@ -104,7 +114,7 @@ struct ComposerLimitsBadge: View {
         for rows: [(display: String, window: UsageWindow)]
     ) -> some View {
         HStack(spacing: 4) {
-            ForEach(Array(rows.enumerated()), id: \.element.display) { index, row in
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                 if index > 0 {
                     Text("·")
                         .font(Theme.font(11))
@@ -151,7 +161,7 @@ struct ComposerLimitsBadge: View {
         // on every composer mount. The popover's Refresh always asks.
         let last = Self.lastLiveAttemptByBackend[backend]
         guard last.map({ Date().timeIntervalSince($0) > 300 }) ?? true else { return }
-        Self.lastLiveAttemptByBackend[backend] = Date()
+        Self.noteLiveAttempt(backend: backend)
         await refresh()
         Self.log.debug("composer badge live backend=\(self.backend, privacy: .public) shown=\(self.provider?.source ?? "none", privacy: .public)")
     }
@@ -163,6 +173,14 @@ struct ComposerLimitsBadge: View {
         guard let fresh = try? await Bridge.usageLimits() else { return }
         let visible = PlanLimits.visible(fresh).filter { !skip.contains($0.source) }
         providers = visible
+    }
+
+    private static func noteLiveAttempt(backend: String) {
+        if lastLiveAttemptByBackend[backend] == nil, lastLiveAttemptByBackend.count >= liveAttemptCap,
+           let drop = lastLiveAttemptByBackend.keys.sorted().first {
+            lastLiveAttemptByBackend.removeValue(forKey: drop)
+        }
+        lastLiveAttemptByBackend[backend] = Date()
     }
 }
 
@@ -199,8 +217,8 @@ private struct ComposerLimitsDetail: View {
                     .disabled(refreshing)
             }
             let rows = ComposerLimits.badgeRows(
-                windows: provider.windows, label: \.label, percent: \.percent)
-            ForEach(Array(rows.enumerated()), id: \.element.display) { _, row in
+                windows: provider.windows, label: \.label, scope: \.scope)
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 detailRow(tag: row.display, window: row.window)
             }
             footer

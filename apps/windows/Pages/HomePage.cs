@@ -192,6 +192,25 @@ internal sealed class HomePage : Page
                     foreach (var window in windows)
                     {
                         var label = Format.Text(window, "label", "window");
+                        // Codex reports the account's own allowance beside the
+                        // running model's, and both are weekly. Without the
+                        // scope the two rows read as one limit stated twice.
+                        var scope = Format.Text(window, "scope", "");
+                        if (!string.IsNullOrEmpty(scope) && scope != "primary")
+                        {
+                            if (scope == "secondary")
+                            {
+                                label = $"{label} (all models)";
+                            }
+                            else if (scope == "current model")
+                            {
+                                label = $"{label} (secondary)";
+                            }
+                            else
+                            {
+                                label = $"{label} ({scope})";
+                            }
+                        }
                         var percent = Format.Number(window, "percent");
                         body.Children.Add(new TextBlock
                         {

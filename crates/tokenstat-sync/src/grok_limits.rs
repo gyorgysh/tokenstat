@@ -211,6 +211,7 @@ fn monthly_window(config: &BillingConfig) -> Option<UsageWindow> {
     let percent = (used / limit * 100.0).clamp(0.0, 100.0);
     Some(UsageWindow {
         label: "monthly".to_string(),
+        scope: None,
         percent,
         resets_at_ms: config.billing_period_end.as_deref().and_then(parse_iso_ms),
         severity: LimitSeverity::from_percent(percent),
@@ -231,6 +232,7 @@ fn weekly_window(config: &BillingConfig) -> Option<UsageWindow> {
     let percent = config.credit_usage_percent.unwrap_or(0.0).clamp(0.0, 100.0);
     Some(UsageWindow {
         label: "weekly".to_string(),
+        scope: None,
         percent,
         resets_at_ms: config.billing_period_end.as_deref().and_then(parse_iso_ms),
         severity: LimitSeverity::from_percent(percent),

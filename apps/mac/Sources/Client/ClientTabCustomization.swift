@@ -5,10 +5,9 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
+#if !os(macOS)
 import SwiftUI
 import UIKit
-
-#if !os(macOS)
 
 /// Which tabs this device shows, and in what order.
 ///

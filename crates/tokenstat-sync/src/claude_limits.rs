@@ -187,6 +187,7 @@ pub fn fetch() -> ProviderLimits {
             let percent = dto.utilization?;
             Some(UsageWindow {
                 label: label.to_string(),
+                scope: None,
                 percent,
                 resets_at_ms: dto.resets_at.as_deref().and_then(parse_iso_ms),
                 severity: LimitSeverity::from_percent(percent),

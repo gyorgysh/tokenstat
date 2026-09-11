@@ -123,6 +123,7 @@ pub fn limits() -> ProviderLimits {
         }
         Some(UsageWindow {
             label: label.to_string(),
+            scope: None,
             percent,
             resets_at_ms: reset_at_ms(value, observed_at_ms),
             severity: LimitSeverity::from_percent(percent),
@@ -141,6 +142,7 @@ pub fn limits() -> ProviderLimits {
                 if percent.is_finite() && (0.0..=100.0).contains(&percent) {
                     windows.push(UsageWindow {
                         label: "billing cycle".to_string(),
+                        scope: None,
                         percent,
                         resets_at_ms: body.get("billingCycleEnd").and_then(epoch_or_iso_ms),
                         severity: LimitSeverity::from_percent(percent),
@@ -734,6 +736,7 @@ Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Toke
             let percent = number(value, &["usagePercent", "usedPercent", "percentUsed"])?;
             Some(UsageWindow {
                 label: label.to_string(),
+                scope: None,
                 percent,
                 resets_at_ms: reset_at_ms(value, observed),
                 severity: LimitSeverity::from_percent(percent),

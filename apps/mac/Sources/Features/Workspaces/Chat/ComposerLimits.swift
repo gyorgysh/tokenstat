@@ -33,12 +33,19 @@ enum ComposerLimits {
         return nil
     }
 
-    /// Badge rows: one per recognised window, 5h then 7d then 30d, then any
-    /// unrecognised windows under their own names in reported order. When
-    /// several windows share a tag (model families), the fullest one stands
-    /// for the tag: the badge answers what is about to stop the work.
-    static func badgeRows<T>(windows: [T], label: (T) -> String, percent: (T) -> Double) -> [(display: String, window: T)] {
-        var best: [(tag: String, window: T)] = []
+    /// Collapsed headline rows for Codex: the account's own windows, bare.
+    ///
+    /// The composer shows general only, with no qualifier: a lone 7d needs
+    /// no disambiguation. The running model's own secondary allowance (a
+    /// small model like Spark) lives in the popover one tap away. With no
+    /// general window at all, the model rows stand in, so a model-only
+    /// reading still reads as one instead of vanishing.
+    static func codexHeadlineRows<T>(
+        windows: [T],
+        label: (T) -> String,
+        scope: (T) -> String? = { _ in nil }
+    ) -> [(display: String, window: T)] {
+        var seat: [String: (general: Bool, window: T)] = [:]
         var rest: [(display: String, window: T)] = []
         for window in windows {
             let name = label(window).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -46,16 +53,60 @@ enum ComposerLimits {
                 rest.append((name, window))
                 continue
             }
-            if let index = best.firstIndex(where: { $0.tag == tag }) {
-                if percent(window) > percent(best[index].window) {
-                    best[index] = (tag, window)
-                }
-            } else {
-                best.append((tag, window))
+            let general = scope(window)?.lowercased() == "general"
+            if let taken = seat[tag], taken.general || !general {
+                continue
             }
+            seat[tag] = (general, window)
         }
-        best.sort { rank($0.tag) < rank($1.tag) }
-        return best.map { ($0.tag, $0.window) } + rest
+        let generalSeats = seat.filter { $0.value.general }
+        let use = generalSeats.isEmpty ? seat : generalSeats
+        let seated = use.map { (display: $0.key, rank: rank($0.key), window: $0.value.window) }
+            .sorted { $0.rank < $1.rank }
+        return seated.map { ($0.display, $0.window) } + rest
+    }
+
+    /// Badge rows: one per recognised window, 5h then 7d then 30d, then any
+    /// unrecognised windows under their own names in reported order.
+    /// When several windows share a tag, keep each one so scopes like
+    /// “all models” stay visible.
+    static func badgeRows<T>(
+        windows: [T],
+        label: (T) -> String,
+        scope: (T) -> String? = { _ in nil }
+    ) -> [(display: String, window: T)] {
+        var best: [(display: String, rank: Int, index: Int, window: T)] = []
+        var rest: [(display: String, window: T)] = []
+        for (index, window) in windows.enumerated() {
+            let name = label(window).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let tag = tag(for: name) else {
+                rest.append((name, window))
+                continue
+            }
+            let source = scope(window)
+            // Codex names the allowance itself, so it reads as written:
+            // "weekly (general)", "5-hour (secondary)". Anything else keeps
+            // the short tag, with "secondary" qualified, so two 7d figures
+            // never say the same thing about two different limits.
+            let display = switch source?.lowercased() {
+            case "general":
+                "\(name) (general)"
+            case "current model":
+                "\(name) (secondary)"
+            case "secondary":
+                "all models \(tag)"
+            case "primary", nil, _:
+                tag
+            }
+            best.append((display, rank(tag), index, window))
+        }
+        best.sort { lhs, rhs in
+            if lhs.rank == rhs.rank {
+                return lhs.index < rhs.index
+            }
+            return lhs.rank < rhs.rank
+        }
+        return best.map { ($0.display, $0.window) } + rest
     }
 
     /// The readings for the agent a conversation runs on, when that vendor

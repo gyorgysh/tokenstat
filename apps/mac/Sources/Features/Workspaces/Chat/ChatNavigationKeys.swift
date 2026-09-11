@@ -5,6 +5,8 @@ import SwiftUI
 
 /// Arrow navigation belongs only to the visible chat in this window. Text
 /// editors keep their cursor keys, and sheets keep their own key handling.
+/// An empty composer draft is the exception: nothing to move through, so
+/// the keys switch chats instead of landing silently.
 struct ChatNavigationKeys: NSViewRepresentable {
     var isActive: Bool
     var move: (Int) -> Bool
@@ -32,7 +34,8 @@ struct ChatNavigationKeys: NSViewRepresentable {
                       window.isKeyWindow, event.window === window,
                       window.attachedSheet == nil,
                       event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
-                      !(window.firstResponder is NSTextView),
+                      (!(window.firstResponder is NSTextView)
+                        || ChatDraftTextView.yieldsArrowKeys(window.firstResponder)),
                       !(window.firstResponder is NSControl) else { return event }
                 let step: Int
                 switch event.keyCode {

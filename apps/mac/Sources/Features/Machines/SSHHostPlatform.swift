@@ -46,8 +46,11 @@ final class SSHHostPlatformCache {
         // A changed trusted identity invalidates it too, but only where the
         // label was confirmed against a known identity: a check that ran
         // before the first trust carries no keys and must survive it.
-        // Upgrade the provisional entry on first trust so a later MITM
-        // cannot hide behind the pre-trust label.
+        // Upgrade the provisional entry on first trust (TOFU, like SSH
+        // itself: the pre-trust probe may have seen an attacker, and only
+        // a fresh post-trust probe could prove otherwise). Binding the
+        // label to the first trusted keys means a later identity change
+        // invalidates it instead of hiding behind the pre-trust label.
         if entry.hostKeys.isEmpty, !host.hostKeys.isEmpty {
             entries[host.id] = Entry(label: entry.label, hostname: entry.hostname, port: entry.port, hostKeys: host.hostKeys.sorted(), saved: entry.saved)
             if let data = try? JSONEncoder().encode(entries) {
@@ -106,7 +109,7 @@ func distroBrandAsset(_ label: String?) -> String? {
 func distroBrandID(_ label: String?) -> String? {
     guard let label, !label.isEmpty else { return nil }
     let name = label.lowercased()
-    let tokens = Set(name.split(whereSeparator: { !$0.isLetterOrDigit }).map(String.init))
+    let tokens = Set(name.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init))
     if name.contains("ubuntu") { return "ubuntu" }
     if name.contains("debian") { return "debian" }
     if name.contains("fedora") { return "fedora" }

@@ -1997,6 +1997,7 @@ mod tests {
             plan: Some("pro".into()),
             windows: vec![tokenstat_core::limits::UsageWindow {
                 label: "weekly".into(),
+                scope: None,
                 percent: 40.0,
                 resets_at_ms: None,
                 severity: tokenstat_core::limits::LimitSeverity::Normal,

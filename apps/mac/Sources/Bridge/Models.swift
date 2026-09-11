@@ -2546,12 +2546,37 @@ enum LimitSeverity: String, Codable, Sendable {
 struct UsageWindow: Codable, Sendable, Hashable, Identifiable {
     /// `5-hour`, `weekly`, `monthly`.
     var label: String
+    /// `primary` / `secondary` when the source provides it.
+    var scope: String?
     /// Percent of the allowance used, 0 to 100.
     var percent: Double
     var resetsAtMs: Int64?
     var severity: LimitSeverity
 
-    var id: String { label }
+    var id: String {
+        "\(label)|\(scope ?? "")"
+    }
+
+    var displayLabel: String {
+        guard let scope else {
+            return label
+        }
+        switch scope.lowercased() {
+        case "secondary":
+            return "\(label) (all models)"
+        case "primary":
+            return "\(label) (primary)"
+        case "current model":
+            // A small model's own allowance (Spark, and whatever comes
+            // next): secondary, never bare beside the account's week.
+            return "\(label) (secondary)"
+        default:
+            // The account's own allowance reads as written: "weekly
+            // (general)". Anything else vendor-named stays qualified rather
+            // than translated, which is what hid an exhausted account limit.
+            return "\(label) (\(scope))"
+        }
+    }
 
     var resetsAt: Date? {
         resetsAtMs.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }

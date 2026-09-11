@@ -85,6 +85,7 @@ pub fn fetch() -> ProviderLimits {
         }
         Some(UsageWindow {
             label: label.to_string(),
+            scope: None,
             percent,
             resets_at_ms: window
                 .reset_in_sec

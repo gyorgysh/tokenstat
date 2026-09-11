@@ -139,6 +139,7 @@ pub fn limits() -> ProviderLimits {
         .into_iter()
         .map(|((group, window), (percent, resets_at_ms))| UsageWindow {
             label: format!("{group} · {window}"),
+            scope: None,
             percent,
             resets_at_ms,
             severity: LimitSeverity::from_percent(percent),

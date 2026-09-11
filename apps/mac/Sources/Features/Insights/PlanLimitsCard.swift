@@ -69,7 +69,7 @@ struct PlanLimitPanel: View {
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 if provider.hasWindows {
-                    ForEach(provider.windows) { window in
+                    ForEach(Array(provider.windows.enumerated()), id: \.offset) { _, window in
                         WindowBar(window: window)
                     }
                     if provider.isStale, let note = provider.note {
@@ -142,7 +142,7 @@ private struct WindowBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: Theme.Space.xs) {
-                Text(window.label)
+                Text(window.displayLabel)
                     .font(Theme.font(12))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: Theme.Space.xs)

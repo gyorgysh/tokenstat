@@ -626,13 +626,23 @@ struct ChatView: View {
                         .background(Theme.background)
                 }
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: transcriptReady)
             .modifier(OpeningCover(
                 isOpening: model.openingConversation,
                 ready: transcriptReady,
                 conversationID: model.selected?.id,
                 opening: $opening
             ))
+            // Arm the cover late (see `coverArmed`). This restarts on every
+            // toggle of `opening`, so when it flips back the restart takes
+            // the `guard` exit and disarms before the next frame.
+            .task(id: opening) {
+                coverArmed = false
+                guard opening else { return }
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled, opening else { return }
+                coverArmed = true
+            }
             .chatScrollMetrics { metrics in
                 #if DEBUG
                 TranscriptProbe.shared.noteMetrics()
@@ -824,10 +834,16 @@ struct ChatView: View {
     /// message of a new chat for the length of the settle budget.
     @State private var opening = false
 
-    /// Whether the wireframe is up: an opening is under way, it has not
-    /// settled, and no cached preview is standing in for it.
+    /// Whether the wireframe may appear. Armed 150ms into an opening, so
+    /// a fast open settles before the grace runs out and never flashes
+    /// scaffolding at all. Reset on every toggle, so a re-pick starts over.
+    @State private var coverArmed = false
+
+    /// Whether the wireframe is up: an opening is under way, it has
+    /// outlasted the grace period, it has not settled, and no cached
+    /// preview is standing in for it.
     private var showsSkeleton: Bool {
-        opening && !transcriptReady && model.recentMessagePreview.isEmpty
+        opening && coverArmed && !transcriptReady && model.recentMessagePreview.isEmpty
     }
 
     /// The longest the opening pin holds, in fifty-millisecond frames. It

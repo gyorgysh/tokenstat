@@ -1109,9 +1109,27 @@ mod tests {
 
     #[test]
     fn purge_never_reaches_outside_this_products_own_directories() {
-        for path in data_directories().unwrap() {
-            let name = path.file_name().unwrap().to_str().unwrap();
-            assert!(name.contains("tokenstat"), "{}", path.display());
+        match data_directories() {
+            Ok(paths) => {
+                for path in paths {
+                    let name = path.file_name().unwrap().to_str().unwrap();
+                    assert!(name.contains("tokenstat"), "{}", path.display());
+                }
+            }
+            Err(error) => {
+                // Fail-closed: when the data directory is redirected somewhere
+                // the product does not own (for example the throwaway sandbox
+                // the test docs use), purge refuses instead of deleting.
+                let message = error.to_string();
+                assert!(message.contains("Refusing to delete"), "{message}");
+                let override_dir = std::env::var_os("TOKENSTAT_DATA_DIR")
+                    .map(PathBuf::from)
+                    .expect("a refusal with no override means a system directory is wrong");
+                assert!(
+                    message.contains(&*override_dir.to_string_lossy()),
+                    "{message}"
+                );
+            }
         }
     }
 

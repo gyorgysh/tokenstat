@@ -223,6 +223,32 @@ pub fn write_grok_home(home: &Path, helper: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Point `target` at `source`, replacing a stale file but never silently
+/// reusing a credential that points elsewhere.
+#[cfg(unix)]
+fn ensure_symlink(source: &Path, target: &Path) -> Result<(), String> {
+    use std::os::unix::fs::symlink;
+
+    // Attempt the link without a prior existence check: check-then-act
+    // races with a concurrent creator. An existing target is only
+    // tolerated when it already points at this source; a stale file
+    // (or a link elsewhere) is replaced so a previous credential is
+    // never silently reused.
+    match symlink(source, target) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if std::fs::read_link(target).is_ok_and(|p| p.as_path() == source) {
+                return Ok(());
+            }
+            // A regular file from a previous run: replace it. Anything
+            // else (e.g. a directory in the way) surfaces as an error.
+            std::fs::remove_file(target).map_err(|error| error.to_string())?;
+            symlink(source, target).map_err(|error| error.to_string())
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 /// Link one file from the person's own agent directory into a private home.
 ///
 /// A symlink, never a copy. This is somebody else's credential: tokenstat
@@ -231,7 +257,6 @@ pub fn write_grok_home(home: &Path, helper: &Path) -> Result<(), String> {
 fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), String> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::symlink;
         // Not `$HOME`: a headless daemon started by systemd has none, and the
         // credential to link sits under the real home whether or not the
         // unit's environment names it.
@@ -243,19 +268,13 @@ fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), Strin
         if !source.exists() {
             return Ok(());
         }
-        // Attempt the link without a prior existence check: check-then-act
-        // races with a concurrent creator. Tolerate an existing target.
-        match symlink(&source, &target) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.to_string()),
-        }
+        ensure_symlink(&source, &target)
     }
     #[cfg(not(unix))]
     {
         let _ = (home, directory, file);
+        Ok(())
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -351,5 +370,34 @@ mod tests {
         std::fs::write(&spaced_helper, b"#!/bin/sh\n").unwrap();
         let spaced_line = hook_command(&spaced_helper, "codex", "post");
         assert!(spaced_line.starts_with('\''), "{spaced_line}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_credential_link_is_reused_when_correct_and_replaced_when_stale() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("auth.json");
+        std::fs::write(&source, b"{}").unwrap();
+        let target = root.path().join("home").join("auth.json");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+
+        ensure_symlink(&source, &target).unwrap();
+        assert_eq!(std::fs::read_link(&target).unwrap(), source);
+        // Second run with the same source is a no-op, not an error.
+        ensure_symlink(&source, &target).unwrap();
+
+        // A stale regular file is replaced, never silently reused.
+        std::fs::remove_file(&target).unwrap();
+        std::fs::write(&target, b"stale").unwrap();
+        ensure_symlink(&source, &target).unwrap();
+        assert_eq!(std::fs::read_link(&target).unwrap(), source);
+
+        // A link elsewhere is repointed too.
+        let other = root.path().join("other.json");
+        std::fs::write(&other, b"{}").unwrap();
+        std::fs::remove_file(&target).unwrap();
+        std::os::unix::fs::symlink(&other, &target).unwrap();
+        ensure_symlink(&source, &target).unwrap();
+        assert_eq!(std::fs::read_link(&target).unwrap(), source);
     }
 }

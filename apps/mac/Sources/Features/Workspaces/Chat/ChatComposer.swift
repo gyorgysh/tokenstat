@@ -195,26 +195,34 @@ struct ChatComposer: View {
         .fixedSize()
     }
 
-    /// Stop and Send, over an invisible copy of the widest pair.
+    /// Stop and Send, over an invisible copy of the buttons on screen.
     ///
     /// Either can come and go on its own: Stop only while a turn runs, Send
-    /// only with something to send. The placeholder uses the longest real
-    /// string ("Send after this turn") with a fixed minimum width so the
-    /// badge beside it holds its place across Dynamic Type. The copy carries
-    /// no shortcut, menu or action, so there is one of each in the row.
+    /// only with something to send. The copy mirrors exactly what is drawn,
+    /// so the block hugs the visible buttons instead of holding the old
+    /// widest-pair width, which squashed the quota badge on a narrow well.
+    /// The frame below then reserves one small icon button's width, so a
+    /// single Stop or Send coming or going moves nothing beside it: typing
+    /// the first word, sending, a turn starting or ending all hold still.
+    /// Only the pair (a draft queued mid-turn) reflows the row. The copy
+    /// carries no shortcut, menu or action, so there is one of each in the
+    /// row.
     private var turnActions: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: Theme.Space.s) {
-                Button("Stop", .stop) {}
-                    .buttonStyle(DestructiveButtonStyle(small: true))
-                Button("Send after this turn", .send) {}
-                    .buttonStyle(AccentButtonStyle(small: true))
+                if running {
+                    Button("Stop", .stop) {}
+                        .buttonStyle(DestructiveButtonStyle(small: true))
+                }
+                if !cannotSend {
+                    Button(running ? "Send after this turn" : "Send", .send) {}
+                        .buttonStyle(AccentButtonStyle(small: true))
+                }
             }
             .environment(\.compactActions, true)
             .hidden()
             .accessibilityHidden(true)
             .allowsHitTesting(false)
-            .frame(minWidth: 180)
             HStack(spacing: Theme.Space.s) {
                 if running {
                     Button("Stop", .stop) { onStop() }
@@ -235,6 +243,7 @@ struct ChatComposer: View {
                 }
             }
         }
+        .frame(minWidth: 44, alignment: .trailing)
     }
 
     private var field: some View {

@@ -11,8 +11,11 @@
 //! so no request is involved. Anything that needs a request lives in
 //! `tokenstat-sync`, which is the only crate allowed a network stack.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 
 /// How close to the limit a window is.
@@ -44,6 +47,9 @@ impl LimitSeverity {
 pub struct UsageWindow {
     /// What the vendor calls it, normalised: `5-hour`, `weekly`, `monthly`.
     pub label: String,
+    /// `primary` / `secondary` when available from the source payload.
+    /// Older payloads or cache files may not include this.
+    pub scope: Option<String>,
     /// Percent of the allowance used, 0 to 100.
     pub percent: f64,
     /// When the window rolls over, in unix milliseconds. Absent when the vendor
@@ -190,6 +196,10 @@ fn window_label(minutes: u64) -> String {
         300 => "5-hour".to_string(),
         10080 => "weekly".to_string(),
         43200 => "monthly".to_string(),
+        // Codex stated a percentage without saying what the window is. The
+        // reading is still real, so it goes under a name that does not invent
+        // a length for it.
+        0 => "window".to_string(),
         m if m % 1440 == 0 => format!("{}-day", m / 1440),
         m if m % 60 == 0 => format!("{}-hour", m / 60),
         m => format!("{m}-minute"),
@@ -212,14 +222,56 @@ struct RolloutPayload {
     rate_limits: Option<RateLimits>,
 }
 
+/// One `rate_limits` block, read as the object Codex wrote.
+///
+/// Not a struct of named fields. Codex adds and withdraws windows as its
+/// plans change, and a window nobody wrote a field for here is exactly the
+/// one a person needs to see: two hard coded names is what hid an exhausted
+/// account limit behind a model's. Anything in the block that is not a
+/// window carries no `used_percent` and is ignored.
 #[derive(Debug, Deserialize)]
-struct RateLimits {
-    #[serde(default)]
-    primary: Option<RateWindow>,
-    #[serde(default)]
-    secondary: Option<RateWindow>,
-    #[serde(default)]
-    plan_type: Option<String>,
+#[serde(transparent)]
+struct RateLimits(serde_json::Map<String, serde_json::Value>);
+
+impl RateLimits {
+    /// Which allowance this block is about. `codex` is the account's own,
+    /// anything else is a model's. Absent on older Codex builds.
+    fn limit_id(&self) -> &str {
+        self.text("limit_id")
+    }
+
+    /// What a person is shown for it, when the server names it at all:
+    /// `GPT-5.3-Codex-Spark`. Usually absent even for a model's own block.
+    fn limit_name(&self) -> &str {
+        self.text("limit_name")
+    }
+
+    fn plan_type(&self) -> &str {
+        self.text("plan_type")
+    }
+
+    fn text(&self, key: &str) -> &str {
+        self.0
+            .get(key)
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+    }
+
+    /// The windows in this block, under the names Codex gave them, in the
+    /// order the block states them.
+    fn windows(&self) -> Vec<(&str, RateWindow)> {
+        self.0
+            .iter()
+            .filter_map(|(name, value)| {
+                let window = RateWindow::deserialize(value).ok()?;
+                // A percentage is the whole reading. Without one there is
+                // nothing to report, and reporting zero would claim an
+                // allowance is untouched when nobody said so.
+                window.used_percent?;
+                Some((name.as_str(), window))
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,12 +288,25 @@ struct RateWindow {
     resets_in_seconds: Option<i64>,
 }
 
+/// Scope given to the account's own allowance, the one Codex shows under
+/// "general usage limits".
+const CODEX_ACCOUNT_SCOPE: &str = "general";
+/// Scope given to a model's own allowance when the server did not name the
+/// model. Only used once an account-wide window is in hand to contrast it
+/// with, because a machine with no per-model limits has nothing to contrast.
+const CODEX_MODEL_SCOPE: &str = "current model";
+
 /// Read Codex's limits out of its own session log.
 ///
 /// Codex records the rate limit block the API returned into every rollout file,
 /// so the current picture is the last one it wrote. No request, no token, and
 /// nothing to authenticate: this is a file Codex already put on the disk.
 pub fn codex_limits() -> ProviderLimits {
+    let now_ms = now_ms();
+    if let Some(limits) = limits_in_sqlite(now_ms) {
+        return limits;
+    }
+
     let files = recent_rollouts(RECENT_ROLLOUTS);
     if files.is_empty() {
         return ProviderLimits::unavailable(
@@ -250,106 +315,383 @@ pub fn codex_limits() -> ProviderLimits {
         );
     }
 
-    // Newest first, and keep going until one of them actually carries a block.
-    // Reading only the newest file is wrong: Codex writes the rate limit block
-    // when the API sends one, so a short or interrupted session records none at
-    // all, and the answer is in the session before it rather than absent.
-    for file in files {
-        if let Some(limits) = limits_in(&file) {
-            return limits;
-        }
+    // Every recent file, not the newest one that happens to carry a block.
+    // Codex reports the allowance for whatever model a turn ran on, so the
+    // account's own weekly window and a model's rolling window arrive in
+    // different blocks, often in different sessions. Stopping at the first
+    // file with a block reported the model the last session used and hid an
+    // account-wide limit that had already run out.
+    let mut scan = CodexLimitScan::default();
+    for file in &files {
+        absorb_rollout(&mut scan, file);
     }
 
-    ProviderLimits::unavailable(
-        "codex",
-        "Codex has not written a limit into its recent session logs yet.",
-    )
+    match scan.finish(now_ms) {
+        Some((windows, observed_at_ms, plan)) => ProviderLimits {
+            source: "codex".to_string(),
+            plan,
+            windows,
+            observed_at_ms,
+            note: None,
+            stale: false,
+        },
+        None => ProviderLimits::unavailable(
+            "codex",
+            "Codex has not written a limit into its recent session logs yet.",
+        ),
+    }
 }
 
 /// How many recent session files to look through. Enough to get past a run of
 /// short sessions, few enough that this stays a disk read rather than a scan.
 const RECENT_ROLLOUTS: usize = 25;
 
-/// The last rate limit block in one rollout file, if it has one.
-fn limits_in(file: &Path) -> Option<ProviderLimits> {
-    let raw = tail(file, 512 * 1024)?;
+/// Feed every rate limit block in one rollout to the scan.
+///
+/// The whole file, not its tail. Codex scatters these blocks through a
+/// session rather than restating the current one at the end, and the
+/// account's own allowance is written only on a turn that spent it, which
+/// can be megabytes back in a long session. Reading a 512 KB tail found the
+/// running model's windows and missed an account limit that had already run
+/// out. The `rate_limits` test keeps this cheap: a rollout is almost all
+/// conversation, and a whole recent archive scans in well under a second.
+fn absorb_rollout(scan: &mut CodexLimitScan, path: &Path) {
+    use std::io::{BufRead, BufReader};
 
-    // Backwards: the most recent block is the current one, and a long session
-    // contains hundreds of them.
-    //
-    // Codex sends sparse updates and carries the unchanged fields forward
-    // itself (`merge_rate_limit_fields` in its session state), so a block can
-    // arrive with the windows filled in and no plan named, while the account
-    // plainly still has one. The windows are never sparse, so the newest block
-    // carrying them is still the reading; only the plan label needs the same
-    // carry-forward, taken from the newest block that named one.
-    // Newest-first. The windows come from the newest block that carries
-    // them; the plan comes from the newest block that names one (newer,
-    // same, or older). A sparse update with windows but no plan must keep
-    // scanning older blocks for the plan instead of returning None.
-    let mut candidate: Option<(Vec<UsageWindow>, i64, Option<String>)> = None;
-    let mut newest_plan: Option<String> = None;
-    for line in raw.lines().rev() {
-        if !line.contains("rate_limits") {
-            continue;
-        }
-        let Ok(parsed) = serde_json::from_str::<RolloutLine>(line) else {
-            continue;
-        };
-        let Some(limits) = parsed.payload.and_then(|p| p.rate_limits) else {
-            continue;
-        };
-
-        if newest_plan.is_none() {
-            newest_plan.clone_from(&limits.plan_type);
-        }
-
-        if candidate.is_none() {
-            let observed_at_ms = parsed
-                .timestamp
-                .as_deref()
-                .and_then(parse_iso_ms)
-                .unwrap_or(0);
-
-            let mut windows: Vec<UsageWindow> = [limits.primary, limits.secondary]
-                .into_iter()
-                .flatten()
-                .filter_map(|w| {
-                    let percent = w.used_percent?;
-                    let minutes = w.window_minutes.unwrap_or(0);
-                    let resets_at_ms = w
-                        .resets_at
-                        .map(|s| s * 1000)
-                        .or_else(|| w.resets_in_seconds.map(|s| observed_at_ms + s * 1000));
-                    Some(UsageWindow {
-                        label: window_label(minutes),
-                        percent,
-                        resets_at_ms,
-                        severity: LimitSeverity::from_percent(percent),
-                    })
-                })
-                .collect();
-            // Shortest window first: the one about to bite is the one to read.
-            windows.sort_by_key(|w| w.resets_at_ms.unwrap_or(i64::MAX));
-
-            if windows.is_empty() {
-                continue;
-            }
-            candidate = Some((windows, observed_at_ms, limits.plan_type));
-        }
-
-        if candidate.is_some() && newest_plan.is_some() {
-            break;
+    let Ok(file) = std::fs::File::open(path) else {
+        return;
+    };
+    let mut reader = BufReader::with_capacity(1 << 20, file);
+    let mut line: Vec<u8> = Vec::new();
+    loop {
+        line.clear();
+        // Bytes, not `read_line`: one stray byte sequence in somebody's
+        // pasted output must not end the read on the line before the answer.
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => scan.absorb(&String::from_utf8_lossy(&line)),
         }
     }
-    candidate.map(|(windows, observed_at_ms, plan)| ProviderLimits {
-        source: "codex".to_string(),
-        plan: plan.or(newest_plan),
+}
+
+/// The limits in one rollout file, if it has any.
+#[cfg(test)]
+fn limits_in(file: &Path, now_ms: i64) -> Option<ProviderLimits> {
+    let mut scan = CodexLimitScan::default();
+    absorb_rollout(&mut scan, file);
+    scan.finish(now_ms)
+        .map(|(windows, observed_at_ms, plan)| ProviderLimits {
+            source: "codex".to_string(),
+            plan,
+            windows,
+            observed_at_ms,
+            note: None,
+            stale: false,
+        })
+}
+
+fn limits_in_sqlite(now_ms: i64) -> Option<ProviderLimits> {
+    for path in codex_sqlite_db_candidates() {
+        if let Some(found) = limits_in_sqlite_file(&path, now_ms) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn limits_in_sqlite_file(db_path: &Path, now_ms: i64) -> Option<ProviderLimits> {
+    let conn = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.extend(sqlite_candidate_rows(
+        &conn,
+        "thread_items",
+        "item_json",
+        "rowid",
+    ));
+    lines.extend(sqlite_candidate_rows(
+        &conn,
+        "thread_realtime_items",
+        "item_json",
+        "rowid",
+    ));
+    lines.extend(sqlite_candidate_rows(
+        &conn,
+        "thread_timeline_ledger",
+        "payload_json",
+        "sequence",
+    ));
+
+    if lines.is_empty() {
+        return None;
+    }
+
+    let mut scan = CodexLimitScan::default();
+    for line in &lines {
+        scan.absorb(line);
+    }
+
+    scan.finish(now_ms)
+        .map(|(windows, observed_at_ms, plan)| ProviderLimits {
+            source: "codex".to_string(),
+            plan,
+            windows,
+            observed_at_ms,
+            note: None,
+            stale: false,
+        })
+}
+
+/// Which allowance a window belongs to: the limit, and its place in the block.
+///
+/// `limit_id` alone is not enough. Codex reports the account's own weekly
+/// window and the running model's pair of windows under the same `codex` id,
+/// and tells them apart only by the shape of the block, which is what the
+/// position in the key preserves.
+type CodexWindowKey = (String, String, u64, String);
+
+/// The newest reading of every Codex limit seen while walking its logs.
+///
+/// Written to be fed blocks in any order, oldest first by preference: each
+/// window keeps the reading with the latest timestamp, and the plan comes
+/// from the latest block that named one. Codex sends sparse updates and
+/// carries the unchanged fields forward itself, so a block can arrive with
+/// windows and no plan while the account plainly still has one.
+#[derive(Default)]
+struct CodexLimitScan {
+    windows: std::collections::HashMap<CodexWindowKey, (i64, UsageWindow)>,
+    plan: Option<(i64, String)>,
+}
+
+impl CodexLimitScan {
+    fn absorb(&mut self, line: &str) {
+        // The exact spelling a record uses. Sessions about this very code
+        // quote the word thousands of times in ordinary conversation, where
+        // it arrives escaped as `\"rate_limits\":` and does not match, so a
+        // looser test would parse megabytes of chat to learn nothing.
+        if !line.contains(r#""rate_limits":{"#) {
+            return;
+        }
+        let Ok(parsed) = serde_json::from_str::<RolloutLine>(line) else {
+            return;
+        };
+        let Some(limits) = parsed.payload.and_then(|p| p.rate_limits) else {
+            return;
+        };
+        let observed_at_ms = parsed
+            .timestamp
+            .as_deref()
+            .and_then(parse_iso_ms)
+            .unwrap_or(0);
+
+        let plan = limits.plan_type();
+        if !plan.is_empty() {
+            let newer = self
+                .plan
+                .as_ref()
+                .is_none_or(|(at, _)| observed_at_ms >= *at);
+            if newer {
+                self.plan = Some((observed_at_ms, plan.to_string()));
+            }
+        }
+
+        let limit_id = limits.limit_id();
+        let limit_name = limits.limit_name();
+        let reported = limits.windows();
+        let account_wide = is_account_wide(&reported);
+
+        for (position, reported) in &reported {
+            // `windows` already refused anything without one.
+            let Some(percent) = reported.used_percent else {
+                continue;
+            };
+            let minutes = reported.window_minutes.unwrap_or(0);
+            let scope = match (limit_name, account_wide) {
+                // The server named the limit, so use its name.
+                ("", true) => CODEX_ACCOUNT_SCOPE.to_string(),
+                // Nothing to distinguish it from yet. `finish` renames these
+                // if an account-wide window turns up beside them.
+                ("", false) => (*position).to_string(),
+                (name, _) => name.to_string(),
+            };
+            let window = UsageWindow {
+                label: window_label(minutes),
+                scope: Some(scope),
+                percent,
+                resets_at_ms: reported.resets_at.map(|s| s * 1000).or_else(|| {
+                    reported
+                        .resets_in_seconds
+                        .map(|s| observed_at_ms + s * 1000)
+                }),
+                severity: LimitSeverity::from_percent(percent),
+            };
+            let key = (
+                limit_id.to_string(),
+                limit_name.to_string(),
+                minutes,
+                (*position).to_string(),
+            );
+            let newer = self
+                .windows
+                .get(&key)
+                .is_none_or(|(at, _)| observed_at_ms >= *at);
+            if newer {
+                self.windows.insert(key, (observed_at_ms, window));
+            }
+        }
+    }
+
+    /// Every limit still in force, shortest remaining first.
+    fn finish(self, now_ms: i64) -> Option<(Vec<UsageWindow>, i64, Option<String>)> {
+        let mut readings: Vec<(i64, UsageWindow)> = self.windows.into_values().collect();
+        // Newest first, so the duplicate check below keeps the fresher of two
+        // readings of the same limit.
+        readings.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(&b.1.label)));
+
+        let mut kept: Vec<(i64, UsageWindow)> = Vec::new();
+        for (at, window) in readings {
+            // Already rolled over, so the percentage is somebody's history
+            // rather than their quota. Codex stops reporting a limit the
+            // moment no turn uses it, and a window nobody refreshed would
+            // otherwise sit on the card claiming to be full.
+            if window.resets_at_ms.is_some_and(|ms| ms <= now_ms) {
+                continue;
+            }
+            // The same allowance under two ids: Codex moved the model's
+            // windows from a named block to the plain `codex` one, and a
+            // window that rolls over at the same instant as one already kept
+            // is that same window seen under the older name.
+            let duplicate = window.resets_at_ms.is_some()
+                && kept.iter().any(|(_, other)| {
+                    other.label == window.label && other.resets_at_ms == window.resets_at_ms
+                });
+            if duplicate {
+                continue;
+            }
+            kept.push((at, window));
+        }
+
+        if kept.is_empty() {
+            return None;
+        }
+
+        // Only now is there something to contrast a model's windows with.
+        // Calling them "primary" and "secondary" beside an account-wide
+        // window says nothing about which allowance they belong to.
+        let has_account = kept
+            .iter()
+            .any(|(_, w)| w.scope.as_deref() == Some(CODEX_ACCOUNT_SCOPE));
+        if has_account {
+            for (_, window) in kept.iter_mut() {
+                if matches!(window.scope.as_deref(), Some("primary") | Some("secondary")) {
+                    window.scope = Some(CODEX_MODEL_SCOPE.to_string());
+                }
+            }
+        }
+
+        let observed_at_ms = kept.iter().map(|(at, _)| *at).max().unwrap_or(0);
+        let mut windows: Vec<UsageWindow> = kept.into_iter().map(|(_, w)| w).collect();
+        // Shortest window first: the one about to bite is the one to read.
+        windows.sort_by_key(|w| w.resets_at_ms.unwrap_or(i64::MAX));
+        Some((windows, observed_at_ms, self.plan.map(|(_, plan)| plan)))
+    }
+}
+
+/// Whether a block describes the account's whole allowance rather than one
+/// model's.
+///
+/// Codex writes the account-wide limit as a single window a week or longer,
+/// and a model's as its rolling window plus that model's week. There is no
+/// flag for it: both arrive with `limit_id` `codex` and no name, so the shape
+/// is the only thing that separates them.
+fn is_account_wide(windows: &[(&str, RateWindow)]) -> bool {
+    matches!(
         windows,
-        observed_at_ms,
-        note: None,
-        stale: false,
-    })
+        [(_, only)] if only.window_minutes.is_some_and(|minutes| minutes >= 1440)
+    )
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn sqlite_candidate_rows(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    order_by: &str,
+) -> Vec<String> {
+    const RECENT_SQLITE_ROWS: usize = 240;
+    let query = format!(
+        "SELECT {column} FROM {table} WHERE {column} LIKE '%\"rate_limits\"%' \
+         AND {column} LIKE '%token_count%' \
+         ORDER BY {order_by} DESC \
+         LIMIT {RECENT_SQLITE_ROWS}"
+    );
+
+    let mut out = Vec::new();
+    let mut stmt = match conn.prepare(&query) {
+        Ok(stmt) => stmt,
+        Err(_) => return out,
+    };
+    let rows = match stmt.query_map([], |row| row.get::<_, String>(0)) {
+        Ok(rows) => rows,
+        Err(_) => return out,
+    };
+
+    out.extend(rows.flatten());
+    out
+}
+
+fn codex_sqlite_db_candidates() -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    for home in codex_homes() {
+        let db_dir = [home.clone(), home.join("sqlite")];
+
+        for dir in db_dir {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                if is_sqlite_path(&path) && seen.insert(path.clone()) {
+                    candidates.push(path);
+                }
+            }
+        }
+    }
+
+    candidates.sort_by_key(|path| {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH)
+    });
+    candidates.reverse();
+    candidates
+}
+
+fn is_sqlite_path(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.ends_with("-shm") || name.ends_with("-wal") {
+        return false;
+    }
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("sqlite") | Some("db")
+    )
 }
 
 /// `2026-07-12T06:44:58.735Z` and friends, to unix milliseconds.
@@ -437,29 +779,6 @@ fn collect_rollouts(
     }
 }
 
-/// The last `limit` bytes of a file, starting at a line boundary.
-///
-/// A rollout file grows to megabytes and the block wanted is at the end, so
-/// reading the whole thing to find it would be wasteful on every refresh.
-fn tail(path: &Path, limit: u64) -> Option<String> {
-    use std::io::{Read, Seek, SeekFrom};
-
-    let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len();
-    let from = size.saturating_sub(limit);
-    file.seek(SeekFrom::Start(from)).ok()?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf).ok()?;
-    let text = String::from_utf8_lossy(&buf).into_owned();
-
-    // The first line is a fragment when the file was longer than the window.
-    if from > 0 {
-        text.find('\n').map(|i| text[i + 1..].to_string())
-    } else {
-        Some(text)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,7 +803,7 @@ mod tests {
     }
 
     #[test]
-    fn a_rollout_tail_yields_the_last_rate_limit_block() {
+    fn the_newest_block_in_a_file_is_the_reading() {
         let dir = std::env::temp_dir().join(format!("tokenstat-codex-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -493,7 +812,7 @@ mod tests {
         // Two blocks: the later one is the answer, and a line without limits in
         // between must not stop the scan.
         let body = concat!(
-            r#"{"timestamp":"2026-07-12T06:00:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":10.0,"window_minutes":300,"resets_at":1784460000},"plan_type":"free"}}}"#,
+            r#"{"timestamp":"2026-07-12T06:00:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":10.0,"window_minutes":43200,"resets_at":1784460000},"plan_type":"free"}}}"#,
             "\n",
             r#"{"timestamp":"2026-07-12T06:30:00.000Z","type":"event_msg","payload":{"type":"token_count"}}"#,
             "\n",
@@ -502,39 +821,14 @@ mod tests {
         );
         std::fs::write(&file, body).unwrap();
 
-        let raw = tail(&file, 512 * 1024).unwrap();
-        let line = raw
-            .lines()
-            .rev()
-            .find(|l| l.contains("rate_limits"))
-            .unwrap();
-        let parsed: RolloutLine = serde_json::from_str(line).unwrap();
-        let limits = parsed.payload.unwrap().rate_limits.unwrap();
-        assert_eq!(limits.plan_type.as_deref(), Some("pro"));
-
-        let primary = limits.primary.unwrap();
-        assert_eq!(primary.used_percent, Some(100.0));
-        assert_eq!(window_label(primary.window_minutes.unwrap()), "monthly");
+        let found = limits_in(&file, 1_784_400_000_000).expect("the file carries a block");
+        assert_eq!(found.plan.as_deref(), Some("pro"));
+        assert_eq!(found.windows.len(), 1);
+        assert_eq!(found.windows[0].percent, 100.0);
+        assert_eq!(found.windows[0].label, "monthly");
         // Seconds, not milliseconds. Treating it as millis would put the reset
         // in 1970 and the window would read as permanently expired.
-        assert_eq!(primary.resets_at, Some(1784460506));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_tail_that_cut_a_line_drops_the_fragment() {
-        let dir = std::env::temp_dir().join(format!("tokenstat-codex-cut-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("rollout-cut.jsonl");
-        std::fs::write(&file, "aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\n").unwrap();
-
-        // A window that lands mid-line: the partial first line must go, or the
-        // JSON parse fails on rubbish rather than on a real problem.
-        let raw = tail(&file, 16).unwrap();
-        assert!(!raw.contains("aaaa"));
-        assert!(raw.ends_with("cccccccccc\n"));
+        assert_eq!(found.windows[0].resets_at_ms, Some(1_784_460_506_000));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -570,15 +864,232 @@ mod tests {
         .unwrap();
 
         assert!(
-            limits_in(&newer).is_none(),
+            limits_in(&newer, 1_784_400_000_000).is_none(),
             "the newer file carries nothing"
         );
-        let found = limits_in(&older).expect("the older file still has the answer");
+        let found =
+            limits_in(&older, 1_784_400_000_000).expect("the older file still has the answer");
         assert_eq!(found.windows[0].percent, 42.0);
         assert_eq!(found.windows[0].label, "5-hour");
         assert_eq!(found.plan.as_deref(), Some("pro"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_sparse_update_keeps_the_plan_from_an_older_block() {
+        // Codex carries unchanged fields forward itself, so the newest block
+        // can hold windows with no plan named. The windows are the reading;
+        // the plan must keep scanning older blocks instead of going missing.
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-codex-sparse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("rollout-sparse.jsonl");
+        std::fs::write(
+            &file,
+            concat!(
+                r#"{"timestamp":"2026-07-12T06:00:00.000Z","payload":{"rate_limits":{"primary":{"used_percent":10.0,"window_minutes":300,"resets_at":1784460000},"plan_type":"pro"}}}"#,
+                "\n",
+                r#"{"timestamp":"2026-07-12T06:44:58.735Z","payload":{"rate_limits":{"primary":{"used_percent":42.0,"window_minutes":300,"resets_at":1784460506}}}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let found = limits_in(&file, 1_784_400_000_000)
+            .expect("sparse newest block still yields a reading");
+        assert_eq!(
+            found.windows[0].percent, 42.0,
+            "windows come from the newest block"
+        );
+        assert_eq!(
+            found.plan.as_deref(),
+            Some("pro"),
+            "plan carries forward from the older block"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_exhausted_account_window_survives_a_session_on_one_model() {
+        // The case this exists for: the account's weekly allowance ran out, so
+        // Codex fell back to a model with its own allowance and reported only
+        // that model's windows from then on. Reading the newest block alone
+        // showed the model at 88% and hid the account at 100%, which is the
+        // one that stopped the work.
+        let dir = std::env::temp_dir().join(format!("tokenstat-codex-two-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("rollout-two.jsonl");
+        std::fs::write(
+            &file,
+            concat!(
+                r#"{"timestamp":"2026-09-10T21:01:58.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1789641363},"secondary":null,"plan_type":"prolite"}}}"#,
+                "\n",
+                r#"{"timestamp":"2026-09-10T21:32:16.000Z","payload":{"rate_limits":{"limit_id":"codex_bengalfox","limit_name":"GPT-5.3-Codex-Spark","primary":{"used_percent":100.0,"window_minutes":300,"resets_at":1789093407},"secondary":{"used_percent":45.0,"window_minutes":10080,"resets_at":1789680207}}}}"#,
+                "\n",
+                r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":88.0,"window_minutes":300,"resets_at":1789172231},"secondary":{"used_percent":84.0,"window_minutes":10080,"resets_at":1789680207}}}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        // Just after the last block was written.
+        let now_ms = 1_789_162_000_000;
+        let found = limits_in(&file, now_ms).expect("both allowances are readable");
+
+        let labels: Vec<String> = found
+            .windows
+            .iter()
+            .map(|w| format!("{} ({})", w.label, w.scope.clone().unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "5-hour (current model)",
+                "weekly (general)",
+                "weekly (current model)",
+            ],
+            "shortest remaining first, and each window says whose it is"
+        );
+        assert_eq!(found.windows[0].percent, 88.0);
+        assert_eq!(found.windows[1].percent, 100.0);
+        assert_eq!(found.windows[1].severity, LimitSeverity::Critical);
+        // The named block's week is the same week as the plain one's, seen
+        // under the older id, so it appears once at its newer reading.
+        assert_eq!(found.windows[2].percent, 84.0);
+        assert_eq!(found.plan.as_deref(), Some("prolite"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_window_that_already_rolled_over_is_not_reported() {
+        let dir = std::env::temp_dir().join(format!("tokenstat-codex-past-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("rollout-past.jsonl");
+        std::fs::write(
+            &file,
+            concat!(
+                r#"{"timestamp":"2026-09-10T21:32:16.000Z","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":300,"resets_at":1789093407},"secondary":{"used_percent":45.0,"window_minutes":10080,"resets_at":1789680207}}}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let found = limits_in(&file, 1_789_162_000_000).expect("the week is still running");
+        assert_eq!(found.windows.len(), 1, "the spent five hour window is gone");
+        assert_eq!(found.windows[0].label, "weekly");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One rollout in a temp dir, and the reading taken from it.
+    fn reading_from(name: &str, body: &str, now_ms: i64) -> Option<ProviderLimits> {
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-codex-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("rollout.jsonl");
+        std::fs::write(&file, body).unwrap();
+        let found = limits_in(&file, now_ms);
+        let _ = std::fs::remove_dir_all(&dir);
+        found
+    }
+
+    #[test]
+    fn a_withdrawn_model_limit_leaves_the_account_reading_alone() {
+        // What next week looks like: the per-model allowance is gone and
+        // Codex reports the account's own windows under the plain `codex` id
+        // again. Nothing should be renamed on its account, and the model's
+        // last windows are left to expire on their own reset rather than
+        // being guessed at.
+        let found = reading_from(
+            "gone",
+            concat!(
+                r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":88.0,"window_minutes":300,"resets_at":1789172231},"secondary":{"used_percent":84.0,"window_minutes":10080,"resets_at":1789680207}}}}"#,
+                "\n",
+                r#"{"timestamp":"2026-09-18T09:00:00.000Z","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":12.0,"window_minutes":300,"resets_at":1790240000},"secondary":{"used_percent":30.0,"window_minutes":10080,"resets_at":1790500000},"plan_type":"prolite"}}}"#,
+                "\n",
+            ),
+            // A week on, so the older pair has rolled over.
+            1_789_700_000_000,
+        )
+        .expect("the account's own windows are the reading");
+
+        let shown: Vec<String> = found
+            .windows
+            .iter()
+            .map(|w| format!("{} ({})", w.label, w.scope.clone().unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            shown,
+            vec!["5-hour (primary)", "weekly (secondary)"],
+            "with no account-wide block beside them the old names stand"
+        );
+        assert_eq!(found.windows[0].percent, 12.0);
+        assert_eq!(found.windows[1].percent, 30.0);
+    }
+
+    #[test]
+    fn a_window_codex_has_not_named_a_field_for_is_still_reported() {
+        // The windows are read by shape, not by two hard coded field names,
+        // so a third one arrives instead of vanishing. This is the failure
+        // that hid an exhausted limit once already, and it must not depend
+        // on this file having been updated first.
+        let found = reading_from(
+            "third",
+            concat!(
+                r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":10.0,"window_minutes":300,"resets_at":1789172231},"secondary":{"used_percent":20.0,"window_minutes":10080,"resets_at":1789680207},"tertiary":{"used_percent":30.0,"window_minutes":43200,"resets_at":1791680207},"credits":{"has_credits":false,"balance":"0"},"rate_limit_reached_type":null}}}"#,
+                "\n",
+            ),
+            1_789_160_000_000,
+        )
+        .expect("all three windows are readable");
+
+        assert_eq!(found.windows.len(), 3, "credits is not a window");
+        assert_eq!(found.windows[2].label, "monthly");
+        assert_eq!(found.windows[2].scope.as_deref(), Some("tertiary"));
+    }
+
+    #[test]
+    fn a_missing_field_costs_only_what_it_says() {
+        // A block with no length, no reset and no plan. The percentage is
+        // still a real reading and is still shown, under a name that does
+        // not claim a length nobody stated.
+        let found = reading_from(
+            "sparse",
+            concat!(
+                r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"primary":{"used_percent":73.0}}}}"#,
+                "\n",
+            ),
+            1_789_160_000_000,
+        )
+        .expect("a percentage on its own is still a reading");
+
+        assert_eq!(found.windows.len(), 1);
+        assert_eq!(found.windows[0].label, "window");
+        assert_eq!(found.windows[0].percent, 73.0);
+        assert_eq!(found.windows[0].resets_at_ms, None);
+        assert_eq!(found.plan, None);
+    }
+
+    #[test]
+    fn a_window_with_no_percentage_is_not_a_reading() {
+        // Never zero. "The vendor did not say" and "none of it is used" are
+        // different answers and must not render the same.
+        let found = reading_from(
+            "nopct",
+            concat!(
+                r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"primary":{"window_minutes":300,"resets_at":1789172231},"plan_type":"prolite"}}}"#,
+                "\n",
+            ),
+            1_789_160_000_000,
+        );
+        assert!(found.is_none(), "a block with no percentage says nothing");
     }
 
     #[test]
@@ -594,6 +1105,7 @@ mod tests {
                 plan: Some("max".to_string()),
                 windows: vec![UsageWindow {
                     label: "5-hour".to_string(),
+                    scope: None,
                     percent: 64.0,
                     resets_at_ms: Some(1_784_460_000_000),
                     severity: LimitSeverity::Normal,
@@ -634,6 +1146,7 @@ mod tests {
                 plan: None,
                 windows: vec![UsageWindow {
                     label: "5-hour".to_string(),
+                    scope: None,
                     percent: 10.0,
                     resets_at_ms: None,
                     severity: LimitSeverity::Normal,
@@ -649,6 +1162,7 @@ mod tests {
             plan: None,
             windows: vec![UsageWindow {
                 label: "5-hour".to_string(),
+                scope: None,
                 percent: 90.0,
                 resets_at_ms: None,
                 severity: LimitSeverity::Critical,

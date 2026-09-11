@@ -1856,8 +1856,19 @@ private fun LimitCard(reading: JsonObject) {
                 windows.forEach { window ->
                     val value = window.jsonObject
                     val percent = value.doubleOrNull("percent") ?: 0.0
+                    // Codex reports the account's own allowance beside the
+                    // running model's, and both are weekly. Without the scope
+                    // the two rows read as one limit stated twice.
+                    val label = value.string("label") ?: ""
+                    val scope = value.string("scope")
+                    val shown = when (scope) {
+                        null, "", "primary" -> label
+                        "secondary" -> "$label (all models)"
+                        "current model" -> "$label (secondary)"
+                        else -> "$label ($scope)"
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(value.string("label") ?: "", modifier = Modifier.width(72.dp), maxLines = 1)
+                        Text(shown, modifier = Modifier.width(140.dp), maxLines = 1)
                         LinearProgressIndicator(
                             progress = { (percent / 100.0).coerceIn(0.0, 1.0).toFloat() },
                             modifier = Modifier.weight(1f),

@@ -1050,6 +1050,20 @@ struct RootView: View {
         usesOverlaySidebar && (isSidebarPinned || isSidebarOverlayVisible)
     }
 
+    /// Whether a confirmation presented from the sidebar float is on screen.
+    ///
+    /// These dialogs are presented from inside the `sidebar` view, so hiding
+    /// the float unmounts their presenter and takes the dialog with it: pick
+    /// Close on a running session, move the pointer away, and the peek leaves
+    /// with the confirmation still in front of it. The pointer watcher and the
+    /// tap scrim must leave the float up while one is showing.
+    private var isSidebarModalVisible: Bool {
+        sessionPendingClose != nil
+            || workspacePendingRemove != nil
+            || workspacePendingChatRemoval != nil
+            || sshHostPendingClose != nil
+    }
+
     /// The floating pane is on screen.
     private var showsOverlayInspector: Bool {
         usesOverlayInspector && (isOverlayPinned || isOverlayVisible)
@@ -1229,7 +1243,7 @@ struct RootView: View {
                     }
                 } else {
                     leadingSince = nil
-                    if isSidebarOverlayVisible, !isSidebarPinned {
+                    if isSidebarOverlayVisible, !isSidebarPinned, !isSidebarModalVisible {
                         let left = leadingLeftAt ?? now()
                         leadingLeftAt = left
                         if now().timeIntervalSince(left) >= Self.edgeGrace {
@@ -1283,7 +1297,11 @@ struct RootView: View {
     }
 
     /// Hides the floated sidebar, whether it was hover-revealed or pinned.
+    ///
+    /// Refuses while a sidebar confirmation is up, for the same reason the
+    /// pointer watcher does: the dialog's presenter lives in the float.
     private func dismissSidebarOverlay() {
+        guard !isSidebarModalVisible else { return }
         isSidebarPinned = false
         isSidebarOverlayVisible = false
     }

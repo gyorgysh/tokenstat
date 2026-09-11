@@ -242,6 +242,16 @@ final class ChatDraftTextView: NSTextView {
     var pasteAttachments: (() -> Void)?
     private(set) var handlingComposition = false
 
+    /// Whether this draft view gives up the arrow keys to chat switching:
+    /// only when there is no text to move through and no composition to
+    /// steer. Anything typed, or an IME session in progress, keeps them.
+    static func yieldsArrowKeys(_ responder: NSResponder?) -> Bool {
+        guard let view = responder as? ChatDraftTextView,
+              !view.hasMarkedText()
+        else { return false }
+        return view.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// File and image drags belong to the composer well, which attaches them.
     /// Left alone, NSTextView swallows a drop on the text itself and inserts
     /// the path, while the same file dropped a few points above or below
