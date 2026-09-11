@@ -18,7 +18,7 @@ on:
       platforms:
         description: Which artifacts to build
         type: choice
-        options: [all, windows, mac, android, cli]
+        options: [all, windows, mac, android, cli, hostd]
         default: all
   pull_request:
     types: [labeled]
@@ -304,6 +304,68 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: preview-cli-${{ matrix.target }}-${{ github.run_number }}
+          path: |
+            dist/${{ steps.package.outputs.asset }}
+            dist/${{ steps.package.outputs.asset }}.sha256
+          retention-days: 14
+
+  hostd:
+    name: hostd ${{ matrix.target }}
+    needs: version
+    if: >
+      (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.platforms == 'all' ||
+         github.event.inputs.platforms == 'hostd')) ||
+      (github.event_name == 'pull_request' &&
+        contains(github.event.pull_request.labels.*.name, 'preview'))
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: preview-hostd-${{ matrix.target }}
+          save-if: false
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-host
+
+      - name: Package
+        id: package
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          name="tokenstat-hostd-${VERSION}-${TARGET}-dev"
+          mkdir -p "dist/${name}"
+          cp "target/${TARGET}/release/tokenstat-hostd" "dist/${name}/"
+          cp README.md LICENSE "dist/${name}/" 2>/dev/null || cp README.md "dist/${name}/"
+          cargo run --release --locked -p xtask -- notices \
+            "dist/${name}/HOST-THIRD-PARTY-NOTICES.md" tokenstat-host
+          printf '%s\n' "$VERSION" > "dist/${name}/PREVIEW.txt"
+          cd dist
+          tar czf "${name}.tar.gz" "${name}"
+          asset="${name}.tar.gz"
+          sha256sum "$asset" > "${asset}.sha256"
+          echo "asset=${asset}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: preview-hostd-${{ matrix.target }}-${{ github.run_number }}
           path: |
             dist/${{ steps.package.outputs.asset }}
             dist/${{ steps.package.outputs.asset }}.sha256
