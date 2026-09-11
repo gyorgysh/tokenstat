@@ -200,8 +200,8 @@ settings:
     # reporting an unreachable transcript as an error instead of a zero.
     # 97 went up as 1.0.1 with the setup fixes: install retries over a
     # stale pairing file, and the finish step trusts the new machine.
-    # 98 goes up as 1.0.1 with the chat, setup, and home fixes.
-    # 98 is next, unspent.
+    # 98 went up as 1.0.1 with the chat, setup, and home fixes.
+    # 98 is spent. Next free number is 99.
     CURRENT_PROJECT_VERSION: "98"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
