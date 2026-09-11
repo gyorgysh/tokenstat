@@ -20,10 +20,6 @@ import UIKit
 /// four destinations, which is exactly the part that was already fine.
 struct ClientSidebarRoot: View {
     @Binding var showAccount: Bool
-    /// Whether this scene floats in a window. Windowed mode parks the
-    /// traffic lights in the toolbar row, so the brand moves into the
-    /// content; fullscreen keeps the toolbar lockup. See `ClientLayout`.
-    var windowed = false
 
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
@@ -216,47 +212,44 @@ struct ClientSidebarRoot: View {
     // MARK: - Sidebar
 
     private var sidebar: some View {
-        Group {
-            if windowed {
-                VStack(alignment: .leading, spacing: 0) {
-                    // The account and the brand live in the content, not the
-                    // toolbar: the traffic lights own that row while windowed,
-                    // and anything beside them gets shoved into the wordmark.
-                    // Stacked and centred, so the narrow column reads as a
-                    // brand block rather than a squeezed toolbar row.
-                    VStack(spacing: Theme.Space.xs) {
-                        AvatarButton { showAccount = true }
-                        Wordmark(size: 19, fills: false)
-                            .accessibilityAddTraits(.isHeader)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, Theme.Space.s)
-                    .padding(.bottom, Theme.Space.xs)
-                    list
+        list
+            // Avatar leading, wordmark in the middle. Search and the
+            // connection chip live in the detail column's own bar, where
+            // there is room: all four in this narrow column read as clutter,
+            // and the tab layout already puts search and the chip on the
+            // right.
+            //
+            // The same two positions windowed and fullscreen, which is the
+            // point. Windowed, the iPad parks its traffic lights at the start
+            // of this row and insets the bar's own items past them, so the
+            // avatar lands after the lights and the wordmark still has the
+            // middle. Moving the brand into the content while windowed was
+            // the other way to keep clear of the lights, and it cost a whole
+            // row of the column and put the name somewhere it was not when
+            // the window was zoomed.
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    AvatarButton { showAccount = true }
+                        // A couple of points off the bar's own margin, so the
+                        // picture reads as inset from the column's edge rather
+                        // than stuck to it. Positive, not negative: the pull
+                        // that lined it up with the rows below sat it on the
+                        // window edge, and windowed it reached into the gap
+                        // the traffic lights sit in.
+                        .padding(.leading, 2)
                 }
-            } else {
-                list
-                    // Avatar and wordmark only. Search and the connection chip
-                    // live in the detail column's own bar, where there is room:
-                    // all four in this narrow column read as clutter, and the
-                    // tab layout already puts search and the chip on the right.
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            AvatarButton { showAccount = true }
-                                // The bar adds a leading margin the rows below
-                                // do not have. Half of it back: the full pull
-                                // sat the avatar on the screen edge.
-                                .padding(.leading, -6)
-                        }
-                        ToolbarItem(placement: .principal) {
-                            Wordmark(size: 19, fills: false)
-                                .accessibilityAddTraits(.isHeader)
-                        }
-                    }
+                ToolbarItem(placement: .principal) {
+                    Wordmark(size: 19, fills: false)
+                        .accessibilityAddTraits(.isHeader)
+                        // The narrow column shares this row with the avatar,
+                        // the sidebar toggle and, windowed, the traffic
+                        // lights. The name is the one thing here that must
+                        // not come out as an ellipsis.
+                        .fixedSize()
+                }
             }
-        }
-        .background(Theme.background)
-        .navigationBarTitleDisplayMode(.inline)
+            .background(Theme.background)
+            .navigationBarTitleDisplayMode(.inline)
     }
 
     private var list: some View {

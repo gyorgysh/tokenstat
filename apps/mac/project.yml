@@ -201,8 +201,12 @@ settings:
     # 97 went up as 1.0.1 with the setup fixes: install retries over a
     # stale pairing file, and the finish step trusts the new machine.
     # 98 went up as 1.0.1 with the chat, setup, and home fixes.
-    # 98 is spent. Next free number is 99.
-    CURRENT_PROJECT_VERSION: "100"
+    # 99 went up as 1.0.1 with the remote folder fixes.
+    # 101 went up as 1.0.1 with the iPad sidebar brand placement: avatar and
+    # wordmark in one toolbar row, windowed and fullscreen alike. 100 was
+    # never uploaded.
+    # 101 is spent. Next free number is 102.
+    CURRENT_PROJECT_VERSION: "101"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

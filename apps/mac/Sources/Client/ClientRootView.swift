@@ -115,12 +115,6 @@ struct ClientRootView: View {
     /// than by every screen.
     @State private var windowWidth: CGFloat = 0
 
-    /// Whether this scene floats in a window with traffic lights, rather
-    /// than filling the display. The toolbar lockup returns fullscreen.
-    private var windowed: Bool {
-        ClientLayout.isWindowed(windowWidth: windowWidth)
-    }
-
     private var layout: ClientLayoutMode {
         ClientLayout.mode(
             preference: ClientLayoutPreference(rawValue: layoutPreference) ?? .automatic,
@@ -153,7 +147,7 @@ struct ClientRootView: View {
             } else if !account.signedIn {
                 signedOut
             } else if layout == .sidebar {
-                ClientSidebarRoot(showAccount: $showAccount, windowed: windowed)
+                ClientSidebarRoot(showAccount: $showAccount)
                     .id(WorkSessionContext.shared.scope)
                     .transition(.opacity)
             } else {
@@ -370,7 +364,7 @@ struct ClientRootView: View {
                     Tab(tab.label, systemImage: tab.symbol, value: tab) {
                         NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                             tab.content
-                                .clientChrome(showAccount: $showAccount, windowed: windowed)
+                                .clientChrome(showAccount: $showAccount)
                                 .modifier(ClientRestoredDestination(tab: tab))
                                 .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                         }
@@ -388,7 +382,7 @@ struct ClientRootView: View {
                 ForEach(tabCustomization.tabs(including: navigation.destination)) { tab in
                     NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                         tab.content
-                            .clientChrome(showAccount: $showAccount, windowed: windowed)
+                            .clientChrome(showAccount: $showAccount)
                             .modifier(ClientRestoredDestination(tab: tab))
                             .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                     }
@@ -545,15 +539,13 @@ private struct ClientAuthRetryView: View {
 }
 
 private extension View {
-    /// The top bar every client screen shares: the avatar, and room for
-    /// exactly one contextual control. The wordmark joins the middle everywhere
-    /// except a windowed iPad, where the traffic lights leave no uncontested
-    /// center and the tab bar already names the screen.
+    /// The top bar every client screen shares: the avatar, the wordmark, and
+    /// room for exactly one contextual control.
     ///
     /// A modifier rather than a wrapper view, so each screen keeps its own
     /// scroll view as the direct child of the navigation stack. That is what
     /// lets content scroll under the glass instead of stopping at its edge.
-    func clientChrome(showAccount: Binding<Bool>, windowed: Bool) -> some View {
+    func clientChrome(showAccount: Binding<Bool>) -> some View {
         toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -570,15 +562,19 @@ private extension View {
                 ToolbarItem(placement: .topBarTrailing) {
                     ClientConnectionChip()
                 }
-                if !windowed {
-                    ToolbarItem(placement: .principal) {
-                        // Larger than the Mac's sidebar lockup, and not filling:
-                        // this is the one brand on the screen and it has a whole
-                        // bar to itself, where the sidebar size read as a caption.
-                        // `fills` off so it centres instead of pushing right.
-                        Wordmark(size: 22, fills: false)
-                            .accessibilityAddTraits(.isHeader)
-                    }
+                ToolbarItem(placement: .principal) {
+                    // Larger than the Mac's sidebar lockup, and not filling:
+                    // this is the one brand on the screen and it has a whole
+                    // bar to itself, where the sidebar size read as a caption.
+                    // `fills` off so it centres instead of pushing right.
+                    //
+                    // Windowed too. The iPad's traffic lights take the start
+                    // of this row, not its middle, and this bar is the whole
+                    // window wide, so the centre is still free. Dropping the
+                    // brand here left the bar with an avatar at one end and a
+                    // search button at the other.
+                    Wordmark(size: 22, fills: false)
+                        .accessibilityAddTraits(.isHeader)
                 }
             }
     }

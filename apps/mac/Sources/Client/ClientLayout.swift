@@ -82,26 +82,6 @@ enum ClientLayout {
             return width >= minimumSidebarWidth ? .sidebar : .tabs
         }
     }
-
-    /// Whether this scene floats in a window instead of filling the display.
-    ///
-    /// iPad windowed mode parks the traffic lights in the toolbar row, so the
-    /// client keeps its brand out of that row while windowed. Fullscreen has
-    /// no lights and the toolbar lockup returns. A phone window always fills
-    /// its display, so this is always false there.
-    ///
-    /// Window width against the foreground scene's screen width: there is no
-    /// public "traffic lights are visible" flag, and size class cannot tell
-    /// fullscreen from windowed at the same width. The margin stays well
-    /// above rounding noise and well below any real window inset.
-    static func isWindowed(windowWidth: CGFloat) -> Bool {
-        guard windowWidth > 0 else { return false }
-        let scene = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first { $0.activationState == .foregroundActive }
-        guard let screenWidth = scene?.screen.bounds.width, screenWidth > 0 else { return false }
-        return screenWidth - windowWidth > 16
-    }
 }
 
 /// Whether this iPad has a keyboard or a pointer attached right now.
