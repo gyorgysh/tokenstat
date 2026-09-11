@@ -278,7 +278,12 @@ struct ChatView: View {
                     }
                     .keyboardShortcut(step < 0 ? .upArrow : .downArrow, modifiers: [.command, .option])
                 }
-                ToolbarIconButton(systemImage: "plus", help: "New chat") {
+                ToolbarIconButton(
+                    systemImage: "plus",
+                    help: "New chat",
+                    isBusy: model.isCreating,
+                    isEnabled: !model.isCreating
+                ) {
                     Task { if await model.create() != nil { showingOverview = false } }
                 }
             }
@@ -315,10 +320,10 @@ struct ChatView: View {
                 if model.approvals.isEmpty {
                     // Pending writing stays available offline for copying or cancellation.
                     // Sending and receipt checks require a live, verified owner.
-                    if !model.queued.isEmpty {
+                    if !model.pendingQueue.isEmpty {
                         let queueOwner = model.currentReference
                         ChatQueueStrip(
-                            items: model.queued,
+                            items: model.pendingQueue,
                             owner: queueOwner,
                             paused: model.queuePaused,
                             offline: model.savedCopy != nil,
@@ -614,7 +619,7 @@ struct ChatView: View {
             // not visible, so they stayed at estimated height until a click
             // forced a real layout.
             .overlay {
-                if !transcriptReady, model.recentMessagePreview.isEmpty {
+                if showsSkeleton {
                     TranscriptSkeleton()
                         .frame(maxWidth: ReadingRoom.laneWidth)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -622,6 +627,12 @@ struct ChatView: View {
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
+            .modifier(OpeningCover(
+                isOpening: model.openingConversation,
+                ready: transcriptReady,
+                conversationID: model.selected?.id,
+                opening: $opening
+            ))
             .chatScrollMetrics { metrics in
                 #if DEBUG
                 TranscriptProbe.shared.noteMetrics()
@@ -801,6 +812,22 @@ struct ChatView: View {
     /// the end is under the viewport and steady.
     private var transcriptReady: Bool {
         follow.arrived && !model.openingConversation
+    }
+
+    /// Whether an opening is in progress for the conversation on screen.
+    ///
+    /// The wireframe covers an opening: the fetch, and the frames a lazy stack
+    /// then spends measuring what the fetch delivered. Nothing else. A send, a
+    /// jump and a streaming turn all reset `arrived` too, and an empty
+    /// transcript never reaches it at all (`atEnd` needs a content height),
+    /// so keying the cover on `arrived` alone put scaffolding over the first
+    /// message of a new chat for the length of the settle budget.
+    @State private var opening = false
+
+    /// Whether the wireframe is up: an opening is under way, it has not
+    /// settled, and no cached preview is standing in for it.
+    private var showsSkeleton: Bool {
+        opening && !transcriptReady && model.recentMessagePreview.isEmpty
     }
 
     /// The longest the opening pin holds, in fifty-millisecond frames. It
@@ -1178,6 +1205,7 @@ struct ChatView: View {
                 Task { await model.create() }
             }
             .buttonStyle(AccentButtonStyle())
+            .disabled(model.isCreating)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

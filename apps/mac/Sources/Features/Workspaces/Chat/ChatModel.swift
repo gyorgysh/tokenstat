@@ -20,8 +20,23 @@ final class ChatModel {
     }
 
     private static let launchChoiceKey = "chat.lastLaunchChoice.v1"
-    var chats: [ChatConversation] = []
-    var selected: ChatConversation?
+    var chats: [ChatConversation] = [] {
+        didSet { noteRunningChats() }
+    }
+    /// When each known conversation was first seen running, by conversation
+    /// id. The host reports only whether a turn is running, so the stamp is
+    /// the moment this app observed it: exact for a turn sent from here, a
+    /// lower bound for one already going when the list was read. Reconciled
+    /// on every list write, so a stopped turn leaves no stamp behind it.
+    private var runningSince: [String: Date] = [:]
+    /// When this conversation's current turn started, for the Working clock
+    /// in the composer and the sidebar. Nil when it is not running.
+    func turnStartedAt(for conversationID: String) -> Date? {
+        runningSince[conversationID]
+    }
+    var selected: ChatConversation? {
+        didSet { noteRunningChats() }
+    }
     var events: [ChatTimelineEvent] = []
     /// A prompt that has been sent and is not in `events` yet.
     ///
@@ -462,7 +477,7 @@ final class ChatModel {
     /// so rather than a claim in either direction.
     func sendFromComposer() async {
         guard let submission = heldSubmission else { return }
-        defer { heldSubmission = nil; sending = false }
+        defer { heldSubmission = nil; sending = false; deliveringFromComposer = nil }
         guard let reference = submission.reference, let messageID = submission.messageID,
               submission.owns(reference: currentReference, conversationID: selected?.id,
                               peer: peer, scope: WorkSessionContext.shared.scope) else {
@@ -481,6 +496,7 @@ final class ChatModel {
                 } else { items.append(candidate) }
             }
             guard let item = queued.first(where: { $0.id == messageID }) else { throw ChatOutboxStore.Failure.invalid }
+            deliveringFromComposer = messageID
             let accepted = await deliverQueued(item, stopCurrent: false, reserved: true)
             if !accepted {
                 restoreSubmission(submission)
@@ -600,6 +616,33 @@ final class ChatModel {
             chatListCache.removeValue(forKey: drop)
         }
     }
+
+    /// Stamp newly running conversations, drop stopped ones. Reads every
+    /// list the model holds, because the sidebar draws cached folders the
+    /// live list does not currently cover, and a stamp must live exactly as
+    /// long as its row claims Working: both correct together on the next
+    /// read of that folder. Runs from `chats`'s didSet, which also fires for
+    /// element writes like the accepted-send path's `replace`, so no send
+    /// site stamps anything itself.
+    private func noteRunningChats() {
+        var running = Set<String>()
+        for conversation in chats where conversation.running {
+            running.insert(conversation.id)
+        }
+        if let selected, selected.running {
+            running.insert(selected.id)
+        }
+        for list in chatListCache.values {
+            for conversation in list where conversation.running {
+                running.insert(conversation.id)
+            }
+        }
+        let next = reconcileRunningSince(runningSince, running: running, now: Date())
+        if next != runningSince {
+            runningSince = next
+        }
+    }
+
     private var attachmentCacheGeneration: UInt64 = 0
     private var attemptedResponseAttachments: Set<String> = []
     private(set) var loadingResponseAttachments: Set<String> = []
@@ -722,7 +765,17 @@ final class ChatModel {
             async let loadedChats = Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
             let loaded = try await (loadedBackends, loadedPersonas, loadedChats)
             probe.error("load answered gen=\(generation)/\(self.loadGeneration) scopeThen=\(String(describing: scope?.identity)) scopeNow=\(String(describing: WorkSessionContext.shared.scope?.identity)) chats=\(loaded.2.count)")
-            guard generation == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
+            guard generation == loadGeneration, scope == WorkSessionContext.shared.scope else {
+                // A superseded load must not keep the opening state its
+                // folder-change block may have set above: this return skips
+                // every path that clears it, and the stuck flag then gates
+                // polling (and the transcript) with the newer load none the
+                // wiser, freezing a finished turn on screen. The newer load
+                // re-asserts the flag in its own block when it is opening;
+                // when it is not, polling must run.
+                openingConversation = false
+                return
+            }
             backends = loaded.0
             personas = loaded.1.personas
             // The host says "" for a workspace that has chosen no persona.
@@ -848,7 +901,7 @@ final class ChatModel {
         return savedCopy != nil
     }
 
-    private func select(_ chat: ChatConversation?, savedPage: CachedRecordPayload?) async {
+    private func select(_ chat: ChatConversation?, savedPage: CachedRecordPayload?, fresh: Bool = false) async {
         if savedPage == nil, let chat, chat.id == selected?.id, !events.isEmpty {
             await refreshOpen(id: chat.id)
             return
@@ -880,6 +933,30 @@ final class ChatModel {
         #endif
         guard let chat else {
             openingConversation = false
+            return
+        }
+        if fresh {
+            // Created a moment ago on this machine, so there is nothing to
+            // open: no rows, no earlier pages, no approvals, no sealed copy.
+            // Asking anyway put the wireframe over an empty screen for as
+            // long as the host took to answer "nothing", which is the jump a
+            // new chat used to open with. The state below is what an empty
+            // live page would have set, so the first poll picks the opening
+            // turn up exactly as it does after any other open.
+            openingConversation = false
+            contextRevision = chat.sendRevision
+            eventsEpoch &+= 1
+            offset = 0
+            tailCursor = nil
+            earlierCursor = nil
+            hasEarlier = false
+            reachedStart = false
+            historyTrimmed = false
+            conversationUsage = nil
+            usageThrough = nil
+            // Not awaited: the empty conversation is already on screen, and
+            // the inspector's disclosure can fill itself in behind it.
+            Task { await loadInstructions(id: chat.id, generation: generation) }
             return
         }
         openingConversation = true
@@ -979,8 +1056,20 @@ final class ChatModel {
         await openEvents(id: selected.id, generation: generation)
     }
 
+    /// One creation at a time: a second tap while the backend answers awaits
+    /// the same conversation instead of doubling the sidebar.
+    private let createSingleflight = Singleflight<ChatConversation?>()
+
     @discardableResult
     func create() async -> ChatConversation? {
+        await createSingleflight.run { await self.performCreate() }
+    }
+
+    /// True while a creation is reaching the backend. New-chat buttons read
+    /// this so the tap shows as busy instead of dead.
+    var isCreating: Bool { createSingleflight.isRunning }
+
+    private func performCreate() async -> ChatConversation? {
         guard !Task.isCancelled, let workspaceID, let scope = continuityScope,
               scope == WorkSessionContext.shared.scope else { return nil }
         let context = loadGeneration
@@ -1020,7 +1109,9 @@ final class ChatModel {
             guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return nil }
             chats.insert(chat, at: 0)
             if let folderID { storeChatListCache(chats, folderID: folderID) }
-            if !Task.isCancelled, selection == selectionGeneration { await select(chat) }
+            if !Task.isCancelled, selection == selectionGeneration {
+                await select(chat, savedPage: nil, fresh: true)
+            }
             return chat
         } catch {
             if !Task.isCancelled, context == loadGeneration, scope == WorkSessionContext.shared.scope { self.error = error.localizedDescription }
@@ -1208,6 +1299,22 @@ final class ChatModel {
     /// Messages waiting for the open turn to finish. Kept per conversation so
     /// leaving the thread and coming back still has them.
     private(set) var queued: [ChatQueuedMessage] = []
+    /// The message the composer is delivering on its first attempt.
+    ///
+    /// The outbox is written before the host is asked, because an
+    /// acknowledgement that never arrives must not take the words with it.
+    /// That record is not news to the person who just pressed Send: on a
+    /// healthy send it exists for one round trip, and drawing it made the
+    /// pending strip open and shut on every message.
+    private var deliveringFromComposer: String?
+    /// What the pending strip draws: everything genuinely waiting, which is
+    /// to say everything except the send that is in flight right now. A
+    /// refused or unconfirmed send clears this on its way out, so it appears
+    /// the moment it really is pending.
+    var pendingQueue: [ChatQueuedMessage] {
+        guard let deliveringFromComposer else { return queued }
+        return queued.filter { $0.id != deliveringFromComposer }
+    }
     private var queuedReference: WorkReference?
     @ObservationIgnored private var sendingNow = false
     private var authorizedQueueItems: Set<String> = []

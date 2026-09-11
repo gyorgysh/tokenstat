@@ -77,24 +77,10 @@ struct ChatComposer: View {
                     chat: chat,
                     locked: running
                 )
-                Spacer(minLength: Theme.Space.s)
-                if running {
-                    Button("Stop", .stop) { onStop() }
-                        .buttonStyle(DestructiveButtonStyle(small: true))
-                        .environment(\.compactActions, true)
-                        .keyboardShortcut(.cancelAction)
-                }
-                if !cannotSend {
-                    Button(running ? "Send after this turn" : "Send", .send, action: onSend)
-                        .buttonStyle(AccentButtonStyle(small: true))
-                        .environment(\.compactActions, true)
-                        .help(running ? "Waits until this turn finishes. Stop and send now is on the queued message." : "Send")
-                        .contextMenu {
-                            if running {
-                                Button("Stop and send now", .send, action: onSendNow)
-                            }
-                        }
-                }
+                Spacer(minLength: Theme.Space.m)
+                turnStatus
+                ComposerLimitsBadge(backend: chat.backend)
+                turnActions
             }
         }
         #if os(macOS)
@@ -175,6 +161,79 @@ struct ChatComposer: View {
         #endif
         .help("Attach files or images")
         .accessibilityLabel("Attach")
+    }
+
+    /// How long this turn has been running, in a slot wide enough for its
+    /// longest reading.
+    ///
+    /// The slot is held whether or not a turn is running, and sits against
+    /// the row's flexible gap, so the space it keeps while nothing runs reads
+    /// as part of that gap rather than as a hole. Holding it is what stops
+    /// the quota badge and the buttons beside it being shoved sideways every
+    /// time a turn starts, ends, or the clock passes another digit.
+    private var turnStatus: some View {
+        ZStack(alignment: .trailing) {
+            Text("Working · 00h 00m")
+                .hidden()
+                .accessibilityHidden(true)
+            if running {
+                if let since = model.turnStartedAt(for: chat.id) {
+                    TurnElapsedText(since: since)
+                } else {
+                    // The stamp lands on the same write that reports running,
+                    // so this is a single frame at most: the word without the
+                    // clock beats no word at all.
+                    Text("Working")
+                        .accessibilityLabel("Working")
+                }
+            }
+        }
+        .font(Theme.font(11, weight: .medium))
+        .monospacedDigit()
+        .foregroundStyle(Theme.accent)
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    /// Stop and Send, over an invisible copy of both.
+    ///
+    /// Either can come and go on its own: Stop only while a turn runs, Send
+    /// only with something to send. Laying them over the pair keeps this
+    /// block one width, so Send holds the trailing edge and the badge beside
+    /// it holds its place. The copy carries no shortcut, menu or action, so
+    /// there is one of each of those in the row and not two.
+    private var turnActions: some View {
+        ZStack(alignment: .trailing) {
+            HStack(spacing: Theme.Space.s) {
+                Button("Stop", .stop) {}
+                    .buttonStyle(DestructiveButtonStyle(small: true))
+                Button("Send", .send) {}
+                    .buttonStyle(AccentButtonStyle(small: true))
+            }
+            .environment(\.compactActions, true)
+            .hidden()
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+            HStack(spacing: Theme.Space.s) {
+                if running {
+                    Button("Stop", .stop) { onStop() }
+                        .buttonStyle(DestructiveButtonStyle(small: true))
+                        .environment(\.compactActions, true)
+                        .keyboardShortcut(.cancelAction)
+                }
+                if !cannotSend {
+                    Button(running ? "Send after this turn" : "Send", .send, action: onSend)
+                        .buttonStyle(AccentButtonStyle(small: true))
+                        .environment(\.compactActions, true)
+                        .help(running ? "Waits until this turn finishes. Stop and send now is on the queued message." : "Send")
+                        .contextMenu {
+                            if running {
+                                Button("Stop and send now", .send, action: onSendNow)
+                            }
+                        }
+                }
+            }
+        }
     }
 
     private var field: some View {

@@ -672,6 +672,36 @@ struct TranscriptBottomSentinel: View {
 /// a couple of tool rows between them, weighted to the bottom because that is
 /// where the reading starts. It is over in a few frames, and its job is that
 /// those frames look like the thing that is about to appear.
+/// Keeps the wireframe's opening latch in step with the conversation.
+///
+/// Raised the moment a conversation starts opening, dropped once its
+/// transcript has settled once. A selection change reads the model's current
+/// value rather than assuming an order, so it does not matter which of the
+/// three lands first on the frame a conversation changes.
+///
+/// Its own modifier because these are three observations on a view body the
+/// type checker already finds long, and because both chat screens need the
+/// same rule.
+struct OpeningCover: ViewModifier {
+    var isOpening: Bool
+    var ready: Bool
+    var conversationID: String?
+    @Binding var opening: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: isOpening) { _, value in
+                if value { opening = true }
+            }
+            .onChange(of: ready) { _, value in
+                if value { opening = false }
+            }
+            .onChange(of: conversationID) { _, _ in
+                opening = isOpening
+            }
+    }
+}
+
 struct TranscriptSkeleton: View {
     /// Roughly how tall each stand-in turn is, in bars.
     private static let turns: [(mine: Bool, lines: Int)] = [

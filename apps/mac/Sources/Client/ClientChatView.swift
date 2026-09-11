@@ -182,6 +182,7 @@ struct ClientChatView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("New chat", .create) { Task { await create() } }
+                    .disabled(model.isCreating)
             }
         }
         .confirmationDialog(
@@ -658,10 +659,10 @@ struct ClientChatThread: View {
                 }
                 // Pending writing stays available offline for copying or cancellation.
                 // Sending and receipt checks require a live, verified owner.
-                if !model.queued.isEmpty {
+                if !model.pendingQueue.isEmpty {
                         let queueOwner = model.currentReference
                     ChatQueueStrip(
-                        items: model.queued,
+                        items: model.pendingQueue,
                         owner: queueOwner,
                             paused: model.queuePaused,
                             offline: model.savedCopy != nil,
@@ -820,13 +821,19 @@ struct ClientChatThread: View {
             // lazy stack skipped measuring the last prompt until a later
             // layout (leave and come back) forced the real height.
             .overlay {
-                if !transcriptReady, model.recentMessagePreview.isEmpty {
+                if showsSkeleton {
                     TranscriptSkeleton()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Theme.background)
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
+            .modifier(OpeningCover(
+                isOpening: model.openingConversation,
+                ready: transcriptReady,
+                conversationID: model.selected?.id,
+                opening: $opening
+            ))
             .chatScrollMetrics { metrics in
                 #if DEBUG
                 TranscriptProbe.shared.noteMetrics()
@@ -1087,6 +1094,22 @@ struct ClientChatThread: View {
     /// Whether the transcript may be looked at. Same rule as the Mac: the
     /// wireframe covers the frames between picking a conversation and the
     /// settle task starting, as well as the settle itself.
+    /// Whether an opening is in progress for the conversation on screen.
+    ///
+    /// The wireframe covers an opening: the fetch, and the frames a lazy stack
+    /// then spends measuring what the fetch delivered. Nothing else. A send, a
+    /// jump and a streaming turn all reset `arrived` too, and an empty
+    /// transcript never reaches it at all (`atEnd` needs a content height),
+    /// so keying the cover on `arrived` alone put scaffolding over the first
+    /// message of a new chat for the length of the settle budget.
+    @State private var opening = false
+
+    /// Whether the wireframe is up: an opening is under way, it has not
+    /// settled, and no cached preview is standing in for it.
+    private var showsSkeleton: Bool {
+        opening && !transcriptReady && model.recentMessagePreview.isEmpty
+    }
+
     private var transcriptReady: Bool {
         follow.arrived && !model.openingConversation
     }
