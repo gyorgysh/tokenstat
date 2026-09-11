@@ -1104,8 +1104,19 @@ fn resolve_shell(configured: Option<&str>) -> String {
     );
     candidates
         .into_iter()
-        .find(|shell| PathBuf::from(&shell).exists())
-        .unwrap_or_else(|| configured.unwrap_or("/bin/sh").to_string())
+        .find(|shell| {
+            let path = PathBuf::from(&shell);
+            path.is_file() && is_executable_shell(&path)
+        })
+        .unwrap_or_else(|| "/bin/sh".to_string())
+}
+
+#[cfg(unix)]
+fn is_executable_shell(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 /// Whether a request is the interactive shell profile rather than a harness.
@@ -1428,7 +1439,7 @@ fn apply_login_environment(cmd: &mut CommandBuilder, req: &Spawn) {
         for (key, value) in &env.vars {
             cmd.env(key, value);
         }
-        if !env.vars.contains_key("HOME") {
+        if env.vars.get("HOME").is_none_or(|home| home.is_empty()) {
             apply_home(cmd);
         }
         return;

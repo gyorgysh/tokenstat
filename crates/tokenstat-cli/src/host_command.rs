@@ -488,6 +488,12 @@ fn access(
 /// Numbered so a key never has to be retyped over SSH. `--all` takes every
 /// pending request at once; a single target plus `--yes` (or `--json`) runs
 /// without a prompt for scripts.
+///
+/// Numbers refer to the freshly fetched pending list inside this call, not
+/// to an earlier `host access` listing: a new request arriving between the
+/// list and this call shifts numbers. Scripts should prefer a full key or a
+/// long key prefix; numbers are for an interactive session that lists and
+/// approves in one step.
 fn approve(
     socket: &std::path::Path,
     target: Option<&str>,
@@ -527,24 +533,53 @@ fn approve(
         println!("Nothing was changed.");
         return Ok(());
     }
+    // Dedupe: `1,1` must not issue the grant twice.
+    let mut seen = std::collections::HashSet::new();
+    let chosen: Vec<String> = chosen
+        .into_iter()
+        .filter(|k| seen.insert(k.clone()))
+        .collect();
     let mut approved = Vec::new();
+    let mut failed = Vec::new();
     for key in &chosen {
-        host_rpc::call(
+        match host_rpc::call(
             socket,
             "workspace.access.set",
             json!({"peerId": key, "allow": true, "via": "console"}),
-        )?;
-        approved.push(key.clone());
+        ) {
+            Ok(_) => approved.push(key.clone()),
+            Err(e) => failed.push(json!({"peerId": key, "error": e.to_string()})),
+        }
     }
     if json_output {
-        println!("{}", json!({"approved": approved}));
-    } else if approved.len() == 1 {
-        println!(
-            "Allowed access for {}.",
-            describe(&approved[0], &pending_list)
-        );
+        if failed.is_empty() {
+            println!("{}", json!({"approved": approved}));
+        } else {
+            println!("{}", json!({"approved": approved, "failed": failed}));
+            bail!("Failed to approve {} request(s).", failed.len());
+        }
     } else {
-        println!("Allowed access for {} devices.", approved.len());
+        if !failed.is_empty() {
+            for f in &failed {
+                eprintln!("Failed to approve {}: {}", f["peerId"], f["error"]);
+            }
+            if !approved.is_empty() {
+                println!(
+                    "Allowed access for {} device(s); {} failed.",
+                    approved.len(),
+                    failed.len()
+                );
+            }
+            bail!("Failed to approve {} request(s).", failed.len());
+        }
+        if approved.len() == 1 {
+            println!(
+                "Allowed access for {}.",
+                describe(&approved[0], &pending_list)
+            );
+        } else {
+            println!("Allowed access for {} devices.", approved.len());
+        }
     }
     Ok(())
 }
@@ -554,6 +589,9 @@ fn approve(
 /// and visible in the list above.
 fn resolve_target(target: &str, pending: &[Value]) -> Result<String> {
     let needle = target.trim();
+    if needle.is_empty() {
+        bail!("Empty device selector. Use a list number, key prefix, or label.");
+    }
     if let Ok(number) = needle.parse::<usize>() {
         if number >= 1 && number <= pending.len() {
             return pending[number - 1]["peerId"]
@@ -652,6 +690,11 @@ fn prompt_choices(pending: &[Value], keys: &[String]) -> Result<Vec<String>> {
     }
     if answer == "a" || answer == "all" {
         return Ok(keys.to_vec());
+    }
+    // A label may itself contain a comma. Try the whole answer first; only
+    // split when it does not resolve as one target.
+    if let Ok(single) = resolve_target(&answer, pending) {
+        return Ok(vec![single]);
     }
     // Comma-separated numbers like `1,3` approve several at once.
     if answer.contains(',') {

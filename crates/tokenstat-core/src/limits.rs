@@ -283,6 +283,11 @@ fn limits_in(file: &Path) -> Option<ProviderLimits> {
     // plainly still has one. The windows are never sparse, so the newest block
     // carrying them is still the reading; only the plan label needs the same
     // carry-forward, taken from the newest block that named one.
+    // Newest-first. The windows come from the newest block that carries
+    // them; the plan comes from the newest block that names one (newer,
+    // same, or older). A sparse update with windows but no plan must keep
+    // scanning older blocks for the plan instead of returning None.
+    let mut candidate: Option<(Vec<UsageWindow>, i64, Option<String>)> = None;
     let mut newest_plan: Option<String> = None;
     for line in raw.lines().rev() {
         if !line.contains("rate_limits") {
@@ -299,46 +304,52 @@ fn limits_in(file: &Path) -> Option<ProviderLimits> {
             newest_plan.clone_from(&limits.plan_type);
         }
 
-        let observed_at_ms = parsed
-            .timestamp
-            .as_deref()
-            .and_then(parse_iso_ms)
-            .unwrap_or(0);
+        if candidate.is_none() {
+            let observed_at_ms = parsed
+                .timestamp
+                .as_deref()
+                .and_then(parse_iso_ms)
+                .unwrap_or(0);
 
-        let mut windows: Vec<UsageWindow> = [limits.primary, limits.secondary]
-            .into_iter()
-            .flatten()
-            .filter_map(|w| {
-                let percent = w.used_percent?;
-                let minutes = w.window_minutes.unwrap_or(0);
-                let resets_at_ms = w
-                    .resets_at
-                    .map(|s| s * 1000)
-                    .or_else(|| w.resets_in_seconds.map(|s| observed_at_ms + s * 1000));
-                Some(UsageWindow {
-                    label: window_label(minutes),
-                    percent,
-                    resets_at_ms,
-                    severity: LimitSeverity::from_percent(percent),
+            let mut windows: Vec<UsageWindow> = [limits.primary, limits.secondary]
+                .into_iter()
+                .flatten()
+                .filter_map(|w| {
+                    let percent = w.used_percent?;
+                    let minutes = w.window_minutes.unwrap_or(0);
+                    let resets_at_ms = w
+                        .resets_at
+                        .map(|s| s * 1000)
+                        .or_else(|| w.resets_in_seconds.map(|s| observed_at_ms + s * 1000));
+                    Some(UsageWindow {
+                        label: window_label(minutes),
+                        percent,
+                        resets_at_ms,
+                        severity: LimitSeverity::from_percent(percent),
+                    })
                 })
-            })
-            .collect();
-        // Shortest window first: the one about to bite is the one to read.
-        windows.sort_by_key(|w| w.resets_at_ms.unwrap_or(i64::MAX));
+                .collect();
+            // Shortest window first: the one about to bite is the one to read.
+            windows.sort_by_key(|w| w.resets_at_ms.unwrap_or(i64::MAX));
 
-        if windows.is_empty() {
-            continue;
+            if windows.is_empty() {
+                continue;
+            }
+            candidate = Some((windows, observed_at_ms, limits.plan_type));
         }
-        return Some(ProviderLimits {
-            source: "codex".to_string(),
-            plan: limits.plan_type.or(newest_plan),
-            windows,
-            observed_at_ms,
-            note: None,
-            stale: false,
-        });
+
+        if candidate.is_some() && newest_plan.is_some() {
+            break;
+        }
     }
-    None
+    candidate.map(|(windows, observed_at_ms, plan)| ProviderLimits {
+        source: "codex".to_string(),
+        plan: plan.or(newest_plan),
+        windows,
+        observed_at_ms,
+        note: None,
+        stale: false,
+    })
 }
 
 /// `2026-07-12T06:44:58.735Z` and friends, to unix milliseconds.

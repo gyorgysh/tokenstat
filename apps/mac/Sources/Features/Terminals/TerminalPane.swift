@@ -173,14 +173,14 @@ struct TerminalPane: View {
         .task(id: peer) {
             await launcher.resolve()
             guard let peer else { return }
-            // Keep asking while the answer is still missing. Connecting to a
-            // machine is manual and its daemon can restart under a folder that
-            // stays open, so the first fetch is regularly the one that loses.
-            // The loop ends the moment the catalog arrives, and with it when
-            // the folder closes.
-            while !Task.isCancelled {
+            // Retry while the answer is missing, bounded: the peer may be
+            // offline or return empty. An unbounded loop polls forever with
+            // a no-op fetch after the first attempt.
+            var attempts = 0
+            while !Task.isCancelled, attempts < 6 {
                 await launcher.resolveRemote(peer: peer)
                 if !launcher.remoteCatalog(for: peer).isEmpty { break }
+                attempts += 1
                 try? await Task.sleep(for: .seconds(5))
             }
         }

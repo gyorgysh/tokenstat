@@ -109,6 +109,7 @@ pub struct SshFolder {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderRef {
     pub kind: String,
+    #[serde(alias = "resourceID")]
     pub resource_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,

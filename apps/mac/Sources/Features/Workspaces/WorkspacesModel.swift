@@ -1075,10 +1075,11 @@ final class WorkspacesModel {
 
     /// An explicit Connect undoes a Disconnect: the peer's folders are
     /// allowed back and fetched immediately rather than after the next sweep.
-    /// Connecting never flips the auto-connect switch: that is the switch's
-    /// own gesture, on Devices.
+    /// It also turns auto-connect back on, so the next sweep keeps what this
+    /// fetch brings back instead of leaving it stale.
     func reconnect(peer key: String) {
         suppressedPeers.remove(key)
+        Self.setAutoConnect(true, for: key)
         // Clear the backoff too. Somebody pressing Connect is asking now, and
         // a peer that had been dialled down to the slow rate would otherwise
         // sit out most of the next ten minutes before being tried.
@@ -1367,14 +1368,29 @@ final class WorkspacesModel {
             // sending the prefixed id locally is what made Remove silently
             // fail on remote folders.
             if folder.isRemote, let peer = folder.machineID {
-                let raw: String = {
-                    let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
-                    return parts.count == 3 ? parts[2] : folder.id
-                }()
+                let prefix = "remote:\(peer):"
+                let raw: String = folder.id.hasPrefix(prefix)
+                    ? String(folder.id.dropFirst(prefix.count))
+                    : {
+                        let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
+                        return parts.count == 3 ? parts[2] : folder.id
+                    }()
                 struct RemovedAck: Codable, Sendable { var removed: Bool? }
+                if raw == folder.id {
+                    // Parse failed: the owner would fail too. Drop locally
+                    // rather than sending a guaranteed-failing id.
+                    if selectedID == folder.id { selectedID = nil }
+                    forgetTabs(in: folder.id)
+                    remoteFolders[peer]?.removeAll(where: { $0.id == folder.id })
+                    publishFolders()
+                    return
+                }
                 _ = try await Bridge.onPeer(peer, "workspace.remove", ["id": raw], as: RemovedAck.self)
                 if selectedID == folder.id { selectedID = nil }
                 forgetTabs(in: folder.id)
+                // Optimistic drop so the row does not linger until refresh.
+                remoteFolders[peer]?.removeAll(where: { $0.id == folder.id })
+                publishFolders()
                 refreshRemotePeer(peer)
                 return
             }

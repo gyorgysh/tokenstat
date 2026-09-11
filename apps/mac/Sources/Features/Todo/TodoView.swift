@@ -959,7 +959,7 @@ private struct NewCardForm: View {
                 return cleaned.isEmpty ? nil : cleaned
             }(),
             effort: effortChoice.isEmpty ? nil : effortChoice,
-            priority: priorityChoice,
+            priority: priorityChoice == "normal" ? nil : priorityChoice,
             destinationName: destinationName
         )
         if model.errorMessage == nil { cancel() }

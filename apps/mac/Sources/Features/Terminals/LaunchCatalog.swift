@@ -311,22 +311,30 @@ final class LaunchCatalog {
 
     /// Ask the machine that owns a remote workspace what it can launch. One
     /// fetch per peer; a failure forgets the peer so the next visit retries.
+    /// Concurrent panes share the in-flight fetch instead of each starting
+    /// their own.
+    private var remoteInFlight: [String: Task<[RemoteLaunchProfile]?, Never>] = [:]
     func resolveRemote(peer: String) async {
-        guard !remoteFetched.contains(peer) else { return }
-        remoteFetched.insert(peer)
-        do {
-            let dtos = try await Bridge.onPeer(
-                peer,
-                "launcher.catalog",
-                as: [RemoteLaunchProfile].self
-            )
-            let profiles = dtos.map(Self.profile(from:))
-            remoteCatalogByPeer[peer] = profiles
-            remoteAvailableByPeer[peer] = profiles.filter { $0.installed }
-            await adoptHostHidden(from: profiles, scope: peer, peer: peer)
-        } catch {
-            remoteFetched.remove(peer)
+        if let running = remoteInFlight[peer] {
+            _ = await running.value
+            return
         }
+        guard !remoteFetched.contains(peer) else { return }
+        let task = Task<[RemoteLaunchProfile]?, Never> {
+            try? await Bridge.onPeer(peer, "launcher.catalog", as: [RemoteLaunchProfile].self)
+        }
+        remoteInFlight[peer] = task
+        let dtos = await task.value
+        remoteInFlight[peer] = nil
+        guard let dtos else {
+            remoteFetched.remove(peer)
+            return
+        }
+        remoteFetched.insert(peer)
+        let profiles = dtos.map(Self.profile(from:))
+        remoteCatalogByPeer[peer] = profiles
+        remoteAvailableByPeer[peer] = profiles.filter { $0.installed }
+        await adoptHostHidden(from: profiles, scope: peer, peer: peer)
     }
 
     /// Hide a profile on the machine that owns it, then refresh that catalog.

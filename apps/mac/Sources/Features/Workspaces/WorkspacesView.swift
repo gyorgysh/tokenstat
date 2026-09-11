@@ -28,10 +28,12 @@ struct WorkspacesView: View {
     /// The signed-in tier, for the screen viewer a remote workspace offers.
     /// Nil is a tier the viewer refuses, and says so.
     var tier: String?
-    /// Whether the remote folder's owner reports no display layer. Probed
-    /// live: the account record carries no platform, so there is nothing
-    /// local to gate the viewer on.
-    @State private var ownerHeadless = false
+    /// Whether the remote folder's owner reports no display layer, per peer.
+    /// Probed live: the account record carries no platform, so there is
+    /// nothing local to gate the viewer on. Keyed by peer because one view
+    /// can show folders from several machines; a single Bool lets the last
+    /// probe win and hides (or shows) View screen on the wrong folder.
+    @State private var ownerHeadless: [String: Bool] = [:]
     @Environment(\.openWindow) private var openWindow
     #endif
 
@@ -137,7 +139,7 @@ struct WorkspacesView: View {
                 // A headless server has no display layer. Offering a viewer
                 // for it only ends in the viewer's own error, so the button
                 // stays off the header entirely.
-                if !ownerHeadless {
+                if !(ownerHeadless[peer] ?? false) {
                     Button("View screen", .preview) {
                         openWindow(value: RemoteScreenTarget(
                             peer: peer,
@@ -163,7 +165,7 @@ struct WorkspacesView: View {
             // An older host that cannot answer leaves the button where it
             // was rather than hiding a viewer that works.
             if let headless = try? await Bridge.peerHeadless(peer) {
-                ownerHeadless = headless
+                ownerHeadless[peer] = headless
             }
         }
     }

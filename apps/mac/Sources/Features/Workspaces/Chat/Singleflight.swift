@@ -14,6 +14,13 @@ import Foundation
 /// lives, and a second caller simply waits for the same task. A waiter that
 /// is cancelled still gets the answer (waiting never throws), and the slot
 /// clears exactly once, for the attempt that holds it.
+///
+/// Cancellation is not forwarded: the shared attempt belongs to all waiters,
+/// so cancelling one waiter must not cancel the create another tap is
+/// waiting on. Callers that need a cancelled tap to do nothing must check
+/// `Task.isCancelled` before calling `run`, not inside the operation (the
+/// operation runs in the shared child task, whose flag is never set by a
+/// waiter cancelling).
 @MainActor
 final class Singleflight<Value: Sendable> {
     private var inFlight: Task<Value, Never>?
@@ -26,7 +33,7 @@ final class Singleflight<Value: Sendable> {
         if let running = inFlight {
             return await running.value
         }
-        let task = Task { await operation() }
+        let task = Task { @MainActor in await operation() }
         inFlight = task
         let value = await task.value
         // Unconditional: a contender can only arrive while this await is

@@ -617,7 +617,10 @@ final class ClientWorkspacesModel {
             if isConnecting == nil, pendingPeer == host.peerKey { break }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        guard isConnecting == nil, pendingPeer == host.peerKey else { return }
+        guard isConnecting == nil, pendingPeer == host.peerKey else {
+            if pendingPeer == host.peerKey { pendingPeer = nil }
+            return
+        }
         await dial(host, recovering: false)
     }
 

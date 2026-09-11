@@ -4061,7 +4061,7 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
         notes = try values.decode(String.self, forKey: .notes)
         column = try values.decode(String.self, forKey: .column)
         order = try values.decode(Int64.self, forKey: .order)
-        priority = try values.decode(String.self, forKey: .priority)
+        priority = try values.decodeIfPresent(String.self, forKey: .priority) ?? "normal"
         backend = try values.decode(String.self, forKey: .backend)
         model = try values.decodeIfPresent(String.self, forKey: .model)
         effort = try values.decodeIfPresent(String.self, forKey: .effort)

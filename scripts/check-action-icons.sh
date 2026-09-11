@@ -218,14 +218,14 @@ ALLOWED = [
 # `, .save)` is the usual shape. `.icon` covers a button whose glyph is chosen
 # at runtime from the same vocabulary (`failure.action.icon`): the type is still
 # `ActionIcon`, so the compiler guarantees what this script is checking for.
-# `? .done : .copy` is the same case written inline, for a button that changes
-# its glyph with its own state (Copy becoming Copied). Both arms are cases of
-# the enum, so the compiler enforces the vocabulary either way; without this
-# the script read a compliant button as having no glyph at all.
+# A state-changing glyph (`? .done : .copy` for Copy becoming Copied) only
+# counts when the snippet is ActionIcon-typed; a bare ternary matches any enum
+# (`? .red : .blue`) and let colour/size ternaries pass without glyphs.
 GLYPH = re.compile(
     r"systemImage|ActionIcon|Image\(\s*systemName|, \.\w+[,)]|\.label\("
-    r"|actionIcon|\.icon[,)]|\?\s*\.\w+\s*:\s*\.\w+"
+    r"|actionIcon|\.icon[,)]"
 )
+TERNARY_GLYPH = re.compile(r"\?\s*\.\w+\s*:\s*\.\w+")
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -485,6 +485,14 @@ for root, _, files in os.walk(SRC):
             if in_skip(ranges, start):
                 continue
             if GLYPH.search(snippet):
+                continue
+            tm = TERNARY_GLYPH.search(snippet)
+            if tm and ("ActionIcon" in snippet or all(
+                arm.strip(". ") in vocab for arm in re.findall(r"\.\w+", tm.group(0))
+            )):
+                for um in re.finditer(r"\.(\w+)", tm.group(0)):
+                    if um.group(1) in vocab:
+                        used.add(um.group(1))
                 continue
             if allowed(p, snippet):
                 continue

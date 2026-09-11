@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// A distribution's own mark on a tinted tile, or a neutral server glyph.
 ///
@@ -12,7 +18,7 @@ struct SSHHostPlatformMark: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 9).fill(Theme.accentSoft)
-            if let asset = distroBrandAsset(label) {
+            if let asset = distroBrandAsset(label), assetExists(asset) {
                 Image(asset)
                     .renderingMode(.template)
                     .resizable()
@@ -26,5 +32,13 @@ struct SSHHostPlatformMark: View {
         .frame(width: 34, height: 34)
         .accessibilityLabel(label ?? "Server; platform not checked")
         .help(label ?? "Platform appears after a server check")
+    }
+
+    private func assetExists(_ name: String) -> Bool {
+#if os(macOS)
+        return NSImage(named: name) != nil
+#else
+        return UIImage(named: name) != nil
+#endif
     }
 }

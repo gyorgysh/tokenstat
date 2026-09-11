@@ -690,6 +690,7 @@ struct OpeningCover: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .onAppear { opening = isOpening }
             .onChange(of: isOpening) { _, value in
                 if value { opening = true }
             }

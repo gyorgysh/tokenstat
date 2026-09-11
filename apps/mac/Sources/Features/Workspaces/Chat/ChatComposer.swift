@@ -195,25 +195,26 @@ struct ChatComposer: View {
         .fixedSize()
     }
 
-    /// Stop and Send, over an invisible copy of both.
+    /// Stop and Send, over an invisible copy of the widest pair.
     ///
     /// Either can come and go on its own: Stop only while a turn runs, Send
-    /// only with something to send. Laying them over the pair keeps this
-    /// block one width, so Send holds the trailing edge and the badge beside
-    /// it holds its place. The copy carries no shortcut, menu or action, so
-    /// there is one of each of those in the row and not two.
+    /// only with something to send. The placeholder uses the longest real
+    /// string ("Send after this turn") with a fixed minimum width so the
+    /// badge beside it holds its place across Dynamic Type. The copy carries
+    /// no shortcut, menu or action, so there is one of each in the row.
     private var turnActions: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: Theme.Space.s) {
                 Button("Stop", .stop) {}
                     .buttonStyle(DestructiveButtonStyle(small: true))
-                Button("Send", .send) {}
+                Button("Send after this turn", .send) {}
                     .buttonStyle(AccentButtonStyle(small: true))
             }
             .environment(\.compactActions, true)
             .hidden()
             .accessibilityHidden(true)
             .allowsHitTesting(false)
+            .frame(minWidth: 180)
             HStack(spacing: Theme.Space.s) {
                 if running {
                     Button("Stop", .stop) { onStop() }

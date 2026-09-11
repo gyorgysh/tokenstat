@@ -310,6 +310,8 @@ jobs:
           retention-days: 14
 
   hostd:
+    # Preview only: x86_64 Linux. No aarch64 target (unlike release) to keep
+    # preview builds fast; ARM64 Linux is covered by the release matrix.
     name: hostd ${{ matrix.target }}
     needs: version
     if: >

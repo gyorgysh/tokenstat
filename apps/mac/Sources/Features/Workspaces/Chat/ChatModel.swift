@@ -615,6 +615,7 @@ final class ChatModel {
            let drop = chatListCache.keys.first(where: { $0 != folderID }) {
             chatListCache.removeValue(forKey: drop)
         }
+        noteRunningChats()
     }
 
     /// Stamp newly running conversations, drop stopped ones. Reads every
@@ -690,6 +691,7 @@ final class ChatModel {
                 loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
             chatListCache = [:]
+            noteRunningChats()
             recentMessages.removeAll()
             recentMessagePreview = []
             chats = []
@@ -766,14 +768,9 @@ final class ChatModel {
             let loaded = try await (loadedBackends, loadedPersonas, loadedChats)
             probe.error("load answered gen=\(generation)/\(self.loadGeneration) scopeThen=\(String(describing: scope?.identity)) scopeNow=\(String(describing: WorkSessionContext.shared.scope?.identity)) chats=\(loaded.2.count)")
             guard generation == loadGeneration, scope == WorkSessionContext.shared.scope else {
-                // A superseded load must not keep the opening state its
-                // folder-change block may have set above: this return skips
-                // every path that clears it, and the stuck flag then gates
-                // polling (and the transcript) with the newer load none the
-                // wiser, freezing a finished turn on screen. The newer load
-                // re-asserts the flag in its own block when it is opening;
-                // when it is not, polling must run.
-                openingConversation = false
+                // A superseded load must not touch the opening flag: load N+1
+                // may already have asserted opening=true in its folder-change
+                // block, and clearing it here would clobber the newer load.
                 return
             }
             backends = loaded.0
@@ -1062,7 +1059,11 @@ final class ChatModel {
 
     @discardableResult
     func create() async -> ChatConversation? {
-        await createSingleflight.run { await self.performCreate() }
+        // A cancelled New-chat tap must not create in the background: the
+        // shared task does not inherit waiter cancellation, so check here
+        // where the waiter's flag is visible.
+        guard !Task.isCancelled else { return nil }
+        return await createSingleflight.run { await self.performCreate() }
     }
 
     /// True while a creation is reaching the backend. New-chat buttons read

@@ -258,6 +258,8 @@ final class TerminalStackView: NSView {
         }
     }
 
+    private static let splitGap: CGFloat = 1
+
     override func layout() {
         super.layout()
         guard bounds.width > 1, bounds.height > 1 else {
@@ -267,7 +269,7 @@ final class TerminalStackView: NSView {
             // session stays blank until something forces another layout.
             return
         }
-        let gap: CGFloat = 1
+        let gap = Self.splitGap
         if let axis = splitAxis {
             let (lead, trail) = splitFrames(axis: axis, fraction: fraction, gap: gap)
             if let view = leadingView, view.frame != lead { view.frame = lead }
@@ -299,7 +301,7 @@ final class TerminalStackView: NSView {
         fraction: CGFloat
     ) -> CGRect? {
         if let axis {
-            let (lead, trail) = splitFrames(axis: axis, fraction: fraction, gap: 1)
+            let (lead, trail) = splitFrames(axis: axis, fraction: fraction, gap: Self.splitGap)
             if view === leading { return lead }
             if view === trailing { return trail }
             return nil
@@ -310,6 +312,7 @@ final class TerminalStackView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        guard window != nil else { return }
         // Freshly mounted with a zero frame, the first `sync` had nothing to
         // lay out against. Ask again now that a window exists, so the terminal
         // does not wait for a manual resize to appear.

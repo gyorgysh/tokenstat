@@ -993,15 +993,17 @@ struct SSHConnectForm: View {
                 if key.secretRef.hasPrefix("agent:") {
                     let fingerprint = String(key.secretRef.dropFirst("agent:".count))
                     authPayload = ["kind": "agent", "fingerprint": fingerprint]
-                    handle = try await Bridge.openSSHWithAgent(host, fingerprint: fingerprint, rows: 24, cols: 80, jump: jump)
+                    handle = try await Bridge.openSSHWithResolvedAuth(host, auth: authPayload, rows: 24, cols: 80, jump: jump)
                 } else {
                     let pem = try SSHSecretStore.load(reference: key.secretRef)
+                    // Same encoding for open and probe: nil passphrase is
+                    // NSNull, not missing, so the two calls cannot disagree.
                     authPayload = ["kind": "privateKey", "pem": pem, "passphrase": NSNull()]
-                    handle = try await Bridge.openSSHWithKey(host, pem: pem, passphrase: nil, rows: 24, cols: 80, jump: jump)
+                    handle = try await Bridge.openSSHWithResolvedAuth(host, auth: authPayload, rows: 24, cols: 80, jump: jump)
                 }
             } else {
                 authPayload = ["kind": "password", "password": password]
-                handle = try await Bridge.openSSHWithPassword(host, password: password, rows: 24, cols: 80, jump: jump)
+                handle = try await Bridge.openSSHWithResolvedAuth(host, auth: authPayload, rows: 24, cols: 80, jump: jump)
             }
             // Cancelling does not reach the call that is already in flight, so
             // a connection can land for a sheet somebody has left. Handing
@@ -1013,14 +1015,21 @@ struct SSHConnectForm: View {
             guard !Task.isCancelled else { return }
             connected(SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id))
             await model.noteConnection(host)
+            // Clear secrets promptly; the probe below reuses the already
+            // resolved values instead of holding cleartext longer.
+            password = ""
+            let probeAuth = authPayload
+            let probeJump = jump
+            let probeHost = host
             dismiss()
             // The library row shows what the server said about itself, and a
             // plain Connect never asked: the setup wizard probes, this sheet
             // did not. Refresh best effort with the same credential while it
             // is still in memory, so the next visit names the distro.
-            let confirmedHost = host
-            Task.detached {
-                try? await Bridge.probeServerForSetup(confirmedHost, auth: authPayload, jump: jump)
+            // Scoped to this sheet's lifetime: no detached fire-and-forget
+            // holding credentials after dismiss, failures surface via model.
+            Task {
+                try? await Bridge.probeServerForSetup(probeHost, auth: probeAuth, jump: probeJump)
             }
         } catch {
             guard !Task.isCancelled else { return }

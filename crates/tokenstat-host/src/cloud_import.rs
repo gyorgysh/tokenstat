@@ -79,8 +79,17 @@ fn import_digital_ocean(params: &str) -> Result<Value, String> {
 }
 
 fn do_host(d: &Droplet, username: &str) -> Option<Value> {
-    let address = d.networks.v4.iter().find(|n| n.kind == "public").or_else(|| d.networks.v4.first())?.ip_address.clone();
-    Some(json!({"id":"", "label":d.name, "hostname":address, "port":22, "username":username, "initialDirectory":"~", "credentialID":null, "tags":["digitalocean", d.region.slug], "provider":{"kind":"digitalocean", "resourceId":d.id.to_string(), "region":d.region.slug}, "hostKeys":[]}))
+    let address = d
+        .networks
+        .v4
+        .iter()
+        .find(|n| n.kind == "public")
+        .or_else(|| d.networks.v4.first())?
+        .ip_address
+        .clone();
+    Some(
+        json!({"id":"", "label":d.name, "hostname":address, "port":22, "username":username, "initialDirectory":"~", "credentialID":null, "tags":["digitalocean", d.region.slug], "provider":{"kind":"digitalocean", "resourceId":d.id.to_string(), "region":d.region.slug}, "hostKeys":[]}),
+    )
 }
 
 fn save_hosts(hosts: impl Iterator<Item = Value>) -> Result<Value, String> {
@@ -184,7 +193,8 @@ mod tests {
     #[test]
     fn imported_hosts_carry_a_provider_the_records_accept() {
         let page: DropletPage = serde_json::from_value(json!({"droplets":[{"id":7,"name":"web","region":{"slug":"fra1"},"networks":{"v4":[{"ip_address":"203.0.113.7","type":"public"}]}}]})).unwrap();
-        let host = do_host(&page.droplets[0], "root").expect("droplet with a public address imports");
+        let host =
+            do_host(&page.droplets[0], "root").expect("droplet with a public address imports");
         let provider: crate::ssh_records::ProviderRef =
             serde_json::from_value(host["provider"].clone()).expect("provider ref deserializes");
         assert_eq!(provider.resource_id, "7");

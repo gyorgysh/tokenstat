@@ -57,6 +57,7 @@ pub struct Card {
     pub notes: String,
     pub column: String,
     pub order: i64,
+    #[serde(default)]
     pub priority: Priority,
     /// Where a delegated run happens. Chosen once at create.
     pub backend: String,

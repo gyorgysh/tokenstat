@@ -21,8 +21,14 @@ enum ComposerLimits {
     /// labels arrive from several vendors' APIs in several shapes.
     static func tag(for label: String) -> String? {
         let plain = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Normalise vendor variants: "5 hour", "5h", "5-hour", "·5-hour".
+        let spaced = plain.replacingOccurrences(of: "·", with: " · ")
+        let norm = spaced.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        if norm == "5 hour" || norm == "5h" || norm.hasSuffix("· 5 hour") || norm.hasSuffix("· 5h") { return "5h" }
         if plain == "5-hour" || plain.hasSuffix("· 5-hour") { return "5h" }
+        if norm.contains("per week") || norm == "weekly" || norm.hasSuffix("· weekly") || norm == "7d" || norm == "7 day" { return "7d" }
         if plain == "weekly" || plain.hasSuffix("· weekly") { return "7d" }
+        if norm.contains("per month") || norm == "monthly" || norm.hasSuffix("· monthly") || norm == "30d" { return "30d" }
         if plain == "monthly" || plain.hasSuffix("· monthly") { return "30d" }
         return nil
     }

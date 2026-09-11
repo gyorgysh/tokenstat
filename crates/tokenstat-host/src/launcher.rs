@@ -664,7 +664,8 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
     // postinstall scripts outlive the shell they hang under otherwise.
     #[cfg(unix)]
     cmd.process_group(0);
-    if let Some(env) = tokenstat_pty::login_env_ready() {
+    let login_env = tokenstat_pty::login_env_ready();
+    if let Some(env) = &login_env {
         cmd.env("PATH", &env.path);
         for (key, value) in &env.vars {
             cmd.env(key, value);
@@ -740,8 +741,22 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
     // Believe the filesystem over the exit code. A downloader that is not
     // installed makes `curl … | bash` succeed on an empty script: exit zero,
     // nothing installed, and the tile flips back to not installed with no
-    // error shown. The same resolve the catalog uses decides.
-    if ok && !install_delivered(profile, &search_path(), Path::new(&home)) {
+    // error shown. Verify against the same login PATH the installer ran
+    // with, so a tool delivered to a login-only prefix is not misreported
+    // as a failure because the daemon PATH is shorter.
+    let verify_path = match &login_env {
+        Some(env) => {
+            let mut paths: Vec<String> =
+                split_path_var(&std::env::var("PATH").unwrap_or_default()).collect();
+            paths.extend(split_path_var(&env.path));
+            paths.extend(conventional_paths(&home));
+            let mut seen = HashSet::new();
+            paths.retain(|p| !p.is_empty() && seen.insert(p.clone()));
+            paths
+        }
+        None => search_path(),
+    };
+    if ok && !install_delivered(profile, &verify_path, Path::new(&home)) {
         ok = false;
         if !output.ends_with('\n') {
             output.push('\n');

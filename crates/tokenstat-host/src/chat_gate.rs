@@ -240,8 +240,15 @@ fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), Strin
         };
         let source = user_home.join(directory).join(file);
         let target = home.join(file);
-        if source.exists() && !target.exists() {
-            symlink(source, target).map_err(|error| error.to_string())?;
+        if !source.exists() {
+            return Ok(());
+        }
+        // Attempt the link without a prior existence check: check-then-act
+        // races with a concurrent creator. Tolerate an existing target.
+        match symlink(&source, &target) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.to_string()),
         }
     }
     #[cfg(not(unix))]

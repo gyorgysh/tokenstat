@@ -25,10 +25,10 @@ struct ComposerLimitsBadge: View {
     @State private var skip: Set<String> = []
     @State private var refreshing = false
     @State private var showingDetail = false
-    /// When vendors were last asked live. The cache read is a cheap local
-    /// call and runs on every appear; the live one is not, so an agent with
-    /// no readings must not trigger it on every composer mount.
-    @State private var lastLiveAttempt: Date?
+    /// When vendors were last asked live, per backend across composer mounts.
+    /// Per-view state resets on every conversation switch and re-fires the
+    /// live probe; the throttle belongs to the backend, not the view.
+    private static var lastLiveAttemptByBackend: [String: Date] = [:]
 
     private var shared: [ProviderLimits] {
         providers.filter { !skip.contains($0.source) }
@@ -83,7 +83,8 @@ struct ComposerLimitsBadge: View {
                     .accessibilityLabel("\(harnessName(provider.source)) limits: \(summaryText(for: rows))")
                     .popover(isPresented: $showingDetail, arrowEdge: .bottom) {
                         ComposerLimitsDetail(
-                            provider: provider,
+                            source: provider.source,
+                            providers: shared,
                             refreshing: refreshing,
                             refresh: { Task { await refresh() } }
                         )
@@ -91,7 +92,7 @@ struct ComposerLimitsBadge: View {
                 }
             }
         }
-        .task {
+        .task(id: backend) {
             await load()
         }
     }
@@ -103,7 +104,7 @@ struct ComposerLimitsBadge: View {
         for rows: [(display: String, window: UsageWindow)]
     ) -> some View {
         HStack(spacing: 4) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+            ForEach(Array(rows.enumerated()), id: \.element.display) { index, row in
                 if index > 0 {
                     Text("·")
                         .font(Theme.font(11))
@@ -130,9 +131,8 @@ struct ComposerLimitsBadge: View {
     private func apply(_ state: LimitsSyncState) {
         skip = Set(state.skip)
         let visible = PlanLimits.visible(state.providers).filter { !skip.contains($0.source) }
-        if !visible.isEmpty {
-            providers = visible
-        }
+        // Always assign so a revoked/empty reading clears a stale badge.
+        providers = visible
     }
 
     private func load() async {
@@ -149,8 +149,9 @@ struct ComposerLimitsBadge: View {
         // Live only when the cache has nothing for this agent, and at most
         // every five minutes: backends without vendor readings must not ask
         // on every composer mount. The popover's Refresh always asks.
-        guard lastLiveAttempt.map({ Date().timeIntervalSince($0) > 300 }) ?? true else { return }
-        lastLiveAttempt = Date()
+        let last = Self.lastLiveAttemptByBackend[backend]
+        guard last.map({ Date().timeIntervalSince($0) > 300 }) ?? true else { return }
+        Self.lastLiveAttemptByBackend[backend] = Date()
         await refresh()
         Self.log.debug("composer badge live backend=\(self.backend, privacy: .public) shown=\(self.provider?.source ?? "none", privacy: .public)")
     }
@@ -161,21 +162,25 @@ struct ComposerLimitsBadge: View {
         defer { refreshing = false }
         guard let fresh = try? await Bridge.usageLimits() else { return }
         let visible = PlanLimits.visible(fresh).filter { !skip.contains($0.source) }
-        if !visible.isEmpty {
-            providers = visible
-        }
+        providers = visible
     }
 }
 
 /// The full windows behind the badge: bars, reset times, and the reading's
 /// age, with a way to ask the vendors again.
 private struct ComposerLimitsDetail: View {
-    let provider: ProviderLimits
+    let source: String
+    let providers: [ProviderLimits]
     var refreshing: Bool
     var refresh: () -> Void
 
+    private var provider: ProviderLimits? {
+        providers.first(where: { $0.source == source })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if let provider {
             HStack(spacing: Theme.Space.s) {
                 HarnessMark(id: provider.source, size: 22)
                 VStack(alignment: .leading, spacing: 1) {
@@ -195,10 +200,15 @@ private struct ComposerLimitsDetail: View {
             }
             let rows = ComposerLimits.badgeRows(
                 windows: provider.windows, label: \.label, percent: \.percent)
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+            ForEach(Array(rows.enumerated()), id: \.element.display) { _, row in
                 detailRow(tag: row.display, window: row.window)
             }
             footer
+            } else {
+                Text("No readings for this agent yet.")
+                    .font(Theme.font(11))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(Theme.Space.m)
         .frame(minWidth: 264)
@@ -240,13 +250,13 @@ private struct ComposerLimitsDetail: View {
     /// working.
     private var footer: some View {
         Group {
-            if let observed = provider.observedAt {
+            if let provider, let observed = provider.observedAt {
                 Text(provider.isStale
                     ? "Stale, read \(RelativeClock.phrase(for: observed, style: .abbreviated))"
                     : "Read \(RelativeClock.phrase(for: observed, style: .abbreviated))")
                     .font(Theme.font(11))
                     .foregroundStyle(provider.isStale ? Theme.warning : .secondary)
-            } else if let note = provider.note {
+            } else if let note = provider?.note {
                 Text(note)
                     .font(Theme.font(11))
                     .foregroundStyle(.tertiary)

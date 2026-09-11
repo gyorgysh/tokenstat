@@ -129,7 +129,12 @@ fn project_dirs() -> Option<directories::ProjectDirs> {
 pub fn home_dir() -> Option<PathBuf> {
     for key in HOME_KEYS {
         if let Some(value) = std::env::var_os(key).filter(|value| !value.is_empty()) {
-            return Some(PathBuf::from(value));
+            let path = PathBuf::from(value);
+            // A relative HOME would make every join relative too; ignore it
+            // and fall back to the password database.
+            if path.is_absolute() {
+                return Some(path);
+            }
         }
     }
     directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
