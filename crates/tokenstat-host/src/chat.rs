@@ -2293,6 +2293,35 @@ impl Store {
                     return Err(error.to_string());
                 }
             }
+            // A session the manager no longer knows has no drain thread coming
+            // to reap it, so waiting for one wedges the composer until the
+            // daemon restarts. Release the guard here instead. A session that
+            // is still registered is left alone: its drain owns the ending and
+            // the cleanup, and finish_turn ignores a guard that no longer
+            // names its own session. No ending is appended: the drain wrote
+            // one on its way out, when there was a drain.
+            if tokenstat_pty::manager().info(&pty).is_err()
+                && self
+                    .active
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(id)
+                    .is_some_and(|current| current == &pty)
+            {
+                self.active
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(id);
+                // Nothing was killed: there was no session. Leaving the mark
+                // would end the next turn as stopped.
+                self.killed
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(id);
+                // Best effort: the guard is already gone, so a failed write is
+                // healable through the no-session path below on a retry.
+                let _ = self.set_running(id, false);
+            }
         } else {
             if crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_none() {
                 return Err(
@@ -2404,23 +2433,30 @@ impl Store {
         cleanup: impl FnOnce(),
     ) -> Result<(), String> {
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        // Hands off only when a newer turn owns the conversation. An unowned
+        // one is still this drainer's to retire: its cleanup must run even
+        // when the guard below was already released elsewhere.
         if self
             .active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(id)
-            .is_none_or(|current| current != pty)
+            .is_some_and(|current| current != pty)
         {
             return Ok(());
         }
         cleanup();
-        self.set_running(id, false)?;
+        let status = self.set_running(id, false);
+        // The guard goes even when that write fails, or every later send is
+        // refused as already responding while Stop reports success without
+        // changing anything. A newer turn cannot have appeared in between:
+        // sends are refused while this entry is present.
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
         drop(runner);
-        Ok(())
+        status.map(|_| ())
     }
 
     fn record_events(&self, id: &str, backend: &str, events: Vec<Event>) {
@@ -4178,6 +4214,60 @@ mod tests {
         assert_eq!(
             rows,
             fs::read_to_string(again.events_path("interrupted")).unwrap()
+        );
+    }
+
+    #[test]
+    fn finish_turn_releases_its_guard_when_the_running_bit_write_fails() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "stuck-finish");
+        store.set_running("stuck-finish", true).unwrap();
+        store
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert("stuck-finish".into(), "dead-pty".into());
+        // The running-bit write now fails: the index it would update is gone.
+        fs::remove_file(store.root.join("conversations.json")).unwrap();
+        let cleaned = std::cell::Cell::new(false);
+        let result = store.finish_turn("stuck-finish", "dead-pty", None, || cleaned.set(true));
+        assert!(result.is_err());
+        assert!(cleaned.get(), "turn cleanup still runs");
+        assert!(
+            !store
+                .active
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key("stuck-finish"),
+            "a failed write must not leave every later send refused as already responding"
+        );
+    }
+
+    #[test]
+    fn stop_with_a_dead_session_releases_the_conversation() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "dead-session");
+        store.set_running("dead-session", true).unwrap();
+        // No drain thread is coming for this one: the manager never knew it.
+        store
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert("dead-session".into(), "no-such-session".into());
+        store.stop("dead-session").unwrap();
+        assert!(!store.get("dead-session").unwrap().running);
+        assert!(
+            !store
+                .active
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key("dead-session")
+        );
+        assert!(
+            !store.events_path("dead-session").exists(),
+            "no ending is invented for a turn whose drain already wrote one"
         );
     }
 

@@ -1346,6 +1346,12 @@ final class ChatModel {
         }
     }
 
+    /// A refusal with no words looks like a dead button: the message stays
+    /// queued, the draft comes back, and nothing says why.
+    private func busyTurnError() {
+        error = "This conversation is still finishing its previous turn. Wait a moment, or press Stop and send again."
+    }
+
     /// Acceptance updates the captured owner's disk record even if navigation
     /// changes. Nothing leaves the outbox before the host's acknowledgement.
     private func deliverQueued(_ candidate: ChatQueuedMessage, stopCurrent: Bool, reserved: Bool = false) async -> Bool {
@@ -1422,9 +1428,15 @@ final class ChatModel {
                     try? await Task.sleep(for: .milliseconds(200))
                 }
             }
-            guard current(), !busy else { return false }
+            guard current(), !busy else {
+                if current() { busyTurnError() }
+                return false
+            }
             let resolved = try await resolveDraftAttachments(item.attachments, reference: reference, peer: targetPeer)
-            guard current(), !busy else { return false }
+            guard current(), !busy else {
+                if current() { busyTurnError() }
+                return false
+            }
             let firstAttemptAt = item.firstAttemptAt ?? item.attemptedAt ?? Date()
             publish(try ChatOutboxStore.shared.update(reference) { items in
                 guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item else {
