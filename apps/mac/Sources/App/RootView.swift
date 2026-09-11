@@ -2130,8 +2130,7 @@ struct RootView: View {
                     openSection(section, in: folderID)
                 },
                 isActive: showsWorkspaceSurface,
-                tier: account.account?.tier,
-                accountMachines: account.account?.machines ?? []
+                tier: account.account?.tier
             )
             .opacity(showsWorkspaceSurface ? 1 : 0)
             .allowsHitTesting(showsWorkspaceSurface)

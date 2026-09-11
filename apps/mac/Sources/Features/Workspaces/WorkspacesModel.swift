@@ -1075,8 +1075,9 @@ final class WorkspacesModel {
 
     /// An explicit Connect undoes a Disconnect: the peer's folders are
     /// allowed back and fetched immediately rather than after the next sweep.
+    /// Connecting never flips the auto-connect switch: that is the switch's
+    /// own gesture, on Devices.
     func reconnect(peer key: String) {
-        Self.setAutoConnect(true, for: key)
         suppressedPeers.remove(key)
         // Clear the backoff too. Somebody pressing Connect is asking now, and
         // a peer that had been dialled down to the slow rate would otherwise

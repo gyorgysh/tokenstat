@@ -2925,6 +2925,15 @@ extension Bridge {
     /// feature that an older desktop cannot answer. A version is a capability
     /// boundary, not a release number: a newer phone can explain what needs an
     /// update instead of making a feature call that only returns unknown method.
+    /// Whether the paired host reports no display layer.
+    ///
+    /// Asked live because the account record carries no platform: a headless
+    /// server answered with nothing to gate on. An older host that cannot
+    /// answer throws, and callers fail open to the current behavior.
+    static func peerHeadless(_ peer: String) async throws -> Bool {
+        try await provisionStatus(peer: peer).headless
+    }
+
     static func peerProtocolVersion(_ peer: String) async throws -> Int {
         struct Spoken: Codable, Sendable { let protocolVersion: String }
         let spoken = try await onPeer(peer, "protocol", as: Spoken.self)

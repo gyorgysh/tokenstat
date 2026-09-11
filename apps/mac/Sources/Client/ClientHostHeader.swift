@@ -42,13 +42,16 @@ struct ClientHostHeader: View {
 
     private var isLegend: Bool { account.account?.tier?.lowercased() == "legend" }
 
-    /// A headless Linux server has no display layer, so the row that opens
-    /// the screen viewer stays off rather than landing in its error state.
-    private var isHeadless: Bool {
-        let platform = (account.account?.machines ?? [])
+    /// Whether the host reports no display layer, so the row that opens the
+    /// screen viewer stays off rather than landing in its error state.
+    /// Probed live: the account record carries no platform to gate on, which
+    /// is only the fallback when the host cannot answer.
+    @State private var isHeadless = false
+
+    private var accountPlatform: String? {
+        (account.account?.machines ?? [])
             .first { $0.publicIdentity?.caseInsensitiveCompare(peerKey) == .orderedSame }?
             .platform
-        return isHeadlessPlatform(platform)
     }
 
     var body: some View {
@@ -76,6 +79,13 @@ struct ClientHostHeader: View {
 
             if showsOpenWork { openWork }
             if !isHeadless { viewScreen }
+        }
+        .task(id: peerKey) {
+            if let headless = try? await Bridge.peerHeadless(peerKey) {
+                isHeadless = headless
+            } else {
+                isHeadless = isHeadlessPlatform(accountPlatform)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)

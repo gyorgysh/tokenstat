@@ -167,6 +167,16 @@ struct TerminalPane: View {
             await launcher.resolve()
             if let peer {
                 await launcher.resolveRemote(peer: peer)
+                // The fetch can lose to a daemon restart on the other
+                // machine. A failed first answer stays retried while the
+                // folder is open rather than leaving the grid on the
+                // fallback shell with no install rows.
+                for _ in 0..<4 {
+                    if !launcher.remoteCatalog(for: peer).isEmpty { break }
+                    try? await Task.sleep(for: .seconds(3))
+                    guard !Task.isCancelled else { break }
+                    await launcher.resolveRemote(peer: peer)
+                }
             }
         }
         // Three buttons and not two, because "Cancel" and "Don't Save" are

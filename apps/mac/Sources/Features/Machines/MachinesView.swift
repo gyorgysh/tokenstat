@@ -873,8 +873,8 @@ struct MachinesView: View {
                         Spacer(minLength: 0)
                     }
                     Spacer(minLength: 0)
-                    deviceActions(machine, isSelf: isSelf)
                     autoConnectRow(machine, isSelf: isSelf)
+                    deviceActions(machine, isSelf: isSelf)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(Theme.Space.m)

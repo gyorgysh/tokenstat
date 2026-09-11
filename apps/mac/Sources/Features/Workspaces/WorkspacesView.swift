@@ -28,10 +28,10 @@ struct WorkspacesView: View {
     /// The signed-in tier, for the screen viewer a remote workspace offers.
     /// Nil is a tier the viewer refuses, and says so.
     var tier: String?
-    /// Account machines, for the owning host's platform. A headless Linux
-    /// server has no display layer, so the folder header must not offer a
-    /// screen viewer for it.
-    var accountMachines: [Machine] = []
+    /// Whether the remote folder's owner reports no display layer. Probed
+    /// live: the account record carries no platform, so there is nothing
+    /// local to gate the viewer on.
+    @State private var ownerHeadless = false
     @Environment(\.openWindow) private var openWindow
     #endif
 
@@ -134,10 +134,10 @@ struct WorkspacesView: View {
                 Text(folder.machineLabel ?? "Remote machine")
                     .font(Theme.fit(12, weight: .medium))
                 Spacer(minLength: 0)
-                // A headless Linux server has no display layer. Offering a
-                // viewer for it only ends in the viewer's own error, so the
-                // button stays off the header entirely.
-                if !isHeadlessPeer(peer) {
+                // A headless server has no display layer. Offering a viewer
+                // for it only ends in the viewer's own error, so the button
+                // stays off the header entirely.
+                if !ownerHeadless {
                     Button("View screen", .preview) {
                         openWindow(value: RemoteScreenTarget(
                             peer: peer,
@@ -159,14 +159,13 @@ struct WorkspacesView: View {
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.bottom, Theme.Space.s)
-    }
-
-    /// Whether the owning host reports a platform with no display layer.
-    private func isHeadlessPeer(_ peer: String) -> Bool {
-        let platform = accountMachines.first {
-            $0.publicIdentity == peer || $0.machineID == peer
-        }?.platform
-        return isHeadlessPlatform(platform)
+        .task(id: peer) {
+            // An older host that cannot answer leaves the button where it
+            // was rather than hiding a viewer that works.
+            if let headless = try? await Bridge.peerHeadless(peer) {
+                ownerHeadless = headless
+            }
+        }
     }
     #endif
 
