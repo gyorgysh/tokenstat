@@ -159,11 +159,13 @@ struct ClientInsightsView: View {
             Text("at list rates, across every device")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
-            ClientOverviewFacts(facts: [
-                ("Tokens", formatTokens(rows.reduce(0) { $0 + $1.counters.total })),
-                ("Events", rows.reduce(0) { $0 + $1.events }.formatted()),
-                (model.cut.plural.capitalized, "\(rows.count)")
-            ]).padding(.top, Theme.Space.s)
+            InsightStatPanels(panels: ClientInsightFacts.panels(
+                tokens: rows.reduce(0) { $0 + $1.counters.total },
+                events: rows.reduce(0) { $0 + $1.events },
+                count: rows.count,
+                countLabel: model.cut.plural.capitalized,
+                formatCompact: formatTokens
+            )).padding(.top, Theme.Space.s)
             // A remembered answer says so. The numbers are real, they are just
             // not this minute's, and a figure with no date is a quiet claim to
             // be current.
@@ -186,6 +188,41 @@ struct ClientInsightsView: View {
         return rows.filter { row in
             row.key.lowercased().contains(term)
                 || model.cut.title(for: row.key).lowercased().contains(term)
+        }
+    }
+}
+
+/// The period's three figures as three panels, not one strip.
+///
+/// One card holding three numbers reads as one fact with footnotes. Three
+/// panels read as three facts, and each keeps its own card on every width,
+/// the way the Mac's overview draws one metric card per figure.
+private struct InsightStatPanels: View {
+    var panels: [(label: String, value: String)]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) { cards }
+            VStack(spacing: Theme.Space.s) { cards }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var cards: some View {
+        ForEach(panels.indices, id: \.self) { index in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(panels[index].value)
+                    .font(ClientType.figureSmall)
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(panels[index].label)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.Space.m)
+            .cardSurface()
         }
     }
 }
