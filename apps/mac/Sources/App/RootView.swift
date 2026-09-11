@@ -154,6 +154,10 @@ struct RootView: View {
     /// The SSH group. Same treatment as the global one: shut by default,
     /// remembered, because servers are a place people go to deliberately.
     @AppStorage("sidebar.sshGroupExpanded") private var isSSHGroupExpanded = false
+    /// Whether the folders and live sessions under the Hosts row show.
+    /// Expanded by default and remembered: collapsing is for a library that
+    /// grew folders, and a fresh library has nothing to hide.
+    @AppStorage("sidebar.sshHostsExpanded") private var isSSHHostsExpanded = true
     /// SSH folders whose hosts are listed under the Hosts row.
     @State private var expandedSSHFolders: Set<String> = []
     #if os(macOS)
@@ -1487,6 +1491,13 @@ struct RootView: View {
         case .knownHosts: return "\(ssh.knownHosts.count)"
         }
     }
+
+    /// Whether the Hosts row earns a chevron. Folders and live sessions sit
+    /// under it; with neither, a chevron would be a control that does
+    /// nothing.
+    private var sshHostsCollapsible: Bool {
+        !ssh.folders.isEmpty || !sshLiveHosts.isEmpty
+    }
     #endif
 
     private var sidebar: some View {
@@ -1522,17 +1533,37 @@ struct RootView: View {
                 ) { isSSHGroupExpanded.toggle() }
                 if isSSHGroupExpanded {
                     ForEach(SSHSection.rows) { section in
-                        SidebarRow(
-                            label: section.label,
-                            symbol: section.symbol,
-                            trailing: sshCount(of: section),
-                            isSelected: route.sshSection?.row == section
-                        ) { openSSH(section) }
+                        HStack(spacing: 0) {
+                            // The folders hide behind Hosts once there are
+                            // any. A chevron beside the row rather than inside
+                            // it, the way the folder rows do it: a button
+                            // inside a button is one target that swallows the
+                            // other.
+                            if case .hosts = section, sshHostsCollapsible {
+                                Button {
+                                    isSSHHostsExpanded.toggle()
+                                } label: {
+                                    Image(systemName: isSSHHostsExpanded ? "chevron.down" : "chevron.right")
+                                        .font(Theme.font(8, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 18, height: 24)
+                                        .contentShape(.rect)
+                                }
+                                .buttonStyle(.plain)
+                                .help(isSSHHostsExpanded ? "Collapse hosts" : "Expand hosts")
+                            }
+                            SidebarRow(
+                                label: section.label,
+                                symbol: section.symbol,
+                                trailing: sshCount(of: section),
+                                isSelected: route.sshSection?.row == section
+                            ) { openSSH(section) }
+                        }
 
                         // Folders live under Hosts, because that is what they
                         // hold. A folder row is the Hosts screen filtered, the
                         // same way a workspace row opens that folder.
-                        if case .hosts = section {
+                        if case .hosts = section, isSSHHostsExpanded {
                             ForEach(sshFolderRows) { row in
                                 sshFolderRow(row)
                             }
@@ -2653,8 +2684,9 @@ struct RootView: View {
             lastSSHSection = section
             isSSHGroupExpanded = true
             // A folder cannot be selected while its parent chain is shut, so
-            // opening one opens the way to it.
+            // opening one opens the way to it, Hosts row included.
             if let folderID = section.folderID {
+                isSSHHostsExpanded = true
                 for ancestor in sshAncestors(of: folderID) { expandedSSHFolders.insert(ancestor) }
             }
         }
