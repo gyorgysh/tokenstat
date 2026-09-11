@@ -585,6 +585,26 @@ final class MachinesModel {
         }
     }
 
+    /// Flip a peer's auto-connect from Devices, beside the connection itself.
+    ///
+    /// Off drops the peer now the way Disconnect does, so the row cannot
+    /// read connected while the sweep leaves it alone. On dials when the
+    /// machine looks reachable; otherwise the sweep picks it up when it
+    /// wakes, which is what the switch promises. Without a machine record
+    /// there is no reachability to check, so the dial is attempted and
+    /// reports honestly.
+    func setAutoConnect(_ on: Bool, peer: Peer, machine: Machine? = nil) {
+        WorkspacesModel.setAutoConnect(on, for: peer.key)
+        if on {
+            if let machine, !canConnect(machine) {
+                return
+            }
+            Task { await connect(peer) }
+        } else {
+            disconnect(peer)
+        }
+    }
+
     /// Drop the peer's workspaces from the sidebar and mark the row back to
     /// Connect. The connection itself is a tunnel channel that ends when its
     /// last use does; what the user asked for is that the machine stops

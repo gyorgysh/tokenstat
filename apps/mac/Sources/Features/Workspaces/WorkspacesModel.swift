@@ -872,6 +872,14 @@ final class WorkspacesModel {
                 remotePeerFailures.removeValue(forKey: key)
                 summaries = summaries.filter { !$0.key.hasPrefix("remote:\(key):") }
             }
+            // Suppressed means no folders, enforced every sweep. A dial that
+            // was already in flight when Disconnect landed can still come
+            // back after, and without this its answer would linger.
+            for key in suppressedPeers {
+                if remoteFolders.removeValue(forKey: key) != nil {
+                    summaries = summaries.filter { !$0.key.hasPrefix("remote:\(key):") }
+                }
+            }
             for peer in peers {
                 if suppressedPeers.contains(peer.key) {
                     continue
@@ -884,7 +892,18 @@ final class WorkspacesModel {
                 }
                 if let nextDial = remotePeerNextDial[peer.key], Date() < nextDial { continue }
                 do {
-                    remoteFolders[peer.key] = try await Bridge.remoteWorkspaces(peer: peer)
+                    let fetched = try await Bridge.remoteWorkspaces(peer: peer)
+                    // Disconnect lands while a dial is in flight. Taking the
+                    // answer anyway restored the folders and re-posted
+                    // didConnect, which unsuppressed the peer: Disconnect
+                    // lasted until the dial came back.
+                    guard !suppressedPeers.contains(peer.key) else { continue }
+                    // Newly answering, not routinely re-fetched. Posting on
+                    // every success re-ran `reconnect` from RootView, which
+                    // unsuppresses and spawns an immediate re-sweep: both
+                    // Disconnect and auto-connect-off lasted one sweep.
+                    let newlySeen = remoteFolders[peer.key] == nil
+                    remoteFolders[peer.key] = fetched
                     // One call for every badge on every folder that machine
                     // has. Best effort: a host too old to answer leaves the
                     // badges off, which is what they were before this existed.
@@ -894,7 +913,9 @@ final class WorkspacesModel {
                     remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
                     remotePeerFailures[peer.key] = 0
                     remotePeerEverAnswered.insert(peer.key)
-                    NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
+                    if newlySeen {
+                        NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
+                    }
                 } catch {
                     let text = error.localizedDescription
                     if Self.isWorkspaceRefusal(text) {

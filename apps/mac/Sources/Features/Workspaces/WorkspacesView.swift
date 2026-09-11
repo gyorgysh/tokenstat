@@ -123,9 +123,9 @@ struct WorkspacesView: View {
     ///
     /// The same readings the Devices page shows, from the same `HostStatsBar`,
     /// so the two cannot report different things about one computer. The
-    /// folder header also carries what the Devices row used to own alone:
-    /// Disconnect and the auto-connect switch, because a folder is where a
-    /// connected machine is actually used and there was no way back from it.
+    /// header also carries Disconnect, because a folder is where a connected
+    /// machine is actually used and there was no way back from it. The
+    /// auto-connect switch lives on Devices, beside the connection itself.
     private func remoteMachine(_ folder: WorkspaceFolder, peer: String) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
@@ -156,23 +156,6 @@ struct WorkspacesView: View {
                 .help("Stops showing this computer's folders in the sidebar")
             }
             HostStatsBar(peer: peer, online: true)
-            HStack(spacing: 6) {
-                Text("Auto-connect")
-                    .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Toggle(
-                    "Auto-connect",
-                    isOn: Binding(
-                        get: { WorkspacesModel.isAutoConnectEnabled(for: peer) },
-                        set: { WorkspacesModel.setAutoConnect($0, for: peer) }
-                    )
-                )
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
-            .accessibilityLabel("Auto-connect \(folder.machineLabel ?? "this computer")")
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.bottom, Theme.Space.s)

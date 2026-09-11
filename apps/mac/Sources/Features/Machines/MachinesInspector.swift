@@ -147,6 +147,7 @@ struct MachinesInspector: View {
                             Button("Connect", .connect) { Task { await model.connect(peer) } }
                                 .buttonStyle(AccentButtonStyle())
                         }
+                        autoConnectToggle(peer: peer)
                         Button("Revoke", .revoke) { confirmRevoke = peer }
                             .buttonStyle(SecondaryButtonStyle())
                     } else {
@@ -212,6 +213,30 @@ struct MachinesInspector: View {
             Button("Connect", .connect) { Task { await model.connect(peer) } }
                 .buttonStyle(AccentButtonStyle())
         }
+        autoConnectToggle(peer: peer, machine: machine)
+    }
+
+    /// Whether the sweep dials this peer on its own. Off drops it now, the
+    /// same as Disconnect, so the grant cannot read connected while the
+    /// sweep leaves it alone.
+    private func autoConnectToggle(peer: Peer, machine: Machine? = nil) -> some View {
+        HStack(spacing: 6) {
+            Text("Auto-connect")
+                .font(Theme.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Toggle(
+                "Auto-connect",
+                isOn: Binding(
+                    get: { WorkspacesModel.isAutoConnectEnabled(for: peer.key) },
+                    set: { model.setAutoConnect($0, peer: peer, machine: machine) }
+                )
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+        .accessibilityLabel("Auto-connect \(peer.label.isEmpty ? "this device" : peer.label)")
     }
 
     private static func trustLabel(_ trust: Peer.Trust) -> String {

@@ -874,6 +874,7 @@ struct MachinesView: View {
                     }
                     Spacer(minLength: 0)
                     deviceActions(machine, isSelf: isSelf)
+                    autoConnectRow(machine, isSelf: isSelf)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(Theme.Space.m)
@@ -936,6 +937,33 @@ struct MachinesView: View {
             .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.accent.opacity(0.2)))
             .help("Manage \(model.resolvedName(for: machine) ?? machine.displayName)")
+        }
+    }
+
+    /// Whether the sweep dials this machine on its own, beside the connection
+    /// itself rather than in a folder: turning it off here also drops the
+    /// peer now, so the row cannot read connected while the sweep leaves it
+    /// alone.
+    @ViewBuilder
+    private func autoConnectRow(_ machine: Machine, isSelf: Bool) -> some View {
+        if machine.isHost, !isSelf, let peer = model.peer(for: machine) {
+            HStack(spacing: 6) {
+                Text("Auto-connect")
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Toggle(
+                    "Auto-connect",
+                    isOn: Binding(
+                        get: { WorkspacesModel.isAutoConnectEnabled(for: peer.key) },
+                        set: { model.setAutoConnect($0, peer: peer, machine: machine) }
+                    )
+                )
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+            .accessibilityLabel("Auto-connect \(model.resolvedName(for: machine) ?? machine.displayName)")
         }
     }
 
