@@ -85,8 +85,12 @@ struct ClientSetupServerGuide: View {
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    provider("DigitalOcean", "https://www.digitalocean.com/products/droplets")
+                    provider("DigitalOcean", "https://m.do.co/c/638545628ff0")
                     provider("AWS", "https://aws.amazon.com/ec2/")
+                    Text("The DigitalOcean link is a referral link. Same price for you, credit for the project.")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text("Come back here when the server exists and you have its address. "

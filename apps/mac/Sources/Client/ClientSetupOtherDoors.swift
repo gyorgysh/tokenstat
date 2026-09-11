@@ -180,8 +180,13 @@ struct ClientSetupCloudDoor: View {
                     // The platform segmented control is a grey track with a
                     // grey pill, which is the one piece of chrome on this
                     // screen wearing somebody else's palette.
+                    #if os(macOS)
                     SegmentedTabs(options: Provider.allCases, selection: $provider)
                         .disabled(working)
+                    #else
+                    // Phone: DigitalOcean only. AWS inventory import needs the
+                    // desktop app, so there is no second tab to offer.
+                    #endif
                     if provider == .digitalOcean {
                         Text("Read-only API token")
                             .font(ClientType.caption).foregroundStyle(.secondary)

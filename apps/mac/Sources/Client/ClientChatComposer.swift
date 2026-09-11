@@ -7,7 +7,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// The bar under a phone transcript. Glass chrome, opaque field.
+/// The bar under a phone transcript. Flat opaque panel, opaque field.
 ///
 /// Drop still works from Files. Photos come from the picker, because a
 /// screenshot on iOS lives in the pasteboard or the library, not on a Finder
@@ -344,13 +344,10 @@ struct ClientChatComposer: View {
 }
 
 private struct ChatSendStyle: ViewModifier {
-    @ViewBuilder
+    // Flat accent capsule on all systems. A glass circle on a flat panel
+    // has nothing behind it to refract, so it lifted bright like the bar did.
     func body(content: Content) -> some View {
-        if #available(iOS 26, *) {
-            content.buttonStyle(.glassProminent)
-        } else {
-            content.buttonStyle(AccentButtonStyle(small: true))
-        }
+        content.buttonStyle(AccentButtonStyle(small: true))
     }
 }
 

@@ -307,7 +307,9 @@ struct ClientSidebarRoot: View {
         // search and the chip on the right.
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
+                // Room for the iPad windowed traffic lights. Harmless fullscreen.
                 AvatarButton { showAccount = true }
+                    .padding(.leading, 28)
             }
             ToolbarItem(placement: .principal) {
                 Wordmark(size: 19, fills: false)

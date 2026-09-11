@@ -126,21 +126,16 @@ extension View {
         }
     }
 
-    /// A bar that floats over opaque content. Glass on iOS 26, a panel
-    /// with a hairline below that. The transcript stays solid.
+    /// A bar that floats over opaque content. Flat panel on all systems.
+    /// Glass lifted bright over the dim transcript, so the composer keeps
+    /// the panel fill in the same rounded shape to sit at page luminance.
     @ViewBuilder
     func clientFloatingBar(cornerRadius: CGFloat = 22) -> some View {
-        if #available(iOS 26, *) {
-            glassEffect(
-                .regular.tint(Theme.panel),
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
-        } else {
-            background(Theme.panel)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(Theme.border).frame(height: 1)
-                }
-        }
+        background(Theme.panel, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            }
     }
 
     /// Pin chrome to the bottom of the screen, including the home indicator.

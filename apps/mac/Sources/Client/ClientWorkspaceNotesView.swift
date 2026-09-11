@@ -139,7 +139,7 @@ struct ClientWorkspaceNotesView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(Theme.Space.m)
-        .background(Theme.panel)
+        .background(Theme.tabStrip)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }

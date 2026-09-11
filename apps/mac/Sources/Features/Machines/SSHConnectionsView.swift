@@ -15,6 +15,14 @@ import UIKit
 /// person can read rather than a line at the bottom of a small box.
 struct CloudImportForm: View {
     private enum Provider: String, CaseIterable { case digitalOcean = "DigitalOcean", aws = "AWS" }
+    /// AWS import shells out to the AWS CLI, which only exists on the Mac.
+    /// On the phone there is no CLI and no key to paste, so DigitalOcean
+    /// stands alone there instead of offering a door that cannot open.
+    #if os(macOS)
+    private var providers: [Provider] { Provider.allCases }
+    #else
+    private var providers: [Provider] { [.digitalOcean] }
+    #endif
     let model: SSHLibraryModel
     let onDone: () -> Void
     @State private var token = ""
@@ -35,7 +43,7 @@ struct CloudImportForm: View {
                     SSHEditorSection(title: "Provider") {
                         SSHEditorField(label: "Import from") {
                             Picker("Provider", selection: $provider) {
-                                ForEach(Provider.allCases, id: \.self) {
+                                ForEach(providers, id: \.self) {
                                     Text($0.rawValue).tag($0)
                                 }
                             }

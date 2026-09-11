@@ -640,7 +640,7 @@ struct ClientWorkspaceTasksView: View {
             reload: { await load() }
         ) {
             if !showingArchive {
-                ClientOverviewFacts(facts: Self.columns.map { id, label in
+                ClientStatPanels(panels: Self.columns.map { id, label in
                     (label, "\(cards.filter { $0.kind != .note && $0.column == id }.count)")
                 }).clientCardRow()
             }
@@ -903,7 +903,7 @@ struct ClientWorkspaceWorkflowsView: View {
             refreshKey: "workspace-workflows-\(workspaceID)",
             reload: { await load() }
         ) {
-            ClientOverviewFacts(facts: [("Workflows", "\(graphs.count)"), ("Running", "\(runs.filter(\.isLive).count)")])
+            ClientStatPanels(panels: [("Workflows", "\(graphs.count)"), ("Running", "\(runs.filter(\.isLive).count)")])
             if !search.isEmpty && !graphs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) }) {
                 Text("No matching workflows").foregroundStyle(.secondary)
             }

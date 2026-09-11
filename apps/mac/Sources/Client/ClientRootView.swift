@@ -549,7 +549,9 @@ private extension View {
         toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
+                    // Room for the iPad windowed traffic lights. Harmless fullscreen.
                     AvatarButton { showAccount.wrappedValue = true }
+                        .padding(.leading, 28)
                 }
                 // The wordmark, not the screen's name. The tab bar already
                 // says which screen this is, and the middle of the top bar is

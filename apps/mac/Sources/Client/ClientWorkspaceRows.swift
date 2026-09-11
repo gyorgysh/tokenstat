@@ -43,6 +43,39 @@ struct ClientOverviewFacts: View {
     }
 }
 
+/// One panel per figure, not one card holding every figure.
+///
+/// Three panels read as three facts. Each keeps its own card on every width.
+struct ClientStatPanels: View {
+    var panels: [(label: String, value: String)]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) { cards }
+            VStack(spacing: Theme.Space.s) { cards }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var cards: some View {
+        ForEach(panels.indices, id: \.self) { index in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(panels[index].value)
+                    .font(ClientType.figureSmall)
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(panels[index].label)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.Space.m)
+            .cardSurface()
+        }
+    }
+}
+
 /// Shared leading tile size for folder and session cards.
 private enum ClientRowMark {
     static let size: CGFloat = 26
