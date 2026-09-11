@@ -1242,13 +1242,13 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
-    use super::install_delivered;
     use super::{
-        PROFILES, Profile, catalog, command_names, hide_in, home_from, install,
-        load_prefs_in, model_arguments, model_environment, resolve_profile, show_in, sign_in,
-        split_path_var, strip_ansi,
+        PROFILES, Profile, catalog, command_names, hide_in, install, load_prefs_in,
+        model_arguments, model_environment, resolve_profile, show_in, sign_in, split_path_var,
+        strip_ansi,
     };
+    #[cfg(unix)]
+    use super::{home_from, install_delivered};
     use std::path::Path;
     #[cfg(unix)]
     use std::path::PathBuf;
