@@ -7,6 +7,7 @@ struct ComposerLimitsTests {
     struct Window: Equatable {
         var label: String
         var percent: Double
+        var scope: String? = nil
     }
 
     struct Provider: Equatable {
@@ -24,7 +25,11 @@ struct ComposerLimitsTests {
     }
 
     static func rows(_ windows: [Window]) -> [(display: String, window: Window)] {
-        ComposerLimits.badgeRows(windows: windows, label: \.label, percent: \.percent)
+        ComposerLimits.badgeRows(windows: windows, label: \.label, scope: \.scope)
+    }
+
+    static func headline(_ windows: [Window]) -> [(display: String, window: Window)] {
+        ComposerLimits.codexHeadlineRows(windows: windows, label: \.label, scope: \.scope)
     }
 
     static func main() {
@@ -53,9 +58,36 @@ struct ComposerLimitsTests {
             Window(label: "Claude and GPT models · 5-hour", percent: 0),
             Window(label: "Gemini models · 5-hour", percent: 5),
         ]
-        let merged = rows(families)
-        require(merged.count == 1 && merged[0].display == "5h", "one tag, one row")
-        require(merged[0].window.percent == 5, "the fullest family stands for the tag")
+        let sideBySide = rows(families)
+        require(sideBySide.map(\.display) == ["5h", "5h"], "shared tags stay visible side by side")
+        require(sideBySide.map(\.window.percent) == [0, 5], "each row keeps its own figure")
+
+        let scoped = [
+            Window(label: "5-hour", percent: 88, scope: "current model"),
+            Window(label: "weekly", percent: 100, scope: "general"),
+            Window(label: "weekly", percent: 84, scope: "current model"),
+        ]
+        let popover = rows(scoped)
+        require(
+            popover.map(\.display)
+                == ["5-hour (secondary)", "weekly (general)", "weekly (secondary)"],
+            "the popover names whose allowance is whose")
+        require(
+            rows([Window(label: "weekly", percent: 30, scope: "secondary")]).map(\.display)
+                == ["all models 7d"],
+            "a positional secondary keeps its all-models name")
+
+        let composer = headline(scoped)
+        require(composer.map(\.display) == ["7d"], "the composer shows general only")
+        require(composer[0].window.percent == 100, "the account week is the headline")
+
+        let modelOnly = [
+            Window(label: "5-hour", percent: 12, scope: "primary"),
+            Window(label: "weekly", percent: 30, scope: "secondary"),
+        ]
+        require(
+            headline(modelOnly).map(\.display) == ["5h", "7d"],
+            "a model-only reading still reads as one")
 
         let mixed = [Window(label: "billing cycle", percent: 93), Window(label: "5-hour", percent: 12)]
         let kept = rows(mixed)

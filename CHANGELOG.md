@@ -13,12 +13,54 @@ at the end.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-12
+
+The composer reads the plan it runs on, access approvals explain themselves,
+and Codex limits name the account week beside the model's own.
+
+### Added
+
+- A quota badge beside the Mac composer controls reads the agent this
+  conversation runs on, such as 5h 34% and 7d 87%. Tapping it shows every
+  window with reset times and a refresh. A chat on an agent with no reported
+  quota shows no badge rather than somebody else's numbers.
+- A turn clock in the composer and on the sidebar conversation rows shows
+  how long the running turn has been going. Both read the same stamp, so
+  the two never disagree.
+- The SSH Hosts row collapses behind a chevron once folders or live
+  sessions sit under it. It stays open by default and remembers the choice,
+  and opening a folder expands the way to it.
+- Servers show their distribution's own mark after connecting, replacing
+  the invented initials.
+- A todo card's priority can change after creation, from the inspector
+  picker or the card menu. The task tools accept it on update as well as
+  on create.
+- Approving a device explains itself. The phone shows a sheet naming where
+  the request went and what answers it, with copy buttons instead of
+  retyped commands. On the command line, pending requests take a number, a
+  key prefix, or a label, with --all for the whole queue.
+
 ### Changed
 
 - On iPhone and iPad, a screen's figures each sit on their own card rather
   than sharing one strip, and every figure and section heading carries its
   own icon. Chat, tasks, workflows, automations, notes, insights and the
   today and this week totals on Home all read the same way now.
+- Codex limits name whose allowance is whose. The composer badge shows
+  the account allowance, and the popover lists all four windows as 5-hour
+  (general), weekly (general), 5-hour (secondary) and weekly (secondary).
+  The account week now survives a session that fell back to a model
+  allowance instead of hiding behind it.
+- OpenCode no longer estimates quota from local message costs against
+  written-down ceilings. An account with no reported quota says so.
+- On the phone, the Insights period strip is three panels instead of one
+  card: tokens, events, and the models, harnesses and days behind the cut.
+  They sit side by side where there is room and stack where there is not.
+- Phone cloud import and setup offer DigitalOcean only, with a link to
+  where the token lives, and the server guide links the referral URL with
+  disclosure.
+- Searching everything carries its own mark, leaving the plain magnifier
+  to the field that filters the page.
 
 ### Fixed
 
@@ -43,6 +85,21 @@ at the end.
 - On the Mac, an empty conversation list sits in the middle of the pane, a
   new terminal opens at the size it keeps instead of redrawing once, and a
   conversation can be removed from its own menu.
+- Tapping a machine in the phone sidebar connects to that machine. An
+  approval wait no longer hands the dial to the remembered one, and the
+  detail column lands on Workspaces first, so the waiting card and any
+  error stay on screen.
+- The composer and transcript hold still around a new chat. Trailing
+  controls keep one shape, a fresh chat skips the wireframe it has nothing
+  to fill with, sends never cover rows being read, and a double tap makes
+  one conversation, not two.
+- Cloud imports save again on every provider. The importer built refs the
+  records reject, so DigitalOcean and AWS imports failed at save time.
+- The phone chat composer shows one glass surface instead of two, so the
+  pill no longer blooms bright over the bar.
+- On iPad, windowed mode keeps the brand out of the traffic-light row,
+  tabs keep their wordmark, and SSH shows by default instead of hiding as
+  an opt-in.
 
 ## [1.0.1] - 2026-09-11
 

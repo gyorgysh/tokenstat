@@ -3727,6 +3727,9 @@ fn account_plane_limits() -> Value {
             .iter()
             .map(|w| UsageWindow {
                 label: w.label.clone(),
+                // A posted reading carries no scope: the account plane
+                // predates it, so another machine's rows qualify nothing.
+                scope: None,
                 percent: w.percent,
                 resets_at_ms: w.resets_at_ms,
                 severity: LimitSeverity::from_percent(w.percent),
