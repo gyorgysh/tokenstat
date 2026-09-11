@@ -1,25 +1,23 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// A legible platform badge; initials identify distributions without invented vendor logos.
+/// A distribution's own mark on a tinted tile, or a neutral server glyph.
+///
+/// Never an invented initial: see TRADEMARK.md. Each bundled mark is a
+/// Simple Icons rendition (CC0) of the distribution's own logo, used only to
+/// identify the OS the host itself reported. Anything without a bundled mark
+/// gets the system server glyph, because a wrong logo is worse than no logo.
 struct SSHHostPlatformMark: View {
     let label: String?
-    private var initials: String? {
-        guard let label else { return nil }
-        let name = label.lowercased()
-        if name.contains("ubuntu") { return "U" }
-        if name.contains("debian") { return "D" }
-        if name.contains("fedora") { return "F" }
-        if name.contains("alpine") { return "A" }
-        if name.contains("arch") { return "Ar" }
-        if name.contains("linux") { return "L" }
-        return String(label.prefix(2)).uppercased()
-    }
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 9).fill(Theme.accentSoft)
-            if let initials {
-                Text(initials).font(Theme.font(13, weight: .semibold))
+            if let asset = distroBrandAsset(label) {
+                Image(asset)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 19, height: 19)
             } else {
                 Image(systemName: "server.rack").font(Theme.font(16))
             }

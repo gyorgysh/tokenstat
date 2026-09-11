@@ -976,14 +976,19 @@ struct SSHConnectForm: View {
                 jump = try Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
             }
             let handle: SSHSessionHandle
+            let authPayload: [String: Any]
             if let key = model.keys.first(where: { $0.id == selectedKeyID }) {
                 if key.secretRef.hasPrefix("agent:") {
-                    handle = try await Bridge.openSSHWithAgent(host, fingerprint: String(key.secretRef.dropFirst("agent:".count)), rows: 24, cols: 80, jump: jump)
+                    let fingerprint = String(key.secretRef.dropFirst("agent:".count))
+                    authPayload = ["kind": "agent", "fingerprint": fingerprint]
+                    handle = try await Bridge.openSSHWithAgent(host, fingerprint: fingerprint, rows: 24, cols: 80, jump: jump)
                 } else {
                     let pem = try SSHSecretStore.load(reference: key.secretRef)
+                    authPayload = ["kind": "privateKey", "pem": pem, "passphrase": NSNull()]
                     handle = try await Bridge.openSSHWithKey(host, pem: pem, passphrase: nil, rows: 24, cols: 80, jump: jump)
                 }
             } else {
+                authPayload = ["kind": "password", "password": password]
                 handle = try await Bridge.openSSHWithPassword(host, password: password, rows: 24, cols: 80, jump: jump)
             }
             // Cancelling does not reach the call that is already in flight, so
@@ -997,6 +1002,14 @@ struct SSHConnectForm: View {
             connected(SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id))
             await model.noteConnection(host)
             dismiss()
+            // The library row shows what the server said about itself, and a
+            // plain Connect never asked: the setup wizard probes, this sheet
+            // did not. Refresh best effort with the same credential while it
+            // is still in memory, so the next visit names the distro.
+            let confirmedHost = host
+            Task.detached {
+                try? await Bridge.probeServerForSetup(confirmedHost, auth: authPayload, jump: jump)
+            }
         } catch {
             guard !Task.isCancelled else { return }
             self.error = error.localizedDescription

@@ -56,6 +56,23 @@ use any of them to suggest that the tool's owner is involved with tokenstat.
 The source files come from `sites/tokenstat/assets/brands` in the website
 repository, which records where each one came from.
 
+## Linux distribution marks
+
+The server list identifies a host's OS with the distribution's own mark, under
+`apps/mac/Resources/Brands.xcassets` as `brand_distro_*`. Those SVGs are
+[Simple Icons](https://simpleicons.org/) renditions (CC0 1.0 Universal) of
+each distribution's own logo: Ubuntu, Debian, Fedora, Arch Linux, Alpine
+Linux, openSUSE, CentOS, Rocky Linux, AlmaLinux, Gentoo, Linux Mint, NixOS,
+Red Hat, SUSE, and generic Linux. They belong to their respective owners
+(Canonical, Software in the Public Interest, Red Hat/IBM, etc.) and are used
+for nominative identification of the OS the host itself reported in
+`/etc/os-release`, which is what trademark law permits without a licence.
+
+A distribution with no bundled mark gets the neutral system server glyph,
+never an invented initial and never another distro's logo. Do not add a
+redrawing of your own, and do not use any of them to suggest the
+distribution's owner is involved with tokenstat.
+
 ## Contact
 
 Permission requests: the address listed at https://tokenstat.ai.
