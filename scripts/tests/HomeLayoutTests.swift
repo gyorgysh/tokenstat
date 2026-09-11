@@ -8,12 +8,13 @@ import Foundation
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
 
-        // A device that has never been arranged gets the balanced order,
-        // with usage first and every section discoverable.
+        // A device that has never been arranged gets the balanced order.
+        // These tests run on a Mac, so that is the Mac balanced: the work
+        // first, the figures switched off to be turned back on.
         let fresh = HomeLayout(defaults: defaults)
-        assert(fresh.order == HomePreset.balanced.order)
-        assert(fresh.sections == [.usage, .continueWork, .machines, .pinnedWork, .activity, .limits])
-        assert(fresh.hidden.isEmpty)
+        assert(fresh.order == [.continueWork, .pinnedWork, .activity, .limits, .machines, .usage])
+        assert(fresh.sections == [.continueWork, .pinnedWork, .activity, .limits, .machines])
+        assert(fresh.hidden == [.usage])
         // And says so: a device nobody has arranged is balanced, not "none of
         // these three".
         assert(fresh.preset == .balanced)
@@ -22,11 +23,11 @@ import Foundation
         // claiming to be a preset.
         fresh.move(from: IndexSet(integer: 2), to: 0)
         fresh.setVisible(false, section: .machines)
-        assert(fresh.sections == [.usage, .continueWork, .pinnedWork, .activity, .limits])
+        assert(fresh.sections == [.activity, .continueWork, .pinnedWork, .limits])
         assert(fresh.preset == nil)
         let relaunched = HomeLayout(defaults: defaults)
         assert(relaunched.order == fresh.order)
-        assert(relaunched.hidden == [.machines])
+        assert(relaunched.hidden == [.usage, .machines])
 
         // Every card can be off. A clear Home is an answer, not a failure.
         for section in HomeSection.allCases { relaunched.setVisible(false, section: section) }
@@ -39,7 +40,8 @@ import Foundation
         assert(relaunched.sections == HomePreset.usage.order)
         assert(HomeLayout(defaults: defaults).preset == .usage)
         relaunched.reset()
-        assert(relaunched.sections == HomePreset.balanced.order.filter { !HomePreset.balanced.hidden.contains($0) })
+        assert(relaunched.sections == [.continueWork, .pinnedWork, .activity, .limits, .machines])
+        assert(relaunched.hidden == [.usage])
         assert(relaunched.preset == .balanced)
 
         // A stored order this build cannot read is made usable rather than
@@ -50,7 +52,7 @@ import Foundation
             order: [.limits, .limits, .activity],
             hidden: [.limits, .machines]
         )
-        assert(messy.order == [.limits, .activity, .usage, .continueWork, .machines, .pinnedWork])
+        assert(messy.order == [.limits, .activity, .continueWork, .pinnedWork, .machines, .usage])
         assert(messy.hidden == [.limits, .machines])
 
         // An arrangement stored before pins existed gains the card at the
@@ -90,13 +92,15 @@ import Foundation
         assert(HomeLayout.movedVisible(withHidden, hidden: [.usage],
                                        from: IndexSet(integer: 50), to: 0) == withHidden)
 
-        // Nothing stored at all is the default, not an empty Home.
-        assert(HomeLayout.normalize(order: nil, hidden: []).order == HomePreset.balanced.order)
+        // Nothing stored at all is the Mac balanced order, not an empty Home.
+        assert(HomeLayout.normalize(order: nil, hidden: []).order == [.continueWork, .pinnedWork, .activity, .limits, .machines, .usage])
+        assert(HomeLayout.normalize(order: nil, hidden: []).hidden == [.usage])
 
         // Every preset is a complete arrangement. One that dropped a card
-        // would hide it with no way to say so.
+        // would hide it with no way to say so, so anything hidden must still
+        // be in the order.
         for preset in HomePreset.allCases {
-            assert(preset.hidden.isEmpty)
+            assert(Set(preset.hidden).isSubset(of: preset.order))
             assert(Set(preset.order) == Set(HomeSection.allCases))
             assert(preset.order.count == HomeSection.allCases.count)
         }

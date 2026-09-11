@@ -79,21 +79,40 @@ enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// Every preset switches everything on. A card is switched off by the
-    /// person holding the device, not by the arrangement they picked: an
-    /// arrangement that quietly hides one is a feature somebody never learns
-    /// exists. Kept as a property because a later preset may want to.
-    var hidden: Set<HomeSection> { [] }
+    /// Every preset switches everything on, with one exception: Balanced on
+    /// the Mac leaves the figures off. A new Mac opens on the work, and the
+    /// figures live one click away in Insights; somebody who wants them on
+    /// Home switches them back on in Customize Home. Everywhere else a card
+    /// is switched off by the person holding the device, not by the
+    /// arrangement they picked.
+    var hidden: Set<HomeSection> {
+        switch self {
+        case .balanced:
+#if os(macOS)
+            [.usage]
+#else
+            []
+#endif
+        default:
+            []
+        }
+    }
 
     /// Balanced answers the two questions the app is opened for, in order:
-    /// what it cost, and what you were doing. The two figures are one line
-    /// deep and read at a glance, so they lead without pushing the work down
-    /// the screen. Machines sits under Continue because "can I even reach it"
-    /// is the next question after "where was I", and the year grid and the
-    /// plan windows are what somebody scrolls to rather than opens for.
+    /// what you were doing, and what it cost. On the Mac the work leads and
+    /// the figures sit out: Continue, the pinned shortcuts, the year grid,
+    /// the plan windows, the machines, with Today and this week switched off
+    /// to be turned back on. On the phone the two figures lead as before:
+    /// they are one line deep and read at a glance, so they answer without
+    /// pushing the work down a short screen.
     var order: [HomeSection] {
         switch self {
-        case .balanced: [.usage, .continueWork, .machines, .pinnedWork, .activity, .limits]
+        case .balanced:
+#if os(macOS)
+            [.continueWork, .pinnedWork, .activity, .limits, .machines, .usage]
+#else
+            [.usage, .continueWork, .machines, .pinnedWork, .activity, .limits]
+#endif
         case .work: [.continueWork, .pinnedWork, .machines, .limits, .usage, .activity]
         case .usage: [.usage, .limits, .activity, .continueWork, .pinnedWork, .machines]
         }

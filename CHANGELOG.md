@@ -16,7 +16,9 @@ at the end.
 Small corrections on top of 1.0.0, most of them invisible. The Windows build
 and its tests are green again, and a transcript the meter cannot reach
 reports an error instead of a zero usage figure. The client search fields
-and menu separators follow the theme.
+and menu separators follow the theme. On a new Mac, Home opens on Balanced
+with the work first and the figures switched off; the desktop usage figures
+share their card instead of huddling left.
 
 ## [1.0.0] - 2026-09-08
 
