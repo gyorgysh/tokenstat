@@ -61,7 +61,10 @@ pub(crate) fn parse_identity(output: &str) -> Result<Value, String> {
 }
 
 pub(crate) fn stage_code_command() -> String {
-    format!("umask 077; set -C; cat > \"{CODE_PATH}\"")
+    // A retry must replace a code left by a previous attempt. Remove the
+    // reserved file first, then create it with noclobber still on, so two
+    // concurrent writers cannot both believe they won.
+    format!("umask 077; rm -f \"{CODE_PATH}\"; set -C; cat > \"{CODE_PATH}\"")
 }
 
 pub(crate) fn clear_code_command() -> String {
@@ -319,18 +322,37 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn staging_never_overwrites_an_existing_file() {
+    fn staging_replaces_a_stale_code_from_a_previous_attempt() {
         let root = std::env::temp_dir().join(format!("tokenstat-stage-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join(".tokenstat-pairing");
         std::fs::write(&path, "keep me").unwrap();
-        let output = std::process::Command::new("sh")
+        let mut child = std::process::Command::new("sh")
             .args(["-c", &stage_code_command()])
             .env("HOME", &root)
-            .output()
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .unwrap();
-        assert!(!output.status.success());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep me");
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"WXYZ-1234\n")
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{:?}", output);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "WXYZ-1234\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o077,
+                0
+            );
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 

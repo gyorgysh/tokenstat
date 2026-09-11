@@ -484,6 +484,10 @@ final class ClientSetupModel {
                 }
             }
             guard let peer = self.expectedPeer else { return }
+            // The key arrived over the verified SSH session, which is the same
+            // consent as typing it by hand. Approve it here so the tunnel calls
+            // below are not refused as "not approved on this device".
+            _ = try? await Bridge.pair(key: peer, label: self.machineName, address: "")
             self.checkpoint(.verifying)
             let deadline = Date().addingTimeInterval(180)
             while Date() < deadline {
