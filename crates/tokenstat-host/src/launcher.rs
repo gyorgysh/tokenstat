@@ -1036,8 +1036,35 @@ fn user_home() -> String {
     }
     #[cfg(not(windows))]
     {
-        std::env::var("HOME").unwrap_or_default()
+        let process_home = std::env::var("HOME").unwrap_or_default();
+        // The login shell's answer is read without waiting: the catalog
+        // warms it ahead of time, and a resolve that has not finished yet
+        // behaves exactly as before.
+        let login_env = tokenstat_pty::login_env();
+        let login_home = login_env
+            .as_ref()
+            .and_then(|env| env.vars.get("HOME"))
+            .map(String::as_str);
+        home_from(&process_home, login_home)
     }
+}
+
+/// HOME for path building: the process value wins, the login shell's answer
+/// covers a daemon started with a scrubbed environment.
+///
+/// A systemd system unit has no HOME at all. Building conventional paths
+/// from that turned `~/.local/bin` into `/.local/bin`, so an installed tool
+/// the daemon itself had just delivered resolved as missing and the install
+/// read as a failure.
+#[cfg(not(windows))]
+fn home_from(process_home: &str, login_home: Option<&str>) -> String {
+    if !process_home.is_empty() {
+        return process_home.to_string();
+    }
+    if let Some(home) = login_home.filter(|home| !home.is_empty()) {
+        return home.to_string();
+    }
+    String::new()
 }
 
 fn path_separator() -> char {
@@ -1215,8 +1242,10 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    use super::install_delivered;
     use super::{
-        PROFILES, Profile, catalog, command_names, hide_in, install, install_delivered,
+        PROFILES, Profile, catalog, command_names, hide_in, home_from, install,
         load_prefs_in, model_arguments, model_environment, resolve_profile, show_in, sign_in,
         split_path_var, strip_ansi,
     };
@@ -1313,6 +1342,19 @@ mod tests {
                 "a semicolon is not a unix PATH separator"
             );
         }
+    }
+
+    /// A scrubbed daemon environment still finds home. A systemd system unit
+    /// has no HOME, and without the login shell's answer every conventional
+    /// path degrades to `/.local/bin`, which is how a delivered tool
+    /// resolved as missing.
+    #[cfg(unix)]
+    #[test]
+    fn home_falls_back_to_the_login_shell() {
+        assert_eq!(home_from("/root", Some("/home/other")), "/root");
+        assert_eq!(home_from("", Some("/root")), "/root");
+        assert_eq!(home_from("", Some("")), "");
+        assert_eq!(home_from("", None), "");
     }
 
     /// Exit zero is not delivered. An installer that ran clean and left

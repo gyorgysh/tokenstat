@@ -13,6 +13,7 @@ private struct ChatConversationOverview: View {
     @State private var backend = ""
     @State private var runningOnly = false
     @State private var alphabetical = false
+    @State private var pendingRemoval: ChatConversation?
 
     private var conversations: [ChatConversation] {
         model.folderID == workspaceID ? model.chats : []
@@ -83,8 +84,12 @@ private struct ChatConversationOverview: View {
                     Skeleton.CardPlaceholder(rows: 3)
                 } else if conversations.isEmpty {
                     ContentUnavailableView("No conversations yet", systemImage: "bubble.left.and.bubble.right", description: Text("Start a chat to work with an agent in this workspace."))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, Theme.Space.xl)
                 } else if shown.isEmpty {
                     ContentUnavailableView("No matching conversations", systemImage: "magnifyingglass", description: Text("Try another search or adjust the filters."))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, Theme.Space.xl)
                 } else {
                     Text("\(shown.count) conversations").font(Theme.caption).foregroundStyle(.secondary)
                     LazyVStack(spacing: Theme.Space.s) {
@@ -112,12 +117,35 @@ private struct ChatConversationOverview: View {
                                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
                                 .contentShape(Rectangle())
                             }.buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Remove chat", .delete, role: .destructive) {
+                                    pendingRemoval = conversation
+                                }
+                            }
                         }
                     }
                 }
             }.padding(Theme.Space.m)
         }
         .background(Theme.background)
+        .confirmationDialog(
+            "Remove this chat?",
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove chat", role: .destructive) {
+                if let chat = pendingRemoval {
+                    Task { await model.remove(chat, in: workspaceID) }
+                }
+                pendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: {
+            Text("This permanently deletes the transcript.")
+        }
         .onChange(of: workspaceID) { _, _ in
             search = ""
             backend = ""

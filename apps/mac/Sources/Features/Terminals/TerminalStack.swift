@@ -145,10 +145,25 @@ final class TerminalStackView: NSView {
         // display the screen shows only a caret until the process prints.
         var reparented = Set<ObjectIdentifier>()
         for view in views where view.superview !== self {
-            // No autoresizing: split frames are set in `layout`.
+            // No autoresizing: split frames are set in `layout` (and, for
+            // newcomers, in `targetFrame` below).
             view.autoresizingMask = []
             addSubview(view)
             reparented.insert(ObjectIdentifier(view))
+        }
+        // Place newcomers now, not on the next layout pass. A view keeps its
+        // creation frame until `layout` runs, and output arriving in between
+        // paints at that size in that spot: the terminal opening small in a
+        // corner until a resize moves it.
+        if bounds.width > 1, bounds.height > 1 {
+            for view in views where reparented.contains(ObjectIdentifier(view)) {
+                if let frame = targetFrame(
+                    for: view, leading: leading, trailing: trailing,
+                    axis: axis, fraction: fraction
+                ) {
+                    view.frame = frame
+                }
+            }
         }
         // A session closed elsewhere leaves a view here with nothing behind it.
         for sub in subviews where !views.contains(where: { $0 === sub }) {
@@ -245,8 +260,15 @@ final class TerminalStackView: NSView {
 
     override func layout() {
         super.layout()
+        guard bounds.width > 1, bounds.height > 1 else {
+            // No valid size yet (fresh mount with a zero frame). Leave the
+            // pending full paint queued and the frames alone: collapsing a
+            // visible terminal to zero resizes its pty to nothing, and the
+            // session stays blank until something forces another layout.
+            return
+        }
         let gap: CGFloat = 1
-        if let axis = splitAxis, bounds.width > 1, bounds.height > 1 {
+        if let axis = splitAxis {
             let (lead, trail) = splitFrames(axis: axis, fraction: fraction, gap: gap)
             if let view = leadingView, view.frame != lead { view.frame = lead }
             if let view = trailingView, view.frame != trail { view.frame = trail }
@@ -254,16 +276,44 @@ final class TerminalStackView: NSView {
             // them here would SIGWINCH a session nobody can see.
         } else {
             // Visible views only. Hidden ones keep the frame they were shown
-            // at: resizing them here would SIGWINCH a session nobody can see,
-            // and a zero-bounds pass would collapse the pty and leave the
-            // session broken until input forced a resize and repaint.
+            // at: resizing them here would SIGWINCH a session nobody can see.
+            // (A zero-bounds pass returns at the guard above for the same
+            // reason: collapsing the pty leaves the session broken until a
+            // resize forces a repaint.)
             for sub in subviews where !sub.isHidden {
                 if sub.frame != bounds { sub.frame = bounds }
             }
         }
-        if needsFullPaint, bounds.width > 1, bounds.height > 1 {
+        if needsFullPaint {
             paintVisibleTerminals()
         }
+    }
+
+    /// Where `view` belongs right now. Mirrors `layout()`, so a view added
+    /// between layout passes never paints its creation frame first.
+    private func targetFrame(
+        for view: TerminalView,
+        leading: TerminalView?,
+        trailing: TerminalView?,
+        axis: Axis?,
+        fraction: CGFloat
+    ) -> CGRect? {
+        if let axis {
+            let (lead, trail) = splitFrames(axis: axis, fraction: fraction, gap: 1)
+            if view === leading { return lead }
+            if view === trailing { return trail }
+            return nil
+        }
+        if view === leading || view === trailing { return bounds }
+        return nil
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Freshly mounted with a zero frame, the first `sync` had nothing to
+        // lay out against. Ask again now that a window exists, so the terminal
+        // does not wait for a manual resize to appear.
+        needsLayout = true
     }
 
     private func splitFrames(axis: Axis, fraction: CGFloat, gap: CGFloat) -> (CGRect, CGRect) {
