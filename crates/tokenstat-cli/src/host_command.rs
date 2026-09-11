@@ -126,6 +126,22 @@ enum AccessCommand {
         #[arg(value_parser = peer_key)]
         device: String,
     },
+    /// Approve a pending request without pasting the full device key
+    ///
+    /// With no target it lists the pending requests and asks which to let
+    /// in. Pass a list number, a key prefix, or a device label. Pass --all
+    /// to approve every pending request at once. CI: --yes skips the prompt,
+    /// --json prints what was approved.
+    Approve {
+        /// List number, key prefix, full key, or device label. Omit to choose interactively.
+        target: Option<String>,
+        /// Approve every pending request
+        #[arg(long)]
+        all: bool,
+        /// Do not ask for confirmation
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
     /// Revoke an exact device public key's access to the work here
     Deny {
         #[arg(value_parser = peer_key)]
@@ -391,13 +407,18 @@ fn access(
     match command {
         Some(AccessCommand::Invite) => return invite(socket, json_output),
         Some(AccessCommand::Log { lines }) => return log(socket, *lines, json_output),
+        Some(AccessCommand::Approve { target, all, yes }) => {
+            return approve(socket, target.as_deref(), *all, *yes, json_output);
+        }
         _ => {}
     }
     if let Some(command) = command {
         let (device, allow) = match command {
             AccessCommand::Allow { device } => (device, true),
             AccessCommand::Deny { device } => (device, false),
-            AccessCommand::Invite | AccessCommand::Log { .. } => unreachable!("handled above"),
+            AccessCommand::Invite | AccessCommand::Log { .. } | AccessCommand::Approve { .. } => {
+                unreachable!("handled above")
+            }
         };
         let result = host_rpc::call(
             socket,
@@ -434,23 +455,229 @@ fn access(
             println!("  None yet");
         }
         println!("\nPending requests");
-        for request in pending
+        let pending_list = pending
             .as_array()
-            .context("The host returned an invalid request list")?
-        {
-            println!(
-                "  {}  {}",
-                text(&request["peerId"]),
-                text(&request["label"])
-            );
+            .context("The host returned an invalid request list")?;
+        for (index, request) in pending_list.iter().enumerate() {
+            let key = request["peerId"].as_str().unwrap_or("unavailable");
+            let label = request["label"].as_str().unwrap_or("");
+            let name = if label.is_empty() {
+                "unnamed device"
+            } else {
+                label
+            };
+            println!("  [{}] {name} ({})", index + 1, short(key));
+            println!("      {key}");
         }
-        if pending.as_array().is_some_and(Vec::is_empty) {
+        if pending_list.is_empty() {
             println!("  None");
         } else {
-            println!("\nApprove one with `tokenstat host access allow <device key>`.");
+            println!("\nApprove without pasting the key:");
+            println!("  tokenstat host access approve      # choose from the list");
+            println!("  tokenstat host access approve 1    # by list number");
+            println!("  tokenstat host access approve --all");
+            println!("\nExact key still works:");
+            println!("  tokenstat host access allow <device key>");
         }
     }
     Ok(())
+}
+
+/// Approve pending requests by list number, key prefix, or label.
+///
+/// Numbered so a key never has to be retyped over SSH. `--all` takes every
+/// pending request at once; a single target plus `--yes` (or `--json`) runs
+/// without a prompt for scripts.
+fn approve(
+    socket: &std::path::Path,
+    target: Option<&str>,
+    all: bool,
+    assume_yes: bool,
+    json_output: bool,
+) -> Result<()> {
+    let pending = host_rpc::call(socket, "workspace.access.pending", json!({}))
+        .map_err(|error| older_host("access requests", error))?;
+    let pending_list: Vec<Value> = pending
+        .as_array()
+        .context("The host returned an invalid request list")?
+        .clone();
+    if pending_list.is_empty() {
+        if json_output {
+            println!("{}", json!({"approved": []}));
+        } else {
+            println!("No pending requests.");
+        }
+        return Ok(());
+    }
+    let keys: Vec<String> = pending_list
+        .iter()
+        .filter_map(|request| request["peerId"].as_str().map(str::to_owned))
+        .collect();
+    let chosen: Vec<String> = if all {
+        keys.clone()
+    } else if let Some(target) = target {
+        vec![resolve_target(target, &pending_list)?]
+    } else if json_output {
+        bail!("Pass a list number, key, label, or --all with --json.");
+    } else {
+        print_pending(&pending_list);
+        prompt_choices(&pending_list, &keys)?
+    };
+    if !json_output && !assume_yes && !prompt_confirm(&chosen, &pending_list)? {
+        println!("Nothing was changed.");
+        return Ok(());
+    }
+    let mut approved = Vec::new();
+    for key in &chosen {
+        host_rpc::call(
+            socket,
+            "workspace.access.set",
+            json!({"peerId": key, "allow": true, "via": "console"}),
+        )?;
+        approved.push(key.clone());
+    }
+    if json_output {
+        println!("{}", json!({"approved": approved}));
+    } else if approved.len() == 1 {
+        println!(
+            "Allowed access for {}.",
+            describe(&approved[0], &pending_list)
+        );
+    } else {
+        println!("Allowed access for {} devices.", approved.len());
+    }
+    Ok(())
+}
+
+/// One pending request, by number (1-based), full key, unique key prefix, or
+/// case-insensitive label. Numbers are what SSH sessions want: short, exact,
+/// and visible in the list above.
+fn resolve_target(target: &str, pending: &[Value]) -> Result<String> {
+    let needle = target.trim();
+    if let Ok(number) = needle.parse::<usize>() {
+        if number >= 1 && number <= pending.len() {
+            return pending[number - 1]["peerId"]
+                .as_str()
+                .map(str::to_owned)
+                .context("The host returned an invalid device key");
+        }
+        bail!(
+            "There are {} pending requests, so {number} is out of range.",
+            pending.len()
+        );
+    }
+    let lowered = needle.to_ascii_lowercase();
+    // Full key first: exact, no ambiguity.
+    if let Some(hit) = pending.iter().find(|request| {
+        request["peerId"]
+            .as_str()
+            .is_some_and(|key| key.to_ascii_lowercase() == lowered)
+    }) {
+        return Ok(hit["peerId"].as_str().unwrap_or_default().to_owned());
+    }
+    // Key prefix, when it names exactly one request.
+    let prefix: Vec<String> = pending
+        .iter()
+        .filter_map(|request| request["peerId"].as_str())
+        .filter(|key| key.to_ascii_lowercase().starts_with(&lowered))
+        .map(str::to_owned)
+        .collect();
+    if prefix.len() == 1 {
+        return Ok(prefix[0].clone());
+    }
+    if prefix.len() > 1 {
+        bail!(
+            "{needle} matches {} pending requests. Use more of the key or a list number.",
+            prefix.len()
+        );
+    }
+    // Device label, when it names exactly one request.
+    let labels: Vec<String> = pending
+        .iter()
+        .filter(|request| {
+            request["label"]
+                .as_str()
+                .is_some_and(|label| label.to_ascii_lowercase().contains(&lowered))
+        })
+        .filter_map(|request| request["peerId"].as_str().map(str::to_owned))
+        .collect();
+    match labels.len() {
+        1 => Ok(labels[0].clone()),
+        0 => {
+            bail!("No pending request matches {needle}. Use `tokenstat host access` to list them.")
+        }
+        _ => bail!(
+            "{needle} matches {} pending requests. Use a list number instead.",
+            labels.len()
+        ),
+    }
+}
+
+fn print_pending(pending: &[Value]) {
+    println!("Pending requests");
+    for (index, request) in pending.iter().enumerate() {
+        println!(
+            "  [{}] {}",
+            index + 1,
+            describe(request["peerId"].as_str().unwrap_or(""), pending)
+        );
+    }
+}
+
+fn describe(key: &str, pending: &[Value]) -> String {
+    let label = pending
+        .iter()
+        .find(|request| request["peerId"].as_str() == Some(key))
+        .and_then(|request| request["label"].as_str())
+        .unwrap_or("");
+    if label.is_empty() {
+        format!("{} ({})", key, short(key))
+    } else {
+        format!("{label} ({})", short(key))
+    }
+}
+
+fn prompt_choices(pending: &[Value], keys: &[String]) -> Result<Vec<String>> {
+    use std::io::Write;
+    print!(
+        "Approve which? [1-{}, a for all, q to quit] ",
+        pending.len()
+    );
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    let answer = answer.trim().to_ascii_lowercase();
+    if answer == "q" || answer == "quit" || answer == "n" || answer == "no" || answer.is_empty() {
+        bail!("Nothing was changed.");
+    }
+    if answer == "a" || answer == "all" {
+        return Ok(keys.to_vec());
+    }
+    // Comma-separated numbers like `1,3` approve several at once.
+    if answer.contains(',') {
+        let mut out = Vec::new();
+        for part in answer.split(',') {
+            out.push(resolve_target(part, pending)?);
+        }
+        return Ok(out);
+    }
+    Ok(vec![resolve_target(&answer, pending)?])
+}
+
+fn prompt_confirm(chosen: &[String], pending: &[Value]) -> Result<bool> {
+    use std::io::Write;
+    if chosen.len() == 1 {
+        print!("Allow {}? [y/N] ", describe(&chosen[0], pending));
+    } else {
+        print!("Allow {} devices? [y/N] ", chosen.len());
+    }
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 /// Mint the code that lets one more device in.
@@ -749,6 +976,18 @@ mod tests {
             vec!["tokenstat", "host", "uninstall", "--purge", "--yes"],
             vec!["tokenstat", "host", "access", "invite"],
             vec!["tokenstat", "host", "access", "log", "-n", "10"],
+            vec!["tokenstat", "host", "access", "approve"],
+            vec!["tokenstat", "host", "access", "approve", "1", "--yes"],
+            vec!["tokenstat", "host", "access", "approve", "--all", "--yes"],
+            vec![
+                "tokenstat",
+                "host",
+                "access",
+                "approve",
+                "--all",
+                "--yes",
+                "--json",
+            ],
             vec![
                 "tokenstat",
                 "host",
@@ -839,5 +1078,26 @@ mod tests {
         for value in ["", "a-device", "abcd", &"g".repeat(64)] {
             assert!(peer_key(value).is_err());
         }
+    }
+
+    #[test]
+    fn approve_targets_resolve_by_number_key_or_label() {
+        let pending = vec![
+            json!({"peerId": "aa".repeat(32), "label": "phone"}),
+            json!({"peerId": "bb".repeat(32), "label": "tablet"}),
+        ];
+        assert_eq!(resolve_target("1", &pending).unwrap(), "aa".repeat(32));
+        assert_eq!(resolve_target("2", &pending).unwrap(), "bb".repeat(32));
+        assert!(resolve_target("3", &pending).is_err());
+        assert_eq!(
+            resolve_target(&"AA".repeat(32), &pending).unwrap(),
+            "aa".repeat(32)
+        );
+        assert_eq!(
+            resolve_target(&"aa".repeat(4), &pending).unwrap(),
+            "aa".repeat(32)
+        );
+        assert_eq!(resolve_target("tablet", &pending).unwrap(), "bb".repeat(32));
+        assert!(resolve_target("nope", &pending).is_err());
     }
 }

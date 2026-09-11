@@ -9,6 +9,7 @@ import SwiftUI
 
 // The client is iOS and iPadOS only.
 #if !os(macOS)
+import UIKit
 
 /// What a screen shows when it has no content, and why the three cases are
 /// three cases.
@@ -456,6 +457,8 @@ enum ClientWireframe {
 /// keeps a picture moving so it reads as pending rather than as failed.
 struct ClientAwaitingAccessCard: View {
     let hostName: String
+    var isHeadless: Bool = false
+    @State private var showHelp = false
 
     var body: some View {
         VStack(spacing: Theme.Space.s) {
@@ -468,10 +471,342 @@ struct ClientAwaitingAccessCard: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            if isHeadless {
+                Text("No screen on that machine? Approve over SSH instead.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button("How to approve", .help) {
+                showHelp = true
+            }
+            .font(ClientType.label.weight(.semibold))
+            .tint(Theme.accent)
         }
         .frame(maxWidth: .infinity)
         .padding(Theme.Space.l)
         .cardSurface()
+        .sheet(isPresented: $showHelp) {
+            ClientAccessApprovalSheet(hostName: hostName, peerKey: "", isHeadless: isHeadless)
+        }
+    }
+}
+
+/// The numbered steps shared by the waiting card and the approval sheet.
+///
+/// One place so the card's inline help and the sheet cannot drift into two
+/// different answers. Headless hosts get SSH commands; Macs with a screen get
+/// the GUI path first and SSH as the fallback.
+struct ClientAccessApprovalSteps: View {
+    let hostName: String
+    var isHeadless: Bool
+    @State private var copied: String?
+
+    private var approveCommand: String { "tokenstat host access approve" }
+    private var inviteCommand: String { "tokenstat host access invite" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("How to approve")
+                .font(ClientType.label.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 2)
+            if isHeadless {
+                approvalStep(
+                    symbol: "terminal",
+                    step: "Step 1",
+                    title: "SSH into \(hostName)",
+                    detail: "Any shell on that machine works. The request is already waiting there."
+                )
+                commandRow(command: approveCommand, id: "approve")
+                approvalStep(
+                    symbol: "checkmark.seal",
+                    step: "Step 2",
+                    title: "Pick this device from the list",
+                    detail: "The command numbers every pending request, so there is no key to paste."
+                )
+                approvalStep(
+                    symbol: "link",
+                    step: "Step 3",
+                    title: "Come back here",
+                    detail: "This screen connects on its own once the request is answered."
+                )
+                fallbackCard(
+                    symbol: "key",
+                    title: "No SSH either?",
+                    detail: "Run the invite command on that machine, then enter the code via “I have a code”.",
+                    command: inviteCommand,
+                    commandId: "invite"
+                )
+            } else {
+                approvalStep(
+                    symbol: "laptopcomputer",
+                    step: "Step 1",
+                    title: "Open tokenstat on \(hostName)",
+                    detail: "The request is waiting in the sidebar and in Devices."
+                )
+                approvalStep(
+                    symbol: "checkmark.seal",
+                    step: "Step 2",
+                    title: "Approve this device",
+                    detail: "This screen connects on its own once it is answered."
+                )
+                fallbackCard(
+                    symbol: "terminal",
+                    title: "Remote machine?",
+                    detail: "SSH in and run the approve command, then pick this device.",
+                    command: approveCommand,
+                    commandId: "approve"
+                )
+            }
+        }
+    }
+
+    private func approvalStep(symbol: String, step: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Theme.accentSoft)
+                    .frame(width: 34, height: 34)
+                Image(systemName: symbol)
+                    .font(Theme.font(15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.uppercased())
+                    .font(ClientType.caption.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                Text(title).font(ClientType.label.weight(.semibold))
+                Text(detail)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border, lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(step). \(title). \(detail)")
+    }
+
+    private func commandRow(command: String, id: String) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            Text(command)
+                .font(Theme.monoText(13))
+                .textSelection(.enabled)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(copied == id ? "Copied" : "Copy", copied == id ? .done : .copy) {
+                UIPasteboard.general.string = command
+                copied = id
+            }
+            .font(ClientType.caption.weight(.semibold))
+            .tint(Theme.accent)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border, lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Run \(command) on \(hostName)")
+    }
+
+    /// The secondary path as its own card, so it never reads as small print
+    /// under the real answer. Headless hosts offer the invite code; GUI hosts
+    /// offer SSH as the fallback.
+    private func fallbackCard(symbol: String, title: String, detail: String, command: String, commandId: String) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                Image(systemName: symbol)
+                    .font(Theme.font(15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 34, height: 34)
+                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(ClientType.label.weight(.semibold))
+                    Text(detail)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: Theme.Space.s) {
+                Text(command)
+                    .font(Theme.monoText(13))
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(copied == commandId ? "Copied" : "Copy", copied == commandId ? .done : .copy) {
+                    UIPasteboard.general.string = command
+                    copied = commandId
+                }
+                .font(ClientType.caption.weight(.semibold))
+                .tint(Theme.accent)
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border, lineWidth: 1)
+        }
+    }
+}
+
+/// Request access, explained as a sheet rather than as small print.
+///
+/// The button used to fire the request and leave two captions underneath it,
+/// which is why nobody could tell the SSH path from the code path. This asks
+/// first, then shows where the request went and exactly what answers it on
+/// the other machine, with copy buttons so no command is retyped.
+struct ClientAccessApprovalSheet: View {
+    let hostName: String
+    /// Empty when the caller only wants the steps (the Workspaces waiting
+    /// card already asked on connect). Non-empty enables Request again and
+    /// the code-entry link.
+    let peerKey: String
+    var isHeadless: Bool
+    var requestNotice: String?
+    var isRequesting = false
+    var onRequestAgain: (() -> Void)?
+    var onGranted: (() -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
+    @State private var justAsked = false
+
+    private var approveCommand: String { "tokenstat host access approve" }
+    private var isRateLimited: Bool {
+        (requestNotice ?? "").lowercased().contains("several times")
+            || (requestNotice ?? "").lowercased().contains("wait an hour")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    VStack(spacing: Theme.Space.s) {
+                        ClientEmptyArt(kind: .workspaceAccess)
+                            .frame(maxWidth: .infinity)
+                        Text("Waiting for approval")
+                            .font(ClientType.screenTitle)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                        Text("Request sent to \(hostName). Approve it there and this screen will connect on its own.")
+                            .font(ClientType.label)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity)
+                        HStack(spacing: 6) {
+                            if isRequesting {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: isRateLimited ? "hourglass" : "paperplane")
+                                    .foregroundStyle(Theme.accent)
+                            }
+                            Text(isRequesting ? "Asking…" : (isRateLimited ? "Asked. Waiting out the limit" : "Request is waiting on that computer"))
+                                .font(ClientType.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, Theme.Space.m)
+                        .padding(.vertical, Theme.Space.s)
+                        .background(Theme.accentSoft.opacity(0.6), in: Capsule())
+                    }
+                    .frame(maxWidth: .infinity)
+                    if let requestNotice, !requestNotice.isEmpty {
+                        Text(requestNotice)
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if justAsked {
+                        Text("Asked. Approve this device on \(hostName).")
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    ClientAccessApprovalSteps(hostName: hostName, isHeadless: isHeadless)
+                    if !peerKey.isEmpty {
+                        NavigationLink {
+                            ClientAddThisDevice(peer: peerKey, hostName: hostName) {
+                                onGranted?()
+                                dismiss()
+                            }
+                        } label: {
+                            HStack(spacing: Theme.Space.m) {
+                                ActionSeat(icon: .pair, size: 34)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("I have a code")
+                                        .font(ClientType.label.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Text("Enter an invite code from that machine instead.")
+                                        .font(ClientType.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(Theme.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(Theme.Space.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border, lineWidth: 1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(Theme.Space.m)
+            }
+            .background(Theme.background)
+            .navigationTitle("Approve this device")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done", .dismiss) { dismiss() }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: Theme.Space.s) {
+                    Button(copied ? "Copied" : "Copy approve command", copied ? .done : .copy) {
+                        UIPasteboard.general.string = approveCommand
+                        copied = true
+                    }
+                    .labelStyle(ActionLabelStyle())
+                    .clientProminentStyle()
+                    .controlSize(.large)
+                    .tint(Theme.accent)
+                    .frame(maxWidth: .infinity)
+                    if onRequestAgain != nil {
+                        Button(isRequesting ? "Asking…" : "Request again", .refresh) {
+                            justAsked = true
+                            onRequestAgain?()
+                        }
+                        .font(ClientType.label)
+                        .tint(Theme.accent)
+                        .disabled(isRequesting)
+                    }
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
+                .background(Theme.background)
+            }
+        }
     }
 }
 

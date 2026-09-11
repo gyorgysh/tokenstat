@@ -78,7 +78,10 @@ struct ClientHostHeader: View {
             }
 
             if showsOpenWork { openWork }
-            if !isHeadless { viewScreen }
+            // Gated on the account record too, not just the live probe: the
+            // probe resolves after first paint, and a Linux host would flash
+            // a View screen row that only ever lands in an error state.
+            if !(isHeadless || isHeadlessPlatform(accountPlatform)) { viewScreen }
         }
         .task(id: peerKey) {
             if let headless = try? await Bridge.peerHeadless(peerKey) {

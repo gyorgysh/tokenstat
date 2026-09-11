@@ -26,6 +26,9 @@ struct ClientHostWorkspacesView: View {
     /// inside folders, so starting one means picking the folder first.
     @State private var starting: WorkspaceSection?
     @State private var search = ""
+    /// The approval explainer. Opening it is part of asking: the request fires
+    /// and the sheet shows where it went and what answers it.
+    @State private var showApproval = false
 
     /// Whether the host reports no display layer, which changes what "it is
     /// not answering" means and what somebody can do about it. Probed live:
@@ -83,39 +86,65 @@ struct ClientHostWorkspacesView: View {
                             message: "Folders, files, terminals and the agents running in them are only open to devices that computer has allowed. This screen opens on its own once the request is answered.",
                             actionTitle: model.isRequesting ? "Asking…" : "Request access",
                             actionIcon: .approve,
-                            action: { Task { await model.requestAccess(peerKey: peerKey) } },
+                            action: {
+                                showApproval = true
+                                Task { await model.requestAccess(peerKey: peerKey) }
+                            },
                             art: .workspaceAccess
                         )
                         if let notice = model.requestNotice {
-                            Text(notice)
-                                .font(ClientType.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity)
-                        }
-                        // On a server there is nobody at the machine to answer
-                        // a request, so asking would wait forever. A code
-                        // minted at its console is the way in, and this is the
-                        // screen where somebody finds that out.
-                        NavigationLink {
-                            ClientAddThisDevice(peer: peerKey, hostName: hostName) {
-                                Task { await model.connect(peerKey: peerKey, name: hostName) }
+                            let limited = notice.lowercased().contains("several times")
+                                || notice.lowercased().contains("wait an hour")
+                            HStack(spacing: Theme.Space.s) {
+                                Image(systemName: limited ? "hourglass" : "paperplane")
+                                    .foregroundStyle(Theme.accent)
+                                    .frame(width: 20)
+                                Text(notice)
+                                    .font(ClientType.caption)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                        } label: {
-                            Label("I have a code", systemImage: ActionIcon.pair.symbol)
-                                .font(ClientType.label)
+                            .padding(Theme.Space.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border, lineWidth: 1)
+                            }
                         }
-                        .tint(Theme.accent)
-                        Text(
-                            "On a machine with no screen, run `tokenstat host access invite` "
-                            + "on it and use the code it prints."
-                        )
-                        .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: Theme.Space.m) {
+                            Button("How to approve", .help) { showApproval = true }
+                                .font(ClientType.label.weight(.semibold))
+                                .tint(Theme.accent)
+                            Spacer(minLength: 0)
+                            // The code path lives beside the request path, not
+                            // below two paragraphs: it is the alternative, and
+                            // on a server with no SSH it is the only one.
+                            NavigationLink {
+                                ClientAddThisDevice(peer: peerKey, hostName: hostName) {
+                                    Task { await model.connect(peerKey: peerKey, name: hostName) }
+                                }
+                            } label: {
+                                Label("I have a code", systemImage: ActionIcon.pair.symbol)
+                                    .font(ClientType.label.weight(.semibold))
+                            }
+                            .tint(Theme.accent)
+                        }
                         .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 2)
+                        .padding(.top, 2)
+                    }
+                    .sheet(isPresented: $showApproval) {
+                        ClientAccessApprovalSheet(
+                            hostName: hostName,
+                            peerKey: peerKey,
+                            isHeadless: isHeadless,
+                            requestNotice: model.requestNotice,
+                            isRequesting: model.isRequesting,
+                            onRequestAgain: { Task { await model.requestAccess(peerKey: peerKey) } },
+                            onGranted: { Task { await model.connect(peerKey: peerKey, name: hostName) } }
+                        )
                     }
                 } else if model.folders.isEmpty, model.sessions.isEmpty {
                     if let message = model.errorMessage {
@@ -393,7 +422,7 @@ final class ClientHostWorkspacesModel {
             if answer.granted == true {
                 requestNotice = "This device already has access. Pull to refresh."
             } else {
-                requestNotice = "Asked. Approve this device on that computer."
+                requestNotice = "Asked. On that computer run `tokenstat host access approve` (over SSH is fine) and pick this device."
             }
         } catch {
             requestNotice = error.localizedDescription
