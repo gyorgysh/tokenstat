@@ -123,6 +123,9 @@ build a Report first, then apply prices with Report::priced.
 CI checks every commit in a pull request against this format. Fix violations by
 rewriting the branch, not by adding a follow up commit.
 
+The macOS build number in `apps/mac/project.yml` rides along with the next
+functional commit. Never a standalone bump commit.
+
 ## Versioning
 
 Semantic versioning. Until `1.0.0`, minor versions may break compatibility, and
