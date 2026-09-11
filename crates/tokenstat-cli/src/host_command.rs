@@ -446,6 +446,8 @@ fn access(
         }
         if pending.as_array().is_some_and(Vec::is_empty) {
             println!("  None");
+        } else {
+            println!("\nApprove one with `tokenstat host access allow <device key>`.");
         }
     }
     Ok(())
