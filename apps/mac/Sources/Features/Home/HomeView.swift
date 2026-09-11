@@ -188,13 +188,12 @@ struct HomeView: View {
              mark: "mark_insights") {
             if model.calendar != nil {
                 HStack(alignment: .top, spacing: Theme.Space.xl) {
-                    Stat(label: "Today", value: model.todayValue.formatted, size: 20, expands: false)
-                    Stat(label: "Last 7 days", value: model.weekValue.formatted, size: 20, expands: false)
+                    Stat(label: "Today", value: model.todayValue.formatted, size: 20, expands: true)
+                    Stat(label: "Last 7 days", value: model.weekValue.formatted, size: 20, expands: true)
                     if let busiest = model.calendar?.busiest {
                         Stat(label: "Busiest", value: formatSpend(busiest.value), note: busiest.date,
-                             size: 20, expands: false)
+                             size: 20, expands: true)
                     }
-                    Spacer(minLength: 0)
                 }
             } else if model.errorMessage != nil {
                 EmptyHint(text: "Usage could not be read. See the message above.")
