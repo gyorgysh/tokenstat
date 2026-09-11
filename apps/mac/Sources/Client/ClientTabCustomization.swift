@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import SwiftUI
+import UIKit
 
 #if !os(macOS)
 
@@ -13,9 +14,10 @@ import SwiftUI
 ///
 /// Device furniture, like the layout preference: a phone with a keyboard case
 /// lives in the sidebar, a phone in hand lives in the tab bar, and neither
-/// arrangement follows the account. The bar stays the familiar four unless
-/// somebody turns SSH on; hiding is refused while one tab is left standing,
-/// so the selection can never point at nothing.
+/// arrangement follows the account. The phone bar stays the familiar four
+/// unless somebody turns SSH on, while the iPad shows it from the start;
+/// hiding is refused while one tab is left standing, so the selection can
+/// never point at nothing.
 @MainActor @Observable
 final class ClientTabCustomization {
     static let shared = ClientTabCustomization()
@@ -28,6 +30,13 @@ final class ClientTabCustomization {
     var order: [ClientTab]
     /// Tabs switched off in the editor. Never every tab: see `setVisible`.
     var hidden: Set<ClientTab>
+
+    /// What a fresh device hides. The phone bar stays the familiar four with
+    /// SSH as an opt-in; the iPad sidebar has room, so SSH joins it there
+    /// from the start.
+    private static var defaultHidden: Set<ClientTab> {
+        UIDevice.current.userInterfaceIdiom == .pad ? [] : [.ssh]
+    }
 
     /// What the tab bar, the sidebar and the shortcuts all draw. Never empty.
     var visibleTabs: [ClientTab] {
@@ -52,9 +61,8 @@ final class ClientTabCustomization {
         let resolvedOrder = known + ClientTab.allCases.filter { !known.contains($0) }
         let resolvedHidden: Set<ClientTab>
         if storedOrder == nil {
-            // New device, or one from before tabs could be arranged: the
-            // familiar four, with SSH waiting as an opt-in.
-            resolvedHidden = [.ssh]
+            // New device, or one from before tabs could be arranged.
+            resolvedHidden = Self.defaultHidden
         } else {
             resolvedHidden = Set(
                 (defaults.stringArray(forKey: Self.hiddenKey) ?? [])
@@ -94,7 +102,7 @@ final class ClientTabCustomization {
 
     func reset() {
         order = ClientTab.allCases
-        hidden = [.ssh]
+        hidden = Self.defaultHidden
         save()
     }
 

@@ -115,6 +115,12 @@ struct ClientRootView: View {
     /// than by every screen.
     @State private var windowWidth: CGFloat = 0
 
+    /// Whether this scene floats in a window with traffic lights, rather
+    /// than filling the display. The toolbar lockup returns fullscreen.
+    private var windowed: Bool {
+        ClientLayout.isWindowed(windowWidth: windowWidth)
+    }
+
     private var layout: ClientLayoutMode {
         ClientLayout.mode(
             preference: ClientLayoutPreference(rawValue: layoutPreference) ?? .automatic,
@@ -147,7 +153,7 @@ struct ClientRootView: View {
             } else if !account.signedIn {
                 signedOut
             } else if layout == .sidebar {
-                ClientSidebarRoot(showAccount: $showAccount)
+                ClientSidebarRoot(showAccount: $showAccount, windowed: windowed)
                     .id(WorkSessionContext.shared.scope)
                     .transition(.opacity)
             } else {
@@ -364,7 +370,7 @@ struct ClientRootView: View {
                     Tab(tab.label, systemImage: tab.symbol, value: tab) {
                         NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                             tab.content
-                                .clientChrome(showAccount: $showAccount)
+                                .clientChrome(showAccount: $showAccount, windowed: windowed)
                                 .modifier(ClientRestoredDestination(tab: tab))
                                 .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                         }
@@ -382,7 +388,7 @@ struct ClientRootView: View {
                 ForEach(tabCustomization.tabs(including: navigation.destination)) { tab in
                     NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
                         tab.content
-                            .clientChrome(showAccount: $showAccount)
+                            .clientChrome(showAccount: $showAccount, windowed: windowed)
                             .modifier(ClientRestoredDestination(tab: tab))
                             .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                     }
@@ -417,9 +423,9 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     case workspaces
     case insights
     case machines
-    /// Saved servers, for somebody who lives in them. Opt-in and off by
-    /// default: the bar stays the familiar four until it is switched on in
-    /// the tab editor.
+    /// Saved servers, for somebody who lives in them. Opt-in on the phone
+    /// and on from the start on the iPad: the phone bar stays the familiar
+    /// four until it is switched on in the tab editor.
     case ssh
 
     var id: String { rawValue }
@@ -539,19 +545,19 @@ private struct ClientAuthRetryView: View {
 }
 
 private extension View {
-    /// The top bar every client screen shares: the avatar, the wordmark, and
-    /// room for exactly one contextual control.
+    /// The top bar every client screen shares: the avatar, and room for
+    /// exactly one contextual control. The wordmark joins the middle everywhere
+    /// except a windowed iPad, where the traffic lights leave no uncontested
+    /// center and the tab bar already names the screen.
     ///
     /// A modifier rather than a wrapper view, so each screen keeps its own
     /// scroll view as the direct child of the navigation stack. That is what
     /// lets content scroll under the glass instead of stopping at its edge.
-    func clientChrome(showAccount: Binding<Bool>) -> some View {
+    func clientChrome(showAccount: Binding<Bool>, windowed: Bool) -> some View {
         toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    // Room for the iPad windowed traffic lights. Harmless fullscreen.
                     AvatarButton { showAccount.wrappedValue = true }
-                        .padding(.leading, 28)
                 }
                 // The wordmark, not the screen's name. The tab bar already
                 // says which screen this is, and the middle of the top bar is
@@ -564,13 +570,15 @@ private extension View {
                 ToolbarItem(placement: .topBarTrailing) {
                     ClientConnectionChip()
                 }
-                ToolbarItem(placement: .principal) {
-                    // Larger than the Mac's sidebar lockup, and not filling:
-                    // this is the one brand on the screen and it has a whole
-                    // bar to itself, where the sidebar size read as a caption.
-                    // `fills` off so it centres instead of pushing right.
-                    Wordmark(size: 22, fills: false)
-                        .accessibilityAddTraits(.isHeader)
+                if !windowed {
+                    ToolbarItem(placement: .principal) {
+                        // Larger than the Mac's sidebar lockup, and not filling:
+                        // this is the one brand on the screen and it has a whole
+                        // bar to itself, where the sidebar size read as a caption.
+                        // `fills` off so it centres instead of pushing right.
+                        Wordmark(size: 22, fills: false)
+                            .accessibilityAddTraits(.isHeader)
+                    }
                 }
             }
     }

@@ -142,6 +142,15 @@ struct ClientSetupCloudDoor: View {
         var id: String { rawValue }
     }
 
+    /// AWS inventory import needs the desktop app, so the phone offers
+    /// DigitalOcean alone. The selector stays with one option, ready for
+    /// the next provider, instead of vanishing and reappearing.
+    #if os(macOS)
+    private var providers: [Provider] { Provider.allCases }
+    #else
+    private var providers: [Provider] { [.digitalOcean] }
+    #endif
+
     @State private var provider = Provider.digitalOcean
     @State private var token = ""
     @State private var profile = ""
@@ -180,13 +189,8 @@ struct ClientSetupCloudDoor: View {
                     // The platform segmented control is a grey track with a
                     // grey pill, which is the one piece of chrome on this
                     // screen wearing somebody else's palette.
-                    #if os(macOS)
-                    SegmentedTabs(options: Provider.allCases, selection: $provider)
+                    SegmentedTabs(options: providers, selection: $provider)
                         .disabled(working)
-                    #else
-                    // Phone: DigitalOcean only. AWS inventory import needs the
-                    // desktop app, so there is no second tab to offer.
-                    #endif
                     if provider == .digitalOcean {
                         Text("Read-only API token")
                             .font(ClientType.caption).foregroundStyle(.secondary)
@@ -194,6 +198,10 @@ struct ClientSetupCloudDoor: View {
                             .textFieldStyle(.themed)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                        if let tokens = URL(string: "https://cloud.digitalocean.com/account/api/tokens") {
+                            Link("Where to find the token", destination: tokens)
+                                .font(ClientType.caption)
+                        }
                     } else {
                         Label("Connect with your server’s address", systemImage: "server.rack")
                             .font(ClientType.body)

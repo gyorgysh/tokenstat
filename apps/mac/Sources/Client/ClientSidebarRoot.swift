@@ -20,6 +20,10 @@ import UIKit
 /// four destinations, which is exactly the part that was already fine.
 struct ClientSidebarRoot: View {
     @Binding var showAccount: Bool
+    /// Whether this scene floats in a window. Windowed mode parks the
+    /// traffic lights in the toolbar row, so the brand moves into the
+    /// content; fullscreen keeps the toolbar lockup. See `ClientLayout`.
+    var windowed = false
 
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
@@ -212,6 +216,50 @@ struct ClientSidebarRoot: View {
     // MARK: - Sidebar
 
     private var sidebar: some View {
+        Group {
+            if windowed {
+                VStack(alignment: .leading, spacing: 0) {
+                    // The account and the brand live in the content, not the
+                    // toolbar: the traffic lights own that row while windowed,
+                    // and anything beside them gets shoved into the wordmark.
+                    // Stacked and centred, so the narrow column reads as a
+                    // brand block rather than a squeezed toolbar row.
+                    VStack(spacing: Theme.Space.xs) {
+                        AvatarButton { showAccount = true }
+                        Wordmark(size: 19, fills: false)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, Theme.Space.s)
+                    .padding(.bottom, Theme.Space.xs)
+                    list
+                }
+            } else {
+                list
+                    // Avatar and wordmark only. Search and the connection chip
+                    // live in the detail column's own bar, where there is room:
+                    // all four in this narrow column read as clutter, and the
+                    // tab layout already puts search and the chip on the right.
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            AvatarButton { showAccount = true }
+                                // The bar adds a leading margin the rows below
+                                // do not have. Half of it back: the full pull
+                                // sat the avatar on the screen edge.
+                                .padding(.leading, -6)
+                        }
+                        ToolbarItem(placement: .principal) {
+                            Wordmark(size: 19, fills: false)
+                                .accessibilityAddTraits(.isHeader)
+                        }
+                    }
+            }
+        }
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var list: some View {
         List {
             Section {
                 ForEach(tabCustomization.visibleTabs) { tab in
@@ -292,29 +340,8 @@ struct ClientSidebarRoot: View {
         // Sections were spending another 20 points on the gap above their
         // heading, which is what made four destinations look like a menu.
         .clientCompactSections()
-        // The lockup, not the word. The Mac's sidebar has the bars and the
-        // two-tone name at its head, and a system title spelling "tokenstat"
-        // in the same place is the one screen in the product where the brand
-        // is set in the platform's font. The mark also acknowledges a pull,
-        // which a title cannot do.
-        .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("sidebar") { await reload() }
-        }
-        // Avatar and wordmark only. Search and the connection chip live in
-        // the detail column's own bar, where there is room: all four in this
-        // narrow column read as clutter, and the tab layout already puts
-        // search and the chip on the right.
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                // Room for the iPad windowed traffic lights. Harmless fullscreen.
-                AvatarButton { showAccount = true }
-                    .padding(.leading, 28)
-            }
-            ToolbarItem(placement: .principal) {
-                Wordmark(size: 19, fills: false)
-                    .accessibilityAddTraits(.isHeader)
-            }
         }
     }
 

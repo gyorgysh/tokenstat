@@ -79,14 +79,13 @@ struct ClientSetupServerGuide: View {
 
                 section("Where to get one") {
                     Text("Choose a provider with a server that meets the requirements above. "
-                        + "Setup can import DigitalOcean servers on this device; for AWS, "
-                        + "enter the server's SSH address. You create and manage the server "
-                        + "in the provider's own account.")
+                        + "Setup can import DigitalOcean servers on this device, and any "
+                        + "other server works with its SSH address. You create and manage "
+                        + "the server in the provider's own account.")
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     provider("DigitalOcean", "https://m.do.co/c/638545628ff0")
-                    provider("AWS", "https://aws.amazon.com/ec2/")
                     Text("The DigitalOcean link is a referral link. Same price for you, credit for the project.")
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)

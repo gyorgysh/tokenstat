@@ -53,6 +53,10 @@ struct CloudImportForm: View {
                                 SecureField("Read-only API token", text: $token)
                                     .themedFieldBox()
                             }
+                            if let tokens = URL(string: "https://cloud.digitalocean.com/account/api/tokens") {
+                                Link("Where to find the token", destination: tokens)
+                                    .font(Theme.caption)
+                            }
                         } else {
                             SSHEditorField(label: "AWS CLI profile") {
                                 TextField("AWS CLI profile", text: $profile)
