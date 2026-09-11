@@ -126,16 +126,26 @@ extension View {
         }
     }
 
-    /// A bar that floats over opaque content. Flat panel on all systems.
-    /// Glass lifted bright over the dim transcript, so the composer keeps
-    /// the panel fill in the same rounded shape to sit at page luminance.
+    /// A bar that floats over the bottom safe-area glass. No glass of its own
+    /// on iOS 26: the safe-area bar already draws the system's glass behind
+    /// it, and two glass surfaces stacked is what read HDR-bright. A
+    /// translucent panel lets that one glass surface do the refracting, the
+    /// way assistant bubbles already do over the transcript. Below 26 there
+    /// is no system glass, so the panel stays opaque with a hairline.
     @ViewBuilder
     func clientFloatingBar(cornerRadius: CGFloat = 22) -> some View {
-        background(Theme.panel, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            }
+        if #available(iOS 26, *) {
+            background(Theme.panel.opacity(0.72), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
+                }
+        } else {
+            background(Theme.panel)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Theme.border).frame(height: 1)
+                }
+        }
     }
 
     /// Pin chrome to the bottom of the screen, including the home indicator.
