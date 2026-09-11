@@ -475,7 +475,9 @@ struct Usage {
 /// having: an agent appends to its session log the moment a turn starts, well
 /// before any of it reaches the terminal.
 fn transcript_touched(harness: &str, cwd: &str) -> Option<Duration> {
-    let home = std::env::var("HOME").ok()?;
+    // Not `$HOME`: a daemon started as a systemd system service has none, and
+    // every transcript path below would be built from an empty string.
+    let home = tokenstat_paths::home_dir()?.display().to_string();
     let dir: PathBuf = match harness {
         // ~/.claude/projects/<cwd with every non-alphanumeric as "-">/
         "claude" => {
@@ -649,9 +651,10 @@ impl HookRecord {
 /// Keepresso on the machine this is an empty list and the CPU heuristic
 /// decides on its own.
 fn hook_records() -> Vec<HookRecord> {
-    let Ok(home) = std::env::var("HOME") else {
+    let Some(home) = tokenstat_paths::home_dir() else {
         return Vec::new();
     };
+    let home = home.display();
     let dir = format!("{home}/Library/Application Support/Keepresso/agent-hooks");
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();

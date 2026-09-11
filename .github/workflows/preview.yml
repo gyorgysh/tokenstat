@@ -335,7 +335,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: preview-hostd-${{ matrix.target }}
-          save-if: false
+          # Main-branch runs save so the next dispatch restores warm.
+          # Label runs on PRs stay restore-only, like the release caches.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-host

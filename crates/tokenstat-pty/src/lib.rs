@@ -645,7 +645,12 @@ impl Manager {
     /// thread instead, and only parks shells that have answered a marker.
     #[cfg(unix)]
     fn build_pool_shell(&self) -> Option<Arc<Session>> {
-        let cwd = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+        let home = home_dir();
+        let cwd = if home.is_empty() {
+            "/".to_string()
+        } else {
+            home
+        };
         let shell = login_shell();
         let args: Vec<String> = if shell.ends_with("zsh") {
             vec!["-il".to_string()]
@@ -1316,6 +1321,20 @@ pub struct LoginEnv {
     pub vars: HashMap<String, String>,
 }
 
+/// The user's home directory, as a string, empty when there is none.
+///
+/// Not `std::env::var("HOME")`: a daemon started as a systemd **system**
+/// service is given PATH, USER and the journal variables and nothing else, so
+/// every conventional path built from it began with an empty string and
+/// `~/.local/bin` became `/.local/bin`. `tokenstat_paths` falls back to the
+/// password database, which needs no environment at all.
+#[cfg(unix)]
+fn home_dir() -> String {
+    tokenstat_paths::home_dir()
+        .map(|home| home.display().to_string())
+        .unwrap_or_default()
+}
+
 /// PATH for a harness spawn when the login resolve has not finished yet.
 ///
 /// launchd's PATH is too small to find Homebrew or `~/.local/bin`. This is
@@ -1323,7 +1342,7 @@ pub struct LoginEnv {
 /// user's full profile.
 #[cfg(unix)]
 fn fallback_path() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = home_dir();
     let mut parts: Vec<String> = std::env::var("PATH")
         .unwrap_or_default()
         .split(':')
@@ -1409,14 +1428,36 @@ fn apply_login_environment(cmd: &mut CommandBuilder, req: &Spawn) {
         for (key, value) in &env.vars {
             cmd.env(key, value);
         }
+        if !env.vars.contains_key("HOME") {
+            apply_home(cmd);
+        }
         return;
     }
 
     if !is_shell_profile(req) {
         cmd.env("PATH", fallback_path());
     }
+    if std::env::var_os("HOME").is_none_or(|home| home.is_empty()) {
+        apply_home(cmd);
+    }
     for key in HOSTILE_INHERITED_KEYS {
         cmd.env_remove(*key);
+    }
+}
+
+/// Give a session a HOME when nothing upstream has one.
+///
+/// A systemd system service is started without HOME, and the login shell
+/// asked from one answers without it too, because it inherits the same
+/// environment. An agent CLI spawned there has nowhere to read its own
+/// configuration or write its session log, so the password database supplies
+/// what the environment did not. Never overrides a HOME that exists: a value
+/// somebody set is a decision.
+#[cfg(unix)]
+fn apply_home(cmd: &mut CommandBuilder) {
+    let home = home_dir();
+    if !home.is_empty() {
+        cmd.env("HOME", home);
     }
 }
 

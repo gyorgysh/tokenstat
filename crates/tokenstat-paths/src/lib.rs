@@ -111,3 +111,57 @@ pub fn runtime_dir() -> Option<PathBuf> {
 fn project_dirs() -> Option<directories::ProjectDirs> {
     directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
 }
+
+/// The user's home directory, even when the process environment does not name
+/// one.
+///
+/// `$HOME` first, because an explicit value is an answer and a portable
+/// install may mean it. Then the password database, through `directories`,
+/// because a **systemd system service has no HOME at all**: the unit starts
+/// with PATH, USER and the journal variables, and nothing else. Building a
+/// conventional location from an empty string turned `~/.local/bin` into
+/// `/.local/bin`, so a headless host could not see a harness its own
+/// installer had just delivered, and the install read as a failure.
+///
+/// `None` only where there is genuinely no home to find, which on a sandboxed
+/// mobile client is the normal answer: those processes have roots handed to
+/// them by [`configure_mobile`] instead.
+pub fn home_dir() -> Option<PathBuf> {
+    for key in HOME_KEYS {
+        if let Some(value) = std::env::var_os(key).filter(|value| !value.is_empty()) {
+            return Some(PathBuf::from(value));
+        }
+    }
+    directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
+}
+
+/// Windows names the home directory twice, and `USERPROFILE` is the one the
+/// platform itself sets.
+#[cfg(windows)]
+const HOME_KEYS: &[&str] = &["USERPROFILE", "HOME"];
+#[cfg(not(windows))]
+const HOME_KEYS: &[&str] = &["HOME"];
+
+#[cfg(test)]
+mod home_tests {
+    /// The password database answers where the environment does not. That is
+    /// the whole reason the function exists, so it is worth a test that
+    /// actually removes HOME rather than one that trusts the crate below.
+    ///
+    /// It is the only test in this crate, deliberately: removing a variable
+    /// is process-wide, and a second test running beside it would read a
+    /// scrubbed environment it did not ask for. Anything added here needs its
+    /// own harness, not another `remove_var`.
+    #[test]
+    #[cfg(unix)]
+    fn a_scrubbed_environment_still_finds_home() {
+        let restore = std::env::var_os("HOME");
+        unsafe { std::env::remove_var("HOME") };
+        let found = super::home_dir();
+        if let Some(home) = restore {
+            unsafe { std::env::set_var("HOME", home) };
+        }
+        let found = found.expect("a unix account has a home in the password database");
+        assert!(found.is_absolute(), "{} is not absolute", found.display());
+    }
+}

@@ -163,20 +163,25 @@ struct TerminalPane: View {
         // Asking the login shell for the real PATH (once per launch, off the
         // main actor), and a remote folder's owner what it can launch. Both
         // fill in when they answer.
-        .task {
+        //
+        // Keyed on the owning machine, because this pane is reused across
+        // folders: an id-less task runs once, for whichever folder happened to
+        // be selected first, so switching from a local folder to a remote one
+        // never asked its owner anything. That is what left the launcher on
+        // the fallback shell with no + tile, and nothing installable on a
+        // remote machine from this Mac at all.
+        .task(id: peer) {
             await launcher.resolve()
-            if let peer {
+            guard let peer else { return }
+            // Keep asking while the answer is still missing. Connecting to a
+            // machine is manual and its daemon can restart under a folder that
+            // stays open, so the first fetch is regularly the one that loses.
+            // The loop ends the moment the catalog arrives, and with it when
+            // the folder closes.
+            while !Task.isCancelled {
                 await launcher.resolveRemote(peer: peer)
-                // The fetch can lose to a daemon restart on the other
-                // machine. A failed first answer stays retried while the
-                // folder is open rather than leaving the grid on the
-                // fallback shell with no install rows.
-                for _ in 0..<4 {
-                    if !launcher.remoteCatalog(for: peer).isEmpty { break }
-                    try? await Task.sleep(for: .seconds(3))
-                    guard !Task.isCancelled else { break }
-                    await launcher.resolveRemote(peer: peer)
-                }
+                if !launcher.remoteCatalog(for: peer).isEmpty { break }
+                try? await Task.sleep(for: .seconds(5))
             }
         }
         // Three buttons and not two, because "Cancel" and "Don't Save" are

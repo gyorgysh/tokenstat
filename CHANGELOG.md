@@ -11,6 +11,25 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
+## [Unreleased]
+
+### Fixed
+
+- Installing an agent on a server works. A host started by systemd is handed
+  no home directory, so every location under it was built from an empty
+  string: a tool the installer had just put in `~/.local/bin` read as
+  missing, and the install reported that it had not arrived on the machine.
+  Sessions there are given a home directory too, so an agent can find its own
+  configuration and write its own log.
+- Another machine's folder offers its whole launcher again. Opening a remote
+  folder after a local one never asked the owning machine what it could run,
+  which left one shell tile and no way to install anything from the Mac. It
+  now keeps asking until that machine answers, so connecting later fills the
+  grid in rather than leaving it short.
+- On the Mac, an empty conversation list sits in the middle of the pane, a
+  new terminal opens at the size it keeps instead of redrawing once, and a
+  conversation can be removed from its own menu.
+
 ## [1.0.1] - 2026-09-11
 
 Small corrections on top of 1.0.0, most of them invisible.

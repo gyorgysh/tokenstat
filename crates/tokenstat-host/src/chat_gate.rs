@@ -232,10 +232,13 @@ fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), Strin
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
-        let Ok(user_home) = std::env::var("HOME") else {
+        // Not `$HOME`: a headless daemon started by systemd has none, and the
+        // credential to link sits under the real home whether or not the
+        // unit's environment names it.
+        let Some(user_home) = tokenstat_paths::home_dir() else {
             return Ok(());
         };
-        let source = PathBuf::from(user_home).join(directory).join(file);
+        let source = user_home.join(directory).join(file);
         let target = home.join(file);
         if source.exists() && !target.exists() {
             symlink(source, target).map_err(|error| error.to_string())?;

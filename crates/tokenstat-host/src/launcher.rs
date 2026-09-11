@@ -1032,6 +1032,9 @@ fn user_home() -> String {
     {
         std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
+            .ok()
+            .filter(|home| !home.is_empty())
+            .or_else(passwd_home)
             .unwrap_or_default()
     }
     #[cfg(not(windows))]
@@ -1045,26 +1048,43 @@ fn user_home() -> String {
             .as_ref()
             .and_then(|env| env.vars.get("HOME"))
             .map(String::as_str);
-        home_from(&process_home, login_home)
+        home_from(&process_home, login_home, passwd_home)
     }
 }
 
+/// The password database's answer, which needs no environment at all.
+fn passwd_home() -> Option<String> {
+    tokenstat_paths::home_dir().map(|home| home.display().to_string())
+}
+
 /// HOME for path building: the process value wins, the login shell's answer
-/// covers a daemon started with a scrubbed environment.
+/// covers a daemon started with a scrubbed environment, and the password
+/// database covers a machine where neither names a home.
 ///
 /// A systemd system unit has no HOME at all. Building conventional paths
 /// from that turned `~/.local/bin` into `/.local/bin`, so an installed tool
 /// the daemon itself had just delivered resolved as missing and the install
 /// read as a failure.
+///
+/// The login shell was supposed to cover that and does not: asked from a unit
+/// with no HOME, `bash -ilc env` answers with no HOME either, because it
+/// inherits the environment it was given. So the last resort is the one
+/// source that does not depend on an environment at all, which is the same
+/// place `directories` reads the data directory from. `passwd` is taken as a
+/// function so a test can supply an answer without a real account.
 #[cfg(not(windows))]
-fn home_from(process_home: &str, login_home: Option<&str>) -> String {
+fn home_from(
+    process_home: &str,
+    login_home: Option<&str>,
+    passwd: impl FnOnce() -> Option<String>,
+) -> String {
     if !process_home.is_empty() {
         return process_home.to_string();
     }
     if let Some(home) = login_home.filter(|home| !home.is_empty()) {
         return home.to_string();
     }
-    String::new()
+    passwd().filter(|home| !home.is_empty()).unwrap_or_default()
 }
 
 fn path_separator() -> char {
@@ -1345,16 +1365,23 @@ mod tests {
     }
 
     /// A scrubbed daemon environment still finds home. A systemd system unit
-    /// has no HOME, and without the login shell's answer every conventional
-    /// path degrades to `/.local/bin`, which is how a delivered tool
-    /// resolved as missing.
+    /// has no HOME, and without a fallback every conventional path degrades
+    /// to `/.local/bin`, which is how a delivered tool resolved as missing.
+    ///
+    /// The login shell is asked first and is not enough on its own: started
+    /// from a unit with no HOME, it answers with no HOME either. The password
+    /// database is what actually ends the chain.
     #[cfg(unix)]
     #[test]
-    fn home_falls_back_to_the_login_shell() {
-        assert_eq!(home_from("/root", Some("/home/other")), "/root");
-        assert_eq!(home_from("", Some("/root")), "/root");
-        assert_eq!(home_from("", Some("")), "");
-        assert_eq!(home_from("", None), "");
+    fn home_falls_back_past_a_scrubbed_environment() {
+        let none = || None;
+        let passwd = || Some("/root".to_string());
+        assert_eq!(home_from("/root", Some("/home/other"), none), "/root");
+        assert_eq!(home_from("", Some("/root"), none), "/root");
+        assert_eq!(home_from("", Some(""), passwd), "/root");
+        assert_eq!(home_from("", None, passwd), "/root");
+        assert_eq!(home_from("", None, || Some(String::new())), "");
+        assert_eq!(home_from("", None, none), "");
     }
 
     /// Exit zero is not delivered. An installer that ran clean and left

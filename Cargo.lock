@@ -3701,6 +3701,7 @@ dependencies = [
  "portable-pty",
  "serde",
  "thiserror 2.0.20",
+ "tokenstat-paths",
 ]
 
 [[package]]
