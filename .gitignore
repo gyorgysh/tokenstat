@@ -92,6 +92,7 @@ ExportOptions.plist
 # way. Never committed.
 /apps/*/build/
 /apps/*/DerivedData*/
+/apps/target/
 /apps/windows/bin/
 /apps/windows/obj/
 /apps/windows/.vs/
