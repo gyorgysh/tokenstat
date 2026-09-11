@@ -790,6 +790,21 @@ final class WorkspacesModel {
     /// would re-dial an approved, reachable machine on its next pass and the
     /// Disconnect would last one refresh.
     private var suppressedPeers: Set<String> = []
+    /// Per-peer auto-connect, on by default. The same preference the phone
+    /// keeps: an explicit Connect turns it back on, the toggle in the folder
+    /// header turns it off, and the peer sweep honours it.
+    static func autoConnectKey(for peerKey: String) -> String {
+        "workspace.autoconnect.\(peerKey)"
+    }
+    static func isAutoConnectEnabled(for peerKey: String) -> Bool {
+        guard UserDefaults.standard.object(forKey: autoConnectKey(for: peerKey)) != nil else {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: autoConnectKey(for: peerKey))
+    }
+    static func setAutoConnect(_ on: Bool, for peerKey: String) {
+        UserDefaults.standard.set(on, forKey: autoConnectKey(for: peerKey))
+    }
     /// Hosts we have already asked to open their work this session, so a
     /// refusal is not re-asked on every peer sweep.
     private var askedWorkspace: Set<String> = []
@@ -859,6 +874,12 @@ final class WorkspacesModel {
             }
             for peer in peers {
                 if suppressedPeers.contains(peer.key) {
+                    continue
+                }
+                // Auto-connect off means the sweep leaves this peer alone.
+                // An explicit Connect goes through `reconnect`, which turns
+                // it back on before the fetch below runs.
+                if !Self.isAutoConnectEnabled(for: peer.key) {
                     continue
                 }
                 if let nextDial = remotePeerNextDial[peer.key], Date() < nextDial { continue }
@@ -1034,6 +1055,7 @@ final class WorkspacesModel {
     /// An explicit Connect undoes a Disconnect: the peer's folders are
     /// allowed back and fetched immediately rather than after the next sweep.
     func reconnect(peer key: String) {
+        Self.setAutoConnect(true, for: key)
         suppressedPeers.remove(key)
         // Clear the backoff too. Somebody pressing Connect is asking now, and
         // a peer that had been dialled down to the slow rate would otherwise
@@ -1317,6 +1339,23 @@ final class WorkspacesModel {
     /// Forget a folder. The folder itself is never touched.
     func remove(_ folder: WorkspaceFolder) async {
         do {
+            // A remote folder is registered on the machine that owns it, so
+            // the prefixed id this side uses means nothing to the local
+            // daemon. Ask the owner to forget it under its own id instead;
+            // sending the prefixed id locally is what made Remove silently
+            // fail on remote folders.
+            if folder.isRemote, let peer = folder.machineID {
+                let raw: String = {
+                    let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
+                    return parts.count == 3 ? parts[2] : folder.id
+                }()
+                struct RemovedAck: Codable, Sendable { var removed: Bool? }
+                _ = try await Bridge.onPeer(peer, "workspace.remove", ["id": raw], as: RemovedAck.self)
+                if selectedID == folder.id { selectedID = nil }
+                forgetTabs(in: folder.id)
+                refreshRemotePeer(peer)
+                return
+            }
             try await Bridge.removeWorkspace(id: folder.id)
             if selectedID == folder.id { selectedID = nil }
             forgetTabs(in: folder.id)

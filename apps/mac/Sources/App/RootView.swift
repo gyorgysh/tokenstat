@@ -1651,6 +1651,15 @@ struct RootView: View {
                             }
                             if !folder.isRemote {
                                 Button("Reveal in Finder", .reveal) { workspaces.revealInFinder(folder) }
+                            } else if let peer = folder.machineID, !peer.isEmpty {
+                                // A remote folder is where its machine is used,
+                                // so the way back belongs here too. Disconnect
+                                // drops the peer's folders from the sidebar;
+                                // Remove below forgets just this folder on
+                                // the machine that owns it.
+                                Button("Disconnect from \(folder.machineLabel ?? "this computer")", .disconnect) {
+                                    NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
+                                }
                             }
                             ThemeRule()
                             // "Remove" and not "Delete": the folder stays.
@@ -2121,7 +2130,8 @@ struct RootView: View {
                     openSection(section, in: folderID)
                 },
                 isActive: showsWorkspaceSurface,
-                tier: account.account?.tier
+                tier: account.account?.tier,
+                accountMachines: account.account?.machines ?? []
             )
             .opacity(showsWorkspaceSurface ? 1 : 0)
             .allowsHitTesting(showsWorkspaceSurface)

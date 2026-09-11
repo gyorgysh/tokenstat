@@ -58,7 +58,14 @@ struct TerminalPane: View {
     /// folder, the owning machine's for a remote one. Installed only; the
     /// launch surface additionally shows what could be installed.
     private var launcherProfiles: [LaunchProfile] {
-        let all = peer == nil ? launcher.available : launcher.remoteAvailable
+        let all: [LaunchProfile] = {
+            guard let peer else { return launcher.available }
+            let profiles = launcher.remoteAvailable(for: peer)
+            // The catalog answer is still in flight: fall back to a shell so
+            // the strip never reads as having nothing to launch.
+            if profiles.isEmpty { return [LaunchProfile.shellFallback] }
+            return profiles
+        }()
         let scope = peer ?? "local"
         let visibility = LauncherVisibility.shared
         return all.filter { !$0.hidden && !visibility.isHidden($0.id, scope: scope) }
@@ -67,7 +74,12 @@ struct TerminalPane: View {
     /// Every supported harness on the owning machine, installed or not, for
     /// the launch surface to draw installed tiles vividly and the rest muted.
     private var launcherCatalog: [LaunchProfile] {
-        peer == nil ? launcher.catalog : launcher.remoteCatalog
+        guard let peer else { return launcher.catalog }
+        let profiles = launcher.remoteCatalog(for: peer)
+        // Same fallback as above: a remote folder with no catalog answer yet
+        // still offers a shell and the install rows rather than an empty grid.
+        if profiles.isEmpty { return [LaunchProfile.shellFallback] }
+        return profiles
     }
 
     /// The harnesses a local model selection means anything to. With none of

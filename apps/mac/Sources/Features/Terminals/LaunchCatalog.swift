@@ -50,6 +50,21 @@ struct LaunchProfile: Identifiable, Sendable {
     /// Taken off the owning machine's launcher. The binary is still there.
     var hidden: Bool = false
 
+    /// A plain shell when the owning machine's catalog has not answered yet.
+    /// The phone draws the same tile, so a remote folder never opens on an
+    /// empty launch grid while the fetch is in flight.
+    static var shellFallback: LaunchProfile {
+        LaunchProfile(
+            id: "shell",
+            name: "Shell",
+            command: shellCommand,
+            args: shellArguments,
+            bypassArgs: [],
+            harnessID: nil,
+            symbol: "terminal"
+        )
+    }
+
     /// Whether pointing this harness at a local model server means anything.
     ///
     /// The host decides what a selection turns into, in
@@ -237,12 +252,22 @@ final class LaunchCatalog {
     /// What the launch surface draws: installed profiles get a vivid tile,
     /// the rest sit behind the + tile until the user opens them.
     private(set) var catalog: [LaunchProfile]
-    /// Profiles on a specific peer (the machine that owns a remote
-    /// workspace), fetched from its daemon once per peer. Installed only, for
-    /// the strip menu and model control.
-    private(set) var remoteAvailable: [LaunchProfile] = []
-    /// Every supported profile on a specific peer, installed or not.
-    private(set) var remoteCatalog: [LaunchProfile] = []
+    /// Profiles by owning peer (the machine that owns a remote workspace),
+    /// fetched from its daemon once per peer. Installed only, for the strip
+    /// menu and model control. One entry per peer: a single shared pair is
+    /// what made opening a second machine's folder show the first one's
+    /// tools, or none at all.
+    private(set) var remoteAvailableByPeer: [String: [LaunchProfile]] = [:]
+    /// Every supported profile by owning peer, installed or not.
+    private(set) var remoteCatalogByPeer: [String: [LaunchProfile]] = [:]
+    /// Installed profiles on one peer, empty until its catalog answers.
+    func remoteAvailable(for peer: String) -> [LaunchProfile] {
+        remoteAvailableByPeer[peer] ?? []
+    }
+    /// Every supported profile on one peer, installed or not.
+    func remoteCatalog(for peer: String) -> [LaunchProfile] {
+        remoteCatalogByPeer[peer] ?? []
+    }
     /// The profile ids whose installer is currently running, so a tile can
     /// show progress and refuse a second click.
     private(set) var installing: Set<String> = []
@@ -295,9 +320,10 @@ final class LaunchCatalog {
                 "launcher.catalog",
                 as: [RemoteLaunchProfile].self
             )
-            remoteCatalog = dtos.map(Self.profile(from:))
-            remoteAvailable = remoteCatalog.filter { $0.installed }
-            await adoptHostHidden(from: remoteCatalog, scope: peer, peer: peer)
+            let profiles = dtos.map(Self.profile(from:))
+            remoteCatalogByPeer[peer] = profiles
+            remoteAvailableByPeer[peer] = profiles.filter { $0.installed }
+            await adoptHostHidden(from: profiles, scope: peer, peer: peer)
         } catch {
             remoteFetched.remove(peer)
         }
@@ -347,14 +373,14 @@ final class LaunchCatalog {
     }
 
     private func setHidden(_ id: String, _ hidden: Bool, peer: String?) {
-        if peer == nil {
-            catalog = catalog.map { profile in
+        if let peer {
+            remoteCatalogByPeer[peer] = (remoteCatalogByPeer[peer] ?? []).map { profile in
                 var next = profile
                 if next.id == id { next.hidden = hidden }
                 return next
             }
         } else {
-            remoteCatalog = remoteCatalog.map { profile in
+            catalog = catalog.map { profile in
                 var next = profile
                 if next.id == id { next.hidden = hidden }
                 return next
@@ -395,14 +421,14 @@ final class LaunchCatalog {
                         return
                     }
                 }
-                if peer == nil {
-                    catalog = catalog.map { profile in
+                if let peer {
+                    remoteCatalogByPeer[peer] = (remoteCatalogByPeer[peer] ?? []).map { profile in
                         var next = profile
                         if local.contains(next.id) { next.hidden = true }
                         return next
                     }
                 } else {
-                    remoteCatalog = remoteCatalog.map { profile in
+                    catalog = catalog.map { profile in
                         var next = profile
                         if local.contains(next.id) { next.hidden = true }
                         return next

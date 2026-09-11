@@ -2002,6 +2002,19 @@ func harnessName(_ id: String) -> String {
     }
 }
 
+/// Whether an account machine's platform string describes a headless host.
+///
+/// A Linux server has no display layer, so offering a screen viewer for it
+/// only ends in an error. Read from what the machine said about itself at
+/// login rather than guessed from its name.
+func isHeadlessPlatform(_ platform: String?) -> Bool {
+    let lower = (platform ?? "").lowercased()
+    guard !lower.isEmpty else { return false }
+    if lower.contains("linux") { return true }
+    return ["ubuntu", "debian", "fedora", "alpine", "arch", "centos", "rocky", "almalinux"]
+        .contains { lower.contains($0) }
+}
+
 /// Asset name for a harness's brand mark, or nil when none is bundled.
 ///
 /// Vendor marks, not ours. See TRADEMARK.md. A missing one falls back to a

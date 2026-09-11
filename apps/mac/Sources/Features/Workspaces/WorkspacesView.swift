@@ -28,6 +28,10 @@ struct WorkspacesView: View {
     /// The signed-in tier, for the screen viewer a remote workspace offers.
     /// Nil is a tier the viewer refuses, and says so.
     var tier: String?
+    /// Account machines, for the owning host's platform. A headless Linux
+    /// server has no display layer, so the folder header must not offer a
+    /// screen viewer for it.
+    var accountMachines: [Machine] = []
     @Environment(\.openWindow) private var openWindow
     #endif
 
@@ -118,7 +122,10 @@ struct WorkspacesView: View {
     /// on to its screen.
     ///
     /// The same readings the Devices page shows, from the same `HostStatsBar`,
-    /// so the two cannot report different things about one computer.
+    /// so the two cannot report different things about one computer. The
+    /// folder header also carries what the Devices row used to own alone:
+    /// Disconnect and the auto-connect switch, because a folder is where a
+    /// connected machine is actually used and there was no way back from it.
     private func remoteMachine(_ folder: WorkspaceFolder, peer: String) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
@@ -127,20 +134,56 @@ struct WorkspacesView: View {
                 Text(folder.machineLabel ?? "Remote machine")
                     .font(Theme.fit(12, weight: .medium))
                 Spacer(minLength: 0)
-                Button("View screen", .preview) {
-                    openWindow(value: RemoteScreenTarget(
-                        peer: peer,
-                        name: folder.machineLabel ?? "Remote machine",
-                        tier: tier
-                    ))
+                // A headless Linux server has no display layer. Offering a
+                // viewer for it only ends in the viewer's own error, so the
+                // button stays off the header entirely.
+                if !isHeadlessPeer(peer) {
+                    Button("View screen", .preview) {
+                        openWindow(value: RemoteScreenTarget(
+                            peer: peer,
+                            name: folder.machineLabel ?? "Remote machine",
+                            tier: tier
+                        ))
+                    }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .fixedSize()
+                }
+                Button("Disconnect", .disconnect) {
+                    NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .fixedSize()
+                .help("Stops showing this computer's folders in the sidebar")
             }
             HostStatsBar(peer: peer, online: true)
+            HStack(spacing: 6) {
+                Text("Auto-connect")
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Toggle(
+                    "Auto-connect",
+                    isOn: Binding(
+                        get: { WorkspacesModel.isAutoConnectEnabled(for: peer) },
+                        set: { WorkspacesModel.setAutoConnect($0, for: peer) }
+                    )
+                )
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+            .accessibilityLabel("Auto-connect \(folder.machineLabel ?? "this computer")")
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.bottom, Theme.Space.s)
+    }
+
+    /// Whether the owning host reports a platform with no display layer.
+    private func isHeadlessPeer(_ peer: String) -> Bool {
+        let platform = accountMachines.first {
+            $0.publicIdentity == peer || $0.machineID == peer
+        }?.platform
+        return isHeadlessPlatform(platform)
     }
     #endif
 

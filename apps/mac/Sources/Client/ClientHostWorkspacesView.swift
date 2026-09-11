@@ -33,11 +33,8 @@ struct ClientHostWorkspacesView: View {
     private var isHeadless: Bool {
         let platform = (account.account?.machines ?? [])
             .first { $0.publicIdentity?.caseInsensitiveCompare(peerKey) == .orderedSame }?
-            .platform?
-            .lowercased() ?? ""
-        return platform.contains("linux")
-            || ["ubuntu", "debian", "fedora", "alpine", "arch", "centos", "rocky", "almalinux"]
-                .contains { platform.contains($0) }
+            .platform
+        return isHeadlessPlatform(platform)
     }
 
     var body: some View {

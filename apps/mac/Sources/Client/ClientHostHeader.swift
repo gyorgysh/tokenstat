@@ -42,6 +42,15 @@ struct ClientHostHeader: View {
 
     private var isLegend: Bool { account.account?.tier?.lowercased() == "legend" }
 
+    /// A headless Linux server has no display layer, so the row that opens
+    /// the screen viewer stays off rather than landing in its error state.
+    private var isHeadless: Bool {
+        let platform = (account.account?.machines ?? [])
+            .first { $0.publicIdentity?.caseInsensitiveCompare(peerKey) == .orderedSame }?
+            .platform
+        return isHeadlessPlatform(platform)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
@@ -66,7 +75,7 @@ struct ClientHostHeader: View {
             }
 
             if showsOpenWork { openWork }
-            viewScreen
+            if !isHeadless { viewScreen }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)
