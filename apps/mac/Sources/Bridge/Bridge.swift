@@ -2604,7 +2604,8 @@ extension Bridge {
 
     static func todoCreate(
         title: String, kind: TodoKind, notes: String, column: String, backend: String,
-        workspaceID: String, budgetSeconds: UInt64, model: String? = nil, effort: String? = nil
+        workspaceID: String, budgetSeconds: UInt64, model: String? = nil, effort: String? = nil,
+        priority: String? = nil
     ) async throws -> TodoCard {
         var params: [String: Any] = [
             "title": title, "kind": kind.rawValue, "notes": notes, "column": column, "backend": backend,
@@ -2612,6 +2613,7 @@ extension Bridge {
         ]
         if let model { params["model"] = model }
         if let effort { params["effort"] = effort }
+        if let priority { params["priority"] = priority }
         return try await background("todo.create", params, as: TodoCard.self)
     }
 
@@ -2619,7 +2621,7 @@ extension Bridge {
         id: String, column: String? = nil, order: Int64? = nil, title: String? = nil,
         kind: TodoKind? = nil, notes: String? = nil, backend: String? = nil,
         model: String? = nil, effort: String? = nil, workspaceID: String? = nil,
-        budgetSeconds: UInt64? = nil
+        budgetSeconds: UInt64? = nil, priority: String? = nil
     ) async throws -> TodoCard {
         var params: [String: Any] = ["id": id]
         if let column { params["column"] = column }
@@ -2627,6 +2629,7 @@ extension Bridge {
         if let title { params["title"] = title }
         if let kind { params["kind"] = kind.rawValue }
         if let notes { params["notes"] = notes }
+        if let priority { params["priority"] = priority }
         if let backend { params["backend"] = backend }
         if let model { params["model"] = model }
         if let effort { params["effort"] = effort }

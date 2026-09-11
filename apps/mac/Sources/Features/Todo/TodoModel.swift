@@ -318,14 +318,14 @@ final class TodoModel {
     func create(
         title: String, kind: TodoKind, notes: String, backend: String,
         workspaceID: String, budgetSeconds: UInt64, column: String = "backlog",
-        model: String? = nil, effort: String? = nil,
+        model: String? = nil, effort: String? = nil, priority: String? = nil,
         destinationName: String = ""
     ) async {
         do {
             let created = try await Bridge.todoCreate(
                 title: title, kind: kind, notes: notes, column: column,
                 backend: backend, workspaceID: workspaceID, budgetSeconds: budgetSeconds,
-                model: model, effort: effort
+                model: model, effort: effort, priority: priority
             )
             // A card that lands where this board cannot show it says where it
             // went, and offers the way there. Silence here is what lost two
@@ -375,7 +375,8 @@ final class TodoModel {
         model: String? = nil,
         effort: String? = nil,
         workspaceID: String? = nil,
-        budgetSeconds: UInt64? = nil
+        budgetSeconds: UInt64? = nil,
+        priority: String? = nil
     ) async -> Bool {
         do {
             _ = try await Bridge.todoUpdate(
@@ -384,7 +385,8 @@ final class TodoModel {
                 model: model,
                 effort: effort,
                 workspaceID: workspaceID,
-                budgetSeconds: budgetSeconds
+                budgetSeconds: budgetSeconds,
+                priority: priority
             )
             errorMessage = nil
             await load()

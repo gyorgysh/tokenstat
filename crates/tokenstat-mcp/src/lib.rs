@@ -417,7 +417,7 @@ fn tools() -> Vec<Value> {
             props["workspaceId"] = workspace_id_schema();
             props["column"] = json!({"type":"string", "enum":["backlog","doing","done","archive"]});
             props["title"]["minLength"] = json!(1);
-            if name == "task_create" {
+            if name == "task_create" || name == "task_update" {
                 props["priority"] = json!({"type":"string", "enum":["low","normal","high"]});
             }
         }

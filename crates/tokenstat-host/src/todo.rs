@@ -88,6 +88,7 @@ pub struct CardUpdate {
     pub title: Option<String>,
     pub kind: Option<CardKind>,
     pub notes: Option<String>,
+    pub priority: Option<Priority>,
     pub backend: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -320,6 +321,9 @@ impl Board {
         }
         if let Some(notes) = changes.notes.as_deref() {
             cards[idx].notes = notes.to_string();
+        }
+        if let Some(priority) = changes.priority {
+            cards[idx].priority = priority;
         }
         if let Some(kind) = changes.kind {
             cards[idx].kind = kind;

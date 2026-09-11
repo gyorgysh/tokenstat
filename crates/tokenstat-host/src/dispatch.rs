@@ -2212,6 +2212,7 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 title: p.title,
                 kind: p.kind,
                 notes: p.notes,
+                priority: p.priority,
                 backend: p.backend,
                 model: p.model,
                 effort: p.effort,

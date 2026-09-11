@@ -27,6 +27,7 @@ struct TodoInspector: View {
     @State private var modelChoice = ""
     @State private var effortChoice = ""
     @State private var workspaceID = ""
+    @State private var priorityChoice = "normal"
     @State private var budgetMinutes = "180"
     @State private var noTimeLimit = false
     @State private var applyingAgent = false
@@ -181,6 +182,19 @@ struct TodoInspector: View {
     @ViewBuilder
     private func agentFields(_ card: TodoCard) -> some View {
         AppMenuPicker(
+            title: "Priority",
+            options: [
+                (value: "low", label: "Low"),
+                (value: "normal", label: "Normal"),
+                (value: "high", label: "High"),
+            ],
+            selection: $priorityChoice
+        )
+        .onChange(of: priorityChoice) { _, _ in
+            guard !applyingAgent, loadedID == card.id else { return }
+            Task { await persistAgent(card) }
+        }
+        AppMenuPicker(
             title: "Agent",
             options: [(value: "", label: "Choose later")]
                 + model.pickerBackends(keeping: card.backend).map { (value: $0.id, label: $0.label) },
@@ -311,6 +325,7 @@ struct TodoInspector: View {
         modelChoice = card.cleanedModel
         effortChoice = card.effort ?? ""
         workspaceID = card.workspaceID
+        priorityChoice = card.priority.isEmpty ? "normal" : card.priority
         noTimeLimit = card.budgetSeconds == 0
         if card.budgetSeconds > 0 {
             budgetMinutes = String(max(1, card.budgetSeconds / 60))
@@ -334,7 +349,8 @@ struct TodoInspector: View {
             model: modelValue,
             effort: effortChoice,
             workspaceID: workspaceID,
-            budgetSeconds: budget
+            budgetSeconds: budget,
+            priority: priorityChoice == card.priority ? nil : priorityChoice
         )
     }
 

@@ -544,6 +544,11 @@ private struct CardView: View {
                     .font(Theme.caption2.weight(.medium)).foregroundStyle(Theme.secondary)
                     .padding(.horizontal, 7).padding(.vertical, 4)
                     .background(Theme.secondary.opacity(0.1), in: Capsule())
+            } else if card.priority == "low" {
+                Label("Low priority", systemImage: "flag")
+                    .font(Theme.caption2.weight(.medium)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 7).padding(.vertical, 4)
+                    .background(Theme.secondary.opacity(0.07), in: Capsule())
             }
             HStack(spacing: Theme.Space.s) {
                 Label(folders.first(where: { $0.id == card.workspaceID })?.name ?? "Uncategorized", systemImage: "folder")
@@ -696,6 +701,20 @@ private struct CardView: View {
                 Button("Restore to Done", .restore) { Task { await model.move(card, to: "done") } }
             }
             ThemeRule()
+            Menu("Priority") {
+                ForEach(["low", "normal", "high"], id: \.self) { level in
+                    Button {
+                        Task { await model.updateCard(card, priority: level) }
+                    } label: {
+                        if card.priority == level || (card.priority.isEmpty && level == "normal") {
+                            Label(level.capitalized, systemImage: "checkmark")
+                        } else {
+                            Text(level.capitalized)
+                        }
+                    }
+                }
+            }
+            ThemeRule()
             if !card.isNote {
                 Button("Run…", .run) {
                     delegating = true
@@ -779,6 +798,7 @@ private struct NewCardForm: View {
     /// backend's default, which is also what the pickers start on.
     @State private var modelChoice = ""
     @State private var effortChoice = ""
+    @State private var priorityChoice = "normal"
     /// Minutes, because that is the unit people think in. Converted to seconds
     /// for the daemon, which stores the raw number.
     @State private var budgetMinutes = "180"
@@ -797,6 +817,7 @@ private struct NewCardForm: View {
 
             if expanded {
                 TextField("Task title", text: $title)
+                    .textFieldStyle(.themed)
                 // A task's notes are what the agent gets. For the Shell
                 // backend that is a command, not a prompt, so the field says
                 // so and its placeholder answers the only question a shell
@@ -811,6 +832,7 @@ private struct NewCardForm: View {
                     ),
                     axis: .vertical
                 )
+                .textFieldStyle(.themedMultiline)
                 .lineLimit(2...4)
                 // Empty workspace id is unfiled. The picker says so before Save.
                 AppMenuPicker(
@@ -825,6 +847,16 @@ private struct NewCardForm: View {
                     options: [(value: "", label: "Choose later")]
                         + model.pickerBackends(keeping: backendID).map { (value: $0.id, label: $0.label) },
                     selection: $backendID
+                )
+                .frame(maxWidth: 260)
+                AppMenuPicker(
+                    title: "Priority",
+                    options: [
+                        (value: "low", label: "Low"),
+                        (value: "normal", label: "Normal"),
+                        (value: "high", label: "High"),
+                    ],
+                    selection: $priorityChoice
                 )
                 .frame(maxWidth: 260)
                     // Model and effort exist only for backends that advertise
@@ -927,6 +959,7 @@ private struct NewCardForm: View {
                 return cleaned.isEmpty ? nil : cleaned
             }(),
             effort: effortChoice.isEmpty ? nil : effortChoice,
+            priority: priorityChoice,
             destinationName: destinationName
         )
         if model.errorMessage == nil { cancel() }
@@ -939,6 +972,7 @@ private struct NewCardForm: View {
         budgetMinutes = "180"
         noTimeLimit = false
         backendID = ""
+        priorityChoice = "normal"
         expanded = false
     }
 }
