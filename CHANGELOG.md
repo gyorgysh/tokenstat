@@ -13,19 +13,45 @@ at the end.
 
 ## [1.0.1] - 2026-09-11
 
-Small corrections on top of 1.0.0, most of them invisible. A finished turn
-always releases the conversation, so a new message can no longer sit queued
-with sends doing nothing, and the app says why when a turn is still
-finishing. Setting up a server retries over a stale pairing file, trusts
-the new machine before checking it, and goes from the machine straight to
-a project. The Add this device, clone, and folder bottom bars follow the
-theme, and a machine that already has folders can get more from its device
-page. On the Mac, Today, Last 7 days, and Busiest are separate panels like
-the phone's tiles. The Windows build and its tests are green again, and a
-transcript the meter cannot reach reports an error instead of a zero usage
-figure. The client search fields and menu separators follow the theme. On
-a new Mac, Home opens on Balanced with the work first and the figures
-switched off.
+Small corrections on top of 1.0.0, most of them invisible.
+
+### Added
+
+- A machine that already has folders can get more from its device page: the
+  folder picker and clone live there as well as in the empty state.
+- Devices carries an auto-connect switch per machine. Off stops the app
+  dialling on its own and leaves a live connection alone; only Disconnect
+  drops it.
+
+### Changed
+
+- The Add this device, clone, and folder bottom bars follow the theme, as do
+  the client search fields and menu separators.
+- On the Mac, Today, Last 7 days, and Busiest are separate panels, like the
+  phone's tiles.
+- On a new Mac, Home opens on Balanced with the work first.
+
+### Fixed
+
+- A finished turn always releases the conversation, so a new message can no
+  longer sit queued with sends doing nothing, and the app says why when a
+  turn is still finishing.
+- Setting up a server retries over a stale pairing file, trusts the new
+  machine before checking it, and goes from the machine straight to
+  a project.
+- The Windows build and its tests are green again.
+- A transcript the meter cannot reach reports an error instead of a zero
+  usage figure.
+- The host runs an existing login shell instead of assuming zsh, so the
+  Shell tile works on machines that have no zsh. An installer that exits
+  zero without delivering reads as a failure with its output.
+- Disconnecting from a machine sticks: the peer sweep no longer re-dials it
+  on the next pass. Removing a remote folder asks the owning machine
+  instead of failing silently.
+- Each machine's launcher list is its own, so a second machine shows its own
+  tools, with a shell tile while its catalog loads.
+- The screen viewer is not offered on headless Linux hosts.
+- The CLI says how to approve a pending device in host access.
 
 ## [1.0.0] - 2026-09-08
 
