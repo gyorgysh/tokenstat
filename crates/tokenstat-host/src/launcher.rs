@@ -478,7 +478,7 @@ fn show_in(dir: &Path, id: &str) -> Result<Value, String> {
 pub(crate) fn catalog() -> Value {
     let path = search_path();
     #[cfg(not(windows))]
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let shell = tokenstat_pty::login_shell();
     #[cfg(not(windows))]
     let shell_args: &[&str] = if shell.ends_with("zsh") {
         &["-il"]
@@ -589,6 +589,13 @@ pub(crate) fn sign_in(id: &str, rows: u16, cols: u16, dark: Option<bool>) -> Res
         })
         .map_err(|e| e.to_string())?;
     serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
+/// Whether an installer that just exited zero actually delivered: the same
+/// resolve the catalog uses, so the two answers can never disagree and a
+/// tile cannot flip back to not installed with no error shown.
+fn install_delivered(profile: &Profile, path: &[String], home: &Path) -> bool {
+    absolute_command(profile.command) || resolve_profile(profile, path, home).is_some()
 }
 
 /// Run a catalog profile's official installer on this machine.
@@ -729,9 +736,24 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
     if truncated {
         output.push_str("\n… (output truncated)");
     }
+    let mut ok = status.success();
+    // Believe the filesystem over the exit code. A downloader that is not
+    // installed makes `curl … | bash` succeed on an empty script: exit zero,
+    // nothing installed, and the tile flips back to not installed with no
+    // error shown. The same resolve the catalog uses decides.
+    if ok && !install_delivered(profile, &search_path(), Path::new(&home)) {
+        ok = false;
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str(&format!(
+            "{} finished but is still not on this machine; its installer output is above.",
+            profile.name
+        ));
+    }
 
     Ok(json!({
-        "ok": status.success(),
+        "ok": ok,
         "exitCode": status.code(),
         "output": output,
     }))
@@ -1194,9 +1216,9 @@ mod tests {
     }
 
     use super::{
-        PROFILES, Profile, catalog, command_names, hide_in, install, load_prefs_in,
-        model_arguments, model_environment, resolve_profile, show_in, sign_in, split_path_var,
-        strip_ansi,
+        PROFILES, Profile, catalog, command_names, hide_in, install, install_delivered,
+        load_prefs_in, model_arguments, model_environment, resolve_profile, show_in, sign_in,
+        split_path_var, strip_ansi,
     };
     use std::path::Path;
     #[cfg(unix)]
@@ -1291,6 +1313,26 @@ mod tests {
                 "a semicolon is not a unix PATH separator"
             );
         }
+    }
+
+    /// Exit zero is not delivered. An installer that ran clean and left
+    /// nothing the catalog can see must read as a failure, not as a success
+    /// whose tile flips back to not installed with no error shown.
+    #[cfg(unix)]
+    #[test]
+    fn an_installer_that_delivers_nothing_is_not_an_install() {
+        let home = home_with("delivered-bin", "tool");
+        let path = vec![home.join("delivered-bin").display().to_string()];
+        assert!(
+            install_delivered(&profile("tool", &[]), &path, &home),
+            "a tool the catalog finds counts as installed"
+        );
+        let empty = std::env::temp_dir();
+        assert!(
+            !install_delivered(&profile("definitely-not-installed", &[]), &[], &empty),
+            "a tool nothing can see counts as missing even after exit zero"
+        );
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// A profile with no install directory of its own is unchanged: absent

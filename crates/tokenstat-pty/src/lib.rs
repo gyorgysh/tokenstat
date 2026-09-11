@@ -646,7 +646,7 @@ impl Manager {
     #[cfg(unix)]
     fn build_pool_shell(&self) -> Option<Arc<Session>> {
         let cwd = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let shell = login_shell();
         let args: Vec<String> = if shell.ends_with("zsh") {
             vec!["-il".to_string()]
         } else {
@@ -1074,6 +1074,35 @@ impl Manager {
     }
 }
 
+/// The login shell to run: the user's own when it exists, otherwise the
+/// first shell that does.
+///
+/// `$SHELL` names a preference, not a promise. A daemon started with a
+/// scrubbed environment, or a user whose shell was uninstalled, would
+/// otherwise advertise and spawn `/bin/zsh` on a machine that has no zsh at
+/// all, and the Shell tile would die on arrival.
+#[cfg(unix)]
+pub fn login_shell() -> String {
+    resolve_shell(std::env::var("SHELL").ok().as_deref())
+}
+
+#[cfg(unix)]
+fn resolve_shell(configured: Option<&str>) -> String {
+    let mut candidates = Vec::new();
+    if let Some(shell) = configured.filter(|shell| !shell.is_empty()) {
+        candidates.push(shell.to_string());
+    }
+    candidates.extend(
+        ["/bin/zsh", "/bin/bash", "/bin/sh"]
+            .iter()
+            .map(|shell| shell.to_string()),
+    );
+    candidates
+        .into_iter()
+        .find(|shell| PathBuf::from(&shell).exists())
+        .unwrap_or_else(|| configured.unwrap_or("/bin/sh").to_string())
+}
+
 /// Whether a request is the interactive shell profile rather than a harness.
 ///
 /// The launcher's Shell tile asks for the user's own login shell with its
@@ -1082,7 +1111,7 @@ impl Manager {
 /// they get the fast spawn path and the non-blocking env read.
 #[cfg(unix)]
 fn is_shell_profile(req: &Spawn) -> bool {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let shell = login_shell();
     if req.command != shell {
         return false;
     }
@@ -1605,7 +1634,7 @@ fn env_cache() -> &'static EnvCache {
 /// process, from the warm thread.
 #[cfg(unix)]
 fn resolve_and_store() {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let shell = login_shell();
     // `env` between two markers, rather than the whole stdout: profiles
     // print banners and prompts, and treating that noise as environment
     // corrupts every variable (the previous PATH-only version did exactly
@@ -1873,10 +1902,33 @@ mod tests {
         assert_eq!(shell_quote("a b"), "'a b'");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn shell_resolution_prefers_a_configured_shell_that_exists() {
+        assert_eq!(resolve_shell(Some("/bin/sh")), "/bin/sh");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_resolution_skips_a_configured_shell_that_is_gone() {
+        let shell = resolve_shell(Some("/definitely/not/a/shell"));
+        assert_ne!(shell, "/definitely/not/a/shell");
+        assert!(PathBuf::from(&shell).exists(), "{shell}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_resolution_without_configuration_finds_a_shell() {
+        for configured in [None, Some("")] {
+            let shell = resolve_shell(configured);
+            assert!(PathBuf::from(&shell).exists(), "{shell}");
+        }
+    }
+
     /// The shell profile request a Shell tile produces.
     #[cfg(unix)]
     fn shell_req(cwd: std::path::PathBuf) -> Spawn {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let shell = login_shell();
         let args: Vec<String> = if shell.ends_with("zsh") {
             vec!["-il".to_string()]
         } else {
