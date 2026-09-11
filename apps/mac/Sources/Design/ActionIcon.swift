@@ -78,6 +78,10 @@ enum ActionIcon {
     case back
     case more
     case search
+    /// Search everything the account has, as opposed to filtering what is
+    /// already on the page. Both sit in the same bar on a wide layout, and
+    /// two plain magnifiers side by side read as one control drawn twice.
+    case searchAll
     case reveal
     case docs
     case source
@@ -175,6 +179,7 @@ enum ActionIcon {
         case .back: return "arrow.left"
         case .more: return "chevron.down"
         case .search: return "magnifyingglass"
+        case .searchAll: return "text.magnifyingglass"
         case .reveal: return "folder"
         case .docs: return "book"
         case .source: return "chevron.left.forwardslash.chevron.right"

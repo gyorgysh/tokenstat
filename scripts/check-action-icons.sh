@@ -218,9 +218,13 @@ ALLOWED = [
 # `, .save)` is the usual shape. `.icon` covers a button whose glyph is chosen
 # at runtime from the same vocabulary (`failure.action.icon`): the type is still
 # `ActionIcon`, so the compiler guarantees what this script is checking for.
+# `? .done : .copy` is the same case written inline, for a button that changes
+# its glyph with its own state (Copy becoming Copied). Both arms are cases of
+# the enum, so the compiler enforces the vocabulary either way; without this
+# the script read a compliant button as having no glyph at all.
 GLYPH = re.compile(
     r"systemImage|ActionIcon|Image\(\s*systemName|, \.\w+[,)]|\.label\("
-    r"|actionIcon|\.icon[,)]"
+    r"|actionIcon|\.icon[,)]|\?\s*\.\w+\s*:\s*\.\w+"
 )
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 

@@ -12,7 +12,7 @@ struct ClientWorkSearchButton: View {
     @Environment(ClientNavigationModel.self) private var navigation
 
     var body: some View {
-        Button("Search", .search) { navigation.showWorkSearch = true }
+        Button("Search", .searchAll) { navigation.showWorkSearch = true }
             .labelStyle(.iconOnly)
             .keyboardShortcut("k", modifiers: .command)
             .accessibilityLabel("Search")
@@ -40,7 +40,7 @@ struct ClientWorkSearchPresentation: View {
                 WorkSearchSheet(model: model, open: open, places: places)
             } else {
                 ThemedSheet(title: "Search", subtitle: "Find a screen, a setting, or your work",
-                            icon: .search, scrolls: true, onClose: { dismiss() }) {
+                            icon: .searchAll, scrolls: true, onClose: { dismiss() }) {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                         placeField
                         if preparing { ProgressView("Preparing saved work") }

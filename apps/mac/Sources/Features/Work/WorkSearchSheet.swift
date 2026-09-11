@@ -19,7 +19,7 @@ struct WorkSearchSheet: View {
         ScrollViewReader { scroll in
         ThemedSheet(title: places == nil ? "Search work" : "Search",
                     subtitle: dynamicTypeSize.isAccessibilitySize ? "" : subtitle,
-                    icon: dynamicTypeSize.isAccessibilitySize ? nil : .search,
+                    icon: dynamicTypeSize.isAccessibilitySize ? nil : .searchAll,
                     scrolls: dynamicTypeSize.isAccessibilitySize, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack(spacing: Theme.Space.s) {

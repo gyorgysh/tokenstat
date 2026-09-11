@@ -99,7 +99,7 @@ struct ClientSavedWorkView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Search work", .search) { Task { await openSearch() } }
+                    Button("Search work", .searchAll) { Task { await openSearch() } }
                         .disabled(loading)
                 }
                 ToolbarItem(placement: .cancellationAction) {
