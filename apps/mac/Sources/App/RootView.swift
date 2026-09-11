@@ -2538,6 +2538,9 @@ struct RootView: View {
                 // itself, so a draft coming or going does not lay this
                 // window out again. See `ChatDraftMark`.
                 draft: chat.draftReference(for: conversation.id, in: folder.id),
+                // The stamp, not the flag: the row's clock reads the same
+                // start the composer does, so the two never disagree.
+                runningSince: chat.turnStartedAt(for: conversation.id),
                 // A chat is the lit row only while the chat screen is the one
                 // in front. The model keeps its selection when you leave, so
                 // without the route test a conversation stayed marked under
@@ -3823,6 +3826,9 @@ private struct ChatSidebarConversationRow: View {
     /// How the mark names this conversation to the draft store. Nil while
     /// the folder's owner is unknown, which draws nothing.
     let draft: WorkReference?
+    /// When the current turn was first seen running. Nil when it is not
+    /// running, which draws the bare word with no clock.
+    let runningSince: Date?
     let isSelected: Bool
     let select: () -> Void
     let remove: () -> Void
@@ -3845,9 +3851,19 @@ private struct ChatSidebarConversationRow: View {
                             Text(harnessName(conversation.backend))
                                 .lineLimit(1)
                             if conversation.running {
-                                Text("· Working")
+                                Text("·")
                                     .foregroundStyle(Theme.accent)
                                     .fixedSize()
+                                Group {
+                                    if let since = runningSince {
+                                        TurnElapsedText(since: since)
+                                    } else {
+                                        Text("Working")
+                                            .accessibilityLabel("Working")
+                                    }
+                                }
+                                .foregroundStyle(Theme.accent)
+                                .fixedSize()
                             }
                         }
                         .font(Theme.fit(10))
