@@ -81,7 +81,10 @@ struct ClientWorkspacesView: View {
                         }
                     }
                     if let host = model.awaitingAccessHost {
-                        ClientAwaitingAccessCard(hostName: host)
+                        ClientAwaitingAccessCard(
+                            hostName: host,
+                            isHeadless: isHeadlessHost(named: host)
+                        )
                     }
                     if let message = model.infoMessage {
                         HStack(alignment: .top, spacing: Theme.Space.s) {
@@ -314,6 +317,17 @@ struct ClientWorkspacesView: View {
             }
     }
 
+    /// Whether the waiting host is a headless server, so the waiting card can
+    /// offer SSH approval instead of GUI steps. Matched by name: the model's
+    /// `awaitingAccessHost` is the display name the card already shows.
+    private func isHeadlessHost(named host: String) -> Bool {
+        let machines = account.account?.machines ?? []
+        let platform = machines.first {
+            ($0.label ?? $0.machineID) == host
+        }?.platform
+        return isHeadlessPlatform(platform)
+    }
+
     /// A tap on a push. A terminal that needs the person opens here. Chat
     /// is the fallback, over the app because this layout has no sidebar.
     ///
@@ -436,13 +450,13 @@ struct ClientWorkspacesView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 } else {
-                    Button(model.isConnecting == host.peerKey ? "Connecting…" : "Connect", .connect) {
+                    Button(model.isBusy(with: host.peerKey) ? "Connecting…" : "Connect", .connect) {
                         Task { await model.connect(host) }
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(Theme.accent)
-                    .disabled(model.isConnecting != nil || host.online == false)
+                    .disabled(model.isConnecting != nil || model.pendingPeer != nil || host.online == false)
                 }
             }
             // Opening the device used to hide behind a bare chevron, so the
@@ -516,6 +530,18 @@ final class ClientWorkspacesModel {
     private(set) var recentChats: [ChatRecentConversation] = []
     private(set) var connectedKey: String?
     private(set) var isConnecting: String?
+    /// An explicitly tapped host waiting for the dial while another attempt
+    /// is still running. The row spins on this as well as on `isConnecting`,
+    /// and the auto path stays out while it is set, so a tap can never lose
+    /// to an auto-connect with nothing on screen saying why.
+    private(set) var pendingPeer: String?
+    /// The machine somebody picked by hand, until they pick another or
+    /// disconnect. It outlives the attempt on purpose: waiting for approval,
+    /// a refusal and an error all clear `connectedKey`, which handed the auto
+    /// path a free run at the remembered machine while the card for the one
+    /// they tapped was still on screen. That is what connected the first tap
+    /// on a second machine to the first one.
+    private(set) var chosenPeer: String?
     private(set) var errorMessage: String?
     /// What this phone is called. It is never in the host list (it cannot dial
     /// itself), so it gets one line of its own.
@@ -574,8 +600,33 @@ final class ClientWorkspacesModel {
     /// same card, with nothing telling them to press Connect again.
     private var accessWatch: Task<Void, Never>?
 
+    /// Explicit, from a tap or a notification. Queues behind an in-flight
+    /// dial instead of dropping: dropping is what let an auto-connect steal
+    /// the first tap on a cold start, landing the detail column on a machine
+    /// nobody asked for. The latest tap wins; a tap on the host already
+    /// dialling or already queued is a no-op.
     func connect(_ host: ClientHost) async {
-        await connect(host, recovering: false)
+        chosenPeer = host.peerKey
+        if isConnecting == host.peerKey || pendingPeer == host.peerKey { return }
+        pendingPeer = host.peerKey
+        for _ in 0..<80 {
+            if Task.isCancelled {
+                if pendingPeer == host.peerKey { pendingPeer = nil }
+                return
+            }
+            if isConnecting == nil, pendingPeer == host.peerKey { break }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        guard isConnecting == nil, pendingPeer == host.peerKey else { return }
+        await dial(host, recovering: false)
+    }
+
+    /// The auto path. Never queues and never preempts: while an explicit tap
+    /// is waiting or dialling, this drops, so redialling the last host cannot
+    /// undo a machine somebody just picked.
+    private func autoDial(_ host: ClientHost) async {
+        guard isConnecting == nil, pendingPeer == nil else { return }
+        await dial(host, recovering: false)
     }
 
     static func autoConnectKey(for peerKey: String) -> String {
@@ -606,19 +657,20 @@ final class ClientWorkspacesModel {
     /// a machine wakes, coming back to the foreground, and now two surfaces
     /// doing each of those. They overlap constantly, and `connectedKey` is
     /// only set once a connection has finished, so callers cannot use it to
-    /// tell whether one is already under way. `connect` refusing while
-    /// `isConnecting` is set is what makes the overlap harmless.
+    /// tell whether one is already under way. `autoDial` dropping while
+    /// anything is under way or queued is what makes the overlap harmless.
     ///
     /// `connectedKey` is in-memory, so a cold start has nothing to recover:
     /// the last peer that was connected is remembered on disk instead.
     func autoConnectLastHost() async {
-        guard connectedKey == nil, isConnecting == nil else { return }
+        guard connectedKey == nil, isConnecting == nil, pendingPeer == nil else { return }
         guard let last = UserDefaults.standard.string(forKey: "client.lastConnectedHost"),
+              chosenPeer == nil || chosenPeer == last,
               Self.isAutoConnectEnabled(for: last),
               let host = hosts.first(where: { $0.peerKey == last }),
               host.online != false
         else { return }
-        await connect(host)
+        await autoDial(host)
     }
 
     /// Redial the current host after a path change. Keeps the connected
@@ -627,8 +679,8 @@ final class ClientWorkspacesModel {
     func recoverAfterNetworkChange(account: Account?) async {
         // An attempt already running is the recovery. Its ladder outlasts the
         // path change that woke this, so redialling on top of it only refreshes
-        // the list twice.
-        guard isConnecting == nil else { return }
+        // the list twice. A queued explicit tap wins over the recovery too.
+        guard isConnecting == nil, pendingPeer == nil else { return }
         let now = Date()
         if now.timeIntervalSince(lastRecoverAt) < 1.5 { return }
         lastRecoverAt = now
@@ -636,7 +688,7 @@ final class ClientWorkspacesModel {
         guard let key = connectedKey,
               let host = hosts.first(where: { $0.peerKey == key })
         else { return }
-        await connect(host, recovering: true)
+        await dial(host, recovering: true)
         activeTerminal?.clearTransientTunnelError()
     }
 
@@ -647,8 +699,11 @@ final class ClientWorkspacesModel {
     /// start a second attempt while the first was still on its retry ladder,
     /// and the two would pair, raise a tunnel and load the remote side twice.
     /// `isConnecting` is set for the whole run, including the sleeps, so this
-    /// is the check that actually holds.
-    func connect(_ host: ClientHost, recovering: Bool) async {
+    /// is the check that actually holds. Private: explicit taps enter through
+    /// `connect`, which queues, and the auto path through `autoDial`, which
+    /// drops. Both end up here, never two at once.
+    private func dial(_ host: ClientHost, recovering: Bool) async {
+        if pendingPeer == host.peerKey { pendingPeer = nil }
         guard isConnecting == nil else { return }
         guard host.online != false else {
             errorMessage = "\(host.name) is asleep."
@@ -784,11 +839,14 @@ final class ClientWorkspacesModel {
                       allowed
                 else { continue }
                 guard !Task.isCancelled else { return }
-                // Let go of the handle before connecting. `connect` stops the
+                // Let go of the handle before connecting. The dial stops the
                 // watch on its way in, and a task that cancels itself
                 // mid-flight would take the retry ladder's own sleeps with it.
+                // `autoDial`, not `connect`: the person may have tapped
+                // another machine since, and the watch must not queue the old
+                // one back up behind it.
                 self.accessWatch = nil
-                await self.connect(host)
+                await self.autoDial(host)
                 return
             }
         }
@@ -800,7 +858,15 @@ final class ClientWorkspacesModel {
         awaitingAccessHost = nil
     }
 
+    /// A row spins while its host is dialling or queued for the dial. One
+    /// helper so the sidebar and the host card cannot disagree about it.
+    func isBusy(with peerKey: String) -> Bool {
+        isConnecting == peerKey || pendingPeer == peerKey
+    }
+
     func disconnect() {
+        pendingPeer = nil
+        chosenPeer = nil
         stopWatchingForAccess()
         activeTerminal?.stop()
         activeTerminal = nil

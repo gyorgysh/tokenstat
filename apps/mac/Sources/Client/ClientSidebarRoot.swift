@@ -90,6 +90,18 @@ struct ClientSidebarRoot: View {
                             maxHeight: .infinity,
                             alignment: .topLeading
                         )
+                        // Search and the connection chip, top right of the
+                        // wide column rather than squeezed into the sidebar,
+                        // the way the tab layout draws them. On the root
+                        // content, so pushed screens bring their own bar.
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                ClientWorkSearchButton()
+                            }
+                            ToolbarItem(placement: .topBarTrailing) {
+                                ClientConnectionChip()
+                            }
+                        }
                 }
             }
             // One stack for the whole detail column, so anything a screen
@@ -289,6 +301,10 @@ struct ClientSidebarRoot: View {
         .refreshable {
             await ClientRefresh.pull("sidebar") { await reload() }
         }
+        // Avatar and wordmark only. Search and the connection chip live in
+        // the detail column's own bar, where there is room: all four in this
+        // narrow column read as clutter, and the tab layout already puts
+        // search and the chip on the right.
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 AvatarButton { showAccount = true }
@@ -296,12 +312,6 @@ struct ClientSidebarRoot: View {
             ToolbarItem(placement: .principal) {
                 Wordmark(size: 19, fills: false)
                     .accessibilityAddTraits(.isHeader)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                ClientWorkSearchButton()
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                ClientConnectionChip(compact: true)
             }
         }
     }
@@ -347,6 +357,14 @@ struct ClientSidebarRoot: View {
     /// rather than of what happens to be running.
     private func hostRow(_ host: ClientHost) -> some View {
         Button {
+            // The detail column lands on Workspaces, which draws this same
+            // model: its connecting line, waiting-for-approval card and
+            // errors are already there. Tapping from Home used to connect
+            // with the detail column somewhere else, so an access refusal
+            // landed nowhere and nothing on screen said why.
+            navigation.restoredRoute = nil
+            navigation.destination = .workspaces
+            navigation.folderID = nil
             if workspaces.connectedKey == host.peerKey {
                 workspaces.disconnect()
             } else {
@@ -362,7 +380,7 @@ struct ClientSidebarRoot: View {
                 Text(host.name)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                if workspaces.isConnecting == host.peerKey {
+                if workspaces.isBusy(with: host.peerKey) {
                     ProgressView().controlSize(.small)
                 }
             }
