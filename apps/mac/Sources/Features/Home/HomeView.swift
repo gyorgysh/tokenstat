@@ -182,35 +182,55 @@ struct HomeView: View {
         }
     }
 
+    /// One figure in its own panel, the shape the phone's tiles use. Built
+    /// from concrete views rather than the generic card: three cards sharing
+    /// one expression overloaded this toolchain's checker.
+    private func figurePanel(title: String, value: String, note: String?) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(alignment: .center) {
+                FeatureMark(name: "mark_insights", tint: Theme.accent, size: 22)
+                Text(title)
+                    .font(Theme.headline)
+                Spacer()
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(Theme.numeric(20, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if let note {
+                    Text(note)
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(Theme.cardPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
     private var usageSummary: some View {
         // One panel per figure, like the phone's tiles. Three stats sharing
         // one card read as one number with footnotes rather than three
-        // answers. The scope already shows in the chrome picker, so the cards
+        // answers. The scope already shows in the chrome picker, so the panels
         // carry no subtitle repeating it.
         if model.calendar != nil {
             HStack(alignment: .top, spacing: Theme.Space.s) {
-                Card(title: "Today", mark: "mark_insights", fillsHeight: true) {
-                    Text(model.todayValue.formatted)
-                        .font(Theme.numeric(20, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                }
-                Card(title: "Last 7 days", mark: "mark_insights", fillsHeight: true) {
-                    Text(model.weekValue.formatted)
-                        .font(Theme.numeric(20, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                }
+                figurePanel(title: "Today", value: model.todayValue.formatted, note: nil)
+                figurePanel(title: "Last 7 days", value: model.weekValue.formatted, note: nil)
                 if let busiest = model.calendar?.busiest {
-                    Card(title: "Busiest", mark: "mark_insights", fillsHeight: true) {
-                        Text(formatSpend(busiest.value))
-                            .font(Theme.numeric(20, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Text(busiest.date)
-                            .font(Theme.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    figurePanel(
+                        title: "Busiest",
+                        value: formatSpend(busiest.value),
+                        note: busiest.date
+                    )
                 }
             }
         } else if model.errorMessage != nil {
