@@ -276,6 +276,14 @@ fn limits_in(file: &Path) -> Option<ProviderLimits> {
 
     // Backwards: the most recent block is the current one, and a long session
     // contains hundreds of them.
+    //
+    // Codex sends sparse updates and carries the unchanged fields forward
+    // itself (`merge_rate_limit_fields` in its session state), so a block can
+    // arrive with the windows filled in and no plan named, while the account
+    // plainly still has one. The windows are never sparse, so the newest block
+    // carrying them is still the reading; only the plan label needs the same
+    // carry-forward, taken from the newest block that named one.
+    let mut newest_plan: Option<String> = None;
     for line in raw.lines().rev() {
         if !line.contains("rate_limits") {
             continue;
@@ -286,6 +294,10 @@ fn limits_in(file: &Path) -> Option<ProviderLimits> {
         let Some(limits) = parsed.payload.and_then(|p| p.rate_limits) else {
             continue;
         };
+
+        if newest_plan.is_none() {
+            newest_plan.clone_from(&limits.plan_type);
+        }
 
         let observed_at_ms = parsed
             .timestamp
@@ -319,7 +331,7 @@ fn limits_in(file: &Path) -> Option<ProviderLimits> {
         }
         return Some(ProviderLimits {
             source: "codex".to_string(),
-            plan: limits.plan_type,
+            plan: limits.plan_type.or(newest_plan),
             windows,
             observed_at_ms,
             note: None,

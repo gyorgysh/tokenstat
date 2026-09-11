@@ -22,7 +22,11 @@ use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};
 
 /// Anthropic's OAuth API wants this on every call, and returns 401 without it.
 const OAUTH_BETA: &str = "oauth-2025-04-20";
-const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+/// The same endpoint Claude Code's own binary calls, with the same
+/// `skip_spend` it asks for: this reads the quota windows and never the spend
+/// figures, so the server is not asked to total money nobody here displays.
+/// The response keeps every field this parses; the DTOs below ignore the rest.
+const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage?skip_spend=1";
 
 /// Where a refresh token is traded for a new access token.
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";

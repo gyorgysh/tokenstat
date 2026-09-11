@@ -51,7 +51,12 @@ pub fn fetch() -> ProviderLimits {
     };
     if !response.status().is_success() {
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return local_limits();
+            // No quota endpoint for this account yet. There was an estimate
+            // here, built from local message costs against dollar ceilings
+            // written down in this file. Those ceilings were a guess, so every
+            // percentage it drew was a guess wearing a real number's clothes.
+            // Saying nothing is the honest answer until OpenCode reports one.
+            return unavailable("OpenCode does not report quota for this account yet.".to_string());
         }
         return unavailable(format!(
             "OpenCode returned {} for its usage endpoint.",
@@ -136,91 +141,6 @@ fn auth_token() -> Option<String> {
         }
     }
     None
-}
-
-/// Estimate Go/Zen windows from OpenCode's local message costs when its public
-/// quota endpoint is not available yet. The provider and limits are explicit,
-/// while the missing reset timestamps stay unknown rather than invented.
-fn local_limits() -> ProviderLimits {
-    let Some(home) = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()) else {
-        return unavailable(
-            "No home directory was found for OpenCode's local database.".to_string(),
-        );
-    };
-    let path = [
-        home.join(".local/share/opencode/opencode.db"),
-        home.join("Library/Application Support/opencode/opencode.db"),
-    ]
-    .into_iter()
-    .find(|path| path.is_file());
-    let Some(path) = path else {
-        return unavailable("OpenCode's local database was not found.".to_string());
-    };
-    let Ok(connection) = rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) else {
-        return unavailable("OpenCode's local database could not be read.".to_string());
-    };
-    let Ok(mut statement) = connection.prepare(
-        "SELECT time_created, data FROM message WHERE json_extract(data, '$.providerID') IN ('opencode-go', 'opencode')",
-    ) else {
-        return unavailable("OpenCode's local database has no readable message table.".to_string());
-    };
-    let now = now_ms();
-    let mut totals = [0.0_f64; 3];
-    let rows = statement.query_map([], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-    });
-    let Ok(rows) = rows else {
-        return unavailable("OpenCode's local usage rows could not be read.".to_string());
-    };
-    for row in rows.flatten() {
-        let (created, data) = row;
-        let Ok(data) = serde_json::from_str::<serde_json::Value>(&data) else {
-            continue;
-        };
-        let Some(cost) = data.get("cost").and_then(serde_json::Value::as_f64) else {
-            continue;
-        };
-        if !cost.is_finite() || cost < 0.0 {
-            continue;
-        }
-        let age = now.saturating_sub(created);
-        if age <= 5 * 60 * 60 * 1000 {
-            totals[0] += cost;
-        }
-        if age <= 7 * 24 * 60 * 60 * 1000 {
-            totals[1] += cost;
-        }
-        if age <= 30 * 24 * 60 * 60 * 1000 {
-            totals[2] += cost;
-        }
-    }
-    let limits = [12.0, 30.0, 60.0];
-    let labels = ["5-hour", "weekly", "monthly"];
-    let windows = totals
-        .into_iter()
-        .zip(limits)
-        .zip(labels)
-        .map(|((used, limit), label)| {
-            let percent = (used / limit * 100.0).clamp(0.0, 100.0);
-            UsageWindow {
-                label: label.to_string(),
-                percent,
-                resets_at_ms: None,
-                severity: LimitSeverity::from_percent(percent),
-            }
-        })
-        .collect();
-    ProviderLimits {
-        source: "opencode".to_string(),
-        plan: Some("Go/Zen (local estimate)".to_string()),
-        windows,
-        observed_at_ms: now,
-        note: None,
-        stale: false,
-    }
 }
 
 fn now_ms() -> i64 {
