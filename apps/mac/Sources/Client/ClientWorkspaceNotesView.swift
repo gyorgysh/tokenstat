@@ -165,6 +165,8 @@ struct ClientWorkspaceNotesView: View {
             refreshKey: "notes-\(workspaceID)",
             reload: { await load() }
         ) {
+            ClientSectionTitle(title: showingArchive ? "Archived notes" : "Notes", mark: "mark_note")
+                .clientCardRow()
             ForEach(notes) { note in
                 row(note)
                     .clientCardRow()

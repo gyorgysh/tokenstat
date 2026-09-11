@@ -125,7 +125,16 @@ struct ClientChatView: View {
             refreshKey: "workspace-chat-\(workspaceID)",
             reload: { await reload() }
         ) {
-            ClientOverviewFacts(facts: [("Conversations", "\(model.chats.count)"), ("Running", "\(model.chats.filter(\.running).count)"), ("Agents", "\(Set(model.chats.map(\.backend)).count)")]).clientCardRow()
+            ClientStatPanels(panels: [
+                ("Conversations", "\(model.chats.count)", "mark_chat"),
+                ("Running", "\(model.chats.filter(\.running).count)", "mark_running"),
+                ("Agents", "\(Set(model.chats.map(\.backend)).count)", "mark_agent"),
+            ]).clientCardRow()
+            // The list gets a name of its own, because the figures above it
+            // are about the folder and the rows below are the conversations.
+            // Home and Workspaces already label their sections this way.
+            ClientSectionTitle(title: "Conversations", mark: "mark_chat")
+                .clientCardRow()
             HStack {
                 Menu {
                     Picker("Agent", selection: $agent) {
@@ -139,7 +148,7 @@ struct ClientChatView: View {
                         Text("Recent first").tag(false)
                         Text("Title A–Z").tag(true)
                     }
-                } label: { Label("Filter & sort", systemImage: "line.3.horizontal.decrease") }
+                } label: { Label("Filter & sort", systemImage: ActionIcon.filter.symbol) }
                 .frame(minHeight: 44)
                 Spacer()
                 Text("\(filteredChats.count) shown").font(ClientType.caption).foregroundStyle(.secondary)

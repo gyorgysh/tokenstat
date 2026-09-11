@@ -613,7 +613,14 @@ struct ClientWorkspaceTasksView: View {
     /// the phone had no way to ask for it at all.
     @State private var showingArchive = false
 
-    private static let columns = [("backlog", "To Do"), ("doing", "Doing"), ("done", "Done")]
+    /// The board's columns, each with the mark that stands for its state.
+    /// Kept together so the panels above the board and the headings inside it
+    /// cannot end up naming the same column two different ways.
+    private static let columns = [
+        ("backlog", "To Do", "mark_todo"),
+        ("doing", "Doing", "mark_running"),
+        ("done", "Done", "mark_done"),
+    ]
 
     /// This folder's cards. Notes are not cards and have their own screen:
     /// see `ClientWorkspaceNotesView`. A list of work with a second list of
@@ -640,11 +647,15 @@ struct ClientWorkspaceTasksView: View {
             reload: { await load() }
         ) {
             if !showingArchive {
-                ClientStatPanels(panels: Self.columns.map { id, label in
-                    (label, "\(cards.filter { $0.kind != .note && $0.column == id }.count)")
+                ClientStatPanels(panels: Self.columns.map { id, label, mark in
+                    (label, "\(cards.filter { $0.kind != .note && $0.column == id }.count)", mark)
                 }).clientCardRow()
             }
-            ForEach(Self.columns, id: \.0) { id, label in
+            // Two levels on purpose: this names the list, the column headings
+            // below divide it. The figures above are about the folder.
+            ClientSectionTitle(title: showingArchive ? "Archived cards" : "Board", mark: "mark_todo")
+                .clientCardRow()
+            ForEach(Self.columns, id: \.0) { id, label, _ in
                 let group = tasks.filter { showingArchive || $0.column == id }
                 if !showingArchive, !group.isEmpty {
                     sectionHeading("\(label) · \(group.count)")
@@ -903,7 +914,11 @@ struct ClientWorkspaceWorkflowsView: View {
             refreshKey: "workspace-workflows-\(workspaceID)",
             reload: { await load() }
         ) {
-            ClientStatPanels(panels: [("Workflows", "\(graphs.count)"), ("Running", "\(runs.filter(\.isLive).count)")])
+            ClientStatPanels(panels: [
+                ("Workflows", "\(graphs.count)", "mark_workflow"),
+                ("Running", "\(runs.filter(\.isLive).count)", "mark_running"),
+            ])
+            ClientSectionTitle(title: "Graphs", mark: "mark_workflow")
             if !search.isEmpty && !graphs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) }) {
                 Text("No matching workflows").foregroundStyle(.secondary)
             }
@@ -976,7 +991,12 @@ struct ClientWorkspaceAutomationsView: View {
             refreshKey: "workspace-automations-\(workspaceID)",
             reload: { await load() }
         ) {
-            ClientOverviewFacts(facts: [("Enabled", "\(jobs.filter(\.enabled).count)"), ("Running", "\(runs.filter(\.isRunning).count)"), ("Paused", "\(jobs.filter { !$0.enabled }.count)")])
+            ClientStatPanels(panels: [
+                ("Enabled", "\(jobs.filter(\.enabled).count)", "mark_automation"),
+                ("Running", "\(runs.filter(\.isRunning).count)", "mark_running"),
+                ("Paused", "\(jobs.filter { !$0.enabled }.count)", "mark_paused"),
+            ])
+            ClientSectionTitle(title: "Jobs", mark: "mark_automation")
             if !search.isEmpty && !jobs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) || $0.prompt.localizedCaseInsensitiveContains(search) }) {
                 Text("No matching automations").foregroundStyle(.secondary)
             }

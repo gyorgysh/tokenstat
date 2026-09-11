@@ -21,33 +21,12 @@ struct ClientAdaptiveCards<Content: View>: View {
     }
 }
 
-struct ClientOverviewFacts: View {
-    var facts: [(String, String)]
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Theme.Space.m) { items }
-            VStack(alignment: .leading, spacing: Theme.Space.s) { items }
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
-        .accessibilityElement(children: .combine)
-    }
-    private var items: some View {
-        ForEach(facts.indices, id: \.self) { index in
-            VStack(alignment: .leading, spacing: 4) {
-                Text(facts[index].1).font(ClientType.rowFigure).foregroundStyle(Theme.accent)
-                Text(facts[index].0).font(ClientType.caption).foregroundStyle(.secondary)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
 /// One panel per figure, not one card holding every figure.
 ///
-/// Three panels read as three facts. Each keeps its own card on every width.
+/// Three panels read as three facts. Each keeps its own card on every width,
+/// and each says which fact it is with a mark from the house vocabulary.
 struct ClientStatPanels: View {
-    var panels: [(label: String, value: String)]
+    var panels: [(label: String, value: String, mark: String)]
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -59,15 +38,27 @@ struct ClientStatPanels: View {
 
     private var cards: some View {
         ForEach(panels.indices, id: \.self) { index in
-            VStack(alignment: .leading, spacing: 4) {
-                Text(panels[index].value)
-                    .font(ClientType.figureSmall)
-                    .foregroundStyle(Theme.accent)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Text(panels[index].label)
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(panels[index].value)
+                        .font(ClientType.figureSmall)
+                        .foregroundStyle(Theme.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    Text(panels[index].label)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                // Trailing, not leading. The figure is what the card is
+                // for, and every panel lines its number up on the same left
+                // edge. A mark in front would push each one in by a
+                // different amount. It also fills the room a short number
+                // leaves behind.
+                FeatureMark(name: panels[index].mark, size: 26)
+                    // The label already says which fact this is. A second
+                    // reading of it, from an image's asset name, is noise.
+                    .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Theme.Space.m)

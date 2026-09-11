@@ -93,7 +93,7 @@ struct ClientInsightsView: View {
                 if model.cut == .day {
                     let days = rows.sorted { $0.key < $1.key }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        Text("Daily activity").font(ClientType.sectionTitle)
+                        ClientSectionTitle(title: "Daily activity", mark: "mark_activity")
                         Text("Tokens per day · cache included").font(ClientType.caption).foregroundStyle(.secondary)
                         Chart(days) { day in
                             BarMark(x: .value("Day", day.key), y: .value("Tokens", day.counters.total))
@@ -123,6 +123,10 @@ struct ClientInsightsView: View {
                     // largest row is a steadier reference than the total: with
                     // 40 models every bar would otherwise be a sliver.
                     let peak = shown.map(\.valueMicros).max() ?? 1
+                    // The breakdown had no name at all, so the cards under the
+                    // chart read as a continuation of it rather than as the
+                    // answer to a different question. The cut names itself.
+                    ClientSectionTitle(title: model.cut.plural.capitalized, mark: "mark_insights")
                     ClientAdaptiveCards {
                     ForEach(shown) { row in
                         InsightRow(row: row, cut: model.cut, peak: peak)
@@ -159,7 +163,7 @@ struct ClientInsightsView: View {
             Text("at list rates, across every device")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
-            InsightStatPanels(panels: ClientInsightFacts.panels(
+            ClientStatPanels(panels: ClientInsightFacts.panels(
                 tokens: rows.reduce(0) { $0 + $1.counters.total },
                 events: rows.reduce(0) { $0 + $1.events },
                 count: rows.count,
@@ -188,41 +192,6 @@ struct ClientInsightsView: View {
         return rows.filter { row in
             row.key.lowercased().contains(term)
                 || model.cut.title(for: row.key).lowercased().contains(term)
-        }
-    }
-}
-
-/// The period's three figures as three panels, not one strip.
-///
-/// One card holding three numbers reads as one fact with footnotes. Three
-/// panels read as three facts, and each keeps its own card on every width,
-/// the way the Mac's overview draws one metric card per figure.
-private struct InsightStatPanels: View {
-    var panels: [(label: String, value: String)]
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Theme.Space.s) { cards }
-            VStack(spacing: Theme.Space.s) { cards }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private var cards: some View {
-        ForEach(panels.indices, id: \.self) { index in
-            VStack(alignment: .leading, spacing: 4) {
-                Text(panels[index].value)
-                    .font(ClientType.figureSmall)
-                    .foregroundStyle(Theme.accent)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Text(panels[index].label)
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Theme.Space.m)
-            .cardSurface()
         }
     }
 }

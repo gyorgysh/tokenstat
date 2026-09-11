@@ -23,11 +23,11 @@ struct ClientInsightFacts {
         count: Int,
         countLabel: String,
         formatCompact: (UInt64) -> String
-    ) -> [(label: String, value: String)] {
+    ) -> [(label: String, value: String, mark: String)] {
         [
-            (label: "Tokens", value: formatCompact(tokens)),
-            (label: "Events", value: events.formatted()),
-            (label: countLabel, value: "\(count)"),
+            (label: "Tokens", value: formatCompact(tokens), mark: "mark_insights"),
+            (label: "Events", value: events.formatted(), mark: "mark_activity"),
+            (label: countLabel, value: "\(count)", mark: "mark_examples"),
         ]
     }
 }
