@@ -145,7 +145,7 @@ fn client() -> Result<reqwest::blocking::Client, UpdateError> {
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(10))
         .user_agent(USER_AGENT)
-        // Listing requests attach GITHUB_TOKEN. A 3xx must not forward it.
+        // Listing requests can attach a GitHub credential. Never forward it.
         .redirect(reqwest::redirect::Policy::none())
         .build()?)
 }
@@ -264,14 +264,13 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
     }
     let current = oldest_installed(installed).to_string();
     let client = client()?;
-    let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let mut req = client.get(&url);
-    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
-        if !token.is_empty() {
-            req = req.header("authorization", format!("Bearer {token}"));
-        }
-    }
-    let resp = req.send()?;
+    // Resolve only after the cooldown gate. Reuse the app's cached GitHub
+    // connection, including HTTPS git credentials, without starting sign-in.
+    // Keep the explicit updater environment override for existing CLI users.
+    let token = github_token().or_else(|| {
+        crate::forge::credential("github.com").map(|credential| credential.bearer().to_owned())
+    });
+    let resp = release_request(&client, token.as_deref()).send()?;
     if let Some(retry_at) = release_retry_at(resp.status().as_u16(), resp.headers(), unix_now()) {
         *cooldown = retry_at;
         if let Some(path) = &cooldown_path {
@@ -282,7 +281,7 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
     if resp.status().as_u16() == 404 {
         // Public repo with no release yet is the common case. A private repo
         // without GITHUB_TOKEN looks the same; mention that only as a footnote.
-        if github_token().is_none() {
+        if token.is_none() {
             return Err(UpdateError::Message(
                 "No GitHub Release found yet for this project. \
                  If you expected one and the repository is private, set GITHUB_TOKEN."
@@ -390,6 +389,21 @@ fn is_rate_limit_message(body: &serde_json::Value) -> bool {
     body.get("message")
         .and_then(|v| v.as_str())
         .is_some_and(|message| message.to_ascii_lowercase().contains("rate limit"))
+}
+
+/// Authentication is limited to this fixed API endpoint. Download redirects
+/// use their separate, unauthenticated client and never receive this token.
+fn release_request(
+    client: &reqwest::blocking::Client,
+    token: Option<&str>,
+) -> reqwest::blocking::RequestBuilder {
+    let request = client.get(format!(
+        "https://api.github.com/repos/{REPO}/releases/latest"
+    ));
+    match token {
+        Some(token) => request.bearer_auth(token),
+        None => request,
+    }
 }
 
 fn read_cooldown(path: &Path, now: u64) -> Option<u64> {
@@ -1534,6 +1548,23 @@ fn touch_check_stamp() -> Result<(), UpdateError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn release_auth_is_optional_and_targets_only_github_api() {
+        let client = super::client().unwrap();
+        let anonymous = super::release_request(&client, None).build().unwrap();
+        assert!(!anonymous.headers().contains_key("authorization"));
+        let authenticated = super::release_request(&client, Some("fixture-token"))
+            .build()
+            .unwrap();
+        assert_eq!(authenticated.url().scheme(), "https");
+        assert_eq!(authenticated.url().host_str(), Some("api.github.com"));
+        assert_eq!(
+            authenticated.headers()["authorization"],
+            "Bearer fixture-token"
+        );
+        assert!(authenticated.headers()["authorization"].is_sensitive());
+    }
+
     #[test]
     fn release_rate_limit_deadlines() {
         use super::release_retry_at;
