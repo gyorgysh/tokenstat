@@ -77,6 +77,14 @@ struct WorkspacesView: View {
             }
         }
         .background(Theme.background)
+        #if os(macOS)
+        .task(id: isActive ? model.selectedID : nil) {
+            guard isActive, let id = model.selectedID else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await chat.warmWorkspacePreviews(id)
+        }
+        #endif
     }
 
     private func header(_ folder: WorkspaceFolder) -> some View {

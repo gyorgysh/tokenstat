@@ -565,7 +565,79 @@ final class ChatModel {
     }
 
     @ObservationIgnored private var recentMessages = ChatRecentMessages<ChatDisplayItem>()
+    @ObservationIgnored private var previewWarmTask: Task<Void, Never>?
     private(set) var recentMessagePreview: [ChatDisplayItem] = []
+
+    /// Opening a project's sessions also prepares its recent chat previews,
+    /// without changing the active conversation or starting an agent.
+    func warmWorkspacePreviews(_ folder: String) async {
+        #if os(macOS)
+        let scope = WorkSessionContext.shared.scope
+        let route = Bridge.chatRoute(workspaceID: folder, peer: nil)
+        if route.peer == nil { await WorkSessionContext.shared.resolveLocalHostIdentity() }
+        guard let scope, let host = route.peer ?? WorkSessionContext.shared.localHostIdentity,
+              !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+        do {
+            let list = try await Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            if continuityScope == nil { continuityScope = scope }
+            guard continuityScope == scope else { return }
+            storeChatListCache(Self.uniqued(list), folderID: folder)
+            let prefix = WorkReferenceKey.folder(scope: scope, hostIdentity: host, workspaceID: route.workspaceID)
+            for chat in list.prefix(5) {
+                guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+                let key = prefix + WorkReferenceKey.encode(chat.id)
+                if !recentMessages.messages(for: key).isEmpty { continue }
+                let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
+                    limit: Self.openPageEvents, peer: route.peer)
+                guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+                recentMessages.store(ChatDisplayItem.coalesce(page.events,
+                    defaultBackend: chat.backend, running: chat.running), for: key) {
+                    String(reflecting: $0).utf8.count
+                }
+            }
+        } catch { /* A preview failure leaves normal opening available. */ }
+        #endif
+    }
+
+    /// Speculative reads use the same small, memory-only preview as a chat
+    /// just left. Never fall back to the legacy whole-conversation endpoint.
+    private func warmRecentChats(limit: Int, after selection: String? = nil) {
+        #if os(macOS)
+        previewWarmTask?.cancel()
+        guard !pagingUnavailable, let folderID,
+              let owner = continuityOwner(folderID: folderID) else { return }
+        let prefix = WorkReferenceKey.folder(scope: owner.scope,
+            hostIdentity: owner.host, workspaceID: owner.workspace)
+        let start = selection.flatMap { id in chats.firstIndex { $0.id == id } }.map { $0 + 1 } ?? 0
+        let candidates = Array(chats.dropFirst(start).filter { $0.id != selected?.id }.prefix(limit))
+        let peer = self.peer
+        previewWarmTask = Task { [weak self] in
+            // Let the selected conversation and its first frame finish first.
+            try? await Task.sleep(for: .milliseconds(250))
+            for chat in candidates {
+                guard !Task.isCancelled, let self,
+                      self.folderID == folderID, self.continuityScope == owner.scope,
+                      WorkSessionContext.shared.scope == owner.scope else { return }
+                let key = prefix + WorkReferenceKey.encode(chat.id)
+                guard self.recentMessages.messages(for: key).isEmpty else { continue }
+                do {
+                    let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
+                        limit: Self.openPageEvents, peer: peer)
+                    guard !Task.isCancelled, self.folderID == folderID,
+                          WorkSessionContext.shared.scope == owner.scope,
+                          self.selected?.id != chat.id else { return }
+                    let rows = ChatDisplayItem.coalesce(page.events,
+                        defaultBackend: chat.backend, running: chat.running)
+                    self.recentMessages.store(rows, for: key) { String(reflecting: $0).utf8.count }
+                } catch {
+                    // Warming is optional. A failed read must not interrupt work.
+                    return
+                }
+            }
+        }
+        #endif
+    }
 
     var isShowingCachedTranscript: Bool { openingConversation && !recentMessagePreview.isEmpty }
     var transcriptItems: [ChatDisplayItem] { isShowingCachedTranscript ? recentMessagePreview : displayItems }
@@ -672,6 +744,7 @@ final class ChatModel {
     }
 
     func load(workspaceID: String, peer: String? = nil, selectFirst: Bool = true) async {
+        previewWarmTask?.cancel()
         loadGeneration &+= 1
         let generation = loadGeneration
         let probe = Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
@@ -850,6 +923,7 @@ final class ChatModel {
             } else {
                 await select(nil)
             }
+            if generation == loadGeneration { warmRecentChats(limit: 5) }
         } catch {
             if generation == loadGeneration {
                 self.error = error.localizedDescription
@@ -882,7 +956,9 @@ final class ChatModel {
     }
 
     func select(_ chat: ChatConversation?) async {
+        previewWarmTask?.cancel()
         await select(chat, savedPage: nil)
+        if selected?.id == chat?.id { warmRecentChats(limit: 3, after: chat?.id) }
     }
 
     /// Cold opening of an existing copy. No pairing, peer request or queue

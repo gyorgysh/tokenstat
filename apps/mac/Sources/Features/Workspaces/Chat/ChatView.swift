@@ -554,7 +554,8 @@ struct ChatView: View {
                         emptyConversation
                     }
                     TranscriptEarlierHeader(model: model) {
-                        window.ask(force: true)
+                        if hiddenAboveCount > 0 { revealEarlier() }
+                        else { window.ask(force: true) }
                     }
                     if hiddenAboveCount > 0 {
                         Button("Show \(hiddenAboveCount) earlier messages", .history) {
@@ -689,7 +690,7 @@ struct ChatView: View {
                     )
                 }
             }
-            .transcriptEarlierPages(model, window: window, proxy: proxy)
+            .transcriptEarlierPages(model, window: window, proxy: proxy, hiddenEarlierRows: hiddenAboveCount)
             .onChange(of: structureToken) { _, _ in
                 // Tool-heavy (Codex) turns change shape per poll. An animated
                 // pin per poll is what yanked scrollback, so structural pins

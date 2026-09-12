@@ -991,6 +991,8 @@ final class TranscriptWindow {
     /// start a request per frame only to have it answer that there is
     /// nothing to fetch.
     var canAskEarlier = false
+    /// Consume rows already held before fetching another archive page.
+    var hasHiddenEarlierRows = false
     /// Whether the transcript is holding the latest turn: pinned to the end,
     /// or still settling onto it after opening.
     ///
@@ -1225,7 +1227,8 @@ final class TranscriptWindow {
     /// `force` is the button at the top of the transcript, which asks whatever
     /// the geometry says.
     func ask(force: Bool) {
-        guard canAskEarlier, !fetching, force || wantsEarlier, let requestEarlier else { return }
+        guard canAskEarlier, !hasHiddenEarlierRows, !fetching,
+              force || wantsEarlier, let requestEarlier else { return }
         fetching = true
         requestEarlier()
     }
@@ -1376,7 +1379,8 @@ extension View {
     func transcriptEarlierPages(
         _ model: ChatModel,
         window: TranscriptWindow,
-        proxy: ScrollViewProxy
+        proxy: ScrollViewProxy,
+        hiddenEarlierRows: Int = 0
     ) -> some View {
         let request: () -> Void = {
             Task { await loadEarlier(model, window: window) }
@@ -1397,6 +1401,7 @@ extension View {
         // The proxy belongs to this reader, so the closures that use it are
         // installed here and renewed whenever the conversation changes.
         .onAppear {
+            window.hasHiddenEarlierRows = hiddenEarlierRows > 0
             window.requestEarlier = request
             window.restore = restore
         }
@@ -1409,6 +1414,9 @@ extension View {
             window.canAskEarlier = more
             guard more else { return }
             window.ask(force: false)
+        }
+        .onChange(of: hiddenEarlierRows, initial: true) { _, count in
+            window.hasHiddenEarlierRows = count > 0
         }
     }
 }
@@ -1436,6 +1444,11 @@ func loadEarlier(_ model: ChatModel, window: TranscriptWindow) async {
     // eyes is the answer they asked for.
     if let anchor = window.anchor { window.hold(anchor) } else { window.release() }
     await model.loadEarlier()
+    // Set this before another geometry callback can request a page. The
+    // view updates its exact slice state on the next render.
+    if model.displayItems.count > max(before, TranscriptSlice.length) {
+        window.hasHiddenEarlierRows = true
+    }
     window.fetching = false
     guard model.displayItems.count > before else {
         // A page of records that folded into no new rows changes nothing on
