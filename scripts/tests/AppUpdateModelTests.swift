@@ -7,6 +7,7 @@ struct AppUpdate: Sendable {
     var latest = "1.1"
     var isAvailable = true
     var htmlURL = "https://example.invalid/release"
+    var retryAt: Double?
     var downloadURL: URL? { URL(string: htmlURL) }
 }
 struct DownloadedFile: Sendable { var path: String }
@@ -36,10 +37,34 @@ enum AppInstaller {
         manual.cancel()
         await manual.value
         assert(offline.failure != nil)
+        offline.dismissFailure()
+        assert(offline.failureDismissed && offline.failure != nil)
 
         Bridge.check = { AppUpdate(isAvailable: false) }
         await offline.retry()
         assert(offline.stage == .idle && offline.failure == nil)
+        assert(!offline.failureDismissed)
+
+        let limited = AppUpdateModel()
+        Bridge.check = { AppUpdate(retryAt: Date().addingTimeInterval(600).timeIntervalSince1970) }
+        await limited.checkAndInstall()
+        assert(limited.isRateLimited && limited.failure != nil && !limited.isAvailable)
+        limited.dismissFailure()
+        Bridge.check = { fatalError("A cooldown must block all repeat checks") }
+        await limited.checkAndInstall()
+        assert(limited.failureDismissed)
+        await limited.retry()
+        await limited.checkNow()
+        assert(!limited.failureDismissed && limited.failure != nil)
+        assert(limited.checkNotice != AppUpdateModel.upToDateMessage)
+
+        let expired = AppUpdateModel()
+        Bridge.check = { AppUpdate(retryAt: Date().addingTimeInterval(-1).timeIntervalSince1970) }
+        await expired.checkAndInstall()
+        assert(!expired.isRateLimited)
+        Bridge.check = { AppUpdate(isAvailable: false) }
+        await expired.retry()
+        assert(expired.failure == nil && expired.retryAfter == nil)
 
         #if os(macOS)
         let success = AppUpdateModel()

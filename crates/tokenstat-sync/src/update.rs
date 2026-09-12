@@ -29,6 +29,9 @@ const USER_AGENT: &str = concat!("tokenstat/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
+    /// A server-requested pause, shared by all release checks on this machine.
+    #[error("GitHub is limiting update checks. Checks are paused until the waiting period ends.")]
+    RateLimited { retry_at: u64 },
     #[error("http: {0}")]
     Http(#[from] reqwest::Error),
     #[error("io: {0}")]
@@ -240,6 +243,25 @@ pub fn oldest_installed<'a>(installed: &[&'a str]) -> &'a str {
 /// machine that rebuilt hostd from tip still gets offered the update when the
 /// app bundle lags the release, and the reverse is true too.
 pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateError> {
+    // Serialize release lookups so another caller cannot slip past a newly
+    // received cooldown. Persist it so restarting the app does not bypass it.
+    static CHECK_LOCK: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+    let mut cooldown = CHECK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let now = unix_now();
+    let cooldown_path = stamp_path()
+        .ok()
+        .map(|path| path.with_file_name("update-retry-after.stamp"));
+    *cooldown = (*cooldown).max(
+        cooldown_path
+            .as_deref()
+            .and_then(|path| read_cooldown(path, now))
+            .unwrap_or(0),
+    );
+    if *cooldown > now {
+        return Err(UpdateError::RateLimited {
+            retry_at: *cooldown,
+        });
+    }
     let current = oldest_installed(installed).to_string();
     let client = client()?;
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
@@ -250,6 +272,13 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
         }
     }
     let resp = req.send()?;
+    if let Some(retry_at) = release_retry_at(resp.status().as_u16(), resp.headers(), unix_now()) {
+        *cooldown = retry_at;
+        if let Some(path) = &cooldown_path {
+            let _ = fs::write(path, retry_at.to_string());
+        }
+        return Err(UpdateError::RateLimited { retry_at });
+    }
     if resp.status().as_u16() == 404 {
         // Public repo with no release yet is the common case. A private repo
         // without GITHUB_TOKEN looks the same; mention that only as a footnote.
@@ -278,9 +307,26 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
         });
     }
     if !resp.status().is_success() {
+        let status = resp.status();
+        // Secondary limits can omit Retry-After. Do not confuse an unrelated
+        // permission failure with a limit just because both use HTTP 403.
+        if status.as_u16() == 403
+            && resp
+                .json::<serde_json::Value>()
+                .ok()
+                .as_ref()
+                .is_some_and(is_rate_limit_message)
+        {
+            let retry_at = unix_now().saturating_add(60);
+            *cooldown = retry_at;
+            if let Some(path) = &cooldown_path {
+                let _ = fs::write(path, retry_at.to_string());
+            }
+            return Err(UpdateError::RateLimited { retry_at });
+        }
         return Err(UpdateError::Message(format!(
             "GitHub releases returned {}",
-            resp.status()
+            status
         )));
     }
     let release: GhRelease = resp.json()?;
@@ -331,6 +377,49 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
             .map(|a| a.url.clone())
             .filter(|u: &String| !u.is_empty()),
     })
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn is_rate_limit_message(body: &serde_json::Value) -> bool {
+    body.get("message")
+        .and_then(|v| v.as_str())
+        .is_some_and(|message| message.to_ascii_lowercase().contains("rate limit"))
+}
+
+fn read_cooldown(path: &Path, now: u64) -> Option<u64> {
+    fs::read_to_string(path)
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|until| *until > now)
+}
+
+fn release_retry_at(status: u16, headers: &reqwest::header::HeaderMap, now: u64) -> Option<u64> {
+    let number = |key: &str| headers.get(key)?.to_str().ok()?.parse::<u64>().ok();
+    let retry = number("retry-after");
+    let exhausted = number("x-ratelimit-remaining") == Some(0);
+    if status != 429 && !(status == 403 && (exhausted || retry.is_some())) {
+        return None;
+    }
+    let reset = if exhausted {
+        number("x-ratelimit-reset")
+    } else {
+        None
+    };
+    // GitHub supplies seconds in Retry-After. Without a usable deadline,
+    // leave at least a minute before another attempt, including secondary limits.
+    Some(
+        reset
+            .unwrap_or(0)
+            .max(now.saturating_add(retry.unwrap_or(60).max(1))),
+    )
 }
 
 /// Arch token used in Windows app zip names (`windows-x64`, `windows-arm64`).
@@ -1438,6 +1527,44 @@ fn touch_check_stamp() -> Result<(), UpdateError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn release_rate_limit_deadlines() {
+        use super::release_retry_at;
+        use reqwest::header::HeaderMap;
+        let mut headers = HeaderMap::new();
+        assert_eq!(release_retry_at(403, &headers, 100), None);
+        assert_eq!(release_retry_at(429, &headers, 100), Some(160));
+        assert!(super::is_rate_limit_message(
+            &serde_json::json!({"message": "You have exceeded a secondary rate limit."})
+        ));
+        assert!(!super::is_rate_limit_message(
+            &serde_json::json!({"message": "Resource not accessible"})
+        ));
+        headers.insert("x-ratelimit-remaining", "0".parse().unwrap());
+        headers.insert("x-ratelimit-reset", "500".parse().unwrap());
+        assert_eq!(release_retry_at(403, &headers, 100), Some(500));
+        assert_eq!(release_retry_at(200, &headers, 100), None);
+        headers.insert("retry-after", "600".parse().unwrap());
+        assert_eq!(release_retry_at(403, &headers, 100), Some(700));
+        headers.remove("x-ratelimit-remaining");
+        assert_eq!(release_retry_at(403, &headers, 100), Some(700));
+        headers.insert("retry-after", "invalid".parse().unwrap());
+        assert_eq!(release_retry_at(429, &headers, 100), Some(160));
+    }
+
+    #[test]
+    fn release_cooldown_survives_restart_and_expires() {
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-update-cooldown-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("retry.stamp");
+        std::fs::write(&path, "500").unwrap();
+        assert_eq!(super::read_cooldown(&path, 100), Some(500));
+        assert_eq!(super::read_cooldown(&path, 500), None);
+        std::fs::write(&path, "invalid").unwrap();
+        assert_eq!(super::read_cooldown(&path, 100), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
     /// The daemon calls this, and its own `current_exe` is the wrong answer.
     ///
     /// Nothing further down would catch the mistake: `verify_candidate` reads a

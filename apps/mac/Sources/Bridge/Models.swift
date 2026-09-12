@@ -1275,9 +1275,11 @@ struct AppUpdate: Codable, Sendable, Hashable {
     /// release cut before the app shipped has none, so this stays optional and
     /// the release page is the fallback.
     var dmgURL: String?
+    /// GitHub's earliest next check, as Unix seconds. No release was fetched.
+    var retryAt: Double?
 
     enum CodingKeys: String, CodingKey {
-        case current, latest, newer, htmlURL = "htmlUrl", dmgURL = "dmgUrl"
+        case current, latest, newer, retryAt, htmlURL = "htmlUrl", dmgURL = "dmgUrl"
     }
 
     /// Where to send somebody who wants the update: the image if the release

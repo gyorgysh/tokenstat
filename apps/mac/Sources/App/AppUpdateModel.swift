@@ -35,6 +35,16 @@ final class AppUpdateModel {
 
     private(set) var release: AppUpdate?
     private(set) var stage: Stage = .idle
+    private(set) var retryAfter: Date?
+    private(set) var failureDismissed = false
+
+    var isRateLimited: Bool { retryAfter.map { $0 > Date() } ?? false }
+
+    /// Hide this notice without skipping a release or removing the cooldown.
+    func dismissFailure() {
+        failureDismissed = true
+        checkNotice = nil
+    }
 
     var isAvailable: Bool { release?.isAvailable == true }
     var latest: String { release?.latest ?? "" }
@@ -74,6 +84,8 @@ final class AppUpdateModel {
     /// check happens once; a person pressing the item means now.
     func checkNow() async {
         guard !isChecking, !isReady else { return }
+        failureDismissed = false
+        guard !isRateLimited else { return }
         noticeGeneration += 1
         let generation = noticeGeneration
         checkNotice = nil
@@ -106,9 +118,18 @@ final class AppUpdateModel {
     /// that cannot be automated still reaches the user.
     func checkAndInstall() async {
         guard stage == .idle || failure != nil else { return }
+        guard !isRateLimited else { return }
+        retryAfter = nil
+        failureDismissed = false
         stage = .checking
         do {
             let found = try await Bridge.appUpdateCheck()
+            if let timestamp = found.retryAt {
+                let date = Date(timeIntervalSince1970: timestamp)
+                retryAfter = date
+                stage = .failed("GitHub is limiting update checks. You can try again after \(date.formatted(date: .omitted, time: .shortened)).")
+                return
+            }
             release = found
             // Compare the skip against the fresh release, so skipping one
             // version still lets automatic checks discover later versions.
@@ -148,7 +169,7 @@ final class AppUpdateModel {
     /// opposite: the card shows progress and the button cannot be pressed
     /// twice. Failure keeps the card with both actions on it.
     func retry() async {
-        guard failure != nil, !isChecking, !isRetrying else { return }
+        guard failure != nil, !isChecking, !isRetrying, !isRateLimited else { return }
         isRetrying = true
         defer { isRetrying = false }
         stage = .idle

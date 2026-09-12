@@ -120,6 +120,9 @@ struct CalendarParams {
 struct AppUpdateCheckParams {
     /// `CFBundleShortVersionString` / Windows informational version.
     app_version: Option<String>,
+    /// Only clients that understand a paused check may receive retryAt instead
+    /// of an error. Older clients must not mistake it for an up-to-date result.
+    supports_retry_after: bool,
 }
 
 impl Default for CalendarParams {
@@ -3120,7 +3123,18 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                             "winZipName": check.app_win_name,
                         })
                     })
-                    .map_err(|e| e.to_string())
+                    .or_else(|e| match e {
+                        tokenstat_sync::UpdateError::RateLimited { retry_at }
+                            if p.supports_retry_after =>
+                        {
+                            Ok(json!({
+                                "current": tokenstat_sync::update::oldest_installed(&installed),
+                                "latest": "", "newer": false, "htmlUrl": "",
+                                "retryAt": retry_at
+                            }))
+                        }
+                        other => Err(other.to_string()),
+                    })
             }
 
             // Fetch the disk image and prove it is the one the release published.

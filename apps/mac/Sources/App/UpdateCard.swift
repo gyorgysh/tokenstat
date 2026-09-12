@@ -23,7 +23,7 @@ struct UpdateCard: View {
             }
         } else if update.isReady {
             readyCard
-        } else if update.failure != nil {
+        } else if update.failure != nil && !update.failureDismissed {
             failedCard
         } else if update.checkNotice == AppUpdateModel.upToDateMessage {
             status(title: "Up to date", subtitle: "v\(update.current)",
@@ -170,7 +170,7 @@ struct UpdateCard: View {
                     .font(Theme.fixed(15))
                     .foregroundStyle(Theme.warning)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(update.isAvailable ? "Update didn’t finish" : "Couldn’t check for updates")
+                    Text(update.retryAfter != nil ? "Update checks paused" : (update.isAvailable ? "Update didn’t finish" : "Couldn’t check for updates"))
                         .font(Theme.callout.weight(.medium))
                         .foregroundStyle(.primary)
                     Text(update.failure ?? "Please try again.")
@@ -182,11 +182,18 @@ struct UpdateCard: View {
                 Spacer(minLength: Theme.Space.s)
             }
             HStack(spacing: Theme.Space.s) {
-                Button("Retry", .refresh) {
-                    Task { await update.retry() }
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Button("Retry", .refresh) {
+                        Task { await update.retry() }
+                    }
+                    .buttonStyle(AccentButtonStyle(small: true))
+                    .disabled(update.retryAfter.map { $0 > context.date } ?? false)
+                    .help("Check again when GitHub's waiting period has ended")
                 }
-                .buttonStyle(AccentButtonStyle(small: true))
-                .help("Try the automatic install again")
+
+                Button("Dismiss", .dismiss) { update.dismissFailure() }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .help("Hide this notice without turning off update checks")
 
                 if update.isAvailable {
                 Button("Manual", .download) {

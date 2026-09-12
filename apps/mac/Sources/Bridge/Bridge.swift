@@ -972,7 +972,7 @@ extension Bridge {
         // version and reports newer when either lags the release.
         try await background(
             "app.updateCheck",
-            ["appVersion": AppInfo.version],
+            ["appVersion": AppInfo.version, "supportsRetryAfter": true],
             as: AppUpdate.self
         )
     }
