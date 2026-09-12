@@ -71,6 +71,11 @@ struct RootView: View {
     /// rather than as a chip, because it has the room.
     @State private var connection = ConnectionModel()
     @State private var isInspectorPresented = true
+    @AppStorage(ChatBrowserPreferences.opensLinksKey) private var opensChatLinksInBrowser = true
+    @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
+    @State private var browserResizeStart: Double?
+    @State private var browserWorkspaceID: String?
+    @State private var chatBrowserURLs: [String: String] = [:]
     /// Explicit sidebar preference, preserved when a narrow window uses a peek.
     @State private var columnVisibilityChoice: NavigationSplitViewVisibility = .all
     /// Whether the window is wide enough to carry the inspector at all.
@@ -659,6 +664,14 @@ struct RootView: View {
         }
         .toolbar(removing: .sidebarToggle)
         .toolbarBackground(.hidden, for: .windowToolbar)
+        .environment(\.openURL, OpenURLAction { url in
+            guard route.workspaceSection == .chat, opensChatLinksInBrowser,
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  let id = route.workspaceID else { return .systemAction }
+            chatBrowserURLs[id] = url.absoluteString
+            browserWorkspaceID = id
+            return .handled
+        })
     }
 
     /// Leading toggles injected into every destination's chrome bar.
@@ -688,16 +701,25 @@ struct RootView: View {
 
     /// Trailing inspector mark for the detail toolbar.
     private var rightInspectorToolbarButton: some View {
+        HStack(spacing: Theme.Space.xs) {
+        if route.workspaceSection == .chat {
+            ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside chat", isAccent: showsChatBrowser) {
+                if showsChatBrowser { browserWorkspaceID = nil }
+                else { browserWorkspaceID = route.workspaceID }
+            }
+            .accessibilityLabel("Browser")
+        }
         SidebarToggleButton(
             edge: .trailing,
-            isOpen: isRightSidebarOpen,
+            isOpen: isRightSidebarOpen && !showsChatBrowser,
             action: toggleRightSidebar,
-            help: isRightSidebarOpen
+            help: showsChatBrowser ? "Show Inspector" : isRightSidebarOpen
                 ? "Hide Inspector (⌥⌘B)"
                 : (inspectorFits
                     ? "Show Inspector (⌥⌘B)"
                     : "Peek Inspector (⌥⌘B)")
         )
+        }
     }
 
     /// Whether the leading sidebar column is on screen.
@@ -766,6 +788,12 @@ struct RootView: View {
     /// not.
     private func toggleRightSidebar() {
         guard route.hasInspector else { return }
+        if showsChatBrowser {
+            browserWorkspaceID = nil
+            isInspectorPresented = true
+            if !inspectorFits { isOverlayVisible = true; overlayHeldByPress = true }
+            return
+        }
         if isInspectorPresented {
             closeInspector()
             return
@@ -1109,7 +1137,12 @@ struct RootView: View {
             detail
                 .background(Theme.background)
                 .frame(minWidth: Self.detailMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
-            if showsInspector {
+            if showsChatBrowser && browserFitsBesideChat {
+                browserResizeHandle
+                chatBrowserPane
+                .frame(width: fittedBrowserWidth)
+                .frame(maxHeight: .infinity)
+            } else if showsInspector && !showsChatBrowser {
                 Rectangle().fill(Theme.border).frame(width: 1)
                 boundedInspector { inspectorContent }
                     .frame(width: DisplayFit.box(400))
@@ -1128,6 +1161,14 @@ struct RootView: View {
             // the panel's frame is exclusively the panel's.
             .overlay(alignment: .leading) { sidebarFloatLayer }
             .overlay(alignment: .trailing) { inspectorFloatLayer }
+            .overlay(alignment: .trailing) {
+                if showsChatBrowser && !browserFitsBesideChat {
+                    chatBrowserPane
+                        .frame(width: min(fittedBrowserWidth, max(320, windowContentWidth - 32)))
+                        .background(Theme.background)
+                        .shadow(color: Theme.shadow(0.2), radius: 12, x: -5)
+                }
+            }
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.18),
                 value: showsOverlayInspector
@@ -1136,6 +1177,51 @@ struct RootView: View {
                 reduceMotion ? nil : .easeOut(duration: 0.18),
                 value: showsSidebarOverlay
             )
+    }
+
+    private var showsChatBrowser: Bool {
+        route.workspaceSection == .chat && route.workspaceID != nil && browserWorkspaceID == route.workspaceID
+    }
+
+    private var browserFitsBesideChat: Bool {
+        windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0) >= Self.detailMinimumWidth + 325
+    }
+
+    @ViewBuilder private var chatBrowserPane: some View {
+        if let id = route.workspaceID {
+            VStack(spacing: 0) {
+                InspectorChromeBar(onClose: { browserWorkspaceID = nil }, closeLabel: "Close browser") {
+                    InspectorTitle(title: "Browser", symbol: "globe")
+                    Spacer(minLength: 0)
+                }
+                BrowserView(url: chatBrowserURLs[id] ?? "", allowsExternalNavigation: true) {
+                    chatBrowserURLs[id] = $0
+                }
+                .id(id)
+            }
+        }
+    }
+
+    private var fittedBrowserWidth: CGFloat {
+        let available = windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0)
+        return min(max(320, browserPaneWidth), max(320, available - Self.detailMinimumWidth - 6))
+    }
+
+    private var browserResizeHandle: some View {
+        Rectangle().fill(Theme.border)
+            .frame(width: 5)
+            .contentShape(.rect)
+            .onHover { hovering in
+                if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                if browserResizeStart == nil { browserResizeStart = fittedBrowserWidth }
+                browserPaneWidth = max(320, min(1000, (browserResizeStart ?? 520) - value.translation.width))
+            }.onEnded { _ in browserResizeStart = nil })
+            .accessibilityLabel("Browser width")
+            .accessibilityAdjustableAction { direction in
+                browserPaneWidth = max(320, min(1000, fittedBrowserWidth + (direction == .increment ? 40 : -40)))
+            }
     }
 
     /// Floated sidebar: panel on the leading edge, dismiss region to its right.
@@ -1168,7 +1254,7 @@ struct RootView: View {
     /// left. Same non-overlapping hit model as the sidebar float.
     @ViewBuilder
     private var inspectorFloatLayer: some View {
-        if showsOverlayInspector {
+        if showsOverlayInspector && !showsChatBrowser {
             HStack(spacing: 0) {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

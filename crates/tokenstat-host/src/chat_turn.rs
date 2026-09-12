@@ -92,7 +92,19 @@ fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> 
         text.push_str("\n\n");
     }
     text.push_str(&file_rule(output_dir));
+    text.push_str("\n\n");
+    text.push_str(browser_rule());
     text
+}
+
+/// Make web previews discoverable through the client's chosen link handler.
+pub fn browser_rule() -> &'static str {
+    "For a web preview, include a clickable absolute HTTP or HTTPS link in your reply, \
+     including the port and path, for example [Open preview](http://localhost:8000). \
+     The macOS client can open it beside this conversation in its browser pane, \
+     or in the user's default browser according to their settings. Prefer giving \
+     this link over launching a separate browser application. A link does not \
+     prove a page was tested. Only describe checks you actually performed."
 }
 
 /// Who the agent is being addressed as.
@@ -208,6 +220,8 @@ mod tests {
         assert_eq!(composed.user_text, "Hey");
         assert!(!composed.user_text.contains("tokenstat-chat-output"));
         assert!(composed.standing_text.contains("tokenstat-chat-output"));
+        assert!(composed.standing_text.contains(browser_rule()));
+        assert!(!composed.user_text.contains(browser_rule()));
     }
 
     #[test]

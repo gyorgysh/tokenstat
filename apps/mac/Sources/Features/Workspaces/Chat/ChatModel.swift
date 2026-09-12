@@ -591,10 +591,12 @@ final class ChatModel {
                 let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
                     limit: Self.openPageEvents, peer: route.peer)
                 guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
-                recentMessages.store(ChatDisplayItem.coalesce(page.events,
-                    defaultBackend: chat.backend, running: chat.running), for: key) {
+                let rows = ChatDisplayItem.coalesce(page.events,
+                    defaultBackend: chat.backend, running: chat.running)
+                recentMessages.store(rows, for: key) {
                     String(reflecting: $0).utf8.count
                 }
+                Self.warmMarkdown(recentMessages.messages(for: key))
             }
         } catch { /* A preview failure leaves normal opening available. */ }
         #endif
@@ -630,6 +632,7 @@ final class ChatModel {
                     let rows = ChatDisplayItem.coalesce(page.events,
                         defaultBackend: chat.backend, running: chat.running)
                     self.recentMessages.store(rows, for: key) { String(reflecting: $0).utf8.count }
+                    Self.warmMarkdown(self.recentMessages.messages(for: key))
                 } catch {
                     // Warming is optional. A failed read must not interrupt work.
                     return
@@ -2190,7 +2193,11 @@ final class ChatModel {
     /// through history. A message that is still being written is a different
     /// string on every token and is not worth warming.
     func warmMarkdown() {
-        MarkdownText.warm(displayItems.compactMap { item in
+        Self.warmMarkdown(displayItems)
+    }
+
+    private static func warmMarkdown(_ items: [ChatDisplayItem]) {
+        MarkdownText.warm(items.compactMap { item in
             switch item.kind {
             case let .user(text): text
             case let .assistant(text, _): text

@@ -13,6 +13,7 @@ import WebKit
 struct BrowserView: View {
     var initialURL: String
     var onURLChange: (String) -> Void
+    var allowsExternalNavigation: Bool
 
     /// What the user is typing. Never what the page is: a half-typed URL must
     /// not start loading, or the first keystroke throws a DNS error.
@@ -23,12 +24,15 @@ struct BrowserView: View {
     @State private var command: BrowserCommand = .none
     @State private var commandID = 0
     @State private var isLoading = false
+    @State private var canGoBack = false
+    @State private var canGoForward = false
     @State private var loadError = ""
     /// A non-loopback URL waiting for the user's go-ahead.
     @State private var remoteURL: RemoteNavigation?
 
-    init(url: String, onURLChange: @escaping (String) -> Void) {
+    init(url: String, allowsExternalNavigation: Bool = false, onURLChange: @escaping (String) -> Void) {
         initialURL = url
+        self.allowsExternalNavigation = allowsExternalNavigation
         self.onURLChange = onURLChange
         _text = State(initialValue: url)
         _loadedURL = State(initialValue: url)
@@ -56,9 +60,11 @@ struct BrowserView: View {
                         onURLChange(url)
                     },
                     onRemoteNavigation: { url in
-                        remoteURL = RemoteNavigation(url: url)
+                        if allowsExternalNavigation { navigate(to: url) }
+                        else { remoteURL = RemoteNavigation(url: url) }
                     },
                     onLoadingChange: { isLoading = $0 },
+                    onHistoryChange: { back, forward in canGoBack = back; canGoForward = forward },
                     onError: { loadError = $0 }
                 )
             }
@@ -90,16 +96,19 @@ struct BrowserView: View {
             }
             .help("Back")
             .accessibilityLabel("Back")
+            .disabled(!canGoBack)
             Button { send(.forward) } label: {
                 Image(systemName: "chevron.right")
             }
             .help("Forward")
             .accessibilityLabel("Forward")
-            Button { send(.reload) } label: {
-                Image(systemName: "arrow.clockwise")
+            .disabled(!canGoForward)
+            Button { send(isLoading ? .stop : .reload) } label: {
+                Image(systemName: isLoading ? "xmark" : "arrow.clockwise")
             }
-            .help("Reload")
-            .accessibilityLabel("Reload")
+            .help(isLoading ? "Stop loading" : "Reload")
+            .accessibilityLabel(isLoading ? "Stop loading" : "Reload")
+            .disabled(loadedURL.isEmpty)
             if isLoading {
                 ProgressView()
                     .controlSize(.small)
@@ -113,8 +122,16 @@ struct BrowserView: View {
                 .onSubmit { commit(text) }
 
             Button("Go", .next) { commit(text) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AccentButtonStyle(small: true))
                 .controlSize(.small)
+            Button {
+                if let url = normalizedURL(loadedURL) { NSWorkspace.shared.open(url) }
+            } label: {
+                Image(systemName: "arrow.up.right.square")
+            }
+            .disabled(loadedURL.isEmpty)
+            .help("Open in default browser")
+            .accessibilityLabel("Open in default browser")
         }
         .padding(.horizontal, Theme.Space.s)
         .padding(.vertical, Theme.Space.xs)
@@ -138,7 +155,11 @@ struct BrowserView: View {
                 : "https://\(candidate)"
         }
         guard let url = URL(string: candidate) else { return }
-        if !isLoopbackHost(url) {
+        guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        if !allowsExternalNavigation && !isLoopbackHost(url) {
             // The browser is for local dev servers. A remote site deserves an
             // explicit go-ahead before it loads inside the app's chrome.
             remoteURL = RemoteNavigation(url: url)
@@ -204,7 +225,7 @@ private extension BrowserView {
 }
 
 private enum BrowserCommand {
-    case none, navigate, back, forward, reload
+    case none, navigate, back, forward, reload, stop
 }
 
 private struct WebBrowser: NSViewRepresentable {
@@ -214,6 +235,7 @@ private struct WebBrowser: NSViewRepresentable {
     var onURLChange: (String) -> Void
     var onRemoteNavigation: (URL) -> Void
     var onLoadingChange: (Bool) -> Void
+    var onHistoryChange: (Bool, Bool) -> Void
     var onError: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -221,6 +243,7 @@ private struct WebBrowser: NSViewRepresentable {
             onURLChange: onURLChange,
             onRemoteNavigation: onRemoteNavigation,
             onLoadingChange: onLoadingChange,
+            onHistoryChange: onHistoryChange,
             onError: onError
         )
     }
@@ -231,6 +254,7 @@ private struct WebBrowser: NSViewRepresentable {
         // UA as a bot and stall instead of answering.
         view.customUserAgent = Self.safariUserAgent
         view.navigationDelegate = context.coordinator
+        view.uiDelegate = context.coordinator
         if let url {
             view.load(URLRequest(url: url))
         }
@@ -253,6 +277,9 @@ private struct WebBrowser: NSViewRepresentable {
             if view.canGoForward { view.goForward() }
         case .reload:
             view.reload()
+        case .stop:
+            view.stopLoading()
+            onLoadingChange(false)
         case .none:
             break
         }
@@ -263,23 +290,26 @@ private struct WebBrowser: NSViewRepresentable {
     static let safariUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         weak var webView: WKWebView?
         var lastCommandID: Int = 0
         let onURLChange: (String) -> Void
         let onRemoteNavigation: (URL) -> Void
         let onLoadingChange: (Bool) -> Void
+        let onHistoryChange: (Bool, Bool) -> Void
         let onError: (String) -> Void
 
         init(
             onURLChange: @escaping (String) -> Void,
             onRemoteNavigation: @escaping (URL) -> Void,
             onLoadingChange: @escaping (Bool) -> Void,
+            onHistoryChange: @escaping (Bool, Bool) -> Void,
             onError: @escaping (String) -> Void
         ) {
             self.onURLChange = onURLChange
             self.onRemoteNavigation = onRemoteNavigation
             self.onLoadingChange = onLoadingChange
+            self.onHistoryChange = onHistoryChange
             self.onError = onError
         }
 
@@ -311,6 +341,12 @@ private struct WebBrowser: NSViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
+            if let url = navigationAction.request.url,
+               !["http", "https", "about"].contains(url.scheme?.lowercased() ?? "") {
+                if navigationAction.navigationType == .linkActivated { NSWorkspace.shared.open(url) }
+                decisionHandler(.cancel)
+                return
+            }
             if navigationAction.navigationType == .linkActivated,
                let url = navigationAction.request.url,
                !isLoopbackHost(url)
@@ -322,8 +358,18 @@ private struct WebBrowser: NSViewRepresentable {
             decisionHandler(.allow)
         }
 
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                     for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if navigationAction.targetFrame == nil, let url = navigationAction.request.url,
+               ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                onRemoteNavigation(url)
+            }
+            return nil
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             onLoadingChange(false)
+            onHistoryChange(webView.canGoBack, webView.canGoForward)
             if let url = webView.url?.absoluteString {
                 onURLChange(url)
             }

@@ -1386,15 +1386,18 @@ struct SidebarToggleButton: View {
 /// otherwise lets liquid glass or the unfocused grey show through the strip.
 struct InspectorChromeBar<Content: View, Accessory: View>: View {
     var onClose: () -> Void
+    var closeLabel: String
     @ViewBuilder var content: () -> Content
     @ViewBuilder var accessory: () -> Accessory
 
     init(
         onClose: @escaping () -> Void,
+        closeLabel: String = "Close the inspector",
         @ViewBuilder accessory: @escaping () -> Accessory,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.onClose = onClose
+        self.closeLabel = closeLabel
         self.content = content
         self.accessory = accessory
     }
@@ -1403,7 +1406,7 @@ struct InspectorChromeBar<Content: View, Accessory: View>: View {
         HStack(spacing: 0) {
             content()
             accessory()
-            InspectorCloseButton(action: onClose)
+            InspectorCloseButton(action: onClose, help: closeLabel, label: closeLabel)
                 .padding(.trailing, Theme.Space.s)
         }
         // The same optical baseline as `DetailChromeBar`, immediately to its
@@ -1442,8 +1445,8 @@ struct InspectorTitle: View {
 }
 
 extension InspectorChromeBar where Accessory == EmptyView {
-    init(onClose: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content) {
-        self.init(onClose: onClose, accessory: { EmptyView() }, content: content)
+    init(onClose: @escaping () -> Void, closeLabel: String = "Close the inspector", @ViewBuilder content: @escaping () -> Content) {
+        self.init(onClose: onClose, closeLabel: closeLabel, accessory: { EmptyView() }, content: content)
     }
 }
 

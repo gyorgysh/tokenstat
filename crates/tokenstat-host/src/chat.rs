@@ -1504,6 +1504,8 @@ impl Store {
             added.push_str("\n\n");
         }
         added.push_str(&crate::chat_turn::file_rule(&self.response_output_dir(id)));
+        added.push_str("\n\n");
+        added.push_str(crate::chat_turn::browser_rule());
         Ok(json!({
             "brief": chat.system_prompt,
             "added": added,

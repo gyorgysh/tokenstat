@@ -1428,6 +1428,7 @@ extension View {
 /// side by side and write a spent cursor back.
 @MainActor
 func loadEarlier(_ model: ChatModel, window: TranscriptWindow) async {
+    let generation = model.selectionGeneration
     guard model.hasEarlier else {
         window.fetching = false
         return
@@ -1444,6 +1445,7 @@ func loadEarlier(_ model: ChatModel, window: TranscriptWindow) async {
     // eyes is the answer they asked for.
     if let anchor = window.anchor { window.hold(anchor) } else { window.release() }
     await model.loadEarlier()
+    guard model.selectionGeneration == generation else { return }
     // Set this before another geometry callback can request a page. The
     // view updates its exact slice state on the next render.
     if model.displayItems.count > max(before, TranscriptSlice.length) {

@@ -107,6 +107,9 @@ struct AccountView: View {
                     }
                     LaunchSettings()
                     ChatCacheSettings()
+                    #if os(macOS)
+                    ChatBrowserSettings()
+                    #endif
                     SavedWorkSettings()
                     notificationsCard
                     licensesCard
@@ -251,6 +254,9 @@ struct AccountView: View {
         notificationsCard
         LaunchSettings()
         ChatCacheSettings()
+        #if os(macOS)
+        ChatBrowserSettings()
+        #endif
         SavedWorkSettings()
         terminalCard
         localModelsCard
