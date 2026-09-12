@@ -50,18 +50,10 @@ struct TaskEditorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Theme.Space.l) {
                         notices
-                        Group {
-                            if wide {
-                                HStack(alignment: .top, spacing: Theme.Space.l) {
-                                    writing(minimumHeight: max(320, geometry.size.height - 120))
-                                    ThemeRule.vertical
-                                    settings.frame(width: 280)
-                                }
-                            } else {
-                                writing(minimumHeight: max(220, geometry.size.height * 0.45))
-                                settings
-                            }
-                        }.disabled(!session.loaded || session.working)
+                        TaskFieldsView(fields: $session.fields, backends: session.backends, folders: session.folders,
+                                       wide: wide, minimumHeight: wide ? max(320, geometry.size.height - 120) : max(220, geometry.size.height * 0.45),
+                                       draftStatus: session.dirty ? (session.persistedFields == session.fields ? "Draft kept on this device" : "Saving draft on this device…") : "Saved on the computer")
+                            .disabled(!session.loaded || session.working)
                     }
                 }
             }
@@ -83,64 +75,6 @@ struct TaskEditorView: View {
         .interactiveDismissDisabled(session.working)
         .task { await session.load() }
         .onDisappear { Task { await session.flush() } }
-    }
-
-    private func writing(minimumHeight: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            TextField("Task title", text: $session.fields.title, axis: .vertical)
-                .font(Theme.title3.weight(.semibold)).textFieldStyle(.plain)
-                .accessibilityLabel("Task title")
-            ThemeRule()
-            Text(session.fields.backend == "sh" ? "Command" : "Prompt").font(Theme.caption).foregroundStyle(Theme.controlGlyph)
-            TextEditor(text: $session.fields.prompt)
-                .font(Theme.callout).scrollContentBackground(.hidden)
-                .frame(minHeight: minimumHeight)
-                .accessibilityLabel(session.fields.backend == "sh" ? "Task command" : "Task prompt")
-            Text(session.dirty ? (session.persistedFields == session.fields ? "Draft kept on this device" : "Saving draft on this device…") : "Saved on the computer")
-                .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var settings: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("Task settings").font(Theme.callout.weight(.semibold))
-            AppMenuPicker(title: "Folder", options: folderOptions, selection: $session.fields.workspaceID)
-            AppMenuPicker(title: "Priority", options: [("low", "Low"), ("normal", "Normal"), ("high", "High")], selection: $session.fields.priority)
-            AppMenuPicker(title: "Agent", options: backendOptions, selection: Binding(
-                get: { session.fields.backend },
-                set: { value in
-                    guard value != session.fields.backend else { return }
-                    session.fields.backend = value
-                    session.fields.model = ""
-                    session.fields.effort = ""
-                }))
-            if let backend = session.backends.first(where: { $0.id == session.fields.backend }) {
-                if !backend.models.isEmpty || !session.fields.model.isEmpty {
-                    FavoriteModelPicker(backendID: backend.id, models: backend.models, extra: session.fields.model,
-                                        preservesSavedSelection: true, selection: $session.fields.model)
-                }
-                if !backend.efforts.isEmpty || !session.fields.effort.isEmpty {
-                    AppMenuPicker(title: "Effort", options: options(backend.efforts, preserving: session.fields.effort), selection: $session.fields.effort)
-                }
-                if !session.fields.model.isEmpty && !backend.models.contains(session.fields.model) {
-                    Text("This computer does not list the saved model. Keep it or choose another.")
-                        .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
-                }
-            } else if !session.fields.model.isEmpty || !session.fields.effort.isEmpty {
-                Text([session.fields.model, session.fields.effort].filter { !$0.isEmpty }.joined(separator: " · "))
-                    .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
-            }
-            ThemeRule()
-            Toggle("No time limit", isOn: $session.fields.noTimeLimit).toggleStyle(BrandCheckboxStyle())
-            if !session.fields.noTimeLimit {
-                TextField("Time limit", text: $session.fields.budgetValue).textFieldStyle(.themed)
-                    .accessibilityLabel("Time limit")
-                AppMenuPicker(title: "Unit", options: [("minutes", "Minutes"), ("seconds", "Seconds")], selection: $session.fields.budgetUnit)
-            }
-            if let validation = session.fields.validation {
-                Text(validation).font(Theme.caption).foregroundStyle(Theme.danger)
-            }
-        }
     }
 
     @ViewBuilder private var notices: some View {
@@ -193,19 +127,7 @@ struct TaskEditorView: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
-    private var folderOptions: [(value: String, label: String)] {
-        var values = [(value: "", label: "Uncategorized")] + session.folders.map { (value: $0.id, label: $0.name) }
-        if !values.contains(where: { $0.value == session.fields.workspaceID }) { values.append((session.fields.workspaceID, "Unavailable folder")) }
-        return values
-    }
-    private var backendOptions: [(value: String, label: String)] {
-        var values = [(value: "", label: "Choose later")] + session.backends.map { (value: $0.id, label: $0.label) }
-        if !values.contains(where: { $0.value == session.fields.backend }) { values.append((session.fields.backend, "\(session.fields.backend) · Unavailable")) }
-        return values
-    }
-    private func options(_ values: [String], preserving value: String) -> [(value: String, label: String)] {
-        [(value: "", label: "Default")] + (values.contains(value) || value.isEmpty ? values : values + [value]).map { (value: $0, label: values.contains($0) ? $0 : "\($0) · Saved choice") }
-    }
+
 }
 
 private struct TaskEditorPresentation: ViewModifier {

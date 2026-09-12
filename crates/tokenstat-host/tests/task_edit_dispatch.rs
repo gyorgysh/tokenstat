@@ -52,4 +52,32 @@ fn task_edits_require_the_reviewed_revision_over_the_shared_dispatch() {
         true
     );
     assert_eq!(call("todo.get", json!({"id":id}))["result"], Value::Null);
+    let draft = json!({"operationId":"fixture-create-dispatch", "title":"Created once", "notes":"Full instructions",
+                       "workspaceId":"", "backend":"", "budgetSeconds":121, "priority":"high"});
+    let once = call("todo.createOnce", draft.clone());
+    assert_eq!(once["ok"], true, "{once}");
+    let repeated = call("todo.createOnce", draft.clone());
+    assert_eq!(once["result"], repeated["result"]);
+    let created_id = &once["result"]["cardId"];
+    assert_eq!(once["result"]["card"]["budgetSeconds"], 121);
+    assert_eq!(
+        call("todo.delete", json!({"id":created_id,"expectedRevision":1}))["ok"],
+        true
+    );
+    let receipt = call(
+        "todo.creationReceipt",
+        json!({"operationId":"fixture-create-dispatch"}),
+    );
+    assert_eq!(receipt["result"]["cardId"], *created_id);
+    assert!(receipt["result"]["card"].is_null());
+    assert!(call("todo.createOnce", draft.clone())["result"]["card"].is_null());
+    let mut changed = draft.clone();
+    changed["notes"] = json!("Another request");
+    assert_eq!(call("todo.createOnce", changed)["ok"], false);
+    let mut missing_budget = draft;
+    missing_budget
+        .as_object_mut()
+        .unwrap()
+        .remove("budgetSeconds");
+    assert_eq!(call("todo.createOnce", missing_budget)["ok"], false);
 }

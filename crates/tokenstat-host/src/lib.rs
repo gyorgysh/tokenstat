@@ -213,4 +213,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 16 adds reviewed current-branch Push and durable outcome recovery.
 /// Version 17 adds revision-checked task editing.
 /// Version 18 adds revision-checked task deletion with active-run protection.
-pub const PROTOCOL_VERSION: &str = "18";
+/// Version 19 adds create-once tasks and receipts retained after deletion.
+pub const PROTOCOL_VERSION: &str = "19";

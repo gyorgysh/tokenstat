@@ -33,6 +33,14 @@ struct TaskEditorDraft: Codable, Equatable, Sendable {
         budgetValue = noTimeLimit ? "180" : String(budgetUnit == "minutes" ? card.budgetSeconds / 60 : card.budgetSeconds)
     }
 
+    init(workspaceID: String, budgetSeconds: UInt64) {
+        title = ""; prompt = ""; self.workspaceID = workspaceID
+        priority = "normal"; backend = ""; model = ""; effort = ""
+        noTimeLimit = budgetSeconds == 0
+        budgetUnit = budgetSeconds % 60 == 0 ? "minutes" : "seconds"
+        budgetValue = noTimeLimit ? "180" : String(budgetUnit == "minutes" ? budgetSeconds / 60 : budgetSeconds)
+    }
+
     enum CodingKeys: String, CodingKey {
         case title, prompt, priority, backend, model, effort, budgetValue, budgetUnit, noTimeLimit
         case workspaceID = "workspaceId"

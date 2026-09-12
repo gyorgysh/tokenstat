@@ -26,6 +26,7 @@ enum RemoteHostFeature {
     case reviewedPush
     case taskEditing
     case taskDeletion
+    case taskCreation
 
     var title: String {
         switch self {
@@ -45,6 +46,7 @@ enum RemoteHostFeature {
         case .reviewedPush: "Pushing a branch"
         case .taskEditing: "Editing tasks"
         case .taskDeletion: "Deleting tasks"
+        case .taskCreation: "Creating tasks"
         }
     }
 
@@ -67,6 +69,7 @@ enum RemoteHostFeature {
     /// Version 15 adds reviewed selected-file commits and outcome recovery.
     /// Version 16 adds reviewed current-branch Push and outcome recovery.
     /// Version 17 adds revision-checked task editing.
+    /// Version 18 adds checked task deletion. Version 19 adds create-once tasks.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
@@ -88,6 +91,7 @@ enum RemoteHostFeature {
         case .reviewedPush: 16
         case .taskEditing: 17
         case .taskDeletion: 18
+        case .taskCreation: 19
         }
     }
 
@@ -109,6 +113,7 @@ enum RemoteHostFeature {
         case .reviewedPush: "arrow.up.circle"
         case .taskEditing: "pencil"
         case .taskDeletion: "trash"
+        case .taskCreation: "plus"
         }
     }
 

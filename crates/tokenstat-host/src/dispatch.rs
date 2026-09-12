@@ -507,6 +507,7 @@ struct AutomationParams {
 #[serde(rename_all = "camelCase", default)]
 struct TodoParams {
     id: Option<String>,
+    operation_id: Option<String>,
     expected_revision: Option<u64>,
     title: Option<String>,
     kind: Option<crate::todo::CardKind>,
@@ -2225,6 +2226,7 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
 
         "todo.list" => {
             let p: TodoParams = parse(params)?;
+            crate::todo::shared().ensure_available()?;
             serde_json::to_value(
                 crate::todo::shared().list_with(p.include_archived.unwrap_or(false)),
             )
@@ -2232,10 +2234,19 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         }
         "todo.get" => {
             let p: TodoParams = parse(params)?;
-            serde_json::to_value(crate::todo::shared().get(&p.id.ok_or("A task read needs an id")?))
-                .envelope()
+            let id = p.id.ok_or("A task read needs an id")?;
+            let board = crate::todo::shared();
+            board.ensure_available()?;
+            serde_json::to_value(board.get(&id)).envelope()
         }
-        "todo.create" => {
+        "todo.creationReceipt" => {
+            let p: TodoParams = parse(params)?;
+            let operation_id = p
+                .operation_id
+                .ok_or("A creation read needs an operation id")?;
+            serde_json::to_value(crate::todo::shared().creation_receipt(&operation_id)?).envelope()
+        }
+        "todo.create" | "todo.createOnce" => {
             let p: TodoParams = parse(params)?;
             let card = crate::todo::Card {
                 id: String::new(),
@@ -2259,7 +2270,23 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 updated_at_ms: 0,
                 delegate: None,
             };
-            serde_json::to_value(crate::todo::shared().create(card)?).envelope()
+            if method == "todo.createOnce" {
+                // A retry must carry the same time limit, even after the host
+                // default changes. Clients read queue settings before composing.
+                if p.budget_seconds.is_none() {
+                    return Err("A task creation needs its explicit time limit".into());
+                }
+                serde_json::to_value(
+                    crate::todo::shared().create_once(
+                        &p.operation_id
+                            .ok_or("A task creation needs an operation id")?,
+                        card,
+                    )?,
+                )
+                .envelope()
+            } else {
+                serde_json::to_value(crate::todo::shared().create(card)?).envelope()
+            }
         }
         "todo.update" | "todo.edit" => {
             let p: TodoParams = parse(params)?;

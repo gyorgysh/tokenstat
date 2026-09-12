@@ -28,9 +28,9 @@ struct TodoView: View {
     /// Scroll-view height per column, so empty space under the cards is a drop target.
     @State private var columnBodyHeights: [String: CGFloat] = [:]
 
-    /// Which column's new-card form is open. Held here, not in the form, so a
-    /// column's trigger and its form drive the same flag.
+    /// The sheet belongs to the board, so a lazy column cannot unmount it.
     @State private var addingIn: String?
+    private struct CreationColumn: Identifiable { let id: String }
 
     /// A value the menu can hold. Not a folder id anyone could own: ids are
     /// paths or `remote:…`, and neither starts with two underscores.
@@ -152,6 +152,13 @@ struct TodoView: View {
         }
         .background(Theme.background)
         .navigationTitle("Tasks")
+        .sheet(item: creationColumn) { column in
+            TaskCreationDestination(target: TaskEditorTarget(peer: nil), workspaceID: model.defaultWorkspaceID ?? "",
+                                    column: column.id, hostName: "This computer") { card in
+                if let card { await model.taskCreated(card, folders: folders) }
+                else { await model.load() }
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             TransientToast(
                 message: $model.noticeMessage,
@@ -172,6 +179,10 @@ struct TodoView: View {
         }
         // The model outlives this view, and its poll loop must not.
         .onDisappear { model.disappeared() }
+    }
+
+    private var creationColumn: Binding<CreationColumn?> {
+        Binding(get: { addingIn.map { CreationColumn(id: $0) } }, set: { addingIn = $0?.id })
     }
 
     private var hasFilters: Bool {
@@ -253,7 +264,6 @@ struct TodoView: View {
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.s)
 
-            ScrollViewReader { scroll in
             ScrollView {
                 LazyVStack(spacing: Theme.Space.s) {
                     ForEach(visibleCards(in: id)) { card in
@@ -307,18 +317,12 @@ struct TodoView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, Theme.Space.xl)
                     }
                     if !(id == "done" && model.showingArchive) {
-                        NewCardForm(
-                            model: model,
-                            folders: folders,
-                            column: id,
-                            expanded: Binding(
+                        AddCardTrigger(expanded: Binding(
                                 get: { addingIn == id },
                                 set: { open in
                                     if open { addingIn = id } else if addingIn == id { addingIn = nil }
                                 }
-                            )
-                        )
-                        .id("new-\(id)")
+                        ))
                     }
                     // Empty space under the last card is a drop target. The
                     // outer column destination only wins on the header.
@@ -352,10 +356,6 @@ struct TodoView: View {
                 columnBodyHeights.merge(next, uniquingKeysWith: { _, n in n })
             }
             .frame(maxWidth: .infinity)
-            .onChange(of: addingIn) { _, column in
-                if column == id { scroll.scrollTo("new-\(id)", anchor: .bottom) }
-            }
-            }
         }
         .frame(width: width)
         .padding(Theme.Space.s)
@@ -744,13 +744,10 @@ private struct CardView: View {
 
 // MARK: - New card
 
-/// The full-width row that opens the new-card form.
+/// The full-width row that opens New Task.
 ///
 /// One of these sits above the card list and one below it, both driving the
-/// same `expanded` flag, so a long backlog never has to be scrolled to reach
-/// the way to add to it. Full width and with a hit shape of its own: the old
-/// control was a bare `Label`, so only the glyph and the two words were
-/// clickable, on a column 300pt wide.
+/// presentation flag, so a long backlog still has a nearby way to add work.
 private struct AddCardTrigger: View {
     @Binding var expanded: Bool
 
@@ -758,10 +755,7 @@ private struct AddCardTrigger: View {
         Button {
             expanded.toggle()
         } label: {
-            Label(
-                expanded ? "New card" : "Add a card",
-                systemImage: expanded ? "chevron.up" : "plus"
-            )
+            Label("New task", systemImage: ActionIcon.create.symbol)
             .font(Theme.caption.weight(.medium))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Theme.Space.s)
@@ -777,205 +771,6 @@ private struct AddCardTrigger: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct NewCardForm: View {
-    @Bindable var model: TodoModel
-    var folders: [WorkspaceFolder]
-    /// Which column the card lands in. Passed in so each column's form creates
-    /// straight into that column instead of everything going to backlog.
-    var column: String
-    /// Shared with the trigger above the card list, so only one form is ever
-    /// open and either row closes it.
-    @Binding var expanded: Bool
-
-    @State private var title = ""
-    @State private var notes = ""
-    @State private var backendID = ""
-    @State private var workspaceID = ""
-    /// The selected backend's model alias and effort level. Empty means the
-    /// backend's default, which is also what the pickers start on.
-    @State private var modelChoice = ""
-    @State private var effortChoice = ""
-    @State private var priorityChoice = "normal"
-    /// Minutes, because that is the unit people think in. Converted to seconds
-    /// for the daemon, which stores the raw number.
-    @State private var budgetMinutes = "180"
-    @State private var noTimeLimit = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            AddCardTrigger(expanded: $expanded)
-                // A card added on a folder's board belongs to that folder. The
-                // picker stays, because a card can be moved, but it is a
-                // correction rather than a decision every time.
-                .onChange(of: expanded, initial: true) { _, open in
-                    guard open, let folder = model.defaultWorkspaceID else { return }
-                    workspaceID = folder
-                }
-
-            if expanded {
-                TextField("Task title", text: $title)
-                    .textFieldStyle(.themed)
-                // A task's notes are what the agent gets. For the Shell
-                // backend that is a command, not a prompt, so the field says
-                // so and its placeholder answers the only question a shell
-                // has: what do I run?
-                TextField(
-                    isShellBackend ? "Command" : "Prompt",
-                    text: $notes,
-                    prompt: Text(
-                        isShellBackend
-                            ? "Command to run, e.g. npm test"
-                            : "What should the agent do?"
-                    ),
-                    axis: .vertical
-                )
-                .textFieldStyle(.themedMultiline)
-                .lineLimit(2...4)
-                // Empty workspace id is unfiled. The picker says so before Save.
-                AppMenuPicker(
-                    title: "Saving to",
-                    options: [(value: "", label: "Uncategorized (no folder)")]
-                        + folders.map { (value: $0.id, label: $0.name) },
-                    selection: $workspaceID
-                )
-                .frame(maxWidth: 260)
-                AppMenuPicker(
-                    title: "Agent",
-                    options: [(value: "", label: "Choose later")]
-                        + model.pickerBackends(keeping: backendID).map { (value: $0.id, label: $0.label) },
-                    selection: $backendID
-                )
-                .frame(maxWidth: 260)
-                AppMenuPicker(
-                    title: "Priority",
-                    options: [
-                        (value: "low", label: "Low"),
-                        (value: "normal", label: "Normal"),
-                        (value: "high", label: "High"),
-                    ],
-                    selection: $priorityChoice
-                )
-                .frame(maxWidth: 260)
-                    // Model and effort exist only for backends that advertise
-                    // them, so the pair appears for Claude and never for
-                    // Shell. Both start on the backend's default.
-                    if let backend = selectedBackend,
-                       !backend.models.isEmpty || !backend.efforts.isEmpty {
-                        VStack(alignment: .leading, spacing: Theme.Space.s) {
-                            if !backend.models.isEmpty {
-                                FavoriteModelPicker(
-                                    backendID: backend.id,
-                                    models: backend.models,
-                                    extra: modelChoice,
-                                    selection: $modelChoice
-                                )
-                            }
-                            if !backend.efforts.isEmpty {
-                                AppMenuPicker(
-                                    title: "Effort",
-                                    options: [(value: "", label: "Default")]
-                                        + backend.efforts.map { (value: $0, label: $0) },
-                                    selection: $effortChoice
-                                )
-                            }
-                        }
-                    }
-                    HStack(spacing: Theme.Space.xs) {
-                        Text("Time limit")
-                            .font(Theme.caption)
-                            .foregroundStyle(.secondary)
-                        TextField("180", text: $budgetMinutes)
-                            .textFieldStyle(.themed)
-                            .frame(width: 56)
-                            .multilineTextAlignment(.trailing)
-                            .disabled(noTimeLimit)
-                        Text("minutes")
-                            .font(Theme.caption)
-                            .foregroundStyle(.secondary)
-                        BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
-                        Spacer()
-                    }
-                HStack {
-                    Button("Cancel", .dismiss) { cancel() }
-                        .buttonStyle(SecondaryButtonStyle())
-                    Spacer()
-                    Button("Save", .save) {
-                        Task { await save() }
-                    }
-                    .buttonStyle(AccentButtonStyle())
-                    .disabled(!canSave)
-                }
-            }
-        }
-        .onAppear {
-            budgetMinutes = "180"
-            noTimeLimit = false
-        }
-        .onChange(of: backendID) { _, _ in
-            // A model that meant something to one backend means nothing to
-            // the next; go back to defaults when the agent changes.
-            modelChoice = ""
-            effortChoice = ""
-        }
-    }
-
-    private var selectedBackend: AgentBackend? {
-        model.backends.first { $0.id == backendID }
-    }
-
-    private var isShellBackend: Bool {
-        selectedBackend?.id == "sh"
-    }
-
-    private var canSave: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    /// What the toast calls the place this card is going.
-    private var destinationName: String {
-        if workspaceID.isEmpty { return "Uncategorized" }
-        return folders.first { $0.id == workspaceID }?.name ?? "another folder"
-    }
-
-    private func save() async {
-        // Clamp before multiplying: a typed number near UInt64.max must not
-        // trap the sheet. Normal minute values are unchanged.
-        let minutes = min(UInt64(budgetMinutes) ?? 180, UInt64.max / 60)
-        let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
-        await model.create(
-            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-            kind: .task,
-            notes: notes,
-            backend: backendID,
-            // The folder this board is, or the one the picker says. A note
-            // used to be forced out of the folder it was written in and into
-            // Inbox, where the board it came from could not show it.
-            workspaceID: workspaceID,
-            budgetSeconds: budget,
-            column: column,
-            model: {
-                let cleaned = TodoCard.cleanModelID(modelChoice)
-                return cleaned.isEmpty ? nil : cleaned
-            }(),
-            effort: effortChoice.isEmpty ? nil : effortChoice,
-            priority: priorityChoice == "normal" ? nil : priorityChoice,
-            destinationName: destinationName
-        )
-        if model.errorMessage == nil { cancel() }
-    }
-
-    private func cancel() {
-        title = ""
-        notes = ""
-        workspaceID = ""
-        budgetMinutes = "180"
-        noTimeLimit = false
-        backendID = ""
-        priorityChoice = "normal"
-        expanded = false
     }
 }
 

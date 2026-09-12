@@ -6,7 +6,10 @@
 //! use, as a one-shot job whose transcript lands in the runs history. Nothing
 //! here writes to a repository. It moves cards.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+mod creation;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
@@ -87,6 +90,8 @@ pub struct Card {
 struct File {
     #[serde(default)]
     cards: Vec<Card>,
+    #[serde(default)]
+    creations: BTreeMap<String, creation::CreationReceipt>,
 }
 
 /// The fields a caller may change on a card.
@@ -109,6 +114,10 @@ pub struct CardUpdate {
 pub struct Board {
     path: PathBuf,
     cards: Mutex<Vec<Card>>,
+    // Always lock cards before receipts when both are needed.
+    creations: Mutex<BTreeMap<String, creation::CreationReceipt>>,
+    load_error: Option<String>,
+    persistence_error: Mutex<Option<String>>,
 }
 
 /// Same body the Mac In front path sends: notes, or the title if notes
@@ -160,6 +169,9 @@ impl Board {
         Board {
             path,
             cards: Mutex::new(Vec::new()),
+            creations: Mutex::new(BTreeMap::new()),
+            load_error: None,
+            persistence_error: Mutex::new(None),
         }
     }
 
@@ -167,15 +179,43 @@ impl Board {
         let path = tokenstat_paths::data_dir()
             .map(|d| d.join("todo.json"))
             .unwrap_or_else(|| PathBuf::from("todo.json"));
-        let cards = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<File>(&text).ok())
-            .map(|file| file.cards)
-            .unwrap_or_default();
+        Self::read_path(path)
+    }
+
+    fn read_path(path: PathBuf) -> Board {
+        let loaded = match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice::<File>(&bytes).map_err(|e| e.to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(File::default()),
+            Err(error) => Err(error.to_string()),
+        };
+        let (file, load_error) = match loaded {
+            Ok(file) => (file, None),
+            Err(error) => (
+                File::default(),
+                Some(format!(
+                    "The saved task board could not be read. Its contents have been preserved. Restart the host after restoring access: {error}"
+                )),
+            ),
+        };
         Board {
             path,
-            cards: Mutex::new(cards),
+            cards: Mutex::new(file.cards),
+            creations: Mutex::new(file.creations),
+            load_error,
+            persistence_error: Mutex::new(None),
         }
+    }
+
+    /// An unreadable board must never become an empty board that forgets receipts.
+    pub fn ensure_available(&self) -> Result<(), String> {
+        if let Some(error) = &self.load_error {
+            return Err(error.clone());
+        }
+        self.persistence_error
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map_or(Ok(()), |error| Err(error.clone()))
     }
 
     fn save(&self) -> Result<(), String> {
@@ -186,9 +226,23 @@ impl Board {
     /// Keep the board lock through persistence so a slower old snapshot cannot
     /// overwrite a newer save. Checked edits publish in memory only afterward.
     fn save_cards(&self, cards: &[Card]) -> Result<(), String> {
+        let creations = self
+            .creations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        self.save_state(cards, &creations)
+    }
+
+    fn save_state(
+        &self,
+        cards: &[Card],
+        creations: &BTreeMap<String, creation::CreationReceipt>,
+    ) -> Result<(), String> {
         use std::io::Write;
+        self.ensure_available()?;
         let body = serde_json::to_vec_pretty(&File {
             cards: cards.to_vec(),
+            creations: creations.clone(),
         })
         .map_err(|e| e.to_string())?;
         if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -203,6 +257,19 @@ impl Board {
         temp.write_all(&body).map_err(|e| e.to_string())?;
         temp.as_file().sync_all().map_err(|e| e.to_string())?;
         temp.persist(&self.path).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        if let Err(error) = std::fs::File::open(parent).and_then(|dir| dir.sync_all()) {
+            // The rename already happened. Block further writes from this
+            // stale in-memory snapshot until the host reloads the saved file.
+            let message = format!(
+                "The task board was written but its durability could not be confirmed. Restart the host before continuing: {error}"
+            );
+            *self
+                .persistence_error
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(message.clone());
+            return Err(message);
+        }
         Ok(())
     }
 
@@ -307,6 +374,7 @@ impl Board {
     }
 
     pub fn create(&self, mut card: Card) -> Result<Card, String> {
+        self.ensure_available()?;
         if card.title.trim().is_empty() {
             return Err("a card needs a title".into());
         }
@@ -331,9 +399,10 @@ impl Board {
         card.revision = 1;
         card.updated_at_ms = card.created_at_ms;
         card.order = cards.iter().filter(|c| c.column == card.column).count() as i64;
-        cards.push(card.clone());
-        drop(cards);
-        self.save()?;
+        let mut next = cards.clone();
+        next.push(card.clone());
+        self.save_cards(&next)?;
+        *cards = next;
         Ok(card)
     }
 
@@ -367,6 +436,7 @@ impl Board {
         changes: &CardUpdate,
         expected_revision: Option<u64>,
     ) -> Result<Card, String> {
+        self.ensure_available()?;
         self.auto_archive();
         let mut live = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         let mut cards = live.clone();
@@ -387,11 +457,9 @@ impl Board {
         {
             return Err("Choose To Do, Doing, Done or Archive.".into());
         }
-        if changes.title.as_ref().is_some_and(|s| s.len() > 4096)
-            || changes
-                .notes
-                .as_ref()
-                .is_some_and(|s| s.len() > 1024 * 1024)
+        if changes.kind.unwrap_or(cards[idx].kind) == CardKind::Task
+            && (changes.title.as_deref().unwrap_or(&cards[idx].title).len() > 4096
+                || changes.notes.as_deref().unwrap_or(&cards[idx].notes).len() > 1024 * 1024)
         {
             return Err("Use a title of at most 4 KiB and a prompt of at most 1 MiB.".into());
         }
@@ -472,6 +540,7 @@ impl Board {
     }
 
     pub fn remove(&self, id: &str) -> Result<bool, String> {
+        self.ensure_available()?;
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         let old = cards.len();
         cards.retain(|c| c.id != id);
@@ -485,6 +554,7 @@ impl Board {
 
     /// Delete the reviewed task, preserving newer edits and active runs.
     pub fn delete(&self, id: &str, expected_revision: u64) -> Result<bool, String> {
+        self.ensure_available()?;
         self.reconcile();
         let mut live = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(card) = live.iter().find(|card| card.id == id) else {
@@ -510,6 +580,7 @@ impl Board {
     /// Hand a card to an agent. The run is a one-shot automation whose
     /// transcript lands in the runs history.
     pub fn delegate(self: &std::sync::Arc<Board>, id: &str) -> Result<Card, String> {
+        self.ensure_available()?;
         let job = {
             let cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
             let card = cards
@@ -596,6 +667,7 @@ impl Board {
 
     /// Stop a delegated run by its card. Kills the pty behind the run.
     pub fn stop(&self, id: &str) -> Result<Card, String> {
+        self.ensure_available()?;
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         let card = cards
             .iter_mut()
@@ -617,7 +689,7 @@ impl Board {
 mod tests {
     use super::*;
 
-    fn card(id: &str) -> Card {
+    pub(super) fn card(id: &str) -> Card {
         Card {
             id: id.into(),
             revision: 0,
@@ -651,11 +723,7 @@ mod tests {
         let updated = board.edit("a", &edit, original.revision).unwrap();
         assert_eq!(updated.revision, original.revision + 1);
         assert!(board.edit("a", &edit, original.revision).is_err());
-        let persisted: File = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        let reopened = Board {
-            path,
-            cards: Mutex::new(persisted.cards),
-        };
+        let reopened = Board::read_path(path);
         let saved = reopened.get("a").unwrap();
         assert_eq!(saved.title, "Updated task");
         assert_eq!(saved.revision, updated.revision);

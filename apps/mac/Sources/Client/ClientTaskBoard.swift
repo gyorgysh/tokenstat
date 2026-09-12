@@ -125,9 +125,10 @@ struct ClientTaskBoard: View {
                 Button("New task", .create) { session.composing = true }.labelStyle(.iconOnly)
             }
         }
-        .sheet(isPresented: $session.composing) {
-            ClientTaskComposer(peer: peer, workspaceID: defaultFolder, folderName: folderName, hostName: hostName,
-                               folders: session.fixedFolder == nil ? session.folders : []) { await session.load() }
+        .fullScreenCover(isPresented: $session.composing) {
+            TaskCreationDestination(target: session.target, workspaceID: defaultFolder, hostName: hostName) { _ in
+                await session.load()
+            }
         }
         .fullScreenCover(item: $session.editingTask, onDismiss: { Task { await session.load() } }) { card in
             TaskEditorDestination(target: session.target, card: card, hostName: hostName) { await session.load() }

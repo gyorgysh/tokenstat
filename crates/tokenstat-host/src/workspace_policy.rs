@@ -1212,6 +1212,8 @@ mod tests {
             "workflow.run",
             "automation.run",
             "todo.create",
+            "todo.createOnce",
+            "todo.creationReceipt",
             "todo.edit",
             "todo.delete",
             "todo.get",

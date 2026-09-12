@@ -315,38 +315,14 @@ final class TodoModel {
         if cards != fresh { cards = fresh }
     }
 
-    func create(
-        title: String, kind: TodoKind, notes: String, backend: String,
-        workspaceID: String, budgetSeconds: UInt64, column: String = "backlog",
-        model: String? = nil, effort: String? = nil, priority: String? = nil,
-        destinationName: String = ""
-    ) async {
-        do {
-            let created = try await Bridge.todoCreate(
-                title: title, kind: kind, notes: notes, column: column,
-                backend: backend, workspaceID: workspaceID, budgetSeconds: budgetSeconds,
-                model: model, effort: effort, priority: priority
-            )
-            // A card that lands where this board cannot show it says where it
-            // went, and offers the way there. Silence here is what lost two
-            // notes: they were written, saved, and then invisible.
-            let noun = kind == .note ? "Note" : "Card"
-            if inScope(created) {
-                showNotice("\(noun) added.")
-            } else {
-                let place = destinationName.isEmpty ? "another board" : destinationName
-                // Only the global board can follow: a folder's board is fixed
-                // by the route, so there it names the place and stops.
-                showNotice(
-                    "\(noun) added to \(place).",
-                    scope: scope == nil ? destinationScope(of: created) : nil
-                )
-            }
-            errorMessage = nil
-            await load()
-        } catch {
-            errorMessage = error.localizedDescription
+    func taskCreated(_ created: TodoCard, folders: [WorkspaceFolder]) async {
+        if inScope(created) { showNotice("Task added.") }
+        else {
+            let place = created.workspaceID.isEmpty ? "Uncategorized" : folders.first(where: { $0.id == created.workspaceID })?.name ?? "another folder"
+            showNotice("Task added to \(place).", scope: scope == nil ? destinationScope(of: created) : nil)
         }
+        errorMessage = nil
+        await load()
     }
 
     func move(_ card: TodoCard, to column: String) async {
