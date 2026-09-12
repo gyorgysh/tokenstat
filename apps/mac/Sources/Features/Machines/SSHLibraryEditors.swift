@@ -449,6 +449,7 @@ struct SSHKeyEditor: View {
     @State private var error: String?
     @State private var copied = false
     @State private var confirmingDelete = false
+    @State private var algorithm = SSHKeyAlgorithm.ed25519
 
     private var isNew: Bool { keyID == nil }
 
@@ -501,14 +502,18 @@ struct SSHKeyEditor: View {
                     }
                 } else {
                     SSHEditorSection(title: "Add") {
-                        SSHEditorNote(text: "Generate a new Ed25519 key, or paste an existing private key. The private half goes into this device's vault, never into the connection list.")
+                        SSHEditorField(label: "New key type") {
+                            AppMenuPicker(options: SSHKeyAlgorithm.allCases.map { (value: $0, label: $0.label) }, selection: $algorithm)
+                        }
+                        SSHEditorNote(text: algorithm.explanation)
+                        Button("Generate key", .create) { Task { await generate() } }
+                            .buttonStyle(AccentButtonStyle())
+                        SSHEditorNote(text: "Or import an existing private key below. The private half goes into this device's vault, never into the connection list.")
                         ThemedEditor(text: $pem, font: Theme.mono(11), minHeight: 160)
                         SSHEditorField(label: "Private-key passphrase (if it has one)") {
                             SecureField("Passphrase", text: $passphrase).themedFieldBox()
                         }
                         HStack(spacing: Theme.Space.s) {
-                            Button("Generate a key", .create) { Task { await generate() } }
-                                .buttonStyle(SecondaryButtonStyle())
                             Button("Import pasted key", .upload) { Task { await importPasted() } }
                                 .buttonStyle(AccentButtonStyle())
                                 .disabled(pem.isEmpty)
@@ -549,7 +554,17 @@ struct SSHKeyEditor: View {
     private func generate() async {
         working = true
         defer { working = false }
-        do { await keep(try await Bridge.generateSSHKey(), protected: false) }
+        do {
+            let material: SSHKeyMaterial
+            switch algorithm {
+            case .ed25519:
+                material = try await Bridge.generateSSHKey()
+            case .ecdsaP256:
+                let pem = await Task.detached { SSHKeyAlgorithm.makeP256PEM() }.value
+                material = try await Bridge.inspectSSHKey(pem: pem, passphrase: nil)
+            }
+            await keep(material, protected: false)
+        }
         catch { self.error = error.localizedDescription }
     }
 
