@@ -106,7 +106,6 @@ struct ClientDevicesView: View {
                             DeviceRow(
                                 machine: machine,
                                 usage: model.usage(for: machine),
-                                peak: model.peak,
                                 isThisDevice: isThisDevice(machine)
                             )
                         }
@@ -379,18 +378,12 @@ struct ClientDevicesView: View {
 private struct DeviceRow: View {
     let machine: Machine
     let usage: MachineUsage?
-    let peak: Int64
     let isThisDevice: Bool
 
     /// Phones, tablets and "this device" never upload an archive. A $0.00
     /// figure there is noise, not a measurement, so the row stays about status.
     private var showsSpend: Bool {
         machine.isHost && !isThisDevice
-    }
-
-    private var share: Double {
-        guard showsSpend, let usage, peak > 0 else { return 0 }
-        return min(1, max(0, Double(usage.valueMicros) / Double(peak)))
     }
 
     var body: some View {
@@ -443,23 +436,10 @@ private struct DeviceRow: View {
                     .font(Theme.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-            if showsSpend, usage != nil {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Theme.accent.opacity(0.12))
-                        Capsule()
-                            .fill(Theme.accent.opacity(0.55))
-                            .frame(width: max(2, geo.size.width * share))
-                    }
-                }
-                .frame(height: 4)
-                .accessibilityHidden(true)
-            }
         }
         .padding(Theme.Space.s)
         // A row is a link, so the whole card has to be tappable and at least
-        // 44 points tall. The padding above gets it there on one line of text
-        // and the bar keeps it there on two.
+        // 44 points tall.
         .frame(minHeight: 44)
         .cardSurface()
         .accessibilityElement(children: .combine)
@@ -475,6 +455,7 @@ private struct DeviceRow: View {
 /// One device, level 2: what it is, what it spent, and whether it can be
 /// reached.
 struct ClientDeviceDetailView: View {
+    @Environment(ClientWorkspacesModel.self) private var workspaces: ClientWorkspacesModel?
     let machine: Machine
     let usage: MachineUsage?
     let accountTotal: Int64
@@ -520,6 +501,11 @@ struct ClientDeviceDetailView: View {
                         online: machine.online,
                         reach: DeviceCopy.reach(machine, isThisDevice: isThisDevice)
                     )
+                    if let workspaces, workspaces.connectedKey == key {
+                        Button("Disconnect", .disconnect) { workspaces.disconnect() }
+                            .buttonStyle(SecondaryButtonStyle())
+                            .accessibilityHint("Disconnects this device from the computer")
+                    }
                 } else {
                     liveStats
                     reach
@@ -1050,11 +1036,6 @@ final class ClientDevicesModel {
         guard let id = machine.machineID else { return nil }
         return rows.first { $0.machine == id }
     }
-
-    /// The largest device's value, which the share bars are drawn against. The
-    /// account total would make a two-device account draw two half bars and say
-    /// nothing.
-    var peak: Int64 { rows.map(\.valueMicros).max() ?? 0 }
 
     var total: Int64 { rows.reduce(0) { $0 + $1.valueMicros } }
 

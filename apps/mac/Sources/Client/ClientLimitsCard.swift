@@ -47,13 +47,16 @@ struct ClientLimitsCard: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                ForEach(sorted) { provider in
-                    ProviderRow(provider: provider)
+                ClientAdaptiveCards {
+                    ForEach(sorted) { provider in
+                        ProviderRow(provider: provider)
+                            .padding(Theme.Space.m)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .cardSurface()
+                    }
                 }
             }
         }
-        .padding(Theme.Space.m)
-        .cardSurface()
     }
 
     /// Only providers with an actual reading.

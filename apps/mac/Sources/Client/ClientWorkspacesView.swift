@@ -425,6 +425,7 @@ struct ClientWorkspacesView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 2)
                 .padding(.top, Theme.Space.s)
+            ClientAdaptiveCards {
             ForEach(model.folders) { folder in
                 NavigationLink {
                     ClientWorkspaceDetailView(
@@ -436,6 +437,7 @@ struct ClientWorkspacesView: View {
                     ClientFolderRow(folder: folder)
                 }
                 .buttonStyle(.plain)
+            }
             }
         }
     }

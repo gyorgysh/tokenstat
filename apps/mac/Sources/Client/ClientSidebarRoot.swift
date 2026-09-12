@@ -128,6 +128,7 @@ struct ClientSidebarRoot: View {
         // shared models live above this view, while every controller the split
         // owns is replaced.
         .id(detailGeneration)
+        .environment(workspaces)
         .clientShortcuts(shortcuts)
         .task {
             await reload()
@@ -385,11 +386,13 @@ struct ClientSidebarRoot: View {
             // with the detail column somewhere else, so an access refusal
             // landed nowhere and nothing on screen said why.
             navigation.restoredRoute = nil
-            navigation.destination = .workspaces
             navigation.folderID = nil
-            if workspaces.connectedKey == host.peerKey {
-                workspaces.disconnect()
+            if workspaces.connectedKey == host.peerKey,
+               let machine = account.account?.machines.first(where: { $0.publicIdentity == host.peerKey }) {
+                navigation.deviceMachineID = machine.id
+                navigation.destination = .machines
             } else {
+                navigation.destination = .workspaces
                 Task { await workspaces.connect(host) }
             }
         } label: {
