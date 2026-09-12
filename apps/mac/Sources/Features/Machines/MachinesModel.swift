@@ -171,12 +171,19 @@ final class MachinesModel {
         }?.label
     }
 
-    /// Account machines in the order the screen shows them: computers first,
-    /// then phones. A phone cannot be dialled, so it belongs under the rows
-    /// that can, rather than interleaved with them by whatever order the
-    /// directory returned.
+    /// Current device, then online peers, then most recently active devices.
     var listedAccountMachines: [Machine] {
-        accountMachines.filter(\.isHost) + accountMachines.filter { !$0.isHost }
+        accountMachines.sorted { presenceOrder($0) < presenceOrder($1) }
+    }
+
+    private func presenceOrder(_ machine: Machine) -> DevicePresenceOrder {
+        let current = (machine.machineID != nil && machine.machineID == account?.thisMachineID)
+            || (machine.publicIdentity != nil && machine.publicIdentity == identity?.key)
+        return DevicePresenceOrder(
+            isCurrent: current, online: machine.online == true,
+            lastActive: parseServerDate(machine.lastSeenAt) ?? parseServerDate(machine.lastSyncAt) ?? .distantPast,
+            name: machine.displayName, id: machine.id
+        )
     }
 
     /// Phone / tablet / computer icon for a peer row. Uses the account machine
