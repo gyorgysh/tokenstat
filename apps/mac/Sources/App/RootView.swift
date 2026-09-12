@@ -2320,7 +2320,9 @@ struct RootView: View {
                 terminals: terminals,
                 chat: chat,
                 onOpenSection: { section, folderID in
-                    openSection(section, in: folderID)
+                    openSection(section, in: folderID) {
+                        if section == .chat { showingChatOverview = true }
+                    }
                 },
                 isActive: showsWorkspaceSurface,
                 tier: account.account?.tier

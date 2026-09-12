@@ -333,7 +333,17 @@ struct WorkspaceChangesView: View {
                     tint: Theme.accent
                 )
             } else {
-                summary(git)
+                HStack(alignment: .top, spacing: Theme.Space.s) {
+                    summary(git)
+                    Spacer(minLength: Theme.Space.s)
+                    Button("Review all", .preview) {
+                        model.reviewWorkingTree(in: folder.id)
+                    }
+                    .buttonStyle(AccentButtonStyle(small: true))
+                    .fixedSize()
+                    .help("Review all changes, including files not selected for commit.")
+                    .accessibilityLabel("Review all changes")
+                }
                 diffControls(git, in: folder)
                 changeSection("Selected for commit", files: git.files.filter { model.isStaged($0.path, in: folder.id) }, in: folder)
                 changeSection("Not selected", files: git.files.filter { !model.isStaged($0.path, in: folder.id) }, in: folder)
@@ -393,14 +403,6 @@ struct WorkspaceChangesView: View {
 
     private func diffControls(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Button("Review all changes", .preview) {
-                model.reviewWorkingTree(in: folder.id)
-            }
-            .buttonStyle(AccentButtonStyle())
-            .help("Open the full working-tree diff, including files not selected for commit.")
-            #if os(macOS)
-            selectAll(git, in: folder)
-            #endif
             Menu {
             Button("Expand all", .more) {
                 expandedDiffs.formUnion(git.files.map { diffKey($0, in: folder) })
@@ -420,6 +422,10 @@ struct WorkspaceChangesView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            #if os(macOS)
+            ThemeRule()
+            selectAll(git, in: folder)
+            #endif
         }
         .font(Theme.caption)
         .padding(.top, Theme.Space.s)

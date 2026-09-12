@@ -210,13 +210,14 @@ struct MachinesView: View {
         WidthReader { width in
             if width >= 820 {
                 HStack(alignment: .top, spacing: Theme.Space.m) {
-                    thisMachine.frame(maxWidth: .infinity)
-                    DevicePermissionCard(peers: [], localOnly: true)
+                    thisMachine(fillsHeight: true).frame(maxWidth: .infinity)
+                    DevicePermissionCard(peers: [], localOnly: true, fillsHeight: true)
                         .frame(maxWidth: .infinity)
                 }
+                .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(spacing: Theme.Space.m) {
-                    thisMachine
+                    thisMachine()
                     DevicePermissionCard(peers: [], localOnly: true)
                 }
             }
@@ -352,11 +353,12 @@ struct MachinesView: View {
 
     // MARK: - This machine
 
-    private var thisMachine: some View {
+    private func thisMachine(fillsHeight: Bool = false) -> some View {
         Card(
             title: "Connection settings",
             subtitle: "Identity and remote access for this Mac",
-            mark: "mark_device"
+            mark: "mark_device",
+            fillsHeight: fillsHeight
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let identity = model.identity {
@@ -1143,6 +1145,7 @@ struct MachinesView: View {
 private struct DevicePermissionCard: View {
     let peers: [Peer]
     var localOnly = false
+    var fillsHeight = false
     @State private var permissions: [String: ScreenPermission] = [:]
     /// Peer keys allowed to open the work here.
     @State private var workspaceAllowed: Set<String> = []
@@ -1155,7 +1158,7 @@ private struct DevicePermissionCard: View {
     var body: some View {
         Group {
             if localOnly {
-                Card(title: "Local permissions", subtitle: "Screen sharing and incoming files on this Mac", mark: "mark_device") {
+                Card(title: "Local permissions", subtitle: "Screen sharing and incoming files on this Mac", mark: "mark_device", fillsHeight: fillsHeight) {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                     #if os(macOS)
                     HStack {
