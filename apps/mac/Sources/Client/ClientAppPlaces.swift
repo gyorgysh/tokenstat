@@ -21,6 +21,8 @@ enum ClientAppDestination: Hashable {
     case tab(ClientTab)
     /// Home, with its editor open over it.
     case customizeHome
+    /// Workspaces, with its section editor open over it.
+    case customizeWorkspaces
     /// The account sheet, on one of its panes, optionally one screen deeper.
     case account(ClientAccountPane, ClientAccountDetail?)
     /// Devices, showing one machine.
@@ -65,6 +67,8 @@ enum ClientAppPlaces {
             return .tab(tab)
         case "home":
             return .customizeHome
+        case "workspaces":
+            return .customizeWorkspaces
         case "account":
             guard parts.count > 1, let pane = ClientAccountPane(rawValue: parts[1]) else { return nil }
             return .account(pane, parts.count > 2 ? ClientAccountDetail(rawValue: parts[2]) : nil)
@@ -117,6 +121,10 @@ enum ClientAppPlaces {
             .init(id: "home:editor", title: "Customize Home", detail: "Home",
                   icon: .layout,
                   keywords: ["cards", "arrange", "sections", "customise", "edit", "rearrange", "hide"]),
+            .init(id: "workspaces:editor", title: "Customize Workspaces", detail: "Workspaces",
+                  icon: .layout,
+                  keywords: ["folders", "chats", "sessions", "arrange", "sections", "customise",
+                             "edit", "rearrange", "hide", "order"]),
             .init(id: "account:thisDevice", title: "Settings", detail: "Behind your avatar · This device",
                   icon: .settings,
                   keywords: ["preferences", "options", "config", "setup", "device"]),

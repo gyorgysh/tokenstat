@@ -955,7 +955,14 @@ extension Bridge {
     }
 
     static func appUpdateCheck() async throws -> AppUpdate {
-        try await background("app.updateCheck", as: AppUpdate.self)
+        // Pass the bundle marketing version so a tip hostd cannot hide an
+        // older app (or the reverse). The host ORs that with its own crate
+        // version and reports newer when either lags the release.
+        try await background(
+            "app.updateCheck",
+            ["appVersion": AppInfo.version],
+            as: AppUpdate.self
+        )
     }
 }
 

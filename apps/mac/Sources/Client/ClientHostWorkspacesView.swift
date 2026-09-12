@@ -26,6 +26,8 @@ struct ClientHostWorkspacesView: View {
     /// inside folders, so starting one means picking the folder first.
     @State private var starting: WorkspaceSection?
     @State private var search = ""
+    @State private var customizing = false
+    @State private var layout = WorkspacesLayout.shared
     /// The approval explainer. Opening it is part of asking: the request fires
     /// and the sheet shows where it went and what answers it.
     @State private var showApproval = false
@@ -203,84 +205,30 @@ struct ClientHostWorkspacesView: View {
                     }
                 }
 
-                if !model.folders.isEmpty {
-                    HStack(alignment: .center) {
-                        ClientSectionTitle(title: "Folders", mark: "mark_archive")
-                        Spacer(minLength: Theme.Space.s)
-                        NavigationLink {
-                            ClientFolderPicker(peer: peerKey, hostName: hostName) { _ in
-                                Task { await model.connect(peerKey: peerKey, name: hostName) }
-                            }
-                        } label: {
-                            Text("Choose")
-                                .font(ClientType.caption.weight(.semibold))
-                        }
-                        .tint(Theme.accent)
-                        NavigationLink {
-                            ClientCloneRepository(peer: peerKey, hostName: hostName) { _ in
-                                Task { await model.connect(peerKey: peerKey, name: hostName) }
-                            }
-                        } label: {
-                            Text("Clone")
-                                .font(ClientType.caption.weight(.semibold))
-                        }
-                        .tint(Theme.accent)
+                if !model.folders.isEmpty || !model.sessions.isEmpty || !model.recentChats.isEmpty {
+                    ForEach(layout.sections) { section in
+                        hostWorkSection(section)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 2)
-                    .padding(.top, Theme.Space.s)
-                    ClientAdaptiveCards {
-                    ForEach(model.folders.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.path.localizedCaseInsensitiveContains(search) }) { folder in
-                        NavigationLink {
-                            ClientWorkspaceDetailView(
-                                peer: peerKey,
-                                hostName: hostName,
-                                folder: folder
-                            )
-                        } label: {
-                            ClientFolderRow(folder: folder)
+                    if layout.sections.isEmpty {
+                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                            Text("Your Workspaces are clear")
+                                .font(ClientType.label.weight(.medium))
+                            Text("Folders, chats and sessions are switched off.")
+                                .font(ClientType.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.Space.m)
+                        .cardSurface()
+                        .padding(.top, Theme.Space.s)
+                    }
+                    Button("Customize Workspaces", .layout) { customizing = true }
                         .buttonStyle(.plain)
-                    }
-                    }
-                }
-
-                ClientRecentChatsSection(
-                    peer: peerKey,
-                    hostName: hostName,
-                    folders: model.folders,
-                    chats: model.recentChats,
-                    onNewChat: { starting = .chat }
-                )
-                .padding(.top, Theme.Space.s)
-
-                if !model.sessions.isEmpty || !model.folders.isEmpty {
-                    HStack(alignment: .center) {
-                        ClientSectionTitle(title: "Sessions", mark: "mark_terminal")
-                        Spacer(minLength: Theme.Space.s)
-                        if !model.folders.isEmpty {
-                            Button("New session", .create) { starting = .sessions }
-                                .font(ClientType.caption.weight(.semibold))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 2)
-                    .padding(.top, Theme.Space.s)
-                    ForEach(model.sessions) { session in
-                        Button {
-                            model.open(session, peer: peerKey)
-                        } label: {
-                            ClientSessionRow(session: session)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if model.sessions.isEmpty {
-                        Text("Nothing running. Start one from a folder.")
-                            .font(ClientType.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 2)
-                    }
+                        .font(ClientType.caption.weight(.medium))
+                        .foregroundStyle(Theme.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .padding(.top, Theme.Space.xs)
                 }
 
                 ClientSecurityCard(peerKey: peerKey, peerName: hostName)
@@ -321,9 +269,112 @@ struct ClientHostWorkspacesView: View {
                 open(folder, section: section)
             }
         }
+        .sheet(isPresented: $customizing) {
+            ClientWorkspacesEditor(layout: layout)
+        }
     }
 
-    /// Open a folder's section to start something there. The launch tiles and
+    @ViewBuilder
+    private func hostWorkSection(_ section: WorkspacesSection) -> some View {
+        switch section {
+        case .folders:
+            hostFoldersSection
+        case .recentChats:
+            ClientRecentChatsSection(
+                peer: peerKey,
+                hostName: hostName,
+                folders: model.folders,
+                chats: model.recentChats,
+                onNewChat: { starting = .chat }
+            )
+            .padding(.top, Theme.Space.s)
+        case .sessions:
+            hostSessionsSection
+        }
+    }
+
+    @ViewBuilder
+    private var hostFoldersSection: some View {
+        if !model.folders.isEmpty {
+            HStack(alignment: .center) {
+                ClientSectionTitle(title: "Folders", mark: "mark_archive")
+                Spacer(minLength: Theme.Space.s)
+                NavigationLink {
+                    ClientFolderPicker(peer: peerKey, hostName: hostName) { _ in
+                        Task { await model.connect(peerKey: peerKey, name: hostName) }
+                    }
+                } label: {
+                    Text("Choose")
+                        .font(ClientType.caption.weight(.semibold))
+                }
+                .tint(Theme.accent)
+                NavigationLink {
+                    ClientCloneRepository(peer: peerKey, hostName: hostName) { _ in
+                        Task { await model.connect(peerKey: peerKey, name: hostName) }
+                    }
+                } label: {
+                    Text("Clone")
+                        .font(ClientType.caption.weight(.semibold))
+                }
+                .tint(Theme.accent)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 2)
+            .padding(.top, Theme.Space.s)
+            ClientAdaptiveCards {
+                ForEach(model.folders.filter {
+                    search.isEmpty
+                        || $0.name.localizedCaseInsensitiveContains(search)
+                        || $0.path.localizedCaseInsensitiveContains(search)
+                }) { folder in
+                    NavigationLink {
+                        ClientWorkspaceDetailView(
+                            peer: peerKey,
+                            hostName: hostName,
+                            folder: folder
+                        )
+                    } label: {
+                        ClientFolderRow(folder: folder)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var hostSessionsSection: some View {
+        if !model.sessions.isEmpty || !model.folders.isEmpty {
+            HStack(alignment: .center) {
+                ClientSectionTitle(title: "All sessions", mark: "mark_terminal")
+                Spacer(minLength: Theme.Space.s)
+                if !model.folders.isEmpty {
+                    Button("New session", .create) { starting = .sessions }
+                        .font(ClientType.caption.weight(.semibold))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 2)
+            .padding(.top, Theme.Space.s)
+            ForEach(model.sessions) { session in
+                Button {
+                    model.open(session, peer: peerKey)
+                } label: {
+                    ClientSessionRow(session: session)
+                }
+                .buttonStyle(.plain)
+            }
+            if model.sessions.isEmpty {
+                Text("Nothing running. Start one from a folder.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
+            }
+        }
+    }
+
+        /// Open a folder's section to start something there. The launch tiles and
     /// the chat composer already live in the folder; this only gets there.
     /// Both roads: `open` for the sidebar layout, the push for the tab
     /// layout, which observes the destination but not the folder.

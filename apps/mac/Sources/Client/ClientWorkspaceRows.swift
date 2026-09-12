@@ -23,47 +23,55 @@ struct ClientAdaptiveCards<Content: View>: View {
 
 /// One panel per figure, not one card holding every figure.
 ///
-/// Three panels read as three facts. Each keeps its own card on every width,
-/// and each says which fact it is with a mark from the house vocabulary.
+/// Three panels read as three facts. They always sit in one equal-width row:
+/// stacking on the phone made Models and Harnesses look like a different
+/// layout from Days, and unequal heights made a short number look broken next
+/// to a long one. Each keeps its own card, and each says which fact it is
+/// with a mark from the house vocabulary.
 struct ClientStatPanels: View {
     var panels: [(label: String, value: String, mark: String)]
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Theme.Space.s) { cards }
-            VStack(spacing: Theme.Space.s) { cards }
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            ForEach(panels.indices, id: \.self) { index in
+                panel(panels[index])
+                    // Stretch to the tallest sibling so three cards of one
+                    // fact row share one height, not three near-misses.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .combine)
     }
 
-    private var cards: some View {
-        ForEach(panels.indices, id: \.self) { index in
-            HStack(alignment: .top, spacing: Theme.Space.s) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(panels[index].value)
-                        .font(ClientType.figureSmall)
-                        .foregroundStyle(Theme.accent)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                    Text(panels[index].label)
-                        .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                // Trailing, not leading. The figure is what the card is
-                // for, and every panel lines its number up on the same left
-                // edge. A mark in front would push each one in by a
-                // different amount. It also fills the room a short number
-                // leaves behind.
-                FeatureMark(name: panels[index].mark, size: 26)
-                    // The label already says which fact this is. A second
-                    // reading of it, from an image's asset name, is noise.
-                    .accessibilityHidden(true)
+    private func panel(_ item: (label: String, value: String, mark: String)) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.xs) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.value)
+                    .font(ClientType.figureSmall)
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                Text(item.label)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Theme.Space.m)
-            .cardSurface()
+            Spacer(minLength: 0)
+            // Trailing, not leading. The figure is what the card is
+            // for, and every panel lines its number up on the same left
+            // edge. A mark in front would push each one in by a
+            // different amount. It also fills the room a short number
+            // leaves behind.
+            FeatureMark(name: item.mark, size: 22)
+                // The label already says which fact this is. A second
+                // reading of it, from an image's asset name, is noise.
+                .accessibilityHidden(true)
         }
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .cardSurface()
     }
 }
 

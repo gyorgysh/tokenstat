@@ -63,7 +63,7 @@ struct DesktopHomeMachines: View {
                     ForEach(machines) { machine in
                         Button { onOpen(machine) } label: {
                             HStack(spacing: Theme.Space.m) {
-                                Image(systemName: machine.isHost ? "desktopcomputer" : "iphone")
+                                Image(systemName: ClientDeviceIcon.symbol(for: machine))
                                     .foregroundStyle(Theme.accent)
                                     .frame(width: 24)
                                 Text(machine.label.flatMap { $0.isEmpty ? nil : $0 } ?? "Device")

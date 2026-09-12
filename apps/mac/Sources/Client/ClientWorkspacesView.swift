@@ -25,6 +25,8 @@ struct ClientWorkspacesView: View {
     @State private var pendingClose: PtySessionInfo?
     @State private var notificationOpen = NotificationOpen.shared
     @State private var showSetup = false
+    @State private var customizing = false
+    @State private var layout = WorkspacesLayout.shared
     /// Which folder chooser is showing, if any. Same question as the device
     /// page: chats and sessions live inside folders.
     @State private var starting: WorkspaceSection?
@@ -148,78 +150,13 @@ struct ClientWorkspacesView: View {
                     if model.connectedKey != nil {
                         if let peer = model.connectedKey,
                            let host = model.hosts.first(where: { $0.peerKey == peer }) {
-                            if !model.folders.isEmpty {
-                                ClientSectionTitle(title: "Folders", mark: "mark_archive")
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 2)
-                                    .padding(.top, Theme.Space.s)
-                                ForEach(model.folders) { folder in
-                                    NavigationLink {
-                                        ClientWorkspaceDetailView(
-                                            peer: peer,
-                                            hostName: host.name,
-                                            folder: folder
-                                        )
-                                    } label: {
-                                        ClientFolderRow(folder: folder)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
+                            ForEach(layout.sections) { section in
+                                workSection(section, peer: peer, host: host)
                             }
-
-                            ClientRecentChatsSection(
-                                peer: peer,
-                                hostName: host.name,
-                                folders: model.folders,
-                                chats: model.recentChats,
-                                onNewChat: { starting = .chat }
-                            )
-                            .padding(.top, Theme.Space.s)
-
-                            if !model.sessions.isEmpty || !model.folders.isEmpty {
-                                HStack(alignment: .center) {
-                                    Text("All sessions")
-                                        .font(ClientType.sectionTitle)
-                                    Spacer(minLength: Theme.Space.s)
-                                    if !model.folders.isEmpty {
-                                        Button("New session", .create) { starting = .sessions }
-                                            .font(ClientType.caption.weight(.semibold))
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 2)
-                                .padding(.top, Theme.Space.s)
-                                if model.sessions.isEmpty {
-                                    Text("Nothing running. Start one from a folder.")
-                                        .font(ClientType.caption)
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal, 2)
-                                } else {
-                                    List {
-                                        ForEach(model.sessions) { session in
-                                            Button {
-                                                model.openSession(session)
-                                            } label: {
-                                                ClientSessionRow(session: session)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0))
-                                            .listRowSeparator(.hidden)
-                                            .listRowBackground(Color.clear)
-                                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                                Button("Close", role: .destructive) {
-                                                    pendingClose = session
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .listStyle(.plain)
-                                    .scrollDisabled(true)
-                                    .scrollContentBackground(.hidden)
-                                    .frame(minHeight: CGFloat(model.sessions.count) * 78)
-                                }
+                            if layout.sections.isEmpty {
+                                clearWorkspaces
                             }
+                            customizeWorkspacesButton
                         }
                     }
                 }
@@ -241,6 +178,14 @@ struct ClientWorkspacesView: View {
                         navigation.pushFolder(peerKey: peer, hostName: host.name, folder: folder, section: section)
                     }
                 }
+            }
+            .sheet(isPresented: $customizing) {
+                ClientWorkspacesEditor(layout: layout)
+            }
+            .onChange(of: navigation.workspacesEditorRequested, initial: true) { _, requested in
+                guard requested else { return }
+                navigation.workspacesEditorRequested = false
+                customizing = true
             }
             .fullScreenCover(isPresented: $showSetup) {
                 ClientSetupWizard()
@@ -392,6 +337,125 @@ struct ClientWorkspacesView: View {
         if navigation.destination != .workspaces {
             navigation.destination = .workspaces
         }
+    }
+
+    @ViewBuilder
+    private func workSection(
+        _ section: WorkspacesSection,
+        peer: String,
+        host: ClientHost
+    ) -> some View {
+        switch section {
+        case .folders:
+            foldersSection(peer: peer, hostName: host.name)
+        case .recentChats:
+            ClientRecentChatsSection(
+                peer: peer,
+                hostName: host.name,
+                folders: model.folders,
+                chats: model.recentChats,
+                onNewChat: { starting = .chat }
+            )
+            .padding(.top, Theme.Space.s)
+        case .sessions:
+            sessionsSection
+        }
+    }
+
+    @ViewBuilder
+    private func foldersSection(peer: String, hostName: String) -> some View {
+        if !model.folders.isEmpty {
+            ClientSectionTitle(title: "Folders", mark: "mark_archive")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 2)
+                .padding(.top, Theme.Space.s)
+            ForEach(model.folders) { folder in
+                NavigationLink {
+                    ClientWorkspaceDetailView(
+                        peer: peer,
+                        hostName: hostName,
+                        folder: folder
+                    )
+                } label: {
+                    ClientFolderRow(folder: folder)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sessionsSection: some View {
+        if !model.sessions.isEmpty || !model.folders.isEmpty {
+            HStack(alignment: .center) {
+                Text("All sessions")
+                    .font(ClientType.sectionTitle)
+                Spacer(minLength: Theme.Space.s)
+                if !model.folders.isEmpty {
+                    Button("New session", .create) { starting = .sessions }
+                        .font(ClientType.caption.weight(.semibold))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 2)
+            .padding(.top, Theme.Space.s)
+            if model.sessions.isEmpty {
+                Text("Nothing running. Start one from a folder.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
+            } else {
+                List {
+                    ForEach(model.sessions) { session in
+                        Button {
+                            model.openSession(session)
+                        } label: {
+                            ClientSessionRow(session: session)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(
+                            top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0
+                        ))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button("Close", role: .destructive) {
+                                pendingClose = session
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: CGFloat(model.sessions.count) * 78)
+            }
+        }
+    }
+
+    private var clearWorkspaces: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            Text("Your Workspaces are clear")
+                .font(ClientType.label.weight(.medium))
+            Text("Folders, chats and sessions are switched off. Hosts stay above.")
+                .font(ClientType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Space.m)
+        .cardSurface()
+        .padding(.top, Theme.Space.s)
+    }
+
+    private var customizeWorkspacesButton: some View {
+        Button("Customize Workspaces", .layout) { customizing = true }
+            .buttonStyle(.plain)
+            .font(ClientType.caption.weight(.medium))
+            .foregroundStyle(Theme.accent)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.top, Theme.Space.xs)
     }
 
     /// This phone, on the screen that lists the devices it can reach.

@@ -13,9 +13,10 @@ import Foundation
 /// days). The view draws one panel per pair, so each keeps its own card on
 /// every width, the way the Mac's overview draws one metric card per figure.
 ///
-/// Deliberately free of the model layer: the compact token formatter is
-/// injected, so this compiles anywhere Foundation does, including the
-/// standalone test runner.
+/// Deliberately free of the model layer: the compact formatter is injected
+/// for both tokens and events, so a 125,844 reading becomes "126k" and fits
+/// the same panel width as "26.9B". Compiles anywhere Foundation does,
+/// including the standalone test runner.
 struct ClientInsightFacts {
     static func panels(
         tokens: UInt64,
@@ -26,7 +27,7 @@ struct ClientInsightFacts {
     ) -> [(label: String, value: String, mark: String)] {
         [
             (label: "Tokens", value: formatCompact(tokens), mark: "mark_insights"),
-            (label: "Events", value: events.formatted(), mark: "mark_activity"),
+            (label: "Events", value: formatCompact(events), mark: "mark_activity"),
             (label: countLabel, value: "\(count)", mark: "mark_examples"),
         ]
     }

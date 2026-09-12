@@ -289,8 +289,8 @@ struct MachinesView: View {
             || machine.publicIdentity == model.identity?.key
         let resolved = model.resolvedName(for: machine)
         let symbol = machine.isHost
-            ? (isSelf ? "laptopcomputer" : "desktopcomputer")
-            : "iphone"
+            ? (isSelf ? "laptopcomputer" : ClientDeviceIcon.symbol(for: machine))
+            : ClientDeviceIcon.symbol(for: machine)
         return HStack(spacing: Theme.Space.s) {
             Image(systemName: symbol)
                 .foregroundStyle(isSelf ? Theme.accent : .secondary)
@@ -798,9 +798,7 @@ struct MachinesView: View {
                     // subtitle either way, so a resolved title never hides
                     // which machine the row is.
                     let resolved = model.resolvedName(for: machine)
-                    let symbol = machine.isHost
-                        ? (isSelf ? "laptopcomputer" : "desktopcomputer")
-                        : "iphone"
+                    let symbol = ClientDeviceIcon.symbol(for: machine)
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                     HStack(alignment: .top, spacing: Theme.Space.s) {
                         Image(systemName: symbol)

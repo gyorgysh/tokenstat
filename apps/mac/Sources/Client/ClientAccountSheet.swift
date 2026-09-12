@@ -513,7 +513,7 @@ private struct ClientAccountContent: View {
 
     private func deviceRow(_ machine: Machine, isThis: Bool) -> some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
-            Image(systemName: isThis ? "iphone" : "laptopcomputer")
+            Image(systemName: ClientDeviceIcon.symbol(for: machine))
                 .font(Theme.body)
                 .foregroundStyle(isThis ? Theme.accent : .secondary)
                 .frame(width: 22)
@@ -768,20 +768,52 @@ private struct ClientAccountContent: View {
     }
 
     private var privacyNote: some View {
+        // Client Legal, not a host's sync screen. This phone does not upload
+        // an archive; the boundary is what the computers put on the account
+        // and what a remote session carries. Same card chrome as Licenses.
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "What syncing sends", mark: "mark_sync")
-            Text("""
-            Aggregate counts per day, tool and model, and project names replaced \
-            by salted hashes. Prompts, replies, file contents, file paths and \
-            session ids are never eligible.
-            """)
-            .font(ClientType.body)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            ClientSectionTitle(title: "Sync privacy", mark: "mark_sync")
+            Text("Your computers put aggregate counts on the account. This device reads them. Remote folders, terminals and agents stay encrypted between devices.")
+                .font(ClientType.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                privacyLine(
+                    title: "On account",
+                    detail: "Counts per day, tool and model. Project names as salted hashes."
+                )
+                privacyLine(
+                    title: "Not synced",
+                    detail: "Prompts, replies, file contents, file paths and session ids stay on the computer."
+                )
+                privacyLine(
+                    title: "Remote",
+                    detail: "Folders, terminals and agents go device to device, encrypted. The relay cannot read them."
+                )
+            }
+            .padding(.top, 2)
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func privacyLine(title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            Text(title)
+                .font(ClientType.caption.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 78, alignment: .leading)
+            Text(detail)
+                .font(ClientType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title). \(detail)")
     }
 
     private static var defaultDeletionURL: URL {

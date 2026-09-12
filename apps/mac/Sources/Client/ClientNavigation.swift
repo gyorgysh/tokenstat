@@ -37,6 +37,8 @@ final class ClientNavigationModel {
     /// Home's editor was asked for from elsewhere. Home opens it and clears
     /// this.
     var homeEditorRequested = false
+    /// Workspaces' section editor, same pattern as Home.
+    var workspacesEditorRequested = false
     /// The destination: a tab in tab mode, a sidebar row in sidebar mode.
     var destination: ClientTab = .home {
         didSet {
@@ -173,6 +175,7 @@ final class ClientNavigationModel {
         pendingPlace = nil
         accountRequest = nil
         homeEditorRequested = false
+        workspacesEditorRequested = false
         restoredRoute = nil
         visibleTerminal = nil
         rememberedWorkspaceOwner = nil

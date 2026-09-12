@@ -179,21 +179,17 @@ final class MachinesModel {
         accountMachines.filter(\.isHost) + accountMachines.filter { !$0.isHost }
     }
 
-    /// Phone vs computer icon for a peer row. Uses the account `kind` when
-    /// known, otherwise a name heuristic (iPhone / iPad in the label).
+    /// Phone / tablet / computer icon for a peer row. Uses the account machine
+    /// when one matches, otherwise a name heuristic (iPad before iPhone).
     func peerSymbol(for peer: Peer) -> String {
         if let machine = accountMachines.first(where: {
             let identity = $0.publicIdentity ?? $0.machineID
             return identity == peer.key || identity == peer.fingerprint
-        }), !machine.isHost {
-            return "iphone"
+        }) {
+            return ClientDeviceIcon.symbol(for: machine)
         }
         let name = (peer.label.isEmpty ? accountName(for: peer) : peer.label) ?? ""
-        let lower = name.lowercased()
-        if lower.contains("iphone") || lower.contains("ipad") || lower.contains("ios") {
-            return "iphone"
-        }
-        return "desktopcomputer"
+        return ClientDeviceIcon.symbol(name: name, isHost: true)
     }
 
     /// The key plus the best live LAN hint when one exists. An old receiver

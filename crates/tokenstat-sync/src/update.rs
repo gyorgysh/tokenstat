@@ -198,8 +198,49 @@ fn parse_version(raw: &str) -> VersionParts {
 }
 
 /// Look up the latest GitHub Release for this platform.
+///
+/// Compares against this process's own crate version only. The desktop app
+/// should call [`check_latest_against`] with both the app bundle version and
+/// hostd, so a developer machine that rebuilt hostd alone still sees an
+/// update when the app itself is behind.
 pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
-    let current = env!("CARGO_PKG_VERSION").to_string();
+    check_latest_against(&[env!("CARGO_PKG_VERSION")])
+}
+
+/// True when `raw` is something `version_cmp` can treat as a real version.
+fn usable_version(raw: &str) -> Option<&str> {
+    let s = raw.trim();
+    if s.is_empty() || s.eq_ignore_ascii_case("unknown") {
+        return None;
+    }
+    Some(s)
+}
+
+/// Oldest version among `installed`, for the `current` field and the newer
+/// check. Empty input falls back to this process's crate version.
+pub fn oldest_installed<'a>(installed: &[&'a str]) -> &'a str {
+    let mut best: Option<&str> = None;
+    for raw in installed {
+        let Some(v) = usable_version(raw) else {
+            continue;
+        };
+        best = Some(match best {
+            None => v,
+            Some(b) if version_cmp(v, b) == std::cmp::Ordering::Less => v,
+            Some(b) => b,
+        });
+    }
+    best.unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+/// Look up the latest release and decide whether any of `installed` is older.
+///
+/// `newer` is true when the release is strictly greater than the oldest usable
+/// entry in `installed`. That is the OR of "app older" and "hostd older": a
+/// machine that rebuilt hostd from tip still gets offered the update when the
+/// app bundle lags the release, and the reverse is true too.
+pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateError> {
+    let current = oldest_installed(installed).to_string();
     let client = client()?;
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
     let mut req = client.get(&url);
@@ -1409,6 +1450,17 @@ mod tests {
         assert_eq!(version_cmp("0.1.0", "0.0.1"), std::cmp::Ordering::Greater);
         assert_eq!(version_cmp("0.0.1", "0.1.0"), std::cmp::Ordering::Less);
         assert_eq!(version_cmp("v1.2.3", "1.2.3"), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn oldest_installed_picks_the_lagging_side() {
+        // Dev machine: hostd rebuilt past the release, app still on an older
+        // bundle. The check must treat the app version as current so the
+        // release still looks newer.
+        assert_eq!(oldest_installed(&["1.0.2", "1.0.0"]), "1.0.0");
+        assert_eq!(oldest_installed(&["0.9.0", "1.2.0"]), "0.9.0");
+        assert_eq!(oldest_installed(&["1.0.2", "unknown", ""]), "1.0.2");
+        assert_eq!(oldest_installed(&["1.0.2", "1.0.2"]), "1.0.2");
     }
 
     #[test]

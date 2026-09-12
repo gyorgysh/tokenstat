@@ -123,10 +123,10 @@ pub use profile::{
 };
 pub use update::{
     ApplyReport, ScheduledUpdate, UPDATE_JITTER_WINDOW_SECS, UpdateCheck, UpdateError,
-    UpdateOutcome, apply_update, apply_update_to, auto_apply_enabled, check_latest, current_target,
-    download_app_image, download_windows_app_archive, has_macos_signing_authority,
-    is_windows_app_zip, maybe_auto_update, scheduled_update, scheduled_update_to, version_cmp,
-    windows_app_arch,
+    UpdateOutcome, apply_update, apply_update_to, auto_apply_enabled, check_latest,
+    check_latest_against, current_target, download_app_image, download_windows_app_archive,
+    has_macos_signing_authority, is_windows_app_zip, maybe_auto_update, oldest_installed,
+    scheduled_update, scheduled_update_to, version_cmp, windows_app_arch,
 };
 
 pub use power::scheduled_network_allowed;

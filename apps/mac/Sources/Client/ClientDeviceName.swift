@@ -91,18 +91,37 @@ enum ClientDeviceName {
     ]
 }
 
+#endif
+
 /// Which machine a row is, at a glance.
 ///
 /// A list of five identical grey rectangles is a list nobody reads. The kind
 /// comes from the account when it knows one, and from the name when it does
 /// not: a machine called "MacBook Pro" is a laptop whatever the directory has
 /// recorded, and a machine that says nothing is drawn as a desktop rather than
-/// guessed at.
+/// guessed at. iPad is checked before the generic client default, or every
+/// tablet would draw as a phone.
 enum ClientDeviceIcon {
-    static func symbol(name: String?, isHost: Bool) -> String {
-        let lower = (name ?? "").lowercased()
-        if !isHost || lower.contains("iphone") { return "iphone" }
-        if lower.contains("ipad") { return "ipad" }
+    static func symbol(name: String?, isHost: Bool, platform: String? = nil) -> String {
+        let lower = [name, platform]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .lowercased()
+
+        if lower.contains("ipad") || lower.contains("ipados") {
+            return "ipad"
+        }
+        if lower.contains("iphone") || lower.contains("ipod") {
+            return "iphone"
+        }
+        // Bare "ios" without phone/tablet: still a phone-shaped client.
+        if !isHost {
+            if lower.contains("android") && (lower.contains("tablet") || lower.contains("tab ")) {
+                return "ipad"
+            }
+            return "iphone"
+        }
         if lower.contains("macbook") || lower.contains("laptop") || lower.contains("thinkpad") {
             return "laptopcomputer"
         }
@@ -111,11 +130,19 @@ enum ClientDeviceIcon {
         {
             return "desktopcomputer"
         }
-        if lower.contains("server") || lower.contains("linux") || lower.contains("ubuntu") {
+        if lower.contains("server") || lower.contains("linux") || lower.contains("ubuntu")
+            || lower.contains("windows")
+        {
             return "server.rack"
         }
         return "desktopcomputer"
     }
-}
 
-#endif
+    static func symbol(for machine: Machine) -> String {
+        symbol(
+            name: machine.label ?? machine.displayName,
+            isHost: machine.isHost,
+            platform: machine.platform
+        )
+    }
+}

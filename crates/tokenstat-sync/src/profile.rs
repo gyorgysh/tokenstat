@@ -1388,6 +1388,11 @@ pub struct AccountLimitProvider {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountLimitWindow {
     pub label: String,
+    /// Whose allowance this is when a vendor reports more than one of the
+    /// same window (Codex general vs the running model). Absent on older
+    /// posts and on vendors that only ever report one of each.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     pub percent: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets_at_ms: Option<i64>,
@@ -1432,11 +1437,20 @@ pub fn post_limits(
                 "plan": p.plan,
                 "observed_at_ms": p.observed_at_ms,
                 "stale": false,
-                "windows": p.windows.iter().map(|w| serde_json::json!({
-                    "label": w.label,
-                    "percent": w.percent,
-                    "resets_at_ms": w.resets_at_ms,
-                })).collect::<Vec<_>>(),
+                "windows": p.windows.iter().map(|w| {
+                    let mut window = serde_json::json!({
+                        "label": w.label,
+                        "percent": w.percent,
+                        "resets_at_ms": w.resets_at_ms,
+                    });
+                    // Only send a scope when the vendor named one. The
+                    // account plane used to drop it, so two weekly figures
+                    // arrived on the phone both reading "weekly".
+                    if let Some(scope) = w.scope.as_deref().filter(|s| !s.is_empty()) {
+                        window["scope"] = serde_json::Value::String(scope.to_string());
+                    }
+                    window
+                }).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -2021,6 +2035,57 @@ mod tests {
             posted.iter().map(|p| p.source.as_str()).collect::<Vec<_>>(),
             vec!["claude_code"]
         );
+    }
+
+    #[test]
+    fn a_posted_window_keeps_its_scope() {
+        // Two weekly figures without a scope both read "weekly" on the phone.
+        let reading = tokenstat_core::limits::ProviderLimits {
+            source: "codex".into(),
+            plan: Some("prolite".into()),
+            windows: vec![
+                tokenstat_core::limits::UsageWindow {
+                    label: "5-hour".into(),
+                    scope: Some("general".into()),
+                    percent: 88.0,
+                    resets_at_ms: Some(1),
+                    severity: tokenstat_core::limits::LimitSeverity::Warning,
+                },
+                tokenstat_core::limits::UsageWindow {
+                    label: "weekly".into(),
+                    scope: Some("current model".into()),
+                    percent: 84.0,
+                    resets_at_ms: Some(2),
+                    severity: tokenstat_core::limits::LimitSeverity::Warning,
+                },
+            ],
+            observed_at_ms: 1,
+            note: None,
+            stale: false,
+        };
+        let body = serde_json::json!({
+            "src": reading.source,
+            "plan": reading.plan,
+            "observed_at_ms": reading.observed_at_ms,
+            "stale": false,
+            "windows": reading.windows.iter().map(|w| {
+                let mut window = serde_json::json!({
+                    "label": w.label,
+                    "percent": w.percent,
+                    "resets_at_ms": w.resets_at_ms,
+                });
+                if let Some(scope) = w.scope.as_deref().filter(|s| !s.is_empty()) {
+                    window["scope"] = serde_json::Value::String(scope.to_string());
+                }
+                window
+            }).collect::<Vec<_>>(),
+        });
+        let windows = body["windows"].as_array().expect("windows");
+        assert_eq!(windows[0]["scope"], "general");
+        assert_eq!(windows[1]["scope"], "current model");
+        let decoded: AccountLimitWindow =
+            serde_json::from_value(windows[1].clone()).expect("window decodes");
+        assert_eq!(decoded.scope.as_deref(), Some("current model"));
     }
 
     #[test]

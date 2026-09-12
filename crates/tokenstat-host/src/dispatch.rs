@@ -110,6 +110,18 @@ struct CalendarParams {
     force: bool,
 }
 
+/// Optional extras on `app.updateCheck`.
+///
+/// The desktop app sends its bundle marketing version so a host rebuilt from
+/// tip cannot hide an older app (or the reverse). Without it, the check only
+/// sees hostd's crate version.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct AppUpdateCheckParams {
+    /// `CFBundleShortVersionString` / Windows informational version.
+    app_version: Option<String>,
+}
+
 impl Default for CalendarParams {
     fn default() -> Self {
         CalendarParams {
@@ -3060,25 +3072,45 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
             // The app only asks whether a release exists. Applying an update to an
             // installed application needs its signed installer and is deliberately
             // left to the release updater, not the daemon process.
-            "app.updateCheck" => tokenstat_sync::check_latest()
-                .map(|check| {
-                    json!({
-                        "current": check.current,
-                        "latest": check.latest,
-                        "newer": check.newer,
-                        "htmlUrl": check.html_url,
-                        // The disk image itself, so the app can offer the download
-                        // rather than the release page it is one click inside.
-                        "dmgUrl": check.app_dmg_url,
-                        // Windows desktop zip. Distinct from the CLI's
-                        // target-triple zip. Unsigned preview builds skip
-                        // Authenticode in the app, the way a local Mac build
-                        // skips Developer ID.
-                        "winZipUrl": check.app_win_url,
-                        "winZipName": check.app_win_name,
+            //
+            // Always compare both the calling app's marketing version (when
+            // provided) and this hostd's crate version. Developer machines often
+            // run a tip hostd against an older app bundle; a host-only check then
+            // reports up to date and the app never updates. `newer` is true when
+            // either side lags the release.
+            "app.updateCheck" => {
+                let p: AppUpdateCheckParams = parse(params).unwrap_or_default();
+                let host = env!("CARGO_PKG_VERSION").to_string();
+                let app = p
+                    .app_version
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                let installed: Vec<&str> = match app.as_deref() {
+                    Some(app) => vec![app, host.as_str()],
+                    None => vec![host.as_str()],
+                };
+                tokenstat_sync::check_latest_against(&installed)
+                    .map(|check| {
+                        json!({
+                            "current": check.current,
+                            "latest": check.latest,
+                            "newer": check.newer,
+                            "htmlUrl": check.html_url,
+                            // The disk image itself, so the app can offer the download
+                            // rather than the release page it is one click inside.
+                            "dmgUrl": check.app_dmg_url,
+                            // Windows desktop zip. Distinct from the CLI's
+                            // target-triple zip. Unsigned preview builds skip
+                            // Authenticode in the app, the way a local Mac build
+                            // skips Developer ID.
+                            "winZipUrl": check.app_win_url,
+                            "winZipName": check.app_win_name,
+                        })
                     })
-                })
-                .map_err(|e| e.to_string()),
+                    .map_err(|e| e.to_string())
+            }
 
             // Fetch the disk image and prove it is the one the release published.
             //
@@ -3727,9 +3759,15 @@ fn account_plane_limits() -> Value {
             .iter()
             .map(|w| UsageWindow {
                 label: w.label.clone(),
-                // A posted reading carries no scope: the account plane
-                // predates it, so another machine's rows qualify nothing.
-                scope: None,
+                // Keep the vendor's scope so two windows with the same label
+                // still read apart on the phone: "weekly (general)" beside
+                // "weekly (secondary)", the way the Mac card already does.
+                scope: w
+                    .scope
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
                 percent: w.percent,
                 resets_at_ms: w.resets_at_ms,
                 severity: LimitSeverity::from_percent(w.percent),

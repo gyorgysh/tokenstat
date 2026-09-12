@@ -66,8 +66,12 @@ internal sealed class AppUpdateModel
         Changed?.Invoke();
         try
         {
-            var found = await AppServices.Host.CallAsync("app.updateCheck");
-            CurrentVersion = AppInfo.Version;
+            var found = await AppServices.Host.CallAsync(
+                "app.updateCheck",
+                new JsonObject { ["appVersion"] = AppInfo.Version });
+            // Host returns the older of app and hostd as `current`, so a tip
+            // hostd cannot hide an older app (or the reverse).
+            CurrentVersion = Str(found, "current") ?? AppInfo.Version;
             Latest = Str(found, "latest") ?? "";
             HtmlUrl = Str(found, "htmlUrl") ?? "";
             WinZipUrl = Str(found, "winZipUrl");

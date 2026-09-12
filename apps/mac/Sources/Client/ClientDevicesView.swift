@@ -20,9 +20,8 @@ import SwiftUI
 /// Levels 3 to 5 (that device's folders, the sessions running in them, and
 /// attaching to a terminal) need the machine plane and a device that is awake.
 /// The detail screen links into them through `ClientHostWorkspacesView` when
-/// the device has a key to dial, and says nothing when it has not: a phone on
-/// this account is not a host, and a computer without remote reach is already
-/// explained one card above.
+/// the device has a key to dial. Reach and awake state live on each row's
+/// caption, not in a second list of the same hosts.
 struct ClientDevicesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
@@ -93,7 +92,6 @@ struct ClientDevicesView: View {
                 }
                 if !machines.isEmpty {
                     header
-                    alwaysOnHost
                     ClientAdaptiveCards {
                     ForEach(sorted.filter { search.isEmpty || ($0.label ?? "").localizedCaseInsensitiveContains(search) || ($0.platform ?? "").localizedCaseInsensitiveContains(search) }) { machine in
                         NavigationLink {
@@ -227,17 +225,43 @@ struct ClientDevicesView: View {
         return machines.first { $0.machineID == wanted }
     }
 
-    /// This device first, then the busiest. Somebody scanning this list is
-    /// looking for one of two things: the computer they are holding, or the one
-    /// doing the work.
+    /// This device first, then awake machines by spend, then everyone else by
+    /// how recently they were last active. Clients never rank on spend (they
+    /// do not upload usage), so value only separates hosts.
     private var sorted: [Machine] {
         machines.sorted { a, b in
             if isThisDevice(a) != isThisDevice(b) { return isThisDevice(a) }
-            let left = model.usage(for: a)?.valueMicros ?? -1
-            let right = model.usage(for: b)?.valueMicros ?? -1
+            let aAwake = isAwake(a)
+            let bAwake = isAwake(b)
+            if aAwake != bAwake { return aAwake }
+            let left = sortSpend(a)
+            let right = sortSpend(b)
             if left != right { return left > right }
-            return a.displayName.localizedCaseInsensitiveCompare(b.displayName) == .orderedAscending
+            let aSeen = activityDate(a)
+            let bSeen = activityDate(b)
+            if aSeen != bSeen { return aSeen > bSeen }
+            return a.displayName.localizedCaseInsensitiveCompare(b.displayName)
+                == .orderedAscending
         }
+    }
+
+    private func isAwake(_ machine: Machine) -> Bool {
+        isThisDevice(machine) || machine.online == true
+    }
+
+    /// Host spend for ordering. Clients and unknown usage sort below any real
+    /// figure so a $0 phone does not float above a busy laptop.
+    private func sortSpend(_ machine: Machine) -> Int64 {
+        guard machine.isHost, let usage = model.usage(for: machine) else { return -1 }
+        return usage.valueMicros
+    }
+
+    private func activityDate(_ machine: Machine) -> Date {
+        if isThisDevice(machine) { return .distantFuture }
+        if machine.online == true { return .distantFuture }
+        return parseServerDate(machine.lastSeenAt)
+            ?? parseServerDate(machine.lastSyncAt)
+            ?? .distantPast
     }
 
     private func isThisDevice(_ machine: Machine) -> Bool {
@@ -248,11 +272,18 @@ struct ClientDevicesView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ClientSectionTitle(title: deviceCount, mark: "mark_device")
-            Text(planLine ?? model.windowDescription)
-                .font(ClientType.caption)
-                .foregroundStyle(.secondary)
+        // Title + plan fill. The spend window used to sit under the bar as
+        // "Share of all time…", which repeated what every host figure already
+        // means and crowded the list.
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(alignment: .center, spacing: Theme.Space.s) {
+                ClientSectionTitle(title: "Devices", mark: "mark_device")
+                Spacer(minLength: Theme.Space.s)
+                capacityBadge
+            }
+            if let limit = account.account?.machineLimit, limit > 0 {
+                capacityBar(used: machines.count, limit: limit)
+            }
             if let extra = planRemoteLine {
                 Text(extra)
                     .font(ClientType.caption)
@@ -260,18 +291,70 @@ struct ClientDevicesView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Theme.Space.m)
-        .cardSurface()
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(headerAccessibilityLabel)
+    }
+
+    /// Plan fill as a trailing chip: "8 / 10". Reads as capacity, not as a
+    /// second title for the same list of devices below.
+    @ViewBuilder
+    private var capacityBadge: some View {
+        if let limit = account.account?.machineLimit {
+            Text("\(machines.count) / \(limit)")
+                .font(ClientType.caption.weight(.semibold))
+                .foregroundStyle(capacityTint(used: machines.count, limit: limit))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    capacityTint(used: machines.count, limit: limit).opacity(0.12),
+                    in: Capsule()
+                )
+                .accessibilityLabel("\(machines.count) of \(limit) devices")
+        } else {
+            Text(deviceCount)
+                .font(ClientType.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Theme.accent.opacity(0.10), in: Capsule())
+        }
+    }
+
+    private func capacityBar(used: Int, limit: Int) -> some View {
+        let fill = min(1, Double(used) / Double(max(limit, 1)))
+        return GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.accent.opacity(0.12))
+                Capsule()
+                    .fill(capacityTint(used: used, limit: limit).opacity(0.7))
+                    .frame(width: max(4, geo.size.width * fill))
+            }
+        }
+        .frame(height: 4)
+        .accessibilityHidden(true)
+    }
+
+    private func capacityTint(used: Int, limit: Int) -> Color {
+        guard limit > 0 else { return Theme.accent }
+        let ratio = Double(used) / Double(limit)
+        if ratio >= 1 { return Theme.danger }
+        if ratio >= 0.8 { return Theme.warning }
+        return Theme.accent
+    }
+
+    private var headerAccessibilityLabel: String {
+        var parts: [String] = ["Devices"]
+        if let limit = account.account?.machineLimit {
+            parts.append("\(machines.count) of \(limit) devices")
+        } else {
+            parts.append(deviceCount)
+        }
+        if let extra = planRemoteLine { parts.append(extra) }
+        return parts.joined(separator: ". ")
     }
 
     private var deviceCount: String {
         machines.count == 1 ? "1 device" : "\(machines.count) devices"
-    }
-
-    private var planLine: String? {
-        guard let limit = account.account?.machineLimit else { return nil }
-        return "\(machines.count) of \(limit) devices"
     }
 
     private var planRemoteLine: String? {
@@ -280,90 +363,24 @@ struct ClientDevicesView: View {
         }
         return nil
     }
-
-    /// The computers on this account and whether they are reachable right now,
-    /// read-only. A phone cannot change a Mac's host policy, and the account
-    /// does not carry it, so this says where the setting lives instead.
-    @ViewBuilder
-    private var alwaysOnHost: some View {
-        let hosts = machines.filter(\.isHost)
-        if !hosts.isEmpty {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Always-on host", mark: "mark_host")
-                // A name on a card reads as something to press, and this one
-                // was not. It goes where the row in the list below it goes.
-                ForEach(hosts) { machine in
-                    NavigationLink {
-                        ClientDeviceDetailView(
-                            machine: machine,
-                            usage: model.usage(for: machine),
-                            accountTotal: model.total,
-                            isThisDevice: isThisDevice(machine),
-                            onRenamed: { await account.load() }
-                        )
-                    } label: {
-                        HStack(spacing: Theme.Space.s) {
-                            AwakeDot(online: machine.online)
-                            Image(systemName: ClientDeviceIcon.symbol(
-                                name: machine.label,
-                                isHost: machine.isHost
-                            ))
-                            .font(Theme.font(13))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 18)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(DeviceCopy.name(machine))
-                                    .font(ClientType.label.weight(.medium))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text(alwaysOnLine(machine))
-                                    .font(ClientType.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: Theme.Space.s)
-                            Image(systemName: "chevron.right")
-                                .font(ClientType.caption)
-                                .foregroundStyle(.tertiary)
-                                .accessibilityHidden(true)
-                        }
-                        .frame(minHeight: 44)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                }
-                Text("A computer with Always-on host on stays reachable even after you quit the app there. Turn it on in Account on that computer.")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .cardSurface()
-            .accessibilityElement(children: .contain)
-        }
-    }
-
-    private func alwaysOnLine(_ machine: Machine) -> String {
-        if machine.online == true {
-            return "Reachable now"
-        }
-        if machine.publicIdentity?.isEmpty == false {
-            return "Asleep. Reachable once the app is open there."
-        }
-        return "Not set up for remote reach"
-    }
 }
 
 /// One device in the list: what it is called, when it was last heard from, and
-/// how much of the account's recent work it did.
+/// how much of the account's recent work it did (hosts only).
 private struct DeviceRow: View {
     let machine: Machine
     let usage: MachineUsage?
     let peak: Int64
     let isThisDevice: Bool
 
+    /// Phones, tablets and "this device" never upload an archive. A $0.00
+    /// figure there is noise, not a measurement, so the row stays about status.
+    private var showsSpend: Bool {
+        machine.isHost && !isThisDevice
+    }
+
     private var share: Double {
-        guard let usage, peak > 0 else { return 0 }
+        guard showsSpend, let usage, peak > 0 else { return 0 }
         return min(1, max(0, Double(usage.valueMicros) / Double(peak)))
     }
 
@@ -373,48 +390,51 @@ private struct DeviceRow: View {
                 // The device in your hand is awake whatever the directory last
                 // recorded: the app asking the question is running on it.
                 AwakeDot(online: isThisDevice ? true : machine.online)
-                Image(systemName: ClientDeviceIcon.symbol(
-                    name: machine.label,
-                    isHost: machine.isHost
-                ))
+                Image(systemName: ClientDeviceIcon.symbol(for: machine))
                 .font(Theme.font(13))
                 .foregroundStyle(isThisDevice ? Theme.accent : .secondary)
                 .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
-                        Text(DeviceCopy.name(machine))
-                            .font(ClientType.label.weight(.medium))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        if isThisDevice {
-                            Text("this device")
-                                .font(ClientType.caption)
-                                .foregroundStyle(Theme.accent)
-                        }
-                    }
+                    Text(DeviceCopy.name(machine))
+                        .font(ClientType.label.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Text(DeviceCopy.caption(machine, isThisDevice: isThisDevice))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: Theme.Space.s)
-                if let usage {
-                    Text(usage.value.formatted)
-                        .font(ClientType.rowFigure)
+                // Trailing column: spend on hosts, a You chip on this phone,
+                // nothing on other clients. Keeps the name line clean and
+                // lines the marker up with the figures on host rows.
+                if showsSpend {
+                    if let usage {
+                        Text(usage.value.formatted)
+                            .font(ClientType.rowFigure)
+                            .foregroundStyle(Theme.accent)
+                    } else {
+                        // Not zero. A device whose share has not been fetched has
+                        // not been shown to have spent nothing, and reporting zero
+                        // for something we did not measure is the one thing the
+                        // data rules forbid outright.
+                        Text("n/a")
+                            .font(ClientType.rowFigure)
+                            .foregroundStyle(.tertiary)
+                    }
+                } else if isThisDevice {
+                    Text("You")
+                        .font(ClientType.caption.weight(.semibold))
                         .foregroundStyle(Theme.accent)
-                } else {
-                    // Not zero. A device whose share has not been fetched has
-                    // not been shown to have spent nothing, and reporting zero
-                    // for something we did not measure is the one thing the
-                    // data rules forbid outright.
-                    Text("n/a")
-                        .font(ClientType.rowFigure)
-                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Theme.accent.opacity(0.12), in: Capsule())
+                        .accessibilityHidden(true)
                 }
                 Image(systemName: "chevron.right")
                     .font(Theme.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-            if usage != nil {
+            if showsSpend, usage != nil {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Theme.accent.opacity(0.12))
@@ -434,7 +454,11 @@ private struct DeviceRow: View {
         .frame(minHeight: 44)
         .cardSurface()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(DeviceCopy.rowLabel(machine, usage: usage, isThisDevice: isThisDevice))
+        .accessibilityLabel(DeviceCopy.rowLabel(
+            machine,
+            usage: showsSpend ? usage : nil,
+            isThisDevice: isThisDevice
+        ))
         .accessibilityHint("Opens this device's detail")
     }
 }
@@ -473,7 +497,11 @@ struct ClientDeviceDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                spend
+                // Hosts only. Phones and tablets (including this device) do not
+                // upload usage, so a $0.00 card would invent a number.
+                if showsSpend {
+                    spend
+                }
                 // Reachability, live readings and the two ways in, as one
                 // header shared with the screen you reach from Workspaces.
                 if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty, machine.isHost {
@@ -512,6 +540,11 @@ struct ClientDeviceDetailView: View {
         .background(Theme.background)
         .navigationTitle(DeviceCopy.name(current))
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Hosts that are not this phone: the only place spend is a real figure.
+    private var showsSpend: Bool {
+        machine.isHost && !isThisDevice
     }
 
     private var spend: some View {
@@ -882,19 +915,42 @@ private enum DeviceCopy {
         return "Unnamed device"
     }
 
-    /// The second line: enough to tell two unnamed devices apart, then when it
-    /// was last heard from.
+    /// The second line: awake / reach first, then enough to tell two unnamed
+    /// devices apart when there is no status worth leading with.
     static func caption(_ machine: Machine, isThisDevice: Bool = false) -> String {
-        if !isThisDevice,
-           machine.online == true,
-           machine.isHost,
-           machine.publicIdentity?.isEmpty == false {
-            return "Awake. Open work from this device."
-        }
+        let status = statusLine(machine, isThisDevice: isThisDevice)
+        // Named rows: status alone. Unnamed ones keep a short id so two
+        // "Linux computer" rows do not look identical under the same caption.
         guard machine.label?.isEmpty != false, let id = machine.machineID else {
-            return lastSeen(machine, isThisDevice: isThisDevice)
+            return status
         }
-        return "\(shortID(id)) · \(lastSeen(machine, isThisDevice: isThisDevice))"
+        return "\(shortID(id)) · \(status)"
+    }
+
+    /// Short presence + reach for a list row. Detail still carries the longer
+    /// reach paragraph; the list only needs a glance.
+    ///
+    /// The account directory does not publish Always-on host as a flag, so
+    /// "Always on" is not claimed here. Online hosts read as awake; hosts with
+    /// a connection key but offline read as asleep and ready; hosts without a
+    /// key say so in one line instead of a second panel of the same machines.
+    static func statusLine(_ machine: Machine, isThisDevice: Bool) -> String {
+        if isThisDevice || machine.online == true {
+            return "Awake now"
+        }
+        if machine.isHost {
+            if machine.publicIdentity?.isEmpty == false {
+                if let seen = formatRelativeDate(machine.lastSeenAt) {
+                    return "Asleep · last seen \(seen)"
+                }
+                return "Asleep"
+            }
+            return "Not set up for remote"
+        }
+        if let seen = formatRelativeDate(machine.lastSeenAt) {
+            return "Last seen \(seen)"
+        }
+        return "Has not reported in yet"
     }
 
     /// `m_c982…872c`. Long enough to be unique in a list of five, short enough
@@ -905,12 +961,7 @@ private enum DeviceCopy {
     }
 
     static func lastSeen(_ machine: Machine, isThisDevice: Bool = false) -> String {
-        if isThisDevice || machine.online == true { return "Awake now" }
-        if let seen = formatRelativeDate(machine.lastSeenAt) { return "Last seen \(seen)" }
-        if machine.reportsArchiveSync, let synced = formatRelativeDate(machine.lastSyncAt) {
-            return "Last synced \(synced)"
-        }
-        return "Has not reported in yet"
+        statusLine(machine, isThisDevice: isThisDevice)
     }
 
     static func lastSync(_ machine: Machine) -> String {
@@ -924,7 +975,7 @@ private enum DeviceCopy {
             return "Awake and reachable through the tunnel from this device, and from any other device signed in to this account."
         }
         if machine.publicIdentity?.isEmpty == false {
-            return "Asleep. It has a connection key, so it can be reached from this device once it is awake."
+            return "Asleep. It has a connection key, so it can be reached from this device once it is awake. Always-on host on that computer keeps it reachable after you quit the app there."
         }
         // Not a fault, and not something to fix from a phone. Saying which
         // switch it is beats "unavailable".
@@ -934,7 +985,7 @@ private enum DeviceCopy {
     static func rowLabel(_ machine: Machine, usage: MachineUsage?, isThisDevice: Bool) -> String {
         var parts = [name(machine)]
         if isThisDevice { parts.append("this device") }
-        parts.append(lastSeen(machine, isThisDevice: isThisDevice))
+        parts.append(statusLine(machine, isThisDevice: isThisDevice))
         if let usage {
             parts.append(
                 "\(usage.value.formatted) at list rates, \(DeviceHistory.windowPhrase(days: usage.days))"
@@ -1004,8 +1055,16 @@ final class ClientDevicesModel {
     }
 
     func load(machines: [Machine], days: Int = 30, force: Bool = false) async {
-        let ids = machines.compactMap(\.machineID)
-        guard !ids.isEmpty else { return }
+        // Hosts only. Clients never upload an archive, so asking for their
+        // spend only produces $0 rows the UI does not show.
+        let ids = machines.filter(\.isHost).compactMap(\.machineID)
+        guard !ids.isEmpty else {
+            rows = []
+            loadedIDs = []
+            loadedDays = days
+            errorMessage = nil
+            return
+        }
         if !force, Set(ids) == loadedIDs, loadedDays == days, !rows.isEmpty { return }
         isLoading = true
         defer { isLoading = false }

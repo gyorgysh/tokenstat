@@ -1007,11 +1007,16 @@ struct AccountView: View {
     }
     #endif
 
-    /// Show phones as phones on both the desktop account card and the client.
-    /// A host is a computer, with the current one using the laptop variant.
+    /// Show phones as phones, tablets as tablets, on both the desktop account
+    /// card and the client. A host is a computer, with the current one using
+    /// the laptop variant when the name does not already say what it is.
     private func machineIcon(_ machine: Machine, isThisMachine: Bool) -> String {
-        if !machine.isHost { return "iphone" }
-        return isThisMachine ? "laptopcomputer" : "desktopcomputer"
+        if isThisMachine, machine.isHost {
+            let guessed = ClientDeviceIcon.symbol(for: machine)
+            if guessed == "desktopcomputer" { return "laptopcomputer" }
+            return guessed
+        }
+        return ClientDeviceIcon.symbol(for: machine)
     }
 
     /// Being told when a run or chat needs attention.

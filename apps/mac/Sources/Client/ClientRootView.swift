@@ -347,6 +347,9 @@ struct ClientRootView: View {
         case .customizeHome:
             navigation.destination = .home
             navigation.homeEditorRequested = true
+        case .customizeWorkspaces:
+            navigation.destination = .workspaces
+            navigation.workspacesEditorRequested = true
         case .account(let pane, let detail):
             navigation.accountRequest = ClientAccountRequest(pane: pane, detail: detail)
             showAccount = true

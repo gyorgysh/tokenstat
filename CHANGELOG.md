@@ -13,6 +13,48 @@ at the end.
 
 ## [Unreleased]
 
+Devices and Workspaces on the phone got a clearer layout, plan limits keep
+Codex's general and secondary names after sync, and the update check looks at
+the app as well as hostd.
+
+### Added
+
+- Customize Workspaces on the phone, next to Customize Home. Drag Folders,
+  Recent chats and All sessions into order, or switch any of them off. Three
+  presets: folders first, chats first, sessions first. The choice is saved on
+  this device, used on the Workspaces tab and on a host opened from Devices,
+  and listed in search. Hosts stay above the arrangement.
+
+### Changed
+
+- A host posts each plan window's scope with the reading. The phone and the
+  dashboard then name Codex like the Mac: weekly (general) next to weekly
+  (secondary). Posts without a scope still show the bare label.
+- Insights on the phone always puts three equal panels in one row, and the
+  same row on Chat, tasks, workflows and automations. Event counts use the
+  same short form as tokens: 126k, 1.2M.
+- Devices shows plan capacity as a trailing chip and a thin bar. No "Share
+  of…" line under the title. This device ends the row with a You chip.
+- Devices drops the Always-on host panel. Each row carries awake, asleep or
+  remote-setup status. Always-on copy stays on the detail screen. Order is
+  this device, then awake hosts by spend, then the rest by last active.
+  Phones, tablets and this device hide the spend figure that used to read
+  $0.00.
+- On Legal, the Sync privacy card is written for the phone. Computers put
+  aggregate counts on the account, this device reads them, and remote folders,
+  terminals and agents stay encrypted between devices. The card lists what is
+  on the account, what never leaves the computer, and what remote means.
+- The update check compares the app marketing version and hostd. Mac and
+  Windows send the bundle version. Newer is true when either lags the
+  release. Omit the app version and only hostd is compared, as before.
+
+### Fixed
+
+- iPads draw with the tablet symbol. Non-host rows always used the phone
+  icon first.
+- A large event count on Insights no longer spills out of its panel next to
+  a short token figure.
+
 ## [1.0.2] - 2026-09-12
 
 The composer reads the plan it runs on, access approvals explain themselves,
