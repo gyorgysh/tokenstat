@@ -51,6 +51,10 @@ struct ClientFolderSplit: View {
             await ClientRefresh.pull("workspace-\(workspaceID)") { await reload() }
         }
         .task { await reload() }
+        .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
+            guard note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }
+            Task { await reload() }
+        }
         .sheet(isPresented: $showPort) { portSheet }
         .fullScreenCover(item: Binding(
             get: { browserURL.map { BrowserURL(url: $0) } },

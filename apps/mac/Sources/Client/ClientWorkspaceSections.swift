@@ -72,6 +72,11 @@ struct ClientWorkspaceDetailView: View {
             }
         }
         .rememberWorkspace(peer: peer, folder: folder)
+        .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
+            guard !usesWorkspaceLayout,
+                  note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }
+            Task { await reload() }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 WorkFolderCacheButton(folderID: workspaceID, peer: peer, name: folder.name)
@@ -509,15 +514,24 @@ struct ClientWorkspaceChangesView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: Theme.Space.s) {
                 ThemeRule()
+                if !files.isEmpty || session.draft.submitted != nil {
+                    HStack(spacing: Theme.Space.m) {
+                        Text("\(session.draft.paths.count) of \(files.count) selected")
+                            .font(ClientType.caption).foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Button(session.draft.submitted == nil ? "Review and commit" : "Check commit", .commit) {
+                            showingComposer = true
+                        }
+                        .buttonStyle(AccentButtonStyle(comfortable: true))
+                        .disabled(!session.loaded || (session.draft.paths.isEmpty && session.draft.submitted == nil))
+                    }.padding(.horizontal, Theme.Space.m)
+                }
                 HStack(spacing: Theme.Space.m) {
-                    Text("\(session.draft.paths.count) of \(files.count) selected")
+                    Text(current.git?.branch ?? "Current branch")
                         .font(ClientType.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
-                    Button(session.draft.submitted == nil ? "Review and commit" : "Check commit", .commit) {
-                        showingComposer = true
-                    }
-                    .buttonStyle(AccentButtonStyle(comfortable: true))
-                    .disabled(!session.loaded || (session.draft.paths.isEmpty && session.draft.submitted == nil))
+                    GitPushControl(target: session.target, folderName: current.name, hostName: hostName,
+                                   outgoing: current.git?.ahead ?? 0, onPushed: { await load() })
                 }.padding(.horizontal, Theme.Space.m).padding(.bottom, Theme.Space.s)
             }.background(Theme.background)
         }

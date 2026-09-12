@@ -50,6 +50,10 @@ struct ClientWorkspaceHistoryView: View {
             await ClientRefresh.pull("workspace-history-\(workspaceID)") { await load() }
         }
         .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
+            guard note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }
+            Task { await load() }
+        }
     }
 
     @ViewBuilder
@@ -69,7 +73,7 @@ struct ClientWorkspaceHistoryView: View {
             ClientSectionEmpty(
                 text: "No commits yet",
                 art: .history,
-                message: "Make the first commit on \(place) and it will appear here."
+                message: "Commit selected files in Changes and the result will appear here."
             )
         } else if loaded {
             ForEach(commits) { commit in

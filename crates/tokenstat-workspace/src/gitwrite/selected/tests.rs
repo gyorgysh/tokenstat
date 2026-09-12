@@ -228,6 +228,25 @@ fn invalid_selections_and_detached_head_are_refused() {
 }
 
 #[test]
+fn a_conflicted_merge_is_not_committed_or_cleaned_up() {
+    let repo = repo(true);
+    let dir = repo.path();
+    let original = text(dir, &["symbolic-ref", "--short", "HEAD"]).unwrap();
+    text(dir, &["switch", "-qc", "conflicting"]).unwrap();
+    fs::write(dir.join("chosen"), "other branch\n").unwrap();
+    text(dir, &["commit", "-qam", "Other work"]).unwrap();
+    text(dir, &["switch", "-q", &original]).unwrap();
+    fs::write(dir.join("chosen"), "this branch\n").unwrap();
+    text(dir, &["commit", "-qam", "Local work"]).unwrap();
+    assert!(text(dir, &["merge", "conflicting"]).is_err());
+    let index = fs::read(index_path(dir).unwrap()).unwrap();
+    let conflict = fs::read(dir.join("chosen")).unwrap();
+    assert!(review(dir, &["chosen".into()]).is_err());
+    assert_eq!(fs::read(index_path(dir).unwrap()).unwrap(), index);
+    assert_eq!(fs::read(dir.join("chosen")).unwrap(), conflict);
+}
+
+#[test]
 fn recovery_finishes_only_the_recorded_index_after_a_landed_commit() {
     let dir = repo(true);
     let dir = dir.path();

@@ -240,6 +240,7 @@ final class GitCommitSession: Identifiable {
         if receipt.succeeded {
             draft = GitCommitDraft()
             review = nil
+            target.notifyChanged()
         } else if !receipt.unresolved {
             draft.submitted = nil
             review = nil

@@ -1388,16 +1388,10 @@ final class WorkspacesModel {
         await loadHistory(for: folder.id)
     }
 
-    func push(_ folder: WorkspaceFolder) async {
-        isCommitting = true
-        defer { isCommitting = false }
-        do {
-            report(folder.id, .push, try await Bridge.push(id: folder.id))
-            await refresh()
-            await loadHistory(for: folder.id)
-        } catch {
-            report(folder.id, .push, GitOutcome(ok: false, message: error.localizedDescription))
-        }
+    func pushCompleted(_ folder: WorkspaceFolder) async {
+        report(folder.id, .push, GitOutcome(ok: true, message: "Pushed the reviewed commit."))
+        await refresh()
+        await loadHistory(for: folder.id)
     }
 
     private func report(_ workspaceID: String, _ action: GitOutcomeAction, _ outcome: GitOutcome) {

@@ -574,13 +574,9 @@ private struct CommitBox: View {
         return !git.files.isEmpty
     }
 
-    private var isAhead: Bool {
-        (folder.git?.ahead ?? 0) > 0
-    }
-
     var body: some View {
         Group {
-            if hasChanges || isAhead || model.gitOutcome(for: folder.id) != nil || savedCommitSession?.draft.submitted != nil {
+            if folder.git?.isRepo == true || model.gitOutcome(for: folder.id) != nil || savedCommitSession?.draft.submitted != nil {
                 box
             }
         }
@@ -661,7 +657,7 @@ private struct CommitBox: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(Theme.border, lineWidth: 1)
                 )
-            } else if isAhead {
+            } else if folder.git?.isRepo == true {
                 VStack(spacing: 0) {
                     pushOnly
                 }
@@ -715,16 +711,8 @@ private struct CommitBox: View {
 
     private var actions: some View {
         HStack(spacing: Theme.Space.s) {
-            if isAhead {
-                Button {
-                    Task { await model.push(folder) }
-                } label: {
-                    ActionIcon.upload.label("Push \(folder.git?.ahead ?? 0)")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SecondaryButtonStyle())
-                .disabled(model.isCommitting)
-                .help("Push the current branch")
+            if folder.git?.isRepo == true {
+                pushControl
             }
             Button {
                 Task { commitSession = await model.prepareCommit(folder) }
@@ -732,23 +720,20 @@ private struct CommitBox: View {
                 ActionIcon.commit.label(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(AccentButtonStyle())
+            .buttonStyle(AccentButtonStyle(comfortable: true))
             .disabled(model.isCommitting || selectedCount == 0)
         }
         .padding(Theme.Space.s)
     }
 
     private var pushOnly: some View {
-        Button {
-            Task { await model.push(folder) }
-        } label: {
-            ActionIcon.upload.label("Push \(folder.git?.ahead ?? 0)")
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(SecondaryButtonStyle())
-        .disabled(model.isCommitting)
-        .help("Push the current branch")
-        .padding(Theme.Space.s)
+        pushControl.frame(maxWidth: .infinity).padding(Theme.Space.s)
+    }
+
+    private var pushControl: some View {
+        GitPushControl(target: Bridge.reviewedGitTarget(id: folder.id), folderName: folder.name,
+                       hostName: "", outgoing: folder.git?.ahead ?? 0,
+                       onPushed: { await model.pushCompleted(folder) })
     }
 
     private var autoCommitRunning: Bool {

@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-mod lease;
+use super::lease;
 
 /// An exact reviewed tree and the repository state it was based on.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -56,13 +56,13 @@ fn output(mut command: Command) -> Result<Vec<u8>, String> {
     Ok(out.stdout)
 }
 
-fn command(dir: &Path, args: &[&str]) -> Command {
+pub(super) fn command(dir: &Path, args: &[&str]) -> Command {
     let mut command = super::git_command(dir);
     command.args(args).env("GIT_OPTIONAL_LOCKS", "0");
     command
 }
 
-fn text(dir: &Path, args: &[&str]) -> Result<String, String> {
+pub(super) fn text(dir: &Path, args: &[&str]) -> Result<String, String> {
     String::from_utf8(output(command(dir, args))?)
         .map(|s| s.trim().to_owned())
         .map_err(|e| e.to_string())
@@ -162,14 +162,14 @@ fn private(dir: &Path, index: &Path, args: &[&str]) -> Command {
     cmd
 }
 
-fn digest(bytes: &[u8]) -> String {
+pub(super) fn digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
 
-fn index_path(dir: &Path) -> Result<PathBuf, String> {
+pub(super) fn index_path(dir: &Path) -> Result<PathBuf, String> {
     text(
         dir,
         &["rev-parse", "--path-format=absolute", "--git-path", "index"],
@@ -407,7 +407,7 @@ impl Drop for IndexLock {
     }
 }
 
-fn receipt_path(dir: &Path, id: &str) -> Result<PathBuf, String> {
+pub(super) fn receipt_path(dir: &Path, id: &str) -> Result<PathBuf, String> {
     if id.len() < 16 || id.len() > 80 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
     {
         return Err("Invalid operation identifier.".into());
@@ -424,7 +424,7 @@ fn receipt_path(dir: &Path, id: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(root).join(format!("{id}.json")))
 }
 
-fn save(path: &Path, receipt: &Receipt) -> Result<(), String> {
+pub(super) fn save(path: &Path, receipt: &impl Serialize) -> Result<(), String> {
     let parent = path.parent().ok_or("Missing operation directory")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;

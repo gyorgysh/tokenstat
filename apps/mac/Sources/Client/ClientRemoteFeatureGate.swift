@@ -23,6 +23,7 @@ enum RemoteHostFeature {
     case workSearch
     case hostUpdate
     case selectedCommit
+    case reviewedPush
 
     var title: String {
         switch self {
@@ -39,6 +40,7 @@ enum RemoteHostFeature {
         case .workSearch: "Search work"
         case .hostUpdate: "Updating this computer"
         case .selectedCommit: "Committing selected files"
+        case .reviewedPush: "Pushing a branch"
         }
     }
 
@@ -59,6 +61,7 @@ enum RemoteHostFeature {
     /// the send revision: a host below 14 refuses an id without the revision
     /// the client only sends beside it, so confirmed send needs all of 14.
     /// Version 15 adds reviewed selected-file commits and outcome recovery.
+    /// Version 16 adds reviewed current-branch Push and outcome recovery.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
@@ -77,6 +80,7 @@ enum RemoteHostFeature {
         // was nothing to bump.
         case .hostUpdate: 14
         case .selectedCommit: 15
+        case .reviewedPush: 16
         }
     }
 
@@ -95,6 +99,7 @@ enum RemoteHostFeature {
         case .workSearch: "magnifyingglass"
         case .hostUpdate: "arrow.down.circle"
         case .selectedCommit: "checkmark.circle"
+        case .reviewedPush: "arrow.up.circle"
         }
     }
 

@@ -63,8 +63,13 @@ protocol GitCommitService: Sendable {
 }
 
 struct GitCommitTarget: Hashable, Sendable, GitCommitService {
+    static let didChange = Notification.Name("tokenstat.workspaceGitDidChange")
     let peer: String?
     let workspaceID: String
+
+    @MainActor func notifyChanged() {
+        NotificationCenter.default.post(name: Self.didChange, object: self)
+    }
 
     func status() async throws -> WorkspaceFolder {
         try await call("workspace.status", [:], as: WorkspaceFolder.self)
@@ -94,7 +99,7 @@ struct GitCommitTarget: Hashable, Sendable, GitCommitService {
                        ["operationId": operationID], as: GitCommitReceipt?.self)
     }
 
-    private func call<T: Decodable & Sendable>(_ method: String, _ values: [String: Any], as type: T.Type) async throws -> T {
+    func call<T: Decodable & Sendable>(_ method: String, _ values: [String: Any], as type: T.Type) async throws -> T {
         var params = values
         params["id"] = workspaceID
         if let peer {

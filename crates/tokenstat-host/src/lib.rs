@@ -210,4 +210,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// launch while existing receipts remain available for reconciliation.
 /// Version 15 adds immutable selected-file commit reviews, outcome receipts
 /// and explicit recovery while preserving unrelated staged entries.
-pub const PROTOCOL_VERSION: &str = "15";
+/// Version 16 adds reviewed current-branch Push and durable outcome recovery.
+pub const PROTOCOL_VERSION: &str = "16";

@@ -277,6 +277,17 @@ struct SelectedCommitParams {
 }
 
 #[cfg(feature = "local-host")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewedPushParams {
+    id: String,
+    review: Option<tokenstat_workspace::gitwrite::reviewed_push::Review>,
+    operation_id: Option<String>,
+    #[serde(default)]
+    retry: bool,
+}
+
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PtySpawnParams {
@@ -2447,6 +2458,10 @@ fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
         | "workspace.commitSelected"
         | "workspace.commitReceipt"
         | "workspace.commitRecover"
+        | "workspace.pushReview"
+        | "workspace.pushReviewed"
+        | "workspace.pushReceipt"
+        | "workspace.pushRecover"
         | "workspace.write"
         | "workspace.push"
         | "pty.spawn" => {}
@@ -2855,6 +2870,43 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             let outcome = tokenstat_workspace::gitwrite::write_text(&ws.path, &path, &content);
             invalidate_workspace_status(Some(&p.id));
             serde_json::to_value(outcome).map_err(|e| e.to_string())
+        }
+
+        "workspace.pushReview"
+        | "workspace.pushReviewed"
+        | "workspace.pushReceipt"
+        | "workspace.pushRecover" => {
+            use tokenstat_workspace::gitwrite::reviewed_push;
+            let p: ReviewedPushParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let result = match method {
+                "workspace.pushReview" => serde_json::to_value(reviewed_push::review(&ws.path)?),
+                "workspace.pushReviewed" => serde_json::to_value(reviewed_push::push(
+                    &ws.path,
+                    p.operation_id
+                        .as_deref()
+                        .ok_or("A push needs an operation identifier")?,
+                    p.review.as_ref().ok_or("A push needs a reviewed branch")?,
+                    p.retry,
+                )?),
+                "workspace.pushReceipt" => serde_json::to_value(reviewed_push::receipt(
+                    &ws.path,
+                    p.operation_id
+                        .as_deref()
+                        .ok_or("An outcome needs an operation identifier")?,
+                )?),
+                _ => serde_json::to_value(reviewed_push::recover(
+                    &ws.path,
+                    p.operation_id
+                        .as_deref()
+                        .ok_or("Recovery needs an operation identifier")?,
+                )?),
+            };
+            if matches!(method, "workspace.pushReviewed" | "workspace.pushRecover") {
+                invalidate_workspace_status(Some(&p.id));
+            }
+            result.map_err(|e| e.to_string())
         }
 
         "workspace.push" => {
@@ -5060,6 +5112,46 @@ mod tests {
         assert_eq!(receipt["result"]["state"], "succeeded");
         let staged = tokenstat_workspace::git::status(&dir);
         assert!(staged.files.iter().any(|file| file.path == "unrelated.txt"));
+
+        let remote = tempfile::tempdir().unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .arg("init")
+                .arg("--bare")
+                .arg("-q")
+                .arg(remote.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        run(&["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        let push_review: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.pushReview",
+            &json!({"id": id}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(push_review["ok"], true, "{push_review}");
+        let push_request = json!({"id": id, "operationId": "fixture-reviewed-push-0001", "review": push_review["result"]}).to_string();
+        let pushed: Value =
+            serde_json::from_str(&call(&mut s, "workspace.pushReviewed", &push_request)).unwrap();
+        assert_eq!(pushed["result"]["state"], "succeeded", "{pushed}");
+        let push_receipt: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.pushReceipt",
+            &json!({"id": id, "operationId": "fixture-reviewed-push-0001"}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(
+            push_receipt["result"]["state"], "succeeded",
+            "{push_receipt}"
+        );
+        assert!(
+            tokenstat_workspace::git::status(&dir)
+                .files
+                .iter()
+                .any(|file| file.path == "unrelated.txt")
+        );
 
         // A failure comes back as a readable outcome, not as a broken envelope.
         let empty: Value = serde_json::from_str(&call(
