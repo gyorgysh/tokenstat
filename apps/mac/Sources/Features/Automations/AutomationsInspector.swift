@@ -14,6 +14,7 @@ import SwiftUI
 struct AutomationsInspector: View {
     @Bindable var model: AutomationsModel
     var folders: [WorkspaceFolder]
+    var onReviewWorkspace: ((String, TaskResultWorkspaceSurface) -> Void)? = nil
     var onClose: () -> Void
 
     @State private var editing = false
@@ -128,6 +129,17 @@ struct AutomationsInspector: View {
                     .foregroundStyle(.tertiary)
                 BrandToggleChip(title: "Follow", isOn: $followLive)
                     .help("Keep the transcript pinned to the newest line")
+                if let onReviewWorkspace, !run.workspaceID.isEmpty {
+                    TaskResultWorkspaceLinks(
+                        route: TaskResultRoute(
+                            runID: run.id, workspaceID: run.workspaceID, folders: folders, hostName: "This computer"
+                        ),
+                        onSelect: { surface in
+                            onReviewWorkspace(run.workspaceID, surface)
+                        },
+                        showsContext: false
+                    )
+                }
             }
             .padding(Theme.Space.m)
 

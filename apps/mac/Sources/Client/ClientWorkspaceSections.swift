@@ -442,17 +442,27 @@ struct ClientWorkspaceChangesView: View {
     /// visit.
     let folder: WorkspaceFolder
     let hostName: String
+    /// Inspector panes already name this surface. Compact pushes still need the title.
+    var showsNavigationTitle: Bool = true
 
     @State private var live: WorkspaceFolder?
     @State private var errorMessage: String?
     @State private var session: GitCommitSession
     @State private var showingComposer = false
 
-    init(peer: String, workspaceID: String, folder: WorkspaceFolder, hostName: String, session: GitCommitSession? = nil) {
+    init(
+        peer: String,
+        workspaceID: String,
+        folder: WorkspaceFolder,
+        hostName: String,
+        session: GitCommitSession? = nil,
+        showsNavigationTitle: Bool = true
+    ) {
         self.peer = peer
         self.workspaceID = workspaceID
         self.folder = folder
         self.hostName = hostName
+        self.showsNavigationTitle = showsNavigationTitle
         _session = State(initialValue: session ?? GitCommitSessions.session(target: GitCommitTarget(peer: peer, workspaceID: workspaceID)))
     }
 
@@ -509,8 +519,7 @@ struct ClientWorkspaceChangesView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle("Changes")
-        .navigationBarTitleDisplayMode(.inline)
+        .modifier(ClientOptionalNavigationTitle(showsNavigationTitle ? "Changes" : nil))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: Theme.Space.s) {
                 ThemeRule()
@@ -918,6 +927,22 @@ struct ClientCardList<Content: View>: View {
             } else {
                 await reload()
             }
+        }
+    }
+}
+
+/// Compact folder sections need a title. Inspector panes already name the surface.
+struct ClientOptionalNavigationTitle: ViewModifier {
+    var title: String?
+
+    init(_ title: String?) { self.title = title }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let title, !title.isEmpty {
+            content.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        } else {
+            content
         }
     }
 }

@@ -20,8 +20,10 @@ struct ClientWorkspaceHistoryView: View {
     let workspaceID: String
     let folder: WorkspaceFolder
     let hostName: String
+    /// Inspector panes already name this surface. Compact pushes still need the title.
+    var showsNavigationTitle: Bool = true
 
-    @Environment(AccountModel.self) private var account
+    @Environment(AccountModel.self) private var account: AccountModel?
     @State private var live: WorkspaceFolder?
     @State private var commits: [Commit] = []
     @State private var errorMessage: String?
@@ -44,8 +46,7 @@ struct ClientWorkspaceHistoryView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle("History")
-        .navigationBarTitleDisplayMode(.inline)
+        .modifier(ClientOptionalNavigationTitle(showsNavigationTitle ? "History" : nil))
         .refreshable {
             await ClientRefresh.pull("workspace-history-\(workspaceID)") { await load() }
         }
@@ -87,7 +88,7 @@ struct ClientWorkspaceHistoryView: View {
                 } label: {
                     ClientCommitRow(
                         commit: commit,
-                        avatar: commit.mine == true ? account.account?.avatar : nil
+                        avatar: commit.mine == true ? account?.account?.avatar : nil
                     )
                 }
                 .buttonStyle(.plain)

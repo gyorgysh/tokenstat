@@ -987,7 +987,10 @@ struct RootView: View {
             case .workspace(_, .automations), .global(.automations):
                 AutomationsInspector(
                     model: automations,
-                    folders: workspaces.folders
+                    folders: workspaces.folders,
+                    onReviewWorkspace: { workspaceID, surface in
+                        openTaskWorkspaceReview(workspaceID: workspaceID, surface: surface)
+                    }
                 ) { closeInspector() }
             case .workspace:
                 #if os(macOS)
@@ -1058,15 +1061,16 @@ struct RootView: View {
         TodoInspector(
             model: todo,
             folders: workspaces.folders,
-            onViewRun: { runID in
-                navigate(to: .global(.automations))
-                pendingRunID = runID
-                isInspectorPresented = true
+            onViewRun: { runID, workspaceID in
+                openTaskRun(runID: runID, workspaceID: workspaceID)
             },
             onRunInFront: { launch in
                 launchTaskInFront(launch)
             },
-            onOpenTerminal: { info in openTaskTerminal(info) }
+            onOpenTerminal: { info in openTaskTerminal(info) },
+            onReviewWorkspace: { workspaceID, surface in
+                openTaskWorkspaceReview(workspaceID: workspaceID, surface: surface)
+            }
         ) { closeInspector() }
     }
 
@@ -2472,10 +2476,8 @@ struct RootView: View {
             TodoView(
                 model: todo,
                 folders: workspaces.folders,
-                onViewRun: { runID in
-                    navigate(to: .global(.automations))
-                    pendingRunID = runID
-                    isInspectorPresented = true
+                onViewRun: { runID, workspaceID in
+                    openTaskRun(runID: runID, workspaceID: workspaceID)
                 },
                 onRunInFront: { launch in
                     launchTaskInFront(launch)
@@ -2594,6 +2596,40 @@ struct RootView: View {
             if let runID, let run = workflows.runs.first(where: { $0.id == runID }) {
                 workflows.selectRun(run)
             }
+            isInspectorPresented = true
+        }
+    }
+
+    /// Open the exact task run. A known folder keeps the run on that folder's
+    /// automations board instead of dumping it into a generic chat or the
+    /// machine-wide list.
+    private func openTaskRun(runID: String, workspaceID: String) {
+        let route = TaskResultRoute(
+            runID: runID, workspaceID: workspaceID, folders: workspaces.folders, hostName: "This computer"
+        )
+        switch route.runPlacement {
+        case let .folderAutomations(id):
+            navigate(to: .workspace(id: id, section: .automations))
+        case .allAutomations:
+            navigate(to: .global(.automations))
+        }
+        pendingRunID = runID
+        isInspectorPresented = true
+    }
+
+    /// Review the folder that produced a task result. History is an inspector
+    /// tab on Mac, so both doors land on Changes with the matching tab. The
+    /// automations selection is left alone, so returning still shows this run.
+    private func openTaskWorkspaceReview(workspaceID: String, surface: TaskResultWorkspaceSurface) {
+        let route = TaskResultRoute(
+            runID: pendingRunID ?? automations.selectedRun?.id ?? "",
+            workspaceID: workspaceID,
+            folders: workspaces.folders,
+            hostName: "This computer"
+        )
+        guard route.canReviewWorkspace else { return }
+        openSection(.changes, in: workspaceID) {
+            workspaces.inspectorTab = surface == .history ? .history : .changes
             isInspectorPresented = true
         }
     }

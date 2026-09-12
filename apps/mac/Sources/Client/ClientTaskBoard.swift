@@ -143,7 +143,7 @@ struct ClientTaskBoard: View {
             )
         }
         .fullScreenCover(item: $presentedRun) { run in
-            ClientTaskRunDestination(
+            ClientTaskResultView(
                 peer: peer, hostName: hostName, folderName: run.folderName,
                 workspaceID: run.workspaceID, runID: run.runID
             )
@@ -324,7 +324,9 @@ struct ClientTaskBoard: View {
         session.editingTask = nil
         Task { @MainActor in
             await Task.yield()
-            let folderName = session.folders.first(where: { $0.id == workspaceID })?.name ?? "Unavailable folder"
+            let folderName = workspaceID.isEmpty
+                ? "Uncategorized"
+                : session.folders.first(where: { $0.id == workspaceID })?.name ?? "Unavailable folder"
             presentedRun = ClientTaskRunPresentation(runID: runID, workspaceID: workspaceID, folderName: folderName)
         }
     }
@@ -349,37 +351,5 @@ private struct ClientTaskRunPresentation: Identifiable {
     let workspaceID: String
     let folderName: String
     var id: String { runID }
-}
-
-private struct ClientTaskRunDestination: View {
-    let peer: String
-    let hostName: String
-    let folderName: String
-    let workspaceID: String
-    let runID: String
-    @State private var session: ClientAutomationSession
-    @Environment(\.dismiss) private var dismiss
-
-    init(peer: String, hostName: String, folderName: String, workspaceID: String, runID: String) {
-        self.peer = peer
-        self.hostName = hostName
-        self.folderName = folderName
-        self.workspaceID = workspaceID
-        self.runID = runID
-        _session = State(initialValue: ClientAutomationSession(
-            peer: peer, workspaceID: workspaceID, hostName: hostName, folderName: folderName, runID: runID
-        ))
-    }
-
-    var body: some View {
-        NavigationStack {
-            ClientAutomationRunView(session: session, runID: runID)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done", .done) { dismiss() }
-                    }
-                }
-        }
-    }
 }
 #endif

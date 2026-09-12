@@ -170,6 +170,12 @@ ALLOWED = [
     # The whole task card opens its editor; a trailing chevron marks navigation.
     ("Client/ClientTaskBoard.swift", "Button { session.editingTask = card } label:"),
     ("Client/ClientTaskBoard.swift", "Button { navigation.presentedTaskBoard = PresentedTaskBoard"),
+    # Whole-surface rows into a folder's Changes and History from a task result.
+    # The glyph is the section mark already drawn in the row.
+    ("Features/Todo/TaskResultWorkspaceLinks.swift", "onSelect(surface)"),
+    # Trailing inspector tabs on a wide task result. The selected tab is the
+    # fill, like the Mac workspace inspector, not a second action glyph.
+    ("Client/ClientTaskResultView.swift", "inspectorSurface = surface"),
     ("Client/ClientFolderSplit.swift", "section = item"),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectGraph"),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectRun"),

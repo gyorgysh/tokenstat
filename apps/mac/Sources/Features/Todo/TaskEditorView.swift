@@ -10,13 +10,15 @@ struct TaskEditorDestination: View {
     var onClose: (() -> Void)? = nil
     var onViewRun: ((String, String) -> Void)? = nil
     var onOpenTerminal: ((PtySessionInfo) -> Void)? = nil
+    var onReviewWorkspace: ((String, TaskResultWorkspaceSurface) -> Void)? = nil
     @State private var session: TaskEditorSession?
 
     var body: some View {
         Group {
             if let session, session.target == target, session.saved.baseline.id == card.id {
                 TaskEditorView(session: session, hostName: hostName, onSaved: onSaved, onClose: onClose,
-                               onViewRun: onViewRun, onOpenTerminal: onOpenTerminal)
+                               onViewRun: onViewRun, onOpenTerminal: onOpenTerminal,
+                               onReviewWorkspace: onReviewWorkspace)
             }
             else { ProgressView("Opening task").font(Theme.callout) }
         }
@@ -102,6 +104,7 @@ struct TaskEditorView: View {
     var onClose: (() -> Void)? = nil
     var onViewRun: ((String, String) -> Void)? = nil
     var onOpenTerminal: ((PtySessionInfo) -> Void)? = nil
+    var onReviewWorkspace: ((String, TaskResultWorkspaceSurface) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -214,26 +217,44 @@ struct TaskEditorView: View {
 
     @ViewBuilder private var runSummary: some View {
         if let run = session.saved.baseline.delegate {
-            HStack(spacing: Theme.Space.s) {
-                Image(systemName: run.isRunning ? "waveform.path" : run.status == "ok" ? "checkmark.circle.fill" : "clock.arrow.circlepath")
-                    .foregroundStyle(runTint(run))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(run.isRunning ? run.label : "Last run · \(run.label)")
-                        .font(Theme.callout.weight(.semibold))
-                    if let error = run.error, !error.isEmpty {
-                        Text(error).font(Theme.caption).foregroundStyle(Theme.danger).lineLimit(3)
-                    } else {
-                        Text(run.isRunning ? "This run continues on the connected computer." : "The result remains linked to this task.")
-                            .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HStack(spacing: Theme.Space.s) {
+                    Image(systemName: run.isRunning ? "waveform.path" : run.status == "ok" ? "checkmark.circle.fill" : "clock.arrow.circlepath")
+                        .foregroundStyle(runTint(run))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(run.isRunning ? run.label : "Last run · \(run.label)")
+                            .font(Theme.callout.weight(.semibold))
+                        if let error = run.error, !error.isEmpty {
+                            Text(error).font(Theme.caption).foregroundStyle(Theme.danger).lineLimit(3)
+                        } else {
+                            Text(run.isRunning
+                                 ? "This run continues on the connected computer."
+                                 : "The result remains linked to this task.")
+                                .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+                        }
                     }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                .padding(Theme.Space.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.accentSoft.opacity(0.58), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(runTint(run).opacity(0.35)))
+                if let onReviewWorkspace {
+                    TaskResultWorkspaceLinks(
+                        route: TaskResultRoute(
+                            runID: run.runId,
+                            workspaceID: session.saved.baseline.workspaceID,
+                            folders: session.folders,
+                            hostName: hostName
+                        ),
+                        onSelect: { surface in
+                            onReviewWorkspace(session.saved.baseline.workspaceID, surface)
+                        },
+                        showsContext: false
+                    )
+                }
             }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.accentSoft.opacity(0.58), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(runTint(run).opacity(0.35)))
         }
     }
 

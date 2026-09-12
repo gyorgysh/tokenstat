@@ -11,7 +11,7 @@ struct TodoView: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
     /// Open a delegated run's transcript on the Automations screen.
-    var onViewRun: ((String) -> Void)? = nil
+    var onViewRun: ((String, String) -> Void)? = nil
     /// Spawn an interactive terminal for this card. Not an automation.
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)? = nil
 
@@ -451,7 +451,7 @@ private struct CardView: View {
     var isSelected: Bool = false
     var onSelect: () -> Void = {}
     /// Opens the run's transcript on the Automations screen.
-    var onViewRun: ((String) -> Void)?
+    var onViewRun: ((String, String) -> Void)?
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)?
     var onDropBefore: ((TodoCard) -> Void)?
     var onTargeted: ((Bool) -> Void)?
@@ -674,7 +674,7 @@ private struct CardView: View {
             // it, so a delegated card is never a dead end that only says
             // "Done" with nowhere to look.
             Button("View result", .preview) {
-                onViewRun?(delegate.runId)
+                onViewRun?(delegate.runId, card.workspaceID)
             }
             .buttonStyle(.borderless)
             .controlSize(.mini)
@@ -779,7 +779,7 @@ struct DelegateSheet: View {
     @Bindable var model: TodoModel
     var card: TodoCard
     var folders: [WorkspaceFolder]
-    var onViewRun: ((String) -> Void)? = nil
+    var onViewRun: ((String, String) -> Void)? = nil
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
@@ -947,7 +947,7 @@ struct DelegateSheet: View {
         working = false
         if model.errorMessage == nil {
             dismiss()
-            if let runID { onViewRun?(runID) }
+            if let runID { onViewRun?(runID, latest.workspaceID) }
         }
     }
 }

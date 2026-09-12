@@ -7,9 +7,10 @@ import SwiftUI
 struct TodoInspector: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
-    var onViewRun: ((String) -> Void)?
+    var onViewRun: ((String, String) -> Void)?
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)?
     var onOpenTerminal: ((PtySessionInfo) -> Void)?
+    var onReviewWorkspace: ((String, TaskResultWorkspaceSurface) -> Void)? = nil
     var onClose: () -> Void
     @State private var runCard: TodoCard?
 
@@ -18,7 +19,8 @@ struct TodoInspector: View {
             if let card = model.selectedCard, !card.isNote {
                 TaskEditorDestination(target: TaskEditorTarget(peer: nil), card: card, hostName: "This computer",
                                       onSaved: { await model.load() }, onClose: onClose,
-                                      onViewRun: { runID, _ in onViewRun?(runID) }, onOpenTerminal: onOpenTerminal)
+                                      onViewRun: onViewRun, onOpenTerminal: onOpenTerminal,
+                                      onReviewWorkspace: onReviewWorkspace)
                     .id(card.id)
                 ThemeRule()
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -43,7 +45,7 @@ struct TodoInspector: View {
                             if delegate.isRunning {
                                 Button("Stop", .stop) { Task { await model.stop(card) } }.buttonStyle(SecondaryButtonStyle())
                             }
-                            Button("View run", .preview) { onViewRun?(delegate.runId) }.buttonStyle(SecondaryButtonStyle())
+                            Button("View run", .preview) { onViewRun?(delegate.runId, card.workspaceID) }.buttonStyle(SecondaryButtonStyle())
                         }
                     }
                 }.padding(Theme.Space.m)
