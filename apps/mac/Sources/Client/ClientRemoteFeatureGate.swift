@@ -27,6 +27,7 @@ enum RemoteHostFeature {
     case taskEditing
     case taskDeletion
     case taskCreation
+    case taskExecution
 
     var title: String {
         switch self {
@@ -47,6 +48,7 @@ enum RemoteHostFeature {
         case .taskEditing: "Editing tasks"
         case .taskDeletion: "Deleting tasks"
         case .taskCreation: "Creating tasks"
+        case .taskExecution: "Running tasks"
         }
     }
 
@@ -70,6 +72,7 @@ enum RemoteHostFeature {
     /// Version 16 adds reviewed current-branch Push and outcome recovery.
     /// Version 17 adds revision-checked task editing.
     /// Version 18 adds checked task deletion. Version 19 adds create-once tasks.
+    /// Version 20 adds checked task runs, exact-run stops and launch receipts.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
@@ -92,6 +95,7 @@ enum RemoteHostFeature {
         case .taskEditing: 17
         case .taskDeletion: 18
         case .taskCreation: 19
+        case .taskExecution: 20
         }
     }
 
@@ -114,6 +118,7 @@ enum RemoteHostFeature {
         case .taskEditing: "pencil"
         case .taskDeletion: "trash"
         case .taskCreation: "plus"
+        case .taskExecution: "play.fill"
         }
     }
 

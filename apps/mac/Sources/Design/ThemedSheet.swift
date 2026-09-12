@@ -17,6 +17,7 @@ struct ThemedSheet<Content: View, Actions: View>: View {
     let subtitle: String
     let icon: ActionIcon?
     let scrolls: Bool
+    let embedded: Bool
     let onClose: () -> Void
     @ViewBuilder let content: () -> Content
     @ViewBuilder let actions: () -> Actions
@@ -26,6 +27,7 @@ struct ThemedSheet<Content: View, Actions: View>: View {
         subtitle: String,
         icon: ActionIcon? = nil,
         scrolls: Bool = false,
+        embedded: Bool = false,
         onClose: @escaping () -> Void,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder actions: @escaping () -> Actions
@@ -34,6 +36,7 @@ struct ThemedSheet<Content: View, Actions: View>: View {
         self.subtitle = subtitle
         self.icon = icon
         self.scrolls = scrolls
+        self.embedded = embedded
         self.onClose = onClose
         self.content = content
         self.actions = actions
@@ -41,17 +44,29 @@ struct ThemedSheet<Content: View, Actions: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ModalHeader(
-                title: title,
-                subtitle: subtitle,
-                icon: icon,
-                onClose: onClose
-            )
-            ThemeRule()
+            if embedded {
+                InspectorChromeBar(onClose: onClose) {
+                    InspectorTitle(title: title, symbol: "checklist")
+                    Spacer(minLength: 0)
+                }
+            } else {
+                ModalHeader(title: title, subtitle: subtitle, icon: icon, onClose: onClose)
+                ThemeRule()
+            }
             bodyContent
             if showsFooter {
                 ThemeRule()
-                ModalFooter(actions: actions)
+                if embedded {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Theme.Space.s) { actions() }
+                        VStack(alignment: .leading, spacing: Theme.Space.s) { actions() }
+                    }
+                    .padding(Theme.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.sidebar)
+                } else {
+                    ModalFooter(actions: actions)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -63,7 +78,7 @@ struct ThemedSheet<Content: View, Actions: View>: View {
         if scrolls {
             ScrollView {
                 content()
-                    .padding(Theme.Modal.bodyPadding)
+                    .padding(embedded ? Theme.Space.m : Theme.Modal.bodyPadding)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         } else {
@@ -73,7 +88,7 @@ struct ThemedSheet<Content: View, Actions: View>: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 0)
             }
-            .padding(Theme.Modal.bodyPadding)
+            .padding(embedded ? Theme.Space.m : Theme.Modal.bodyPadding)
         }
     }
 

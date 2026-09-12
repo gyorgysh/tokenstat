@@ -209,7 +209,7 @@ struct ClientAutomationActions: View {
     }
 
     private var confirmTitle: String {
-        let name = session.selectedJob?.name ?? "this job"
+        let name = selectedName
         switch pending {
         case .run: return "Run \(name)?"
         case .stop: return "Stop \(name)?"
@@ -218,7 +218,7 @@ struct ClientAutomationActions: View {
     }
 
     private var confirmMessage: String {
-        let name = session.selectedJob?.name ?? "this job"
+        let name = selectedName
         switch pending {
         case .run:
             return ClientJobCopy.run(name, folder: session.folderName, host: session.hostName)
@@ -227,6 +227,11 @@ struct ClientAutomationActions: View {
         case nil:
             return ""
         }
+    }
+
+    private var selectedName: String {
+        if pinnedRunID != nil { return session.selectedRun?.name ?? "this run" }
+        return session.selectedJob?.name ?? session.selectedRun?.name ?? "this job"
     }
 }
 

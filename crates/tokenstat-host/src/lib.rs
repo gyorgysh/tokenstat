@@ -214,4 +214,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 17 adds revision-checked task editing.
 /// Version 18 adds revision-checked task deletion with active-run protection.
 /// Version 19 adds create-once tasks and receipts retained after deletion.
-pub const PROTOCOL_VERSION: &str = "19";
+/// Version 20 adds revision-checked task runs, exact-run stops and launch receipts.
+pub const PROTOCOL_VERSION: &str = "20";

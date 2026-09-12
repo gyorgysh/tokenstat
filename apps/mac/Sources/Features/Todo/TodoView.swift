@@ -791,6 +791,7 @@ struct DelegateSheet: View {
     @State private var budgetUnit = "minutes"
     @State private var noTimeLimit = false
     @State private var working = false
+    @State private var chatTask: TodoCard?
 
     var body: some View {
         ThemedSheet(
@@ -861,10 +862,13 @@ struct DelegateSheet: View {
             Spacer()
             TaskRunBar(canRun: canRun, running: working) { placement in
                 working = true
-                Task { await run(inFront: placement == .front) }
+                Task { await run(inFront: placement == .foreground, asChat: placement == .chat) }
             }
         }
         .interactiveDismissDisabled(working)
+        .sheet(item: $chatTask) { card in
+            TaskChatLaunchView(card: card, peer: nil)
+        }
         .modalFrame(width: 540, height: 520)
         .onAppear {
             backendID = card.backend
@@ -904,7 +908,7 @@ struct DelegateSheet: View {
         return draft
     }
 
-    private func run(inFront: Bool) async {
+    private func run(inFront: Bool, asChat: Bool = false) async {
         guard runDraft.validation == nil, let budget = runDraft.budgetSeconds else {
             working = false
             return
@@ -918,6 +922,11 @@ struct DelegateSheet: View {
             budgetSeconds: budget
         )
         guard saved, let latest = model.cards.first(where: { $0.id == card.id }) else {
+            working = false
+            return
+        }
+        if asChat {
+            chatTask = latest
             working = false
             return
         }

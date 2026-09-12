@@ -794,8 +794,8 @@ pub fn chat_agent_command(
 }
 
 /// Argv for an interactive TTY. Same backends as [`agent_command`], without
-/// print / stream-json flags. The front end `pty.spawn`s this so the person
-/// can watch the agent. Not an automation run: no transcript, no budget.
+/// print or stream-json flags. Interactive task runs keep a run record and
+/// transcript, but no time budget, while the person can watch the host PTY.
 pub fn interactive_agent_command(
     backend: &str,
     prompt: &str,
@@ -1110,6 +1110,9 @@ pub struct RunRecord {
     pub transcript_path: String,
     /// The live pty, kept so a run can be stopped before its budget.
     pub pty_id: Option<String>,
+    /// Interactive terminal output, rather than the backend's headless format.
+    #[serde(default)]
+    pub interactive: bool,
     /// The workflow run this one is a step of, when it is one.
     ///
     /// A workflow node starts an ordinary automation run, so every step
@@ -1152,6 +1155,7 @@ impl Default for QueueConfig {
 
 /// A job waiting for a free slot.
 struct Pending {
+    interactive: bool,
     job: Automation,
     run_id: String,
     transcript_path: PathBuf,
@@ -1179,6 +1183,7 @@ pub struct Store {
     runs_dir: PathBuf,
     jobs: Mutex<Vec<Automation>>,
     runs: Mutex<Vec<RunRecord>>,
+    runs_error: Mutex<Option<String>>,
     queue: Mutex<QueueConfig>,
     waiting: Mutex<VecDeque<Pending>>,
     /// Slots currently in use. Separate from the runs list so a count
@@ -1194,16 +1199,36 @@ pub fn shared() -> Arc<Store> {
     Arc::clone(STORE.get_or_init(|| Arc::new(Store::load())))
 }
 
+fn load_runs_file(path: &Path) -> (Vec<RunRecord>, Option<String>) {
+    let loaded = match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice::<RunsFile>(&bytes).map_err(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(RunsFile::default()),
+        Err(error) => Err(error.to_string()),
+    };
+    match loaded {
+        Ok(file) => (file.runs, None),
+        Err(error) => (
+            Vec::new(),
+            Some(format!(
+                "The saved run history could not be read. Restore access and restart the host before running work: {error}"
+            )),
+        ),
+    }
+}
+
 impl Store {
     #[cfg(test)]
     fn at(path: PathBuf) -> Store {
         let runs_dir = path.parent().unwrap_or(&path).join("runs");
+        let runs_path = runs_dir.join("runs.json");
+        let (runs, runs_error) = load_runs_file(&runs_path);
         Store {
             path,
-            runs_path: runs_dir.join("runs.json"),
+            runs_path,
             runs_dir,
             jobs: Mutex::new(Vec::new()),
-            runs: Mutex::new(Vec::new()),
+            runs: Mutex::new(runs),
+            runs_error: Mutex::new(runs_error),
             queue: Mutex::new(QueueConfig::default()),
             waiting: Mutex::new(VecDeque::new()),
             active: Mutex::new(0),
@@ -1222,14 +1247,10 @@ impl Store {
         let queue = file.queue;
         let runs_dir = dir.join("runs");
         let runs_path = runs_dir.join("runs.json");
-        let mut runs = std::fs::read_to_string(&runs_path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<RunsFile>(&text).ok())
-            .map(|file| file.runs)
-            .unwrap_or_default();
+        let (mut runs, runs_error) = load_runs_file(&runs_path);
         let mut recovered = false;
         for run in &mut runs {
-            if run.status == "running" || run.status == "queued" {
+            if matches!(run.status.as_str(), "starting" | "running" | "queued") {
                 // The pty belongs to the old daemon process. A queued run
                 // lost its pending payload. Do not resurrect either.
                 run.status = "interrupted".into();
@@ -1244,6 +1265,7 @@ impl Store {
             runs_dir,
             jobs: Mutex::new(jobs),
             runs: Mutex::new(runs),
+            runs_error: Mutex::new(runs_error),
             queue: Mutex::new(queue),
             waiting: Mutex::new(VecDeque::new()),
             active: Mutex::new(0),
@@ -1299,15 +1321,51 @@ impl Store {
             .insert(run_id.to_string());
     }
 
-    fn save_runs(&self) -> Result<(), String> {
-        let runs = self
-            .runs
+    pub(crate) fn ensure_runs_available(&self) -> Result<(), String> {
+        self.runs_error
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        std::fs::create_dir_all(&self.runs_dir).map_err(|e| e.to_string())?;
-        let body = serde_json::to_string_pretty(&RunsFile { runs }).map_err(|e| e.to_string())?;
-        write_atomic(&self.runs_path, &body)
+            .as_ref()
+            .map_or(Ok(()), |error| Err(error.clone()))
+    }
+
+    fn save_runs(&self) -> Result<(), String> {
+        let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        self.write_runs(&runs)
+    }
+
+    /// The caller holds the runs lock through the atomic write, so an older
+    /// snapshot cannot overwrite a newer launch or completion.
+    fn write_runs(&self, runs: &[RunRecord]) -> Result<(), String> {
+        self.ensure_runs_available()?;
+        let result = (|| -> Result<(), String> {
+            std::fs::create_dir_all(&self.runs_dir).map_err(|e| e.to_string())?;
+            let body = serde_json::to_vec_pretty(&RunsFile {
+                runs: runs.to_vec(),
+            })
+            .map_err(|e| e.to_string())?;
+            let mut temp =
+                tempfile::NamedTempFile::new_in(&self.runs_dir).map_err(|e| e.to_string())?;
+            temp.write_all(&body).map_err(|e| e.to_string())?;
+            temp.as_file().sync_all().map_err(|e| e.to_string())?;
+            temp.persist(&self.runs_path).map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            std::fs::File::open(&self.runs_dir)
+                .and_then(|dir| dir.sync_all())
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let message = format!(
+                "The run history could not be saved reliably. Restart the host before starting more work: {error}"
+            );
+            *self
+                .runs_error
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(message.clone());
+            return Err(message);
+        }
+        Ok(())
     }
 
     // MARK: jobs
@@ -1488,6 +1546,7 @@ impl Store {
         let run_id = mint_run_id();
         let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
         let pending = Pending {
+            interactive: false,
             job: snapshot.clone(),
             run_id: run_id.clone(),
             transcript_path,
@@ -1512,22 +1571,34 @@ impl Store {
     }
 
     fn push_run(&self, run: RunRecord) -> Result<(), String> {
-        let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
-        if runs.iter().any(|existing| existing.id == run.id) {
+        let mut live = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        if live.iter().any(|existing| existing.id == run.id) {
             return Err(format!("a run with id {} already exists", run.id));
         }
+        let mut runs = live.clone();
         runs.insert(0, run);
-        let evicted: Vec<RunRecord> = if runs.len() > RUNS_KEPT {
-            runs.drain(RUNS_KEPT..).collect()
-        } else {
-            Vec::new()
-        };
+        let mut completed = 0;
+        let mut evicted = Vec::new();
+        runs.retain(|run| {
+            if matches!(run.status.as_str(), "starting" | "running" | "queued") {
+                return true;
+            }
+            completed += 1;
+            if completed <= RUNS_KEPT {
+                true
+            } else {
+                evicted.push(run.clone());
+                false
+            }
+        });
+        self.write_runs(&runs)?;
         let kept: HashSet<String> = runs.iter().map(|r| r.transcript_path.clone()).collect();
-        drop(runs);
+        *live = runs;
+        drop(live);
         for old in &evicted {
             self.remove_run_files(old, &kept);
         }
-        self.save_runs()
+        Ok(())
     }
 
     /// Delete a run's raw and readable transcripts once its record is
@@ -1573,14 +1644,16 @@ impl Store {
 
     /// The drain thread calls this when a run's process has exited.
     pub fn finish_run(&self, id: &str, exit_code: Option<i32>, status: &str) {
-        let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut live = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut runs = live.clone();
         if let Some(run) = runs.iter_mut().find(|run| run.id == id) {
             run.exit_code = exit_code;
             run.status = status.to_string();
             run.ended_at_ms = Some(now_ms());
         }
-        drop(runs);
-        let _ = self.save_runs();
+        if self.write_runs(&runs).is_ok() {
+            *live = runs;
+        }
     }
 
     /// Bytes of a run's transcript after `offset`.
@@ -1595,7 +1668,11 @@ impl Store {
             .find(|run| run.id == run_id)
             .ok_or("no run with that id")?;
         let raw = PathBuf::from(&run.transcript_path);
-        let backend = run.backend.clone();
+        let backend = if run.interactive {
+            "sh".to_string()
+        } else {
+            run.backend.clone()
+        };
         let running = run.status == "running";
         drop(runs);
         if !raw.is_absolute() {
@@ -1655,73 +1732,101 @@ impl Store {
     /// delegate path. Returns the run so the caller can link it to its card.
     /// Starts now when a slot is free, otherwise waits in the queue.
     pub fn run_adhoc(self: &Arc<Store>, job: Automation) -> Result<RunRecord, String> {
-        let workspace = crate::workspaces::folder(&job.workspace_id)?;
-        // Fail before we take a slot: a bad backend must not occupy the queue.
-        let _argv = agent_command(
-            &job.backend,
-            &job.prompt,
-            job.model.as_deref(),
-            job.effort.as_deref(),
-            job.budget_seconds,
-        )?;
+        self.run_task(job, mint_run_id(), false)
+    }
 
-        let run_id = mint_run_id();
+    /// A task reserves its durable run ID before calling this. Interactive
+    /// work opens immediately, as desktop terminals do, without a queue budget.
+    pub(crate) fn run_task(
+        self: &Arc<Store>,
+        job: Automation,
+        run_id: String,
+        interactive: bool,
+    ) -> Result<RunRecord, String> {
+        self.ensure_runs_available()?;
+        let workspace = crate::workspaces::folder(&job.workspace_id)?;
+        if interactive {
+            interactive_agent_command(
+                &job.backend,
+                &job.prompt,
+                job.model.as_deref(),
+                job.effort.as_deref(),
+            )?;
+        } else {
+            agent_command(
+                &job.backend,
+                &job.prompt,
+                job.model.as_deref(),
+                job.effort.as_deref(),
+                job.budget_seconds,
+            )?;
+        }
         let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
         let pending = Pending {
+            interactive,
             job: job.clone(),
             run_id: run_id.clone(),
             transcript_path: transcript_path.clone(),
             parent_run_id: None,
         };
-
-        if self.try_take_slot() {
-            match self.spawn_pending(pending, workspace.id.clone()) {
-                Ok((run, budget)) => {
-                    match self.persist_and_drain(run, budget, |r| self.push_run(r), true) {
-                        Ok(out) => Ok(out),
-                        Err(e) => {
-                            // The drain never started, so the slot is ours to
-                            // return; otherwise a failed save would eat it.
-                            self.release_slot();
-                            Err(e)
-                        }
-                    }
-                }
-                Err(e) => {
-                    self.release_slot();
-                    Err(e)
-                }
+        let owns_slot = !interactive && self.try_take_slot();
+        let queued = !interactive && !owns_slot;
+        let run = RunRecord {
+            id: run_id.clone(),
+            job_id: job.id,
+            name: job.name,
+            backend: job.backend,
+            workspace_id: workspace.id.clone(),
+            started_at_ms: now_ms(),
+            ended_at_ms: None,
+            exit_code: None,
+            status: if queued { "queued" } else { "starting" }.into(),
+            transcript_path: transcript_path.display().to_string(),
+            pty_id: None,
+            parent_run_id: None,
+            interactive,
+        };
+        // Nothing can execute before this record is on disk. A repeated ID is
+        // refused here even if a caller accidentally tries the same launch twice.
+        if let Err(error) = self.push_run(run.clone()) {
+            if owns_slot {
+                self.release_slot();
             }
-        } else {
-            let run = RunRecord {
-                id: run_id,
-                job_id: job.id.clone(),
-                name: job.name,
-                backend: job.backend,
-                workspace_id: workspace.id,
-                started_at_ms: now_ms(),
-                ended_at_ms: None,
-                exit_code: None,
-                status: "queued".into(),
-                transcript_path: transcript_path.display().to_string(),
-                pty_id: None,
-                parent_run_id: pending.parent_run_id.clone(),
-            };
+            return Err(error);
+        }
+        if queued {
             self.waiting
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push_back(pending);
-            if let Err(e) = self.push_run(run.clone()) {
-                // The queued record was never persisted, so drop the pending
-                // entry rather than let the pump start an orphan.
-                self.waiting
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .retain(|p| p.run_id != run.id);
-                return Err(e);
-            }
-            Ok(run)
+            // A slot may have opened between the initial check and enqueueing.
+            self.pump();
+            return Ok(self.get_run(&run_id).unwrap_or(run));
         }
+        let started = self
+            .spawn_pending(pending, workspace.id)
+            .and_then(|(run, budget)| {
+                self.persist_and_drain(run, budget, |r| self.update_run(r), owns_slot)
+            });
+        if let Err(error) = &started {
+            if owns_slot {
+                self.release_slot();
+            }
+            self.finish_run(
+                &run_id,
+                None,
+                if self.is_killed(&run_id) {
+                    "stopped"
+                } else {
+                    "error"
+                },
+            );
+            let _ = std::fs::write(
+                transcript::readable_path(&transcript_path),
+                format!("Failed to start: {error}\n"),
+            );
+        }
+        started
     }
 
     pub(crate) fn try_take_slot(&self) -> bool {
@@ -1756,24 +1861,34 @@ impl Store {
         pending: Pending,
         workspace_id: String,
     ) -> Result<(RunRecord, u64), String> {
+        self.ensure_runs_available()?;
         if self.is_killed(&pending.run_id) {
             return Err("stopped".into());
         }
         let workspace = crate::workspaces::folder(&pending.job.workspace_id)?;
-        let argv = agent_command(
-            &pending.job.backend,
-            &pending.job.prompt,
-            pending.job.model.as_deref(),
-            pending.job.effort.as_deref(),
-            pending.job.budget_seconds,
-        )?;
+        let argv = if pending.interactive {
+            interactive_agent_command(
+                &pending.job.backend,
+                &pending.job.prompt,
+                pending.job.model.as_deref(),
+                pending.job.effort.as_deref(),
+            )?
+        } else {
+            agent_command(
+                &pending.job.backend,
+                &pending.job.prompt,
+                pending.job.model.as_deref(),
+                pending.job.effort.as_deref(),
+                pending.job.budget_seconds,
+            )?
+        };
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
                 command: crate::launcher::spawn_command(&argv[0]),
                 args: argv[1..].to_vec(),
                 cwd: workspace.path.clone(),
                 workspace_id: Some(workspace.id.clone()),
-                hidden: true,
+                hidden: !pending.interactive,
                 rows: 24,
                 cols: 120,
                 no_color: false,
@@ -1783,6 +1898,7 @@ impl Store {
             .map_err(|e| e.to_string())?;
 
         let run = RunRecord {
+            interactive: pending.interactive,
             id: pending.run_id.clone(),
             job_id: pending.job.id.clone(),
             name: pending.job.name.clone(),
@@ -1802,7 +1918,14 @@ impl Store {
             let _ = tokenstat_pty::manager().close(&info.id);
             return Err("stopped".into());
         }
-        Ok((run, pending.job.budget_seconds))
+        Ok((
+            run,
+            if pending.interactive {
+                0
+            } else {
+                pending.job.budget_seconds
+            },
+        ))
     }
 
     /// Write the row, then start drain. A drain that starts before the row
@@ -1832,7 +1955,11 @@ impl Store {
         };
         let transcript_path = PathBuf::from(&run.transcript_path);
         let run_id = run.id.clone();
-        let backend = run.backend.clone();
+        let backend = if run.interactive {
+            "sh".to_string()
+        } else {
+            run.backend.clone()
+        };
         let me = Arc::clone(self);
         std::thread::spawn(move || {
             me.drain(
@@ -1899,20 +2026,22 @@ impl Store {
     }
 
     fn update_run(&self, run: RunRecord) -> Result<(), String> {
-        let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut live = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut runs = live.clone();
         if let Some(existing) = runs.iter_mut().find(|r| r.id == run.id) {
-            // Drain may have already recorded a terminal status. Do not put
-            // the row back to running.
-            if matches!(existing.status.as_str(), "ok" | "error" | "stopped") {
-                drop(runs);
+            if matches!(
+                existing.status.as_str(),
+                "ok" | "error" | "stopped" | "interrupted"
+            ) {
                 return Ok(());
             }
             *existing = run;
         } else {
             runs.insert(0, run);
         }
-        drop(runs);
-        self.save_runs()
+        self.write_runs(&runs)?;
+        *live = runs;
+        Ok(())
     }
 
     /// Run one stored job immediately, or one due job from the scheduler.
@@ -1974,7 +2103,7 @@ impl Store {
             }
             return Ok(());
         }
-        if status == "queued" {
+        if matches!(status.as_str(), "starting" | "queued") {
             // pump owns it now. spawn_pending / pump will see the kill mark.
             return Ok(());
         }
@@ -2175,6 +2304,29 @@ fn validate(job: &Automation) -> Result<(), String> {
     // 0 is a real answer: no time limit. The queue settings own the default.
     // backend and prompt are checked where the command is built, so both errors
     // are the ones a user sees when they try to run it.
+    Ok(())
+}
+
+/// Validate the complete task launch before its board claim is persisted.
+pub(crate) fn validate_task_run(job: &Automation, interactive: bool) -> Result<(), String> {
+    validate(job)?;
+    let _workspace = crate::workspaces::folder(&job.workspace_id)?;
+    if interactive {
+        interactive_agent_command(
+            &job.backend,
+            &job.prompt,
+            job.model.as_deref(),
+            job.effort.as_deref(),
+        )?;
+    } else {
+        agent_command(
+            &job.backend,
+            &job.prompt,
+            job.model.as_deref(),
+            job.effort.as_deref(),
+            job.budget_seconds,
+        )?;
+    }
     Ok(())
 }
 
@@ -3426,6 +3578,7 @@ mod tests {
         let run_id = "run-test";
         let transcript_path = dir.join("runs").join("run-test.txt");
         let run = RunRecord {
+            interactive: false,
             id: run_id.into(),
             job_id: "j".into(),
             name: "echo".into(),
@@ -3490,6 +3643,7 @@ mod tests {
         let store = Store::at(dir.join("jobs.json"));
         store
             .push_run(RunRecord {
+                interactive: false,
                 id: "run-persist".into(),
                 job_id: "j".into(),
                 name: "persist".into(),
@@ -3512,6 +3666,70 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_run_history_is_never_replaced_by_a_new_launch() {
+        let dir = temp_dir("unreadable-runs");
+        std::fs::create_dir_all(dir.join("runs")).unwrap();
+        let runs_path = dir.join("runs").join("runs.json");
+        std::fs::write(&runs_path, b"not valid json").unwrap();
+        let store = Store::at(dir.join("jobs.json"));
+        let error = store
+            .push_run(RunRecord {
+                interactive: false,
+                id: "must-not-start".into(),
+                job_id: "j".into(),
+                name: "protected".into(),
+                backend: "sh".into(),
+                workspace_id: "w".into(),
+                started_at_ms: now_ms(),
+                ended_at_ms: None,
+                exit_code: None,
+                status: "starting".into(),
+                transcript_path: dir.join("run.txt").display().to_string(),
+                pty_id: None,
+                parent_run_id: None,
+            })
+            .unwrap_err();
+        assert!(error.contains("could not be read"), "{error}");
+        assert_eq!(std::fs::read(&runs_path).unwrap(), b"not valid json");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn retention_never_evicts_an_active_run() {
+        let dir = temp_dir("active-retention");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::at(dir.join("jobs.json"));
+        let record = |id: String, status: &str| RunRecord {
+            interactive: false,
+            id,
+            job_id: "j".into(),
+            name: "retained".into(),
+            backend: "sh".into(),
+            workspace_id: "w".into(),
+            started_at_ms: now_ms(),
+            ended_at_ms: (status == "ok").then(now_ms),
+            exit_code: (status == "ok").then_some(0),
+            status: status.into(),
+            transcript_path: dir.join("run.txt").display().to_string(),
+            pty_id: None,
+            parent_run_id: None,
+        };
+        store.push_run(record("active".into(), "running")).unwrap();
+        for index in 0..=RUNS_KEPT {
+            store
+                .push_run(record(format!("done-{index}"), "ok"))
+                .unwrap();
+        }
+        let runs = store.runs();
+        assert!(runs.iter().any(|run| run.id == "active"));
+        assert_eq!(
+            runs.iter().filter(|run| run.status == "ok").count(),
+            RUNS_KEPT
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_budget_kills_a_long_running_run() {
         let dir = temp_dir("run");
         std::fs::create_dir_all(&dir).unwrap();
@@ -3519,6 +3737,7 @@ mod tests {
         let run_id = "run-budget";
         let transcript_path = dir.join("runs").join("run-budget.txt");
         let run = RunRecord {
+            interactive: false,
             id: run_id.into(),
             job_id: "j".into(),
             name: "sleep".into(),
@@ -3620,6 +3839,7 @@ mod tests {
         std::fs::write(crate::transcript::readable_path(&raw_path), &readable).unwrap();
         store
             .push_run(RunRecord {
+                interactive: false,
                 id: "run-grok".into(),
                 job_id: "j".into(),
                 name: "g".into(),
@@ -3660,6 +3880,7 @@ mod tests {
         .unwrap();
         store
             .push_run(RunRecord {
+                interactive: false,
                 id: "run-old".into(),
                 job_id: "j".into(),
                 name: "Release".into(),
@@ -3692,6 +3913,7 @@ mod tests {
         std::fs::write(crate::transcript::readable_path(&raw_path), raw).unwrap();
         store
             .push_run(RunRecord {
+                interactive: false,
                 id: "run-stale".into(),
                 job_id: "j".into(),
                 name: "Release".into(),
@@ -3830,6 +4052,7 @@ mod tests {
         let store = Store::at(dir.join("jobs.json"));
         store
             .push_run(RunRecord {
+                interactive: false,
                 id: "run-done".into(),
                 job_id: "j".into(),
                 name: "done".into(),
@@ -3846,6 +4069,7 @@ mod tests {
             .unwrap();
         store
             .update_run(RunRecord {
+                interactive: false,
                 id: "run-done".into(),
                 job_id: "j".into(),
                 name: "done".into(),

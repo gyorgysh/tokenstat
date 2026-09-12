@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 mod creation;
+mod execution;
+pub use execution::RunPlacement;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
@@ -92,6 +94,8 @@ struct File {
     cards: Vec<Card>,
     #[serde(default)]
     creations: BTreeMap<String, creation::CreationReceipt>,
+    #[serde(default)]
+    launches: BTreeMap<String, execution::LaunchReceipt>,
 }
 
 /// The fields a caller may change on a card.
@@ -116,6 +120,7 @@ pub struct Board {
     cards: Mutex<Vec<Card>>,
     // Always lock cards before receipts when both are needed.
     creations: Mutex<BTreeMap<String, creation::CreationReceipt>>,
+    launches: Mutex<BTreeMap<String, execution::LaunchReceipt>>,
     load_error: Option<String>,
     persistence_error: Mutex<Option<String>>,
 }
@@ -170,6 +175,7 @@ impl Board {
             path,
             cards: Mutex::new(Vec::new()),
             creations: Mutex::new(BTreeMap::new()),
+            launches: Mutex::new(BTreeMap::new()),
             load_error: None,
             persistence_error: Mutex::new(None),
         }
@@ -201,6 +207,7 @@ impl Board {
             path,
             cards: Mutex::new(file.cards),
             creations: Mutex::new(file.creations),
+            launches: Mutex::new(file.launches),
             load_error,
             persistence_error: Mutex::new(None),
         }
@@ -230,19 +237,22 @@ impl Board {
             .creations
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        self.save_state(cards, &creations)
+        let launches = self.launches.lock().unwrap_or_else(PoisonError::into_inner);
+        self.save_state(cards, &creations, &launches)
     }
 
     fn save_state(
         &self,
         cards: &[Card],
         creations: &BTreeMap<String, creation::CreationReceipt>,
+        launches: &BTreeMap<String, execution::LaunchReceipt>,
     ) -> Result<(), String> {
         use std::io::Write;
         self.ensure_available()?;
         let body = serde_json::to_vec_pretty(&File {
             cards: cards.to_vec(),
             creations: creations.clone(),
+            launches: launches.clone(),
         })
         .map_err(|e| e.to_string())?;
         if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -288,7 +298,10 @@ impl Board {
         let mut changed = false;
         for card in cards.iter_mut() {
             if let Some(delegate) = card.delegate.as_mut() {
-                if matches!(delegate.status.as_str(), "running" | "queued") {
+                if matches!(
+                    delegate.status.as_str(),
+                    "starting" | "running" | "queued" | "stopping"
+                ) {
                     if let Some(run) = runs.iter().find(|r| r.id == delegate.run_id) {
                         if run.status != delegate.status {
                             delegate.status = run.status.clone();
@@ -300,6 +313,16 @@ impl Board {
                             card.revision = card.revision.saturating_add(1);
                             changed = true;
                         }
+                    } else if Self::now_ms().saturating_sub(delegate.started_at_ms) > 60_000 {
+                        delegate.status = "interrupted".into();
+                        delegate.ended_at_ms = Some(Self::now_ms());
+                        delegate.error = Some(
+                            "The host stopped before this run was recorded. It was not started again."
+                                .into(),
+                        );
+                        card.updated_at_ms = Self::now_ms();
+                        card.revision = card.revision.saturating_add(1);
+                        changed = true;
                     }
                 }
             }
@@ -563,11 +586,12 @@ impl Board {
         if card.revision != expected_revision {
             return Err("This task changed. Reload it before deleting it.".into());
         }
-        if card
-            .delegate
-            .as_ref()
-            .is_some_and(|run| matches!(run.status.as_str(), "running" | "queued" | "starting"))
-        {
+        if card.delegate.as_ref().is_some_and(|run| {
+            matches!(
+                run.status.as_str(),
+                "starting" | "queued" | "running" | "stopping"
+            )
+        }) {
             return Err("Stop this task's run before deleting it.".into());
         }
         let mut next = live.clone();
@@ -575,113 +599,6 @@ impl Board {
         self.save_cards(&next)?;
         *live = next;
         Ok(true)
-    }
-
-    /// Hand a card to an agent. The run is a one-shot automation whose
-    /// transcript lands in the runs history.
-    pub fn delegate(self: &std::sync::Arc<Board>, id: &str) -> Result<Card, String> {
-        self.ensure_available()?;
-        let job = {
-            let cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
-            let card = cards
-                .iter()
-                .find(|c| c.id == id)
-                .ok_or_else(|| format!("no card with id {id}"))?;
-            if card
-                .delegate
-                .as_ref()
-                .is_some_and(|d| matches!(d.status.as_str(), "running" | "queued"))
-            {
-                return Err(format!("{} is already running", card.title));
-            }
-            if card.kind == CardKind::Note {
-                return Err("notes cannot be delegated to an agent".into());
-            }
-            if card.workspace_id.is_empty() {
-                return Err("pick a workspace before delegating".into());
-            }
-            if card.backend.is_empty() {
-                return Err("pick an agent before delegating".into());
-            }
-            crate::automations::Automation {
-                id: format!("todo-{}", card.id),
-                name: card.title.clone(),
-                backend: card.backend.clone(),
-                model: card.model.clone(),
-                effort: card.effort.clone(),
-                workspace_id: card.workspace_id.clone(),
-                prompt: prompt_for_run(card),
-                schedule: crate::automations::ScheduleSpec::default(),
-                budget_seconds: card.budget_seconds,
-                enabled: false,
-                last_run_at_ms: None,
-                next_run_at_ms: None,
-                last_run_id: None,
-            }
-        };
-        // The spawn happens with no board lock held: `run_adhoc` starts a
-        // process and writes the runs store, and every other board operation
-        // (list, move, update) must not queue behind a fork. The lock comes
-        // back only to attach the result.
-        let run = crate::automations::shared().run_adhoc(job)?;
-
-        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(idx) = cards.iter().position(|c| c.id == id) else {
-            // The card vanished while the process was spawning; the run has
-            // nothing to attach to, so stop it rather than orphan it.
-            drop(cards);
-            let _ = crate::automations::shared().kill_run(&run.id);
-            return Err(format!("no card with id {id}"));
-        };
-        if cards[idx]
-            .delegate
-            .as_ref()
-            .is_some_and(|d| matches!(d.status.as_str(), "running" | "queued"))
-        {
-            // Another delegate claimed the card while the process spawned;
-            // keep the original run, not this duplicate.
-            let title = cards[idx].title.clone();
-            drop(cards);
-            let _ = crate::automations::shared().kill_run(&run.id);
-            return Err(format!("{title} is already running"));
-        }
-        cards[idx].delegate = Some(Delegate {
-            run_id: run.id.clone(),
-            status: run.status.clone(),
-            started_at_ms: run.started_at_ms,
-            ended_at_ms: None,
-            error: None,
-        });
-        cards[idx].column = "doing".into();
-        cards[idx].order = cards
-            .iter()
-            .filter(|c| c.column == "doing" && c.id != id)
-            .count() as i64;
-        cards[idx].updated_at_ms = Self::now_ms();
-        cards[idx].revision = cards[idx].revision.saturating_add(1);
-        let result = cards[idx].clone();
-        drop(cards);
-        self.save()?;
-        Ok(result)
-    }
-
-    /// Stop a delegated run by its card. Kills the pty behind the run.
-    pub fn stop(&self, id: &str) -> Result<Card, String> {
-        self.ensure_available()?;
-        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
-        let card = cards
-            .iter_mut()
-            .find(|c| c.id == id)
-            .ok_or_else(|| format!("no card with id {id}"))?;
-        if let Some(delegate) = card.delegate.as_mut() {
-            if matches!(delegate.status.as_str(), "running" | "queued") {
-                let _ = crate::automations::shared().kill_run(&delegate.run_id);
-            }
-        }
-        let result = card.clone();
-        drop(cards);
-        self.save()?;
-        Ok(result)
     }
 }
 

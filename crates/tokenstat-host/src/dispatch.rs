@@ -508,6 +508,8 @@ struct AutomationParams {
 struct TodoParams {
     id: Option<String>,
     operation_id: Option<String>,
+    run_id: Option<String>,
+    placement: Option<crate::todo::RunPlacement>,
     expected_revision: Option<u64>,
     title: Option<String>,
     kind: Option<crate::todo::CardKind>,
@@ -2336,10 +2338,45 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             )
             .envelope()
         }
+        "todo.runTask" => {
+            let p: TodoParams = parse(params)?;
+            let id = p.id.ok_or("A task run needs an id")?;
+            serde_json::to_value(
+                crate::todo::shared().run_task(
+                    &id,
+                    p.expected_revision
+                        .ok_or("A task run needs its saved revision")?,
+                    &p.operation_id.ok_or("A task run needs an operation id")?,
+                    p.placement.unwrap_or(crate::todo::RunPlacement::Background),
+                )?,
+            )
+            .envelope()
+        }
+        "todo.runReceipt" => {
+            let p: TodoParams = parse(params)?;
+            serde_json::to_value(
+                crate::todo::shared()
+                    .run_receipt(&p.operation_id.ok_or("A run read needs an operation id")?)?,
+            )
+            .envelope()
+        }
         "todo.stop" => {
             let p: TodoParams = parse(params)?;
             serde_json::to_value(crate::todo::shared().stop(&p.id.ok_or("todo.stop needs an id")?)?)
                 .envelope()
+        }
+        "todo.stopTask" => {
+            let p: TodoParams = parse(params)?;
+            let id = p.id.ok_or("A task stop needs an id")?;
+            serde_json::to_value(
+                crate::todo::shared().stop_task(
+                    &id,
+                    p.expected_revision
+                        .ok_or("A task stop needs its saved revision")?,
+                    &p.run_id.ok_or("A task stop needs its run id")?,
+                )?,
+            )
+            .envelope()
         }
 
         other => Err(DispatchError::new(

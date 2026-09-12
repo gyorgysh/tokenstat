@@ -41,15 +41,18 @@ final class ClientAutomationSession {
     /// Set when this session is a detail page for one job. A missing id
     /// then stays missing instead of becoming some other job.
     private let pinnedJobID: String?
+    private let pinnedRunID: String?
 
-    init(peer: String, workspaceID: String, hostName: String, folderName: String, jobID: String? = nil, service: any ClientJobService = ClientRemoteJobService()) {
+    init(peer: String, workspaceID: String, hostName: String, folderName: String, jobID: String? = nil, runID: String? = nil, service: any ClientJobService = ClientRemoteJobService()) {
         self.peer = peer
         self.workspaceID = workspaceID
         self.hostName = hostName
         self.folderName = folderName
         self.service = service
         self.pinnedJobID = jobID
+        self.pinnedRunID = runID
         self.selectedJobID = jobID
+        self.selectedRunID = runID
     }
 
     /// When the caller asked for a specific job, do not fall back to another
@@ -58,17 +61,21 @@ final class ClientAutomationSession {
         if let selectedJobID {
             return jobs.first { $0.id == selectedJobID }
         }
+        if pinnedRunID != nil { return nil }
         return jobs.first
     }
 
     var selectedRun: RunRecord? {
         if let selectedRunID {
-            return runs.first { $0.id == selectedRunID && $0.jobId == selectedJob?.id }
+            return runs.first { $0.id == selectedRunID }
         }
         return liveRun ?? lastRun(for: selectedJob)
     }
 
     var liveRun: RunRecord? {
+        if let selectedRunID, let run = runs.first(where: { $0.id == selectedRunID && $0.isRunning }) {
+            return run
+        }
         guard let id = selectedJob?.id else { return nil }
         return runs.first { $0.jobId == id && $0.isRunning }
     }
@@ -113,11 +120,13 @@ final class ClientAutomationSession {
             jobs = freshItems.filter { $0.workspaceID == workspaceID }
             runs = freshRuns.filter { $0.workspaceID == workspaceID }
             errorMessage = nil
-            if selectedJobID == nil {
+            if selectedJobID == nil, pinnedRunID == nil {
                 selectedJobID = pinnedJobID ?? jobs.first?.id
             }
             if selectedRunID == nil, let job = selectedJob {
                 selectedRunID = lastRun(for: job)?.id
+            } else if selectedRunID == nil {
+                selectedRunID = pinnedRunID
             }
         } catch {
             guard generation == loadGeneration, !Task.isCancelled else { return }
@@ -137,11 +146,10 @@ final class ClientAutomationSession {
     }
 
     func selectRun(_ run: RunRecord) {
-        guard run.workspaceID == workspaceID,
-              jobs.contains(where: { $0.id == run.jobId }) else { return }
+        guard run.workspaceID == workspaceID else { return }
         guard selectedRunID != run.id else { return }
         selectedRunID = run.id
-        selectedJobID = run.jobId
+        if jobs.contains(where: { $0.id == run.jobId }) { selectedJobID = run.jobId }
         transcriptText = ""
         transcriptOffset = 0
         syncWatching()

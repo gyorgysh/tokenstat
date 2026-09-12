@@ -147,58 +147,89 @@ struct FavoriteModelPicker: View {
     }
 }
 
-/// Where a task run goes: hidden automation, or an interactive terminal.
-enum TaskRunPlacement: String, Hashable {
-    case background
-    case front
-}
-
 /// Run type, then a single Run button. Same control in the inspector and
 /// the run sheet, so the two surfaces cannot drift apart.
+enum TaskLaunchMode: String, CaseIterable {
+    case background, foreground, chat
+
+    var title: String {
+        switch self {
+        case .background: "Background"
+        case .foreground: "Terminal"
+        case .chat: "Chat"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .background: "bolt.fill"
+        case .foreground: "terminal"
+        case .chat: "bubble.left.and.bubble.right"
+        }
+    }
+}
+
 struct TaskRunBar: View {
     var canRun: Bool
     var running: Bool
-    var action: (TaskRunPlacement) -> Void
+    var action: (TaskLaunchMode) -> Void
 
-    @AppStorage("tasks.runPlacement") private var placementRaw = TaskRunPlacement.background.rawValue
+    @AppStorage("tasks.runPlacement") private var placementRaw = TaskLaunchMode.background.rawValue
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    private var placement: Binding<TaskRunPlacement> {
+    private var placement: Binding<TaskLaunchMode> {
         Binding(
-            get: { TaskRunPlacement(rawValue: placementRaw) ?? .background },
+            get: { TaskLaunchMode(rawValue: placementRaw) ?? .background },
             set: { placementRaw = $0.rawValue }
         )
     }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: Theme.Space.s) { content }
-            VStack(alignment: .leading, spacing: Theme.Space.s) { content }
+            if horizontalSizeClass != .compact {
+                HStack(spacing: Theme.Space.s) {
+                    SegmentedCapsulePicker(
+                        options: TaskLaunchMode.allCases.map { ($0, $0.title, $0.symbol) },
+                        selection: placement
+                    )
+                    runButton
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            HStack(spacing: Theme.Space.s) {
+                modeMenu
+                runButton
+            }
         }
     }
 
+    private var modeMenu: some View {
+        Menu {
+            ForEach(TaskLaunchMode.allCases, id: \.self) { mode in
+                Button { placement.wrappedValue = mode } label: {
+                    Label(mode.title, systemImage: mode.symbol)
+                }
+            }
+        } label: {
+            Label(placement.wrappedValue.title, systemImage: placement.wrappedValue.symbol)
+        }
+        .buttonStyle(SecondaryButtonStyle())
+        .accessibilityLabel("Run mode")
+        .accessibilityValue(placement.wrappedValue.title)
+        .help("Choose background, terminal, or chat.")
+    }
+
     @ViewBuilder
-    private var content: some View {
-        #if os(macOS)
-        SegmentedCapsulePicker(
-            options: [
-                (TaskRunPlacement.background, "Background", "bolt.fill"),
-                (TaskRunPlacement.front, "In front", "terminal"),
-            ],
-            selection: placement
-        )
-        #endif
+    private var runButton: some View {
         Button(running ? "Starting…" : "Run", .run) {
-            #if os(macOS)
             action(placement.wrappedValue)
-            #else
-            action(.background)
-            #endif
         }
         .buttonStyle(AccentButtonStyle())
         .disabled(!canRun || running)
         .help(
-            placement.wrappedValue == .front
-                ? "Open an interactive terminal. Not tracked as an automation."
+            placement.wrappedValue == .chat
+                ? "Start a workspace chat with this task’s prompt and agent settings."
+                : placement.wrappedValue == .foreground
+                ? "Open and track an interactive terminal on the connected computer."
                 : "Start as an automation. The transcript shows on Automations."
         )
         .accessibilityLabel("Run")

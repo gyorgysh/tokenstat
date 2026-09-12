@@ -8,10 +8,18 @@ struct TaskEditSubmission: Codable, Equatable, Sendable {
     let draft: TaskEditorDraft
 }
 
+struct TaskRunSubmission: Codable, Equatable, Sendable {
+    let operationID: String
+    let cardID: String
+    let revision: UInt64
+    let placement: TaskRunPlacement
+}
+
 struct SavedTaskDraft: Codable, Equatable, Sendable {
     var baseline: TodoCard
     var fields: TaskEditorDraft
     var pending: TaskEditSubmission?
+    var pendingRun: TaskRunSubmission? = nil
 }
 
 /// One owner per account, computer and task. A folder move keeps this identity.
@@ -25,6 +33,8 @@ final class TaskEditorSession {
     private(set) var missing = false
     private(set) var loaded = false
     private(set) var working = false
+    private(set) var supportsExecution = false
+    private(set) var lastRun: TaskRunOutcome?
     private(set) var errorMessage: String?
     private(set) var backends: [AgentBackend] = []
     private(set) var folders: [WorkspaceFolder] = []
@@ -32,15 +42,17 @@ final class TaskEditorSession {
     private(set) var persistedFields: TaskEditorDraft?
     private let storage: WorkbenchDraftFile<SavedTaskDraft>?
     private let service: any TaskEditorService
+    private let runService: any TaskRunService
     private var diskRevision: String?
     private var writeTask: Task<Void, Never>?
     private var writing = false
     private var writeWaiters: [CheckedContinuation<Void, Never>] = []
     private var restoring = false
 
-    init(target: TaskEditorTarget, card: TodoCard, scope: WorkReference.Scope?, hostIdentity: String?, service: (any TaskEditorService)? = nil, draftDirectory: URL? = nil) {
+    init(target: TaskEditorTarget, card: TodoCard, scope: WorkReference.Scope?, hostIdentity: String?, service: (any TaskEditorService)? = nil, runService: (any TaskRunService)? = nil, draftDirectory: URL? = nil) {
         self.target = target
         self.service = service ?? target
+        self.runService = runService ?? target
         fields = TaskEditorDraft(card)
         saved = SavedTaskDraft(baseline: card, fields: TaskEditorDraft(card))
         if let scope, let hostIdentity, !hostIdentity.isEmpty {
@@ -51,9 +63,24 @@ final class TaskEditorSession {
 
     var dirty: Bool { !fields.matches(saved.baseline) }
     var canSave: Bool { loaded && !working && !conflict && !missing && saved.baseline.revision != nil && otherDraft == nil && saved.pending == nil && fields.validation == nil && dirty }
+    var canRun: Bool {
+        supportsExecution && loaded && !working && !dirty && !conflict && !missing
+            && saved.baseline.revision != nil && saved.pending == nil && saved.pendingRun == nil
+            && otherDraft == nil && saved.baseline.delegate?.isRunning != true
+    }
+    var canStop: Bool {
+        supportsExecution && !working && !dirty && saved.pending == nil && saved.pendingRun == nil
+            && saved.baseline.delegate.map { ["starting", "queued", "running"].contains($0.status) } == true
+    }
 
     func load() async {
-        if loaded { await refresh(); await loadOptions(); return }
+        if loaded {
+            await refresh()
+            await loadOptions()
+            supportsExecution = await runService.supportsTaskExecution()
+            if saved.pendingRun != nil { await reconcileRun() }
+            return
+        }
         guard !loaded, !working else { return }
         working = true
         defer { working = false }
@@ -75,6 +102,9 @@ final class TaskEditorSession {
         }
         await readCurrent()
         await loadOptions()
+        supportsExecution = await runService.supportsTaskExecution()
+        working = false
+        if saved.pendingRun != nil { await reconcileRun() }
     }
 
     private func loadOptions() async {
@@ -124,7 +154,12 @@ final class TaskEditorSession {
             } else if current.revision != saved.baseline.revision {
                 if dirty { conflict = true }
                 else {
-                    restore(SavedTaskDraft(baseline: current, fields: TaskEditorDraft(current)))
+                    restore(SavedTaskDraft(
+                        baseline: current,
+                        fields: TaskEditorDraft(current),
+                        pending: nil,
+                        pendingRun: saved.pendingRun
+                    ))
                     conflict = false
                     _ = await persist()
                 }
@@ -150,6 +185,117 @@ final class TaskEditorSession {
         } catch {
             errorMessage = "Check the saved task before trying again. Your draft is still here. \(error.localizedDescription)"
         }
+    }
+
+    func run(_ placement: TaskRunPlacement) async -> TaskRunOutcome? {
+        guard canRun, let revision = saved.baseline.revision else { return nil }
+        let submission = TaskRunSubmission(
+            operationID: "task-run-\(UUID().uuidString)",
+            cardID: saved.baseline.id,
+            revision: revision,
+            placement: placement
+        )
+        saved.pendingRun = submission
+        guard await persist() else { saved.pendingRun = nil; return nil }
+        return await submitRun(submission)
+    }
+
+    /// A retry repeats the same durable operation. It can never create a
+    /// second run, even if the first answer was lost after the host accepted it.
+    func retryRun() async -> TaskRunOutcome? {
+        guard !working, let submission = saved.pendingRun else { return nil }
+        return await submitRun(submission)
+    }
+
+    private func submitRun(_ submission: TaskRunSubmission) async -> TaskRunOutcome? {
+        working = true
+        defer { working = false }
+        do {
+            let outcome = try await runService.runTask(
+                id: submission.cardID,
+                revision: submission.revision,
+                operationID: submission.operationID,
+                placement: submission.placement
+            )
+            return await acceptRun(outcome, submission: submission)
+        } catch {
+            errorMessage = "The run result is not confirmed. Check this request before starting another run. \(error.localizedDescription)"
+            _ = await persist()
+            return nil
+        }
+    }
+
+    /// Receipt reads never launch work. They are safe during reopen and
+    /// reconnect, while a resend remains an explicit person-owned action.
+    func reconcileRun() async {
+        guard !working, let submission = saved.pendingRun else { return }
+        do {
+            guard let outcome = try await runService.taskRunReceipt(operationID: submission.operationID) else {
+                errorMessage = "The computer has not accepted this run request. Retry the same request when the connection is ready."
+                return
+            }
+            _ = await acceptRun(outcome, submission: submission)
+        } catch {
+            errorMessage = "The run result is still unavailable. Your request is kept on this device. \(error.localizedDescription)"
+        }
+    }
+
+    private func acceptRun(_ outcome: TaskRunOutcome, submission: TaskRunSubmission) async -> TaskRunOutcome? {
+        guard outcome.operationID == submission.operationID,
+              outcome.cardID == submission.cardID else {
+            errorMessage = "The computer returned a different task run. Check the original run before continuing."
+            return nil
+        }
+        if outcome.run == nil, outcome.card == nil {
+            saved.pendingRun = nil
+            lastRun = outcome
+            missing = true
+            errorMessage = "This task was deleted before the request could start. No run was launched."
+            _ = await persist()
+            return nil
+        }
+        if outcome.run == nil {
+            lastRun = outcome
+            errorMessage = "The computer accepted this request but has not recorded its run yet. Check again or retry the same request."
+            _ = await persist()
+            return nil
+        }
+        if let card = outcome.card {
+            saved.baseline = card
+            current = card
+            restoring = true
+            fields = TaskEditorDraft(card)
+            restoring = false
+        }
+        saved.pendingRun = nil
+        lastRun = outcome
+        errorMessage = nil
+        _ = await persist()
+        NotificationCenter.default.post(name: Self.didChange, object: target)
+        return outcome
+    }
+
+    func stop() async {
+        guard canStop, let revision = saved.baseline.revision,
+              let delegate = saved.baseline.delegate else { return }
+        working = true
+        defer { working = false }
+        do {
+            let card = try await runService.stopTask(id: saved.baseline.id, revision: revision, runID: delegate.runId)
+            saved.baseline = card
+            current = card
+            errorMessage = nil
+            _ = await persist()
+            NotificationCenter.default.post(name: Self.didChange, object: target)
+        } catch {
+            errorMessage = "The stop was not confirmed. Reload this task before trying again. \(error.localizedDescription)"
+        }
+    }
+
+    func terminal(for outcome: TaskRunOutcome) async -> PtySessionInfo? {
+        guard outcome.placement == .foreground, let run = outcome.run else { return nil }
+        do { return try await runService.taskTerminal(run: run) }
+        catch { errorMessage = error.localizedDescription; return nil }
     }
 
     func resolveConflict(keepMine: Bool) async {

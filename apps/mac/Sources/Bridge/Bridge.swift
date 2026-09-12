@@ -1139,6 +1139,7 @@ extension Bridge {
         autonomy: String = "standard",
         model: String? = nil,
         effort: String? = nil,
+        budgetSeconds: UInt64? = nil,
         personaID: String? = nil,
         peer: String? = nil
     ) async throws -> ChatConversation {
@@ -1152,6 +1153,7 @@ extension Bridge {
         ]
         if let model, !model.isEmpty { params["model"] = model }
         if let effort, !effort.isEmpty { params["effort"] = effort }
+        if let budgetSeconds { params["budgetSeconds"] = budgetSeconds }
         // Nil omits the key so the host applies the workspace default. An
         // empty string is No persona and has to travel, or it would look like
         // the same omit.

@@ -80,4 +80,69 @@ fn task_edits_require_the_reviewed_revision_over_the_shared_dispatch() {
         .unwrap()
         .remove("budgetSeconds");
     assert_eq!(call("todo.createOnce", missing_budget)["ok"], false);
+
+    let workspace = root.path().join("task-run-workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let added = call(
+        "workspace.add",
+        json!({"path": workspace.display().to_string()}),
+    );
+    assert_eq!(added["ok"], true, "{added}");
+    let runnable = call(
+        "todo.create",
+        json!({
+            "title":"Durable run",
+            "workspaceId":added["result"]["id"],
+            "backend":"sh",
+            "notes":"sleep 5",
+            "budgetSeconds":30
+        }),
+    );
+    let operation = "fixture-durable-task-run";
+    let started = call(
+        "todo.runTask",
+        json!({
+            "id":runnable["result"]["id"],
+            "expectedRevision":runnable["result"]["revision"],
+            "operationId":operation,
+            "placement":"background"
+        }),
+    );
+    assert_eq!(started["ok"], true, "{started}");
+    assert_eq!(started["result"]["operationId"], operation);
+    assert_eq!(started["result"]["card"]["column"], "doing");
+    let repeated = call(
+        "todo.runTask",
+        json!({
+            "id":runnable["result"]["id"],
+            "expectedRevision":runnable["result"]["revision"],
+            "operationId":operation,
+            "placement":"background"
+        }),
+    );
+    assert_eq!(repeated["result"]["runId"], started["result"]["runId"]);
+    let receipt = call("todo.runReceipt", json!({"operationId":operation}));
+    assert_eq!(receipt["result"]["runId"], started["result"]["runId"]);
+    let wrong_stop = call(
+        "todo.stopTask",
+        json!({
+            "id":runnable["result"]["id"],
+            "expectedRevision":started["result"]["card"]["revision"],
+            "runId":"another-run"
+        }),
+    );
+    assert_eq!(wrong_stop["ok"], false);
+    let stopped = call(
+        "todo.stopTask",
+        json!({
+            "id":runnable["result"]["id"],
+            "expectedRevision":started["result"]["card"]["revision"],
+            "runId":started["result"]["runId"]
+        }),
+    );
+    assert_eq!(stopped["ok"], true, "{stopped}");
+    assert_eq!(
+        stopped["result"]["delegate"]["runId"],
+        started["result"]["runId"]
+    );
 }

@@ -55,6 +55,8 @@ struct ClientTaskBoard: View {
     @Environment(\.scenePhase) private var phase
     @State private var showingFilters = false
     @State private var targetedColumn: String?
+    @State private var presentedRun: ClientTaskRunPresentation?
+    @State private var presentedTerminal: ClientTerminalSession?
 
     private let columns = [("backlog", "To Do", "mark_todo"), ("doing", "Doing", "mark_running"), ("done", "Done", "mark_done")]
     private var peer: String { session.target.peer ?? "" }
@@ -131,7 +133,23 @@ struct ClientTaskBoard: View {
             }
         }
         .fullScreenCover(item: $session.editingTask, onDismiss: { Task { await session.load() } }) { card in
-            TaskEditorDestination(target: session.target, card: card, hostName: hostName) { await session.load() }
+            TaskEditorDestination(
+                target: session.target,
+                card: card,
+                hostName: hostName,
+                onSaved: { await session.load() },
+                onViewRun: { openRun($0, workspaceID: $1) },
+                onOpenTerminal: { openTerminal($0) }
+            )
+        }
+        .fullScreenCover(item: $presentedRun) { run in
+            ClientTaskRunDestination(
+                peer: peer, hostName: hostName, folderName: run.folderName,
+                workspaceID: run.workspaceID, runID: run.runID
+            )
+        }
+        .fullScreenCover(item: $presentedTerminal) { terminal in
+            ClientTerminalScreen(session: terminal, hostName: hostName)
         }
         .confirmationDialog("Delete task?", isPresented: Binding(
             get: { session.deletingTask != nil }, set: { if !$0 { session.deletingTask = nil } }
@@ -302,12 +320,66 @@ struct ClientTaskBoard: View {
     private func folderLabel(_ card: TodoCard) -> String {
         card.workspaceID.isEmpty ? "Uncategorized" : session.folders.first { $0.id == card.workspaceID }?.name ?? "Unavailable folder"
     }
+    private func openRun(_ runID: String, workspaceID: String) {
+        session.editingTask = nil
+        Task { @MainActor in
+            await Task.yield()
+            let folderName = session.folders.first(where: { $0.id == workspaceID })?.name ?? "Unavailable folder"
+            presentedRun = ClientTaskRunPresentation(runID: runID, workspaceID: workspaceID, folderName: folderName)
+        }
+    }
+    private func openTerminal(_ info: PtySessionInfo) {
+        session.editingTask = nil
+        Task { @MainActor in
+            await Task.yield()
+            presentedTerminal = ClientTerminalSession(peer: peer, info: info)
+        }
+    }
     private func dragValue(_ card: TodoCard) -> String { "tokenstat-task|\(WorkReferenceKey.encode(peer))|\(WorkReferenceKey.encode(card.id))" }
     private func drop(_ values: [String], column: String, before: String?) -> Bool {
         guard !session.working, session.capabilities?.edit == true, !session.filter.newestFirst, values.count == 1,
               let card = session.cards.first(where: { dragValue($0) == values[0] }), card.id != before else { return false }
         Task { await session.move(card, to: column, before: before, atEnd: before == nil) }
         return true
+    }
+}
+
+private struct ClientTaskRunPresentation: Identifiable {
+    let runID: String
+    let workspaceID: String
+    let folderName: String
+    var id: String { runID }
+}
+
+private struct ClientTaskRunDestination: View {
+    let peer: String
+    let hostName: String
+    let folderName: String
+    let workspaceID: String
+    let runID: String
+    @State private var session: ClientAutomationSession
+    @Environment(\.dismiss) private var dismiss
+
+    init(peer: String, hostName: String, folderName: String, workspaceID: String, runID: String) {
+        self.peer = peer
+        self.hostName = hostName
+        self.folderName = folderName
+        self.workspaceID = workspaceID
+        self.runID = runID
+        _session = State(initialValue: ClientAutomationSession(
+            peer: peer, workspaceID: workspaceID, hostName: hostName, folderName: folderName, runID: runID
+        ))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ClientAutomationRunView(session: session, runID: runID)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done", .done) { dismiss() }
+                    }
+                }
+        }
     }
 }
 #endif

@@ -25,14 +25,14 @@ pub struct CreationOutcome {
     pub card: Option<Card>,
 }
 
-fn hash(bytes: &[u8]) -> String {
+pub(super) fn hash(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
 
-fn validate_id(id: &str) -> Result<(), String> {
+pub(super) fn validate_id(id: &str) -> Result<(), String> {
     if !(16..=128).contains(&id.len())
         || !id
             .bytes()
@@ -111,7 +111,8 @@ impl Board {
         next_cards.push(card);
         let mut next_receipts = receipts.clone();
         next_receipts.insert(operation_id.to_owned(), receipt.clone());
-        self.save_state(&next_cards, &next_receipts)?;
+        let launches = self.launches.lock().unwrap_or_else(PoisonError::into_inner);
+        self.save_state(&next_cards, &next_receipts, &launches)?;
         *live = next_cards;
         *receipts = next_receipts;
         Ok(outcome(operation_id, &receipt, &live))

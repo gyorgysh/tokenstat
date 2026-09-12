@@ -1065,7 +1065,8 @@ struct RootView: View {
             },
             onRunInFront: { launch in
                 launchTaskInFront(launch)
-            }
+            },
+            onOpenTerminal: { info in openTaskTerminal(info) }
         ) { closeInspector() }
     }
 
@@ -2659,6 +2660,22 @@ struct RootView: View {
             } catch {
                 todo.errorMessage = error.localizedDescription
             }
+        }
+        #endif
+    }
+
+    private func openTaskTerminal(_ info: PtySessionInfo) {
+        #if os(macOS)
+        guard let workspaceID = info.workspaceID,
+              workspaces.folders.contains(where: { $0.id == workspaceID }) else {
+            todo.errorMessage = "This task's workspace is unavailable. The run is still active."
+            return
+        }
+        _ = terminals.open(info)
+        navigate(to: .workspace(id: workspaceID, section: .sessions)) {
+            workspaces.selectedID = workspaceID
+            workspaces.showTerminal(in: workspaceID)
+            isInspectorPresented = true
         }
         #endif
     }

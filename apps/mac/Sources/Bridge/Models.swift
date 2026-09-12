@@ -3494,6 +3494,10 @@ struct RunRecord: Codable, Sendable, Identifiable {
     var exitCode: Int?
     var status: String
     var transcriptPath: String
+    /// Present for a live process. Interactive task runs use this to open the
+    /// same host-owned terminal instead of creating an unrelated session.
+    var ptyID: String?
+    var interactive: Bool?
     /// The workflow run this is a step of, when it is one. Absent for a run
     /// somebody scheduled or started, which is the only kind worth a
     /// notification: see `RunNotifications`.
@@ -3501,16 +3505,19 @@ struct RunRecord: Codable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, jobId, name, backend, workspaceID = "workspaceId"
-        case startedAtMs, endedAtMs, exitCode, status, transcriptPath
+        case startedAtMs, endedAtMs, exitCode, status, transcriptPath, interactive
+        case ptyID = "ptyId"
         case parentRunID = "parentRunId"
     }
 
     var startedAt: Date { Date(timeIntervalSince1970: Double(startedAtMs) / 1000) }
-    var isRunning: Bool { status == "running" || status == "queued" }
+    var isRunning: Bool { ["starting", "queued", "running", "stopping"].contains(status) }
     var endedLabel: String {
         switch status {
+        case "starting": return "Starting"
         case "queued": return "Queued"
         case "running": return "Running"
+        case "stopping": return "Stopping"
         case "ok": return "Done"
         case "stopped": return "Stopped"
         case "error": return "Failed"
@@ -4217,16 +4224,42 @@ struct TodoDelegate: Codable, Sendable, Hashable {
         case runId, status, startedAtMs, endedAtMs, error
     }
 
-    var isRunning: Bool { status == "running" || status == "queued" }
+    var isRunning: Bool { ["starting", "queued", "running", "stopping"].contains(status) }
     var label: String {
         switch status {
+        case "starting": return "Starting"
         case "queued": return "Queued"
         case "running": return "Running"
+        case "stopping": return "Stopping"
         case "ok": return "Done"
         case "stopped": return "Stopped"
         case "error": return "Failed"
         default: return status
         }
+    }
+}
+
+enum TaskRunPlacement: String, Codable, Sendable, Hashable {
+    case background
+    case foreground
+}
+
+/// The durable answer to one task launch operation. A missing card means the
+/// task was removed later. The receipt and run remain the authoritative result.
+struct TaskRunOutcome: Codable, Sendable {
+    var operationID: String
+    var cardID: String
+    var runID: String
+    var createdAtMs: Int64
+    var placement: TaskRunPlacement
+    var card: TodoCard?
+    var run: RunRecord?
+
+    enum CodingKeys: String, CodingKey {
+        case operationID = "operationId"
+        case cardID = "cardId"
+        case runID = "runId"
+        case createdAtMs, placement, card, run
     }
 }
 

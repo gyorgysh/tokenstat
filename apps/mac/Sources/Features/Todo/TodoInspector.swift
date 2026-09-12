@@ -9,6 +9,7 @@ struct TodoInspector: View {
     var folders: [WorkspaceFolder]
     var onViewRun: ((String) -> Void)?
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)?
+    var onOpenTerminal: ((PtySessionInfo) -> Void)?
     var onClose: () -> Void
     @State private var runCard: TodoCard?
 
@@ -17,7 +18,7 @@ struct TodoInspector: View {
             if let card = model.selectedCard, !card.isNote {
                 TaskEditorDestination(target: TaskEditorTarget(peer: nil), card: card, hostName: "This computer",
                                       onSaved: { await model.load() }, onClose: onClose,
-                                      onRun: card.delegate?.isRunning == true ? nil : { runCard = $0 })
+                                      onViewRun: { runID, _ in onViewRun?(runID) }, onOpenTerminal: onOpenTerminal)
                     .id(card.id)
                 ThemeRule()
                 VStack(alignment: .leading, spacing: Theme.Space.s) {

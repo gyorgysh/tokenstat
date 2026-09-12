@@ -14,6 +14,42 @@ struct TodoCard: Codable, Sendable, Equatable {
     var model: String?
     var effort: String?
     var budgetSeconds: UInt64 = 121
+    var delegate: TodoDelegate?
+}
+struct TodoDelegate: Codable, Sendable, Equatable {
+    var runId: String
+    var status: String
+    var isRunning: Bool { ["starting", "queued", "running", "stopping"].contains(status) }
+}
+enum TaskRunPlacement: String, Codable, Sendable, Equatable { case background, foreground }
+struct RunRecord: Codable, Sendable {
+    var id: String
+    var workspaceID: String
+    var ptyID: String?
+}
+struct PtySessionInfo: Codable, Sendable {}
+struct TaskRunOutcome: Codable, Sendable {
+    var operationID: String
+    var cardID: String
+    var runID: String
+    var createdAtMs: Int64
+    var placement: TaskRunPlacement
+    var card: TodoCard?
+    var run: RunRecord?
+}
+protocol TaskRunService: Sendable {
+    func supportsTaskExecution() async -> Bool
+    func runTask(id: String, revision: UInt64, operationID: String, placement: TaskRunPlacement) async throws -> TaskRunOutcome
+    func taskRunReceipt(operationID: String) async throws -> TaskRunOutcome?
+    func stopTask(id: String, revision: UInt64, runID: String) async throws -> TodoCard
+    func taskTerminal(run: RunRecord) async throws -> PtySessionInfo
+}
+extension TaskEditorTarget: TaskRunService {
+    func supportsTaskExecution() async -> Bool { false }
+    func runTask(id: String, revision: UInt64, operationID: String, placement: TaskRunPlacement) async throws -> TaskRunOutcome { throw FixtureError.unexpectedTransport }
+    func taskRunReceipt(operationID: String) async throws -> TaskRunOutcome? { throw FixtureError.unexpectedTransport }
+    func stopTask(id: String, revision: UInt64, runID: String) async throws -> TodoCard { throw FixtureError.unexpectedTransport }
+    func taskTerminal(run: RunRecord) async throws -> PtySessionInfo { throw FixtureError.unexpectedTransport }
 }
 struct AgentBackend: Codable, Sendable {}
 struct WorkspaceFolder: Codable, Sendable {}
@@ -31,10 +67,14 @@ enum RemoteHostFeature {
     var scope: WorkReference.Scope?
     var localHostIdentity: String?
 }
-actor FixtureTasks: TaskEditorService {
+actor FixtureTasks: TaskEditorService, TaskRunService {
     var card: TodoCard? = TodoCard()
     var edits = 0
     var loseReply = false
+    var loseRunReply = false
+    var failRunBeforeAcceptance = false
+    var runAttempts: [TaskRunSubmission] = []
+    var runOutcomes: [String: TaskRunOutcome] = [:]
     func supportsEditing() async -> Bool { true }
     func task(id: String) async throws -> TodoCard? { card }
     func taskBackends() async throws -> [AgentBackend] { [] }
@@ -44,6 +84,12 @@ actor FixtureTasks: TaskEditorService {
         card?.title = value; card?.revision = revision
     }
     func disconnectAfterEdit() { loseReply = true }
+    func setEditReplyLoss(_ value: Bool) { loseReply = value }
+    func setRunFailure(before: Bool = false, after: Bool = false) {
+        failRunBeforeAcceptance = before
+        loseRunReply = after
+    }
+    func finishRun() { card?.delegate?.status = "ok" }
     func delete() { card = nil }
     func edit(id: String, revision: UInt64, draft: TaskEditorDraft) async throws -> TodoCard {
         guard var next = card, next.revision == revision else { throw FixtureError.conflict }
@@ -56,6 +102,36 @@ actor FixtureTasks: TaskEditorService {
         if loseReply { throw FixtureError.disconnected }
         return next
     }
+    func supportsTaskExecution() async -> Bool { true }
+    func runTask(id: String, revision: UInt64, operationID: String, placement: TaskRunPlacement) async throws -> TaskRunOutcome {
+        let submission = TaskRunSubmission(operationID: operationID, cardID: id, revision: revision, placement: placement)
+        runAttempts.append(submission)
+        if failRunBeforeAcceptance { throw FixtureError.disconnected }
+        if let outcome = runOutcomes[operationID] { return outcome }
+        guard var next = card, next.id == id, next.revision == revision else { throw FixtureError.conflict }
+        let runID = "run-\(operationID)"
+        next.revision = revision + 1
+        next.delegate = TodoDelegate(runId: runID, status: "running")
+        card = next
+        let outcome = TaskRunOutcome(
+            operationID: operationID, cardID: id, runID: runID, createdAtMs: 1,
+            placement: placement, card: next,
+            run: RunRecord(id: runID, workspaceID: next.workspaceID, ptyID: placement == .foreground ? "pty" : nil)
+        )
+        runOutcomes[operationID] = outcome
+        if loseRunReply { throw FixtureError.disconnected }
+        return outcome
+    }
+    func taskRunReceipt(operationID: String) async throws -> TaskRunOutcome? { runOutcomes[operationID] }
+    func stopTask(id: String, revision: UInt64, runID: String) async throws -> TodoCard {
+        guard var next = card, next.id == id, next.revision == revision,
+              next.delegate?.runId == runID else { throw FixtureError.conflict }
+        next.revision = revision + 1
+        next.delegate?.status = "stopping"
+        card = next
+        return next
+    }
+    func taskTerminal(run: RunRecord) async throws -> PtySessionInfo { PtySessionInfo() }
 }
 
 @main struct TaskEditorSessionTests {
@@ -64,7 +140,7 @@ actor FixtureTasks: TaskEditorService {
         defer { try? FileManager.default.removeItem(at: directory) }
         let service = FixtureTasks()
         func session(host: String = "computer") -> TaskEditorSession {
-            TaskEditorSession(target: TaskEditorTarget(peer: host), card: TodoCard(), scope: .local(installationID: "fixture"), hostIdentity: host, service: service, draftDirectory: directory)
+            TaskEditorSession(target: TaskEditorTarget(peer: host), card: TodoCard(), scope: .local(installationID: "fixture"), hostIdentity: host, service: service, runService: service, draftDirectory: directory)
         }
         let first = session()
         await first.load()
@@ -105,6 +181,37 @@ actor FixtureTasks: TaskEditorService {
         assert(recovered.saved.pending == nil && !recovered.dirty)
         let recoveryCount = await service.edits
         assert(recoveryCount == 1, "Read-only recovery must not repeat an edit")
+        await service.setEditReplyLoss(false)
+        await service.setRunFailure(after: true)
+        _ = await recovered.run(.background)
+        let acceptedSubmission = recovered.saved.pendingRun!
+        let firstRunCount = await service.runAttempts.count
+        assert(firstRunCount == 1)
+        await recovered.reconcileRun()
+        assert(recovered.saved.pendingRun == nil && recovered.lastRun?.operationID == acceptedSubmission.operationID)
+        assert(!recovered.canRun, "An active linked run must disable another launch")
+        let recoveredRunCount = await service.runAttempts.count
+        assert(recoveredRunCount == 1, "Receipt recovery must not submit a second run")
+        await recovered.stop()
+        assert(recovered.saved.baseline.delegate?.status == "stopping" && !recovered.canStop)
+
+        await service.finishRun()
+        await service.setRunFailure(before: true)
+        let retrying = session(host: "run-retry")
+        await retrying.load()
+        _ = await retrying.run(.foreground)
+        let retrySubmission = retrying.saved.pendingRun!
+        await retrying.reconcileRun()
+        assert(retrying.saved.pendingRun == retrySubmission)
+        let retryReopened = session(host: "run-retry")
+        await retryReopened.load()
+        assert(retryReopened.saved.pendingRun == retrySubmission)
+        let attemptsBeforeExplicitRetry = await service.runAttempts.count
+        assert(attemptsBeforeExplicitRetry == 2, "Reopening and checking must not resubmit an unaccepted run")
+        await service.setRunFailure()
+        _ = await retryReopened.retryRun()
+        let attempts = await service.runAttempts
+        assert(attempts.suffix(2).allSatisfy { $0 == retrySubmission }, "Explicit retry keeps the original operation and placement")
         first.fields.prompt = "Older window writing"
         await first.flush()
         assert(first.otherDraft != nil && first.fields.prompt == "Older window writing")

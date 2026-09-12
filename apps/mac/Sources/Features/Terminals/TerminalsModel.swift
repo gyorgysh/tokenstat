@@ -349,6 +349,23 @@ final class TerminalsModel {
         }
     }
 
+    /// Put an already-running visible host terminal in front. Task launches
+    /// use this after the host has durably linked the process to its card.
+    @discardableResult
+    func open(_ info: PtySessionInfo) -> TerminalSession {
+        if let existing = sessions.first(where: { $0.hostID == info.id }) {
+            select(existing)
+            focus(existing.id)
+            return existing
+        }
+        let session = TerminalSession(info: info)
+        session.start()
+        sessions.append(session)
+        select(session)
+        focus(session.id)
+        return session
+    }
+
     /// Keep the session list in step with the host while the app is open.
     ///
     /// Sessions do not only start from this window: another machine can spawn
