@@ -672,6 +672,7 @@ struct ClientWorkspaceTasksView: View {
     /// Finished work, off by default. The board hides it on the Mac too, but
     /// the phone had no way to ask for it at all.
     @State private var showingArchive = false
+    @State private var editingTask: TodoCard?
 
     /// The board's columns, each with the mark that stands for its state.
     /// Kept together so the panels above the board and the headings inside it
@@ -758,6 +759,9 @@ struct ClientWorkspaceTasksView: View {
             }
         }
         .task { await load() }
+        .fullScreenCover(item: $editingTask, onDismiss: { Task { await load() } }) { card in
+            TaskEditorDestination(target: TaskEditorTarget(peer: peer), card: card, hostName: hostName) { await load() }
+        }
     }
 
     private func sectionHeading(_ text: String) -> some View {
@@ -769,27 +773,32 @@ struct ClientWorkspaceTasksView: View {
             .clientCardRow()
     }
 
-    /// One card, with the moves a phone can make on it.
-    ///
-    /// Swipes rather than a detail screen: moving a card along and putting it
-    /// away are the two things somebody does from a phone, and both are one
-    /// gesture. Editing stays on the Mac, where the prompt and the agent live.
+    /// Open the complete editor; quick column moves remain within reach.
     private func row(_ card: TodoCard) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(card.title)
-                .font(ClientType.label.weight(.medium))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if !card.notes.isEmpty {
-                Text(card.notes)
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        Button { editingTask = card } label: {
+            HStack(spacing: Theme.Space.m) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(card.title)
+                        .font(ClientType.label.weight(.medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !card.notes.isEmpty {
+                        Text(card.notes)
+                            .font(ClientType.caption)
+                            .foregroundStyle(Theme.controlGlyph)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                Image(systemName: "chevron.right")
+                    .font(Theme.caption).foregroundStyle(Theme.controlGlyph).accessibilityHidden(true)
             }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardSurface()
+            .contentShape(Rectangle())
         }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity)
-        .cardSurface()
+        .buttonStyle(.plain)
+        .accessibilityHint("Edit task")
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if card.column == "archive" {
                 Button("Restore") { Task { await move(card, to: "backlog") } }

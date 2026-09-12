@@ -71,6 +71,8 @@ struct FavoriteModelPicker: View {
     var backendID: String
     var models: [String]
     var extra: String = ""
+    /// Checked task editing must not rewrite an old or custom alias on mount.
+    var preservesSavedSelection = false
     @Binding var selection: String
     @State private var favorites = ModelFavoritesStore.shared
 
@@ -91,7 +93,7 @@ struct FavoriteModelPicker: View {
 
     private var options: [(value: String, label: String)] {
         var ids = models
-        let extraID = TodoCard.cleanModelID(extra)
+        let extraID = preservesSavedSelection ? extra : TodoCard.cleanModelID(extra)
         // Keep a stored alias this backend no longer lists. Do not carry a
         // leftover from the previous agent into the new list.
         if !extraID.isEmpty, !ids.contains(extraID), extraID == selection {
@@ -105,6 +107,7 @@ struct FavoriteModelPicker: View {
     }
 
     private func clampSelection() {
+        if preservesSavedSelection, selection == extra { return }
         let extraID = TodoCard.cleanModelID(extra)
         if selection.isEmpty { return }
         if models.contains(selection) { return }

@@ -167,6 +167,8 @@ ALLOWED = [
     # A whole row is the target: the section list on the phone, and the
     # sidebar group heading on the Mac, where the label is the button.
     ("Client/ClientWorkspaceSections.swift", "showPort = true"),
+    # The whole task card opens its editor; a trailing chevron marks navigation.
+    ("Client/ClientWorkspaceSections.swift", "Button { editingTask = card } label:"),
     ("Client/ClientFolderSplit.swift", "section = item"),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectGraph"),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectRun"),

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //! A kanban board of work, with cards that can be delegated to an agent.
 //!
 //! The board is a list of columns with cards in order. A card is work a person
@@ -56,6 +57,9 @@ pub struct Delegate {
 #[serde(rename_all = "camelCase")]
 pub struct Card {
     pub id: String,
+    /// Monotonic within this card, including moves and delegate changes.
+    #[serde(default)]
+    pub revision: u64,
     pub title: String,
     #[serde(default)]
     pub kind: CardKind,
@@ -175,24 +179,31 @@ impl Board {
     }
 
     fn save(&self) -> Result<(), String> {
-        let cards = self
-            .cards
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        let body = serde_json::to_string_pretty(&File { cards }).map_err(|e| e.to_string())?;
-        if let Some(parent) = self.path.parent() {
+        let cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        self.save_cards(&cards)
+    }
+
+    /// Keep the board lock through persistence so a slower old snapshot cannot
+    /// overwrite a newer save. Checked edits publish in memory only afterward.
+    fn save_cards(&self, cards: &[Card]) -> Result<(), String> {
+        use std::io::Write;
+        let body = serde_json::to_vec_pretty(&File {
+            cards: cards.to_vec(),
+        })
+        .map_err(|e| e.to_string())?;
+        if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        // A unique suffix keeps two savers from interleaving into one temporary.
-        static SAVE_SEQ: AtomicU64 = AtomicU64::new(0);
-        let tmp = self.path.with_extension(format!(
-            "json.tmp.{}.{}",
-            std::process::id(),
-            SAVE_SEQ.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::write(&tmp, &body).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
+        let parent = self
+            .path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+        temp.write_all(&body).map_err(|e| e.to_string())?;
+        temp.as_file().sync_all().map_err(|e| e.to_string())?;
+        temp.persist(&self.path).map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     fn now_ms() -> i64 {
@@ -219,6 +230,7 @@ impl Board {
                                 delegate.error = Some(run_error_note(run));
                             }
                             card.updated_at_ms = Self::now_ms();
+                            card.revision = card.revision.saturating_add(1);
                             changed = true;
                         }
                     }
@@ -268,6 +280,7 @@ impl Board {
             if card.column == "done" && card.updated_at_ms > 0 && card.updated_at_ms < cutoff {
                 card.column = "archive".into();
                 card.updated_at_ms = now;
+                card.revision = card.revision.saturating_add(1);
                 changed = true;
             }
         }
@@ -283,6 +296,7 @@ impl Board {
             for &i in done.iter().take(extra) {
                 cards[i].column = "archive".into();
                 cards[i].updated_at_ms = now;
+                cards[i].revision = cards[i].revision.saturating_add(1);
                 changed = true;
             }
         }
@@ -314,6 +328,7 @@ impl Board {
             return Err(format!("a card with id {} already exists", card.id));
         }
         card.created_at_ms = Self::now_ms();
+        card.revision = 1;
         card.updated_at_ms = card.created_at_ms;
         card.order = cards.iter().filter(|c| c.column == card.column).count() as i64;
         cards.push(card.clone());
@@ -323,12 +338,63 @@ impl Board {
     }
 
     pub fn update(&self, id: &str, changes: &CardUpdate) -> Result<Card, String> {
+        self.update_checked(id, changes, None)
+    }
+
+    pub fn get(&self, id: &str) -> Option<Card> {
+        self.reconcile();
         self.auto_archive();
-        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        self.cards
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|card| card.id == id)
+            .cloned()
+    }
+
+    pub fn edit(
+        &self,
+        id: &str,
+        changes: &CardUpdate,
+        expected_revision: u64,
+    ) -> Result<Card, String> {
+        self.update_checked(id, changes, Some(expected_revision))
+    }
+
+    fn update_checked(
+        &self,
+        id: &str,
+        changes: &CardUpdate,
+        expected_revision: Option<u64>,
+    ) -> Result<Card, String> {
+        self.auto_archive();
+        let mut live = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut cards = live.clone();
         let idx = cards
             .iter()
             .position(|c| c.id == id)
             .ok_or_else(|| format!("no card with id {id}"))?;
+        if expected_revision.is_some_and(|expected| expected != cards[idx].revision) {
+            return Err("This task changed since you opened it. Compare the saved task before replacing it.".into());
+        }
+        if cards[idx].revision == u64::MAX {
+            return Err("This task's revision cannot be advanced.".into());
+        }
+        if changes
+            .column
+            .as_deref()
+            .is_some_and(|column| !COLUMNS.contains(&column))
+        {
+            return Err("Choose To Do, Doing, Done or Archive.".into());
+        }
+        if changes.title.as_ref().is_some_and(|s| s.len() > 4096)
+            || changes
+                .notes
+                .as_ref()
+                .is_some_and(|s| s.len() > 1024 * 1024)
+        {
+            return Err("Use a title of at most 4 KiB and a prompt of at most 1 MiB.".into());
+        }
         if let Some(title) = changes.title.as_deref() {
             if title.trim().is_empty() {
                 return Err("a card needs a title".into());
@@ -376,6 +442,7 @@ impl Board {
         }
         let requested_order = changes.order.map(|o| o.max(0));
         cards[idx].updated_at_ms = Self::now_ms();
+        cards[idx].revision += 1;
         let column = cards[idx].column.clone();
         if requested_order.is_some() || column_changed {
             let mut others: Vec<usize> = cards
@@ -390,12 +457,17 @@ impl Board {
                 .unwrap_or(others.len());
             others.insert(insert_at, idx);
             for (order, i) in others.into_iter().enumerate() {
-                cards[i].order = order as i64;
+                if cards[i].order != order as i64 {
+                    cards[i].order = order as i64;
+                    if i != idx {
+                        cards[i].revision = cards[i].revision.saturating_add(1);
+                    }
+                }
             }
         }
         let result = cards[idx].clone();
-        drop(cards);
-        self.save()?;
+        self.save_cards(&cards)?;
+        *live = cards;
         Ok(result)
     }
 
@@ -491,6 +563,7 @@ impl Board {
             .filter(|c| c.column == "doing" && c.id != id)
             .count() as i64;
         cards[idx].updated_at_ms = Self::now_ms();
+        cards[idx].revision = cards[idx].revision.saturating_add(1);
         let result = cards[idx].clone();
         drop(cards);
         self.save()?;
@@ -523,6 +596,7 @@ mod tests {
     fn card(id: &str) -> Card {
         Card {
             id: id.into(),
+            revision: 0,
             title: "a card".into(),
             kind: CardKind::Task,
             notes: String::new(),
@@ -538,6 +612,85 @@ mod tests {
             updated_at_ms: 0,
             delegate: None,
         }
+    }
+
+    #[test]
+    fn checked_edits_reject_stale_writers_and_survive_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("todo.json");
+        let board = Board::at(path.clone());
+        let original = board.create(card("a")).unwrap();
+        let edit = CardUpdate {
+            title: Some("Updated task".into()),
+            ..Default::default()
+        };
+        let updated = board.edit("a", &edit, original.revision).unwrap();
+        assert_eq!(updated.revision, original.revision + 1);
+        assert!(board.edit("a", &edit, original.revision).is_err());
+        let persisted: File = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let reopened = Board {
+            path,
+            cards: Mutex::new(persisted.cards),
+        };
+        let saved = reopened.get("a").unwrap();
+        assert_eq!(saved.title, "Updated task");
+        assert_eq!(saved.revision, updated.revision);
+    }
+
+    #[test]
+    fn invalid_or_unpersistable_edit_does_not_publish_partial_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("todo.json");
+        let board = Board::at(path.clone());
+        let original = board.create(card("a")).unwrap();
+        let invalid = CardUpdate {
+            title: Some("Must not change".into()),
+            column: Some("unknown".into()),
+            ..Default::default()
+        };
+        assert!(board.edit("a", &invalid, original.revision).is_err());
+        assert_eq!(board.get("a").unwrap().title, original.title);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let update = CardUpdate {
+            notes: Some("Must not publish".into()),
+            ..Default::default()
+        };
+        assert!(board.edit("a", &update, original.revision).is_err());
+        let unchanged = board.get("a").unwrap();
+        assert_eq!(unchanged.notes, original.notes);
+        assert_eq!(unchanged.revision, original.revision);
+    }
+
+    #[test]
+    fn reorder_invalidates_revisions_of_cards_it_moves() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = Board::at(dir.path().join("todo.json"));
+        let first = board.create(card("a")).unwrap();
+        let second = board.create(card("b")).unwrap();
+        board
+            .edit(
+                "b",
+                &CardUpdate {
+                    order: Some(0),
+                    ..Default::default()
+                },
+                second.revision,
+            )
+            .unwrap();
+        assert!(
+            board
+                .edit(
+                    "a",
+                    &CardUpdate {
+                        notes: Some("stale".into()),
+                        ..Default::default()
+                    },
+                    first.revision
+                )
+                .is_err()
+        );
+        assert_eq!(board.get("a").unwrap().order, 1);
     }
 
     #[test]

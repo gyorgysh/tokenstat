@@ -211,4 +211,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 15 adds immutable selected-file commit reviews, outcome receipts
 /// and explicit recovery while preserving unrelated staged entries.
 /// Version 16 adds reviewed current-branch Push and durable outcome recovery.
-pub const PROTOCOL_VERSION: &str = "16";
+/// Version 17 adds revision-checked task editing.
+pub const PROTOCOL_VERSION: &str = "17";

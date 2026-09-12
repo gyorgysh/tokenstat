@@ -2653,7 +2653,7 @@ extension Bridge {
         id: String, column: String? = nil, order: Int64? = nil, title: String? = nil,
         kind: TodoKind? = nil, notes: String? = nil, backend: String? = nil,
         model: String? = nil, effort: String? = nil, workspaceID: String? = nil,
-        budgetSeconds: UInt64? = nil, priority: String? = nil
+        budgetSeconds: UInt64? = nil, priority: String? = nil, expectedRevision: UInt64? = nil
     ) async throws -> TodoCard {
         var params: [String: Any] = ["id": id]
         if let column { params["column"] = column }
@@ -2667,7 +2667,12 @@ extension Bridge {
         if let effort { params["effort"] = effort }
         if let workspaceID { params["workspaceId"] = workspaceID }
         if let budgetSeconds { params["budgetSeconds"] = budgetSeconds }
-        return try await background("todo.update", params, as: TodoCard.self)
+        if let expectedRevision { params["expectedRevision"] = expectedRevision }
+        return try await background(expectedRevision == nil ? "todo.update" : "todo.edit", params, as: TodoCard.self)
+    }
+
+    static func localTaskEditor<T: Decodable & Sendable>(_ method: String, _ params: [String: Any], as type: T.Type) async throws -> T {
+        try await background(method, params, as: type)
     }
 
     static func todoRemove(id: String) async throws {

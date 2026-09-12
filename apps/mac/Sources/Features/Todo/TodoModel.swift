@@ -378,6 +378,22 @@ final class TodoModel {
         budgetSeconds: UInt64? = nil,
         priority: String? = nil
     ) async -> Bool {
+        var draft = TaskEditorDraft(card)
+        if let backend { draft.backend = backend }
+        if let model { draft.model = model }
+        if let effort { draft.effort = effort }
+        if let workspaceID { draft.workspaceID = workspaceID }
+        if let priority { draft.priority = priority }
+        if let budgetSeconds {
+            draft.noTimeLimit = budgetSeconds == 0
+            draft.budgetValue = String(budgetSeconds)
+            draft.budgetUnit = "seconds"
+        }
+        if let validation = draft.validation { errorMessage = validation; return false }
+        guard card.revision != nil else {
+            errorMessage = "Reload this task before saving its settings."
+            return false
+        }
         do {
             _ = try await Bridge.todoUpdate(
                 id: card.id,
@@ -386,7 +402,8 @@ final class TodoModel {
                 effort: effort,
                 workspaceID: workspaceID,
                 budgetSeconds: budgetSeconds,
-                priority: priority
+                priority: priority,
+                expectedRevision: card.revision
             )
             errorMessage = nil
             await load()

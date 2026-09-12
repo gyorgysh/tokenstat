@@ -38,7 +38,7 @@ required-features = ["local-host"]
 # identity, and reaching a machine that does have `local-host`.
 [features]
 default = ["local-host"]
-local-host = ["dep:tokenstat-workspace", "dep:tokenstat-pty", "dep:igd-next"]
+local-host = ["dep:tokenstat-workspace", "dep:tokenstat-pty", "dep:igd-next", "dep:tempfile"]
 
 [dependencies]
 tokenstat-core.workspace = true
@@ -48,6 +48,7 @@ tokenstat-core.workspace = true
 tokenstat-sync.workspace = true
 tokenstat-workspace = { workspace = true, optional = true }
 tokenstat-pty = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 tokenstat-highlight.workspace = true
 tokenstat-identity.workspace = true
 tokenstat-remote.workspace = true

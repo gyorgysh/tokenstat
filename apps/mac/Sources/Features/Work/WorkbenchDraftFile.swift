@@ -29,9 +29,10 @@ actor WorkbenchDraftFile<Value: Codable & Sendable & Equatable> {
     private let file: URL
     private let directory: URL
     private let access: OriginalFileCoordination.Registration
-    private let limit = 2 * 1024 * 1024
+    private let limit: Int
 
-    init(key: String, directory: URL? = nil) {
+    init(key: String, directory: URL? = nil, maximumBytes: Int = 2 * 1024 * 1024) {
+        limit = maximumBytes
         let root = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("tokenstat-workbench-drafts", isDirectory: true)
         self.directory = root

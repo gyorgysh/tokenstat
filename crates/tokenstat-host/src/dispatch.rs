@@ -507,6 +507,7 @@ struct AutomationParams {
 #[serde(rename_all = "camelCase", default)]
 struct TodoParams {
     id: Option<String>,
+    expected_revision: Option<u64>,
     title: Option<String>,
     kind: Option<crate::todo::CardKind>,
     notes: Option<String>,
@@ -2229,10 +2230,16 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             )
             .envelope()
         }
+        "todo.get" => {
+            let p: TodoParams = parse(params)?;
+            serde_json::to_value(crate::todo::shared().get(&p.id.ok_or("A task read needs an id")?))
+                .envelope()
+        }
         "todo.create" => {
             let p: TodoParams = parse(params)?;
             let card = crate::todo::Card {
                 id: String::new(),
+                revision: 0,
                 title: p.title.ok_or("todo.create needs a title")?,
                 kind: p.kind.unwrap_or_default(),
                 notes: p.notes.unwrap_or_default(),
@@ -2254,7 +2261,7 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             };
             serde_json::to_value(crate::todo::shared().create(card)?).envelope()
         }
-        "todo.update" => {
+        "todo.update" | "todo.edit" => {
             let p: TodoParams = parse(params)?;
             let changes = crate::todo::CardUpdate {
                 column: p.column,
@@ -2269,10 +2276,18 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 workspace_id: p.workspace_id,
                 budget_seconds: p.budget_seconds,
             };
-            serde_json::to_value(
-                crate::todo::shared().update(&p.id.ok_or("todo.update needs an id")?, &changes)?,
-            )
-            .envelope()
+            let id = p.id.ok_or("A task update needs an id")?;
+            let card = if method == "todo.edit" {
+                crate::todo::shared().edit(
+                    &id,
+                    &changes,
+                    p.expected_revision
+                        .ok_or("A task edit needs its saved revision")?,
+                )?
+            } else {
+                crate::todo::shared().update(&id, &changes)?
+            };
+            serde_json::to_value(card).envelope()
         }
         "todo.remove" => {
             let p: TodoParams = parse(params)?;
@@ -4347,6 +4362,7 @@ mod tests {
         fn card(kind: crate::todo::CardKind, column: &str, workspace: &str) -> crate::todo::Card {
             crate::todo::Card {
                 id: String::new(),
+                revision: 0,
                 title: "x".into(),
                 kind,
                 notes: String::new(),

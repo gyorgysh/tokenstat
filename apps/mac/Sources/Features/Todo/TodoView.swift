@@ -993,6 +993,7 @@ struct DelegateSheet: View {
     @State private var modelChoice = ""
     @State private var effortChoice = ""
     @State private var budgetMinutes = "180"
+    @State private var budgetUnit = "minutes"
     @State private var noTimeLimit = false
     @State private var working = false
 
@@ -1001,7 +1002,7 @@ struct DelegateSheet: View {
             title: "Run this task",
             subtitle: card.title,
             icon: .run,
-            onClose: { dismiss() }
+            onClose: { if !working { dismiss() } }
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 AppMenuPicker(
@@ -1044,22 +1045,31 @@ struct DelegateSheet: View {
                         .themedFieldBox(small: true)
                         .frame(width: 64)
                         .disabled(noTimeLimit)
-                    Text("minutes")
+                    Text(budgetUnit)
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                     BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
                 }
+                if let validation = runDraft.validation {
+                    Text(validation).font(Theme.caption).foregroundStyle(Theme.danger)
+                }
+                if let error = model.errorMessage {
+                    Text(error).font(Theme.callout).foregroundStyle(Theme.danger)
+                }
             }
+            .disabled(working)
         } actions: {
             Button("Cancel", .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
+                .disabled(working)
             Spacer()
             TaskRunBar(canRun: canRun, running: working) { placement in
                 working = true
                 Task { await run(inFront: placement == .front) }
             }
         }
+        .interactiveDismissDisabled(working)
         .modalFrame(width: 540, height: 520)
         .onAppear {
             backendID = card.backend
@@ -1068,7 +1078,9 @@ struct DelegateSheet: View {
             effortChoice = card.effort ?? ""
             noTimeLimit = card.budgetSeconds == 0
             if card.budgetSeconds > 0 {
-                budgetMinutes = String(max(1, card.budgetSeconds / 60))
+                let draft = TaskEditorDraft(card)
+                budgetMinutes = draft.budgetValue
+                budgetUnit = draft.budgetUnit
             }
             if backendID.isEmpty, let first = model.pickerBackends().first {
                 backendID = first.id
@@ -1082,14 +1094,26 @@ struct DelegateSheet: View {
     }
 
     private var canRun: Bool {
-        !backendID.isEmpty && !workspaceID.isEmpty
+        !backendID.isEmpty && !workspaceID.isEmpty && runDraft.validation == nil
+    }
+
+    private var runDraft: TaskEditorDraft {
+        var draft = TaskEditorDraft(card)
+        draft.backend = backendID
+        draft.model = modelChoice
+        draft.effort = effortChoice
+        draft.workspaceID = workspaceID
+        draft.budgetValue = budgetMinutes
+        draft.budgetUnit = budgetUnit
+        draft.noTimeLimit = noTimeLimit
+        return draft
     }
 
     private func run(inFront: Bool) async {
-        // Clamp before multiplying: a typed number near UInt64.max must not
-        // trap the sheet. Normal minute values are unchanged.
-        let minutes = min(UInt64(budgetMinutes) ?? 180, UInt64.max / 60)
-        let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
+        guard runDraft.validation == nil, let budget = runDraft.budgetSeconds else {
+            working = false
+            return
+        }
         let saved = await model.updateCard(
             card,
             backend: backendID,

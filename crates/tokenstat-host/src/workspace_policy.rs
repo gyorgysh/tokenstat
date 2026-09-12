@@ -1212,6 +1212,8 @@ mod tests {
             "workflow.run",
             "automation.run",
             "todo.create",
+            "todo.edit",
+            "todo.get",
             "launcher.install",
             "harness.config.set",
             "proxy.listen",

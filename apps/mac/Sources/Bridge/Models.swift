@@ -4085,6 +4085,7 @@ enum TodoKind: String, Codable, Sendable, Hashable {
 /// A card on the kanban board.
 struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     var id: String
+    var revision: UInt64?
     var title: String
     var kind: TodoKind
     var notes: String
@@ -4101,7 +4102,7 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     var delegate: TodoDelegate?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, column, order, priority, backend, model, effort
+        case id, revision, title, notes, column, order, priority, backend, model, effort
         case kind
         case workspaceID = "workspaceId", budgetSeconds, createdAtMs, updatedAtMs, delegate
     }
@@ -4109,6 +4110,7 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
+        revision = try values.decodeIfPresent(UInt64.self, forKey: .revision)
         title = try values.decode(String.self, forKey: .title)
         kind = try values.decodeIfPresent(TodoKind.self, forKey: .kind) ?? .task
         notes = try values.decode(String.self, forKey: .notes)
@@ -4149,6 +4151,7 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     init(pendingNote text: String, workspaceID: String) {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         id = "pending:\(UUID().uuidString)"
+        revision = nil
         title = text
         kind = .note
         notes = ""

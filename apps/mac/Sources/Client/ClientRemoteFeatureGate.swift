@@ -24,6 +24,7 @@ enum RemoteHostFeature {
     case hostUpdate
     case selectedCommit
     case reviewedPush
+    case taskEditing
 
     var title: String {
         switch self {
@@ -41,6 +42,7 @@ enum RemoteHostFeature {
         case .hostUpdate: "Updating this computer"
         case .selectedCommit: "Committing selected files"
         case .reviewedPush: "Pushing a branch"
+        case .taskEditing: "Editing tasks"
         }
     }
 
@@ -62,6 +64,7 @@ enum RemoteHostFeature {
     /// the client only sends beside it, so confirmed send needs all of 14.
     /// Version 15 adds reviewed selected-file commits and outcome recovery.
     /// Version 16 adds reviewed current-branch Push and outcome recovery.
+    /// Version 17 adds revision-checked task editing.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
@@ -81,6 +84,7 @@ enum RemoteHostFeature {
         case .hostUpdate: 14
         case .selectedCommit: 15
         case .reviewedPush: 16
+        case .taskEditing: 17
         }
     }
 
@@ -100,6 +104,7 @@ enum RemoteHostFeature {
         case .hostUpdate: "arrow.down.circle"
         case .selectedCommit: "checkmark.circle"
         case .reviewedPush: "arrow.up.circle"
+        case .taskEditing: "pencil"
         }
     }
 
