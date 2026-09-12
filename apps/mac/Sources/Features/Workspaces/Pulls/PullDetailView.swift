@@ -36,8 +36,12 @@ struct PullDetailView: View {
                     } else if let detail = model.detail {
                         hero(detail)
                         DetailTabs(selection: $model.tab, checks: detail.checks.count)
-                        if let notice = model.actionNotice { actionBanner(notice, tint: Theme.success, symbol: "checkmark.circle.fill") }
-                        if let error = model.actionError { actionBanner(FriendlyError.from(error).message, tint: Theme.warning, symbol: "exclamationmark.triangle.fill") }
+                        if let notice = model.actionNotice {
+                            actionBanner(notice, tint: Theme.success, symbol: "checkmark.circle.fill") { model.actionNotice = nil }
+                        }
+                        if let error = model.actionError {
+                            actionBanner(FriendlyError.from(error).message, tint: Theme.warning, symbol: "exclamationmark.triangle.fill") { model.actionError = nil }
+                        }
                         // Measuring two copies of an entire PR conversation on
                         // every layout pass is expensive, especially when one
                         // contains a long Dependabot body. Read the actual
@@ -342,8 +346,12 @@ struct PullDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.warning.opacity(0.09), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
-    private func actionBanner(_ message: String, tint: Color, symbol: String) -> some View {
-        Label(message, systemImage: symbol)
+    private func actionBanner(_ message: String, tint: Color, symbol: String, onDismiss: @escaping () -> Void) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            Label(message, systemImage: symbol)
+            Spacer(minLength: 0)
+            NoticeDismissButton(action: onDismiss)
+        }
             .font(Theme.callout.weight(.medium))
             .foregroundStyle(tint)
             .padding(.horizontal, Theme.Space.m)

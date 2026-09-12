@@ -65,6 +65,7 @@ final class AccountModel {
     /// until the host's ten-minute cache expired.
     private(set) var syncGeneration = 0
     var syncNotice: String?
+    private(set) var syncNoticeDismissed = false
     var syncNoticeIsError = false
     /// After any accepted sync, and after a real 429, the next manual press
     /// would be refused. Used to disable the button. Not the same as a rate
@@ -538,7 +539,13 @@ final class AccountModel {
         }
     }
 
+    func dismissSyncNotice() {
+        syncNoticeDismissed = true
+        syncNotice = nil
+    }
+
     private func showSyncNotice(_ message: String, isError: Bool) {
+        syncNoticeDismissed = false
         noticeGeneration += 1
         let generation = noticeGeneration
         syncNotice = message
@@ -587,6 +594,7 @@ final class AccountModel {
     }
 
     private func clearSyncPacing() {
+        syncNoticeDismissed = false
         syncNotice = nil
         syncNoticeIsError = false
         syncCooldownUntil = nil

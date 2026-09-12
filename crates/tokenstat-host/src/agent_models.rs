@@ -32,6 +32,7 @@ enum Cached {
 
 struct Entry {
     at: Instant,
+    refresh_failed: bool,
     value: Cached,
 }
 
@@ -179,6 +180,21 @@ pub fn for_backend(id: &str, fallback: &[&str]) -> Vec<String> {
     }
 }
 
+/// Enumeration is distinct from installation and from account access.
+pub(crate) fn list_status(id: &str) -> &'static str {
+    if !matches!(
+        id,
+        "grok" | "cursor" | "agy" | "codex" | "opencode" | "opencode2"
+    ) {
+        return "defaultOnly";
+    }
+    match cache_lock().get(id) {
+        Some(entry) if entry.refresh_failed => "refreshFailed",
+        Some(_) => "live",
+        None => "loading",
+    }
+}
+
 fn fill(id: &str, force: bool, fetch: impl FnOnce() -> Option<Vec<String>>) {
     if let Some(entry) = cache_lock().get(id).filter(|_| !force) {
         let ttl = match entry.value {
@@ -197,11 +213,13 @@ fn fill(id: &str, force: bool, fetch: impl FnOnce() -> Option<Vec<String>>) {
         let mut lock = cache_lock();
         if let Some(entry) = lock.get_mut(id) {
             entry.at = Instant::now();
+            entry.refresh_failed = true;
         } else {
             lock.insert(
                 id.to_string(),
                 Entry {
                     at: Instant::now(),
+                    refresh_failed: true,
                     value: Cached::Miss,
                 },
             );
@@ -212,6 +230,7 @@ fn fill(id: &str, force: bool, fetch: impl FnOnce() -> Option<Vec<String>>) {
         id.to_string(),
         Entry {
             at: Instant::now(),
+            refresh_failed: false,
             value: Cached::Live(list),
         },
     );
@@ -580,6 +599,19 @@ fn is_model_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failed_refresh_preserves_discovered_models_and_reports_failure() {
+        let id = "test-retained-model-list";
+        super::fill(id, true, || Some(vec!["discovered-model".into()]));
+        super::fill(id, true, || None);
+        assert_eq!(
+            super::for_backend(id, &["unverified-fallback"]),
+            vec!["discovered-model"]
+        );
+        assert!(super::cache_lock().get(id).unwrap().refresh_failed);
+        super::cache_lock().remove(id);
+    }
+
     use super::*;
 
     #[test]

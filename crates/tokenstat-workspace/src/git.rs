@@ -1448,6 +1448,82 @@ mod tests {
     }
 
     #[test]
+    fn gd_changes_survive_tracking_encoding_and_mixed_binary_commits() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        let run = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "test@example.invalid"]);
+        run(&["config", "user.name", "Test"]);
+        run(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(dir.join("player.gd"), "extends Node\nvar speed = 1\n").unwrap();
+        std::fs::write(dir.join(".gitignore"), "ignored.gd\n.godot/\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-qm", "Initial scripts"]);
+
+        // Godot scripts have no special extension filter. UTF-8, CRLF and
+        // tabs must remain text, alongside an actual binary resource.
+        std::fs::write(
+            dir.join("player.gd"),
+            "extends Node\r\nvar speed = 2\r\n\t# Árvíztűrő 日本語\r\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("new.gd"), "extends Node2D\n").unwrap();
+        std::fs::write(dir.join("ignored.gd"), "ignored\n").unwrap();
+        std::fs::write(dir.join("texture.res"), b"RSRC\0binary\0resource").unwrap();
+        let changes = status(dir);
+        assert!(changes.files.iter().any(|f| f.path == "player.gd"));
+        assert!(
+            changes
+                .files
+                .iter()
+                .any(|f| f.path == "new.gd" && f.kind == ChangeKind::Untracked)
+        );
+        assert!(!changes.files.iter().any(|f| f.path == "ignored.gd"));
+        let edited = diff(dir, "player.gd");
+        assert!(!edited.binary && !edited.untracked);
+        assert!(
+            edited
+                .hunks
+                .iter()
+                .flat_map(|h| &h.lines)
+                .any(|l| l.kind == DiffLineKind::Added && l.text.contains("日本語"))
+        );
+        let new = diff(dir, "new.gd");
+        assert!(new.untracked && !new.binary && !new.hunks.is_empty());
+        assert!(diff(dir, "texture.res").binary);
+
+        run(&["add", "."]);
+        run(&["commit", "-qm", "Scripts and resource"]);
+        let commit = show(dir, "HEAD").unwrap();
+        for path in ["player.gd", "new.gd"] {
+            let file = commit.diffs.iter().find(|f| f.path == path).unwrap();
+            assert!(!file.binary && !file.hunks.is_empty(), "{path}");
+        }
+        assert!(
+            commit
+                .diffs
+                .iter()
+                .find(|f| f.path == "texture.res")
+                .unwrap()
+                .binary
+        );
+        assert!(!commit.files.iter().any(|f| f.path == "ignored.gd"));
+    }
+
+    #[test]
     fn a_commit_reads_back_with_its_message_and_diff() {
         let dir = std::env::temp_dir().join(format!("tokenstat-show-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

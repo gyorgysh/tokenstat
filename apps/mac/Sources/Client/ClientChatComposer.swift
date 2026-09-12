@@ -52,6 +52,9 @@ struct ClientChatComposer: View {
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .disabled(model.stagingAttachments > 0 || model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
             }
+            if model.selectedBackendMissing {
+                ChatAgentAvailabilityNotice(model: model, chat: chat)
+            }
             if model.draftSaveFailed {
                 ChatDraftNotice(retrySave: { model.retryDraftSave() })
             } else if model.unconfirmedSend != nil, model.savedCopy != nil {
@@ -297,7 +300,7 @@ struct ClientChatComposer: View {
     private var cannotSend: Bool {
         // A saved copy is read and drafted in, never sent from: the banner
         // above says why, and the field stays editable for those drafts.
-        model.savedCopy != nil
+        model.selectedBackendMissing || model.savedCopy != nil
             || model.stagingAttachments > 0
             || model.sending
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)

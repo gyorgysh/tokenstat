@@ -1399,6 +1399,11 @@ final class WorkspacesModel {
         gitOutcome[workspaceID] = outcome
     }
 
+    func dismissGitOutcome(for workspaceID: String) {
+        gitOutcome.removeValue(forKey: workspaceID)
+        gitOutcomeAction.removeValue(forKey: workspaceID)
+    }
+
     #if os(macOS)
     /// Whether the onboarding sheet that explains workspaces is up.
     ///

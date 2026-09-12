@@ -165,7 +165,7 @@ struct UpdateCard: View {
     /// try the automatic path again without leaving the app.
     private var failedCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(spacing: Theme.Space.s) {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(Theme.fixed(15))
                     .foregroundStyle(Theme.warning)
@@ -180,6 +180,7 @@ struct UpdateCard: View {
                         .help(update.failure ?? "")
                 }
                 Spacer(minLength: Theme.Space.s)
+                NoticeDismissButton { update.dismissFailure() }
             }
             HStack(spacing: Theme.Space.s) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -190,10 +191,6 @@ struct UpdateCard: View {
                     .disabled(update.retryAfter.map { $0 > context.date } ?? false)
                     .help("Check again when GitHub's waiting period has ended")
                 }
-
-                Button("Dismiss", .dismiss) { update.dismissFailure() }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
-                    .help("Hide this notice without turning off update checks")
 
                 if update.isAvailable {
                 Button("Manual", .download) {

@@ -994,6 +994,22 @@ struct BusySpinner: View {
     }
 }
 
+/// A consistent close control for feedback that does not cancel its action.
+struct NoticeDismissButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button("Dismiss notification", .dismiss, action: action)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+            .help("Dismiss notification")
+    }
+}
+
 /// A line of status across the top of a pane.
 ///
 /// One banner for the whole app. There used to be three: a red-tinted bar in
@@ -1036,12 +1052,19 @@ struct Banner: View {
     /// plumbing rather than an answer. Shown quieter and monospaced, because
     /// it is a quotation and not the message.
     var detail: String?
+    var onDismiss: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Label(text, systemImage: symbol ?? severity.symbol)
-                .font(.callout)
-                .foregroundStyle(severity.tint)
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                Label(text, systemImage: symbol ?? severity.symbol)
+                    .font(.callout)
+                    .foregroundStyle(severity.tint)
+                if let onDismiss {
+                    Spacer(minLength: 0)
+                    NoticeDismissButton(action: onDismiss)
+                }
+            }
             if let detail, !detail.isEmpty {
                 Text(detail)
                     .font(Theme.mono(11))
@@ -1197,6 +1220,7 @@ struct TransientToast: View {
     /// there, or it is a notification that the app knows something you do not.
     var actionLabel: String?
     var action: (() -> Void)?
+    var onDismiss: (() -> Void)?
 
     var body: some View {
         if let message {
@@ -1210,6 +1234,10 @@ struct TransientToast: View {
                     .buttonStyle(.plain)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.accent)
+                }
+                NoticeDismissButton {
+                    self.message = nil
+                    onDismiss?()
                 }
             }
                 .font(.callout.weight(.medium))

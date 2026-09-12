@@ -139,7 +139,7 @@ struct ChatSetupHeader: View {
                 )
                 .disabled(chat.running)
             }
-            if let backend, !backend.models.isEmpty || !backend.efforts.isEmpty {
+            if let backend, backend.installed != false, !backend.models.isEmpty || !backend.efforts.isEmpty {
                 HStack(alignment: .bottom, spacing: Theme.Space.s) {
                     if !backend.models.isEmpty {
                         FavoriteModelPicker(
@@ -169,7 +169,7 @@ struct ChatSetupHeader: View {
 
     private var agentOptions: [(value: String, label: String)] {
         model.backends
-            .filter { $0.id != "sh" || $0.id == chat.backend }
+            .filter { ($0.id != "sh" || $0.id == chat.backend) && $0.installed != false }
             .map { (value: $0.id, label: $0.label) }
     }
 
@@ -392,9 +392,12 @@ struct ChatAgentChoices {
     /// Every row, in the order the sections have always been read in.
     var choices: [PickerChoice<Choice>] {
         var rows = agentOptions.map {
-            PickerChoice(value: Choice.agent($0.value), label: $0.label, section: "Agent")
+            PickerChoice(value: Choice.agent($0.value), label: $0.label,
+                         detail: model.backend(for: $0.value)?.readiness == "needsSignIn" ? "Sign-in may be needed" :
+                            model.backend(for: $0.value)?.readiness == "expired" ? "Stored login has expired" : nil,
+                         section: "Agent")
         }
-        if let backend, !backend.models.isEmpty {
+        if let backend, backend.installed != false {
             rows.append(
                 PickerChoice(
                     value: .model(""),
@@ -404,10 +407,12 @@ struct ChatAgentChoices {
                 )
             )
             rows += modelIDs.map {
-                PickerChoice(value: Choice.model($0), label: $0, section: "Model")
+                PickerChoice(value: Choice.model($0), label: $0,
+                             detail: backend.models.contains($0) ? nil : "Saved choice · availability unverified",
+                             section: "Model")
             }
         }
-        if let backend, !backend.efforts.isEmpty {
+        if let backend, backend.installed != false, !backend.efforts.isEmpty {
             rows.append(PickerChoice(value: .effort(""), label: "Default", section: "Effort"))
             rows += backend.efforts.map {
                 PickerChoice(value: Choice.effort($0), label: $0, section: "Effort")
@@ -464,12 +469,12 @@ struct ChatAgentChoices {
 
     var agentOptions: [(value: String, label: String)] {
         model.backends
-            .filter { $0.id != "sh" || $0.id == chat.backend }
+            .filter { ($0.id != "sh" || $0.id == chat.backend) && $0.installed != false }
             .map { (value: $0.id, label: $0.label) }
     }
 
     var modelIDs: [String] {
-        guard let backend else { return [] }
+        guard let backend, backend.installed != false else { return [] }
         var ids = backend.models
         let extra = chat.model ?? ""
         if !extra.isEmpty, !ids.contains(extra) {
@@ -552,6 +557,9 @@ struct ChatAgentPanel: View {
     var locked: Bool
     var onDone: () -> Void = {}
 
+    @State private var showingSetup = false
+    @State private var installing: String?
+    @State private var setupError: String?
     @State private var canRefresh = false
     @State private var updating = false
     @State private var favorites = ModelFavoritesStore.shared
@@ -567,22 +575,100 @@ struct ChatAgentPanel: View {
             }
             .padding(Theme.Space.s)
             #endif
-            PickerOptionList(
-                choices: choices.choices,
-                isSelected: choices.isSelected,
-                prompt: "Filter agents, models and efforts",
-                emptyMessage: "No agents available",
-                caption: "Three settings for this conversation.",
-                refresh: canRefresh ? { await model.reloadBackends() } : nil,
-                sectionValue: choices.currentValue,
-                sectionTabs: choices.selectableSections,
-                selectionSummary: choices.summary,
-                pick: pick,
-                accessory: { value in AnyView(star(for: value)) }
-            )
-            .disabled(updating || locked)
-            .task(id: model.peer ?? "local") {
-                canRefresh = await RemoteHostFeature.modelRefresh.isSupported(peer: model.peer)
+            if showingSetup {
+                setupList
+            } else {
+                PickerOptionList(
+                    choices: choices.choices,
+                    isSelected: choices.isSelected,
+                    prompt: "Filter agents, models and efforts",
+                    emptyMessage: "No agents installed. Set up an agent to start chatting.",
+                    caption: model.peer == nil ? "Agents on this computer" : "Agents on this chat’s remote host",
+                    refresh: canRefresh ? { await model.reloadBackends() } : nil,
+                    sectionValue: choices.currentValue,
+                    sectionTabs: choices.selectableSections,
+                    selectionSummary: choices.summary,
+                    pick: pick,
+                    accessory: { value in AnyView(star(for: value)) }
+                )
+                .disabled(updating || locked)
+                .task(id: model.peer ?? "local") {
+                    canRefresh = await RemoteHostFeature.modelRefresh.isSupported(peer: model.peer)
+                    await model.reloadBackends(refreshModels: false)
+                }
+            }
+            if choices.backend?.modelListStatus == "refreshFailed" {
+                Text("Couldn’t refresh models. Use the agent default or a previously listed model.")
+                    .font(Theme.caption).foregroundStyle(Theme.warning).padding(.horizontal, Theme.Space.s)
+            } else if choices.backend?.modelListStatus == "loading" {
+                Text("Checking models… Agent default is available.")
+                    .font(Theme.caption).foregroundStyle(Theme.controlGlyph).padding(.horizontal, Theme.Space.s)
+            }
+            if let error = setupError ?? model.backendRefreshError {
+                Text(error).font(Theme.caption).foregroundStyle(Theme.warning)
+                    .padding(.horizontal, Theme.Space.s)
+            }
+            HStack {
+                Button(showingSetup ? "Back to agent choices" : "Set up another agent…") {
+                    showingSetup.toggle()
+                }
+                Spacer(minLength: 0)
+                Button("Retry") { Task { await model.reloadBackends() } }
+            }
+            .font(Theme.caption)
+            .padding(Theme.Space.s)
+            .disabled(installing != nil || locked)
+        }
+    }
+
+    private var setupList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                Text(model.peer == nil ? "Set up on this computer" : "Set up on this chat’s remote host")
+                    .font(Theme.callout.weight(.semibold))
+                ForEach(model.backends.filter { $0.id != "sh" }) { backend in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(backend.label).font(Theme.callout)
+                            Text(backend.installed == false ? "Not installed" :
+                                 backend.readiness == "needsSignIn" || backend.readiness == "expired"
+                                 ? "Open this agent in the host’s Terminal to sign in, then retry."
+                                 : backend.installed == true ? "Installed" : "Availability unknown")
+                                .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+                        }
+                        Spacer()
+                        if backend.installed == false && backend.canInstall {
+                            Button(installing == backend.id ? "Installing…" : "Install") {
+                                install(backend)
+                            }
+                            .disabled(installing != nil || locked)
+                        }
+                    }
+                }
+            }.padding(Theme.Space.s)
+        }
+    }
+
+    private func install(_ backend: ChatBackend) {
+        guard let id = backend.launcherID, installing == nil else { return }
+        let peer = model.peer
+        installing = backend.id
+        setupError = nil
+        Task {
+            defer { installing = nil }
+            do {
+                let result: LauncherInstallResult
+                if let peer {
+                    result = try await Bridge.onPeer(peer, "launcher.install", ["id": id], patience: Bridge.Patience.long, as: LauncherInstallResult.self)
+                } else {
+                    result = try await Bridge.launcherInstall(id: id)
+                }
+                guard model.peer == peer else { return }
+                if !result.ok { setupError = "Installation failed. \(result.output.suffix(600))" }
+                await model.reloadBackends()
+            } catch {
+                guard model.peer == peer else { return }
+                setupError = error.localizedDescription
             }
         }
     }
@@ -592,6 +678,7 @@ struct ChatAgentPanel: View {
     private func pick(_ choice: ChatAgentChoices.Choice) {
         guard !updating, !locked else { return }
         let choices = self.choices
+        if case let .agent(id) = choice, model.backend(for: id)?.installed == false { return }
         let owner = model.currentReference
         updating = true
         Task {
@@ -713,5 +800,25 @@ private func performSetupChange(
               model.selected?.id == chat.id, model.savedCopy == nil,
               model.selected?.running == false else { return }
         await operation()
+    }
+}
+
+/// Keep the saved selection and writing visible when its executable disappears.
+struct ChatAgentAvailabilityNotice: View {
+    @Bindable var model: ChatModel
+    let chat: ChatConversation
+    @State private var showingOptions = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("\(model.backend(for: chat.backend)?.label ?? chat.backend) isn’t installed on this host.")
+                .font(Theme.caption).foregroundStyle(Theme.warning)
+            Button("Set up or choose another agent") { showingOptions = true }
+                .font(Theme.caption)
+        }
+        .pickerPanelSurface(title: "Agent options", isPresented: $showingOptions) {
+            ChatAgentPanel(model: model, chat: chat, locked: chat.running,
+                           onDone: { showingOptions = false })
+        }
     }
 }

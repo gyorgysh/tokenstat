@@ -475,6 +475,14 @@ fn show_in(dir: &Path, id: &str) -> Result<Value, String> {
 /// the UI draws on, and the front end never launches a profile that reports
 /// false. `hidden` is the user's own take-off-the-grid set, stored on this
 /// machine so every client that asks sees the same list.
+pub(crate) fn profile_installed(id: &str) -> Option<bool> {
+    let profile = PROFILES.iter().find(|profile| profile.id == id)?;
+    Some(
+        id == "shell"
+            || resolve_profile(profile, &search_path(), Path::new(&user_home())).is_some(),
+    )
+}
+
 pub(crate) fn catalog() -> Value {
     let path = search_path();
     #[cfg(not(windows))]

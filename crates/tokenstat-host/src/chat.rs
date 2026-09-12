@@ -1991,6 +1991,15 @@ impl Store {
         {
             return Err("this chat is already responding".into());
         }
+        if crate::launcher::profile_installed(launcher_profile_id(&chat.backend)) == Some(false) {
+            return Err(DispatchError::new(
+                "agent_not_installed",
+                format!(
+                    "{} is not installed on this host. Set it up or choose another agent. Your draft stays on your device.",
+                    chat.backend
+                ),
+            ));
+        }
         let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
             .ok_or("This conversation is already running in another instance of tokenstat.")?;
         let attachments = self.attachment_paths(id, attachment_ids)?;
@@ -3529,7 +3538,18 @@ fn last_message_in(path: &Path) -> Option<(i64, &'static str)> {
     })
 }
 
+fn launcher_profile_id(backend: &str) -> &str {
+    match backend {
+        "sh" => "shell",
+        "claude" => "claude_code",
+        "cursor" => "cursor_agent",
+        "agy" => "antigravity",
+        other => other,
+    }
+}
+
 pub fn backends(force: bool) -> Vec<Value> {
+    let catalog = crate::launcher::catalog();
     crate::automations::backends(force)
         .into_iter()
         .map(|mut backend| {
@@ -3553,6 +3573,29 @@ pub fn backends(force: bool) -> Vec<Value> {
                     }),
                 );
             }
+            let id = backend["id"].as_str().unwrap_or("").to_string();
+            if let Some(profile) = catalog.as_array().and_then(|profiles| {
+                profiles
+                    .iter()
+                    .find(|profile| profile["id"].as_str() == Some(launcher_profile_id(&id)))
+            }) {
+                backend["installed"] = profile["installed"].clone();
+                backend["launcherID"] = profile["id"].clone();
+                backend["canInstall"] = json!(
+                    profile["installCommand"]
+                        .as_str()
+                        .is_some_and(|s| !s.is_empty())
+                );
+                backend["readiness"] = profile["readiness"].clone();
+            }
+            // Chat only advertises discovered model IDs. The agent's own
+            // default remains usable when enumeration is unsupported or fails.
+            backend["modelListStatus"] = json!(crate::agent_models::list_status(&id));
+            backend["models"] = json!(if backend["installed"] == false {
+                Vec::<String>::new()
+            } else {
+                crate::agent_models::for_backend(&id, &[])
+            });
             backend
         })
         .collect()
@@ -6040,6 +6083,30 @@ mod tests {
         // Unreadable is an error the wizard shows, not a half-built persona.
         assert!(draft_from_reply("I could not do that.", "fallback").is_err());
         assert!(draft_from_reply(r#"{"systemPrompt":"no name"}"#, "fallback").is_err());
+    }
+
+    #[test]
+    fn chat_backend_availability_comes_from_the_launcher() {
+        let catalog = crate::launcher::catalog();
+        for backend in backends(false) {
+            let id = backend["id"].as_str().unwrap();
+            let profile = catalog
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|profile| profile["id"] == launcher_profile_id(id))
+                .unwrap();
+            assert_eq!(backend["installed"], profile["installed"], "{id}");
+            assert_eq!(backend["launcherID"], profile["id"], "{id}");
+            if backend["installed"] == false {
+                assert_eq!(
+                    backend["models"],
+                    json!([]),
+                    "missing agent {id} advertises models"
+                );
+            }
+            assert!(backend["modelListStatus"].is_string());
+        }
     }
 
     #[test]

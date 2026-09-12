@@ -2920,14 +2920,24 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     var command: String
     var models: [String]
     var efforts: [String]
+    var modelListStatus: String? = nil
+    var installed: Bool? = nil
+    var launcherID: String? = nil
+    var canInstall: Bool = false
+    var readiness: String? = nil
     var gateTier: String
 
     enum CodingKeys: String, CodingKey {
-        case id, label, name, command, models, efforts, gateTier
+        case id, label, name, command, models, efforts, gateTier, modelListStatus, installed, launcherID, canInstall, readiness
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        modelListStatus = try c.decodeIfPresent(String.self, forKey: .modelListStatus)
+        installed = try c.decodeIfPresent(Bool.self, forKey: .installed)
+        launcherID = try c.decodeIfPresent(String.self, forKey: .launcherID)
+        canInstall = try c.decodeIfPresent(Bool.self, forKey: .canInstall) ?? false
+        readiness = try c.decodeIfPresent(String.self, forKey: .readiness)
         id = try c.decode(String.self, forKey: .id)
         label = try c.decodeIfPresent(String.self, forKey: .label)
             ?? c.decodeIfPresent(String.self, forKey: .name)
@@ -2946,6 +2956,11 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         try c.encode(models, forKey: .models)
         try c.encode(efforts, forKey: .efforts)
         try c.encode(gateTier, forKey: .gateTier)
+        try c.encodeIfPresent(modelListStatus, forKey: .modelListStatus)
+        try c.encodeIfPresent(installed, forKey: .installed)
+        try c.encodeIfPresent(launcherID, forKey: .launcherID)
+        try c.encode(canInstall, forKey: .canInstall)
+        try c.encodeIfPresent(readiness, forKey: .readiness)
     }
 }
 

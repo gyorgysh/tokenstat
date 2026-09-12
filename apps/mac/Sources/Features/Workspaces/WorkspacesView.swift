@@ -625,7 +625,8 @@ private struct CommitBox: View {
                         ? (action?.done ?? "Done.")
                         : (action?.failed ?? "That did not work."),
                     severity: outcome.ok ? .success : .danger,
-                    detail: outcome.message
+                    detail: outcome.message,
+                    onDismiss: { model.dismissGitOutcome(for: folder.id) }
                 )
             }
             if let notice = automations.noticeMessage {

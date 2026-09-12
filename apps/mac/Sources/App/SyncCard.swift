@@ -31,7 +31,7 @@ struct SyncCard: View {
                 tint: Theme.accent,
                 spinner: true
             )
-        } else if let notice = account.syncNotice {
+        } else if let notice = account.syncNotice, !account.syncNoticeDismissed {
             if account.isRateLimited {
                 status(
                     title: "Rate limited",
@@ -54,7 +54,7 @@ struct SyncCard: View {
                     tint: Theme.accent
                 )
             }
-        } else if account.isRateLimited {
+        } else if account.isRateLimited && !account.syncNoticeDismissed {
             // The 429 notice has faded, but the gate is still shut. Keep the
             // warning until the remembered wait elapses. A success cooldown
             // does not come through here.
@@ -75,7 +75,7 @@ struct SyncCard: View {
         tint: Color,
         spinner: Bool = false
     ) -> some View {
-        HStack(spacing: Theme.Space.s) {
+        HStack(alignment: .top, spacing: Theme.Space.s) {
             Group {
                 if spinner {
                     ProgressView()
@@ -98,6 +98,9 @@ struct SyncCard: View {
                     .lineLimit(2)
             }
             Spacer(minLength: Theme.Space.s)
+            if !spinner {
+                NoticeDismissButton { account.dismissSyncNotice() }
+            }
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)

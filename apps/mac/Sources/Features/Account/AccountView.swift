@@ -146,7 +146,8 @@ struct AccountView: View {
             TransientToast(message: $model.syncNotice,
                            severity: model.isRateLimited
                                ? .warning
-                               : (model.syncNoticeIsError ? .danger : .success))
+                               : (model.syncNoticeIsError ? .danger : .success),
+                           onDismiss: { model.dismissSyncNotice() })
                 .padding(Theme.Space.l)
         }
         .task {

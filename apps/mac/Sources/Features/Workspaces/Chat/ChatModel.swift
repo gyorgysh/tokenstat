@@ -102,6 +102,10 @@ final class ChatModel {
     /// like local ones without exposing a host filesystem path to SwiftUI.
     var responseAttachmentData: [String: Data] = [:]
     var backends: [ChatBackend] = []
+    var backendRefreshError: String?
+    var selectedBackendMissing: Bool {
+        backend(for: selected?.backend ?? "")?.installed == false
+    }
     var personas: [ChatPersona] = []
     /// New conversations inherit this persona unless the person picks none.
     var defaultPersonaID: String?
@@ -399,7 +403,7 @@ final class ChatModel {
     /// Nothing is lost if the app stops between the two.
     @discardableResult
     func holdDraftForSending(_ text: String) -> Bool {
-        guard savedCopy == nil, let selected, !sending, stagingAttachments == 0, heldSubmission == nil else { return false }
+        guard !selectedBackendMissing, savedCopy == nil, let selected, !sending, stagingAttachments == 0, heldSubmission == nil else { return false }
         saveDraftNow()
         if let pending = queued.first(where: { $0.id == draftMessageID && $0.needsReceipt }) {
             unconfirmedSend = .init(conversationID: selected.id, messageID: pending.id, checking: false)
@@ -862,6 +866,7 @@ final class ChatModel {
                 return
             }
             backends = loaded.0
+            backendRefreshError = nil
             personas = loaded.1.personas
             // The host says "" for a workspace that has chosen no persona.
             // Nil here means the same thing, and every reader already handles
@@ -1189,10 +1194,11 @@ final class ChatModel {
                 backends = loaded
             }
             let saved = lastLaunchChoice
-            let chosen = backends.first { $0.id == saved?.backend }
-                ?? backends.first { $0.id == "codex" }
-                ?? backends.first(where: { $0.id != "sh" })
-                ?? backends.first
+            let available = backends.filter { $0.installed != false && $0.id != "sh" }
+            let chosen = available.first { $0.id == saved?.backend }
+                ?? available.first { $0.id == "codex" }
+                ?? available.first
+                ?? backends.first { $0.id != "sh" }
             let model = chosen?.models.contains(saved?.model ?? "") == true ? saved?.model : nil
             let effort = chosen?.efforts.contains(saved?.effort ?? "") == true ? saved?.effort : nil
             let chat = try await Bridge.createChat(
@@ -1254,14 +1260,19 @@ final class ChatModel {
     /// The host caches them for ten minutes, which is right for a picker that
     /// opens on every screen and wrong the moment somebody adds an API key to
     /// a CLI and comes straight here looking for the models it just gained.
-    /// Errors are swallowed on purpose: the list on screen is still the list,
-    /// and an alert over a picker that already works would be worse than a
-    /// button that changed nothing.
-    func reloadBackends() async {
+    /// Keep the previous choices on failure and explain the failed check
+    /// inline, so a disconnected host never looks like an empty installation.
+    func reloadBackends(refreshModels: Bool = true) async {
         let context = loadGeneration
-        guard let loaded = try? await Bridge.chatBackends(peer: peer, refresh: true) else { return }
-        guard context == loadGeneration else { return }
-        backends = loaded
+        do {
+            let loaded = try await Bridge.chatBackends(peer: peer, refresh: refreshModels)
+            guard context == loadGeneration else { return }
+            backends = loaded
+            backendRefreshError = nil
+        } catch {
+            guard context == loadGeneration else { return }
+            backendRefreshError = "Can’t check agents on this host. Reconnect and retry."
+        }
     }
 
     func update(

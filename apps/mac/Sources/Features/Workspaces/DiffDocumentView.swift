@@ -12,21 +12,34 @@ struct DiffDocumentView<Header: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ScrollView([.vertical, .horizontal]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    header()
-                        .frame(width: geometry.size.width, alignment: .leading)
-                    if !loaded {
-                        ProgressView().frame(width: geometry.size.width, height: 80)
+            if loaded {
+                ScrollView([.vertical, .horizontal]) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        header()
+                            .frame(width: geometry.size.width, alignment: .leading)
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(rows) { row in
+                                DiffDocumentRowView(row: row, width: geometry.size.width)
+                            }
+                        }
                     }
-                    ForEach(rows) { row in
-                        DiffDocumentRowView(row: row, width: geometry.size.width)
-                    }
+                    .frame(minWidth: geometry.size.width, alignment: .topLeading)
                 }
-                .frame(minWidth: geometry.size.width, alignment: .leading)
+                .defaultScrollAnchor(.topLeading)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    header()
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 80)
+                    Spacer(minLength: 0)
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
             }
         }
-        .task(id: diffs) {
+        .task(id: Request(diffs: diffs, fileHeaders: fileHeaders)) {
+            // Mount the scroll view with its complete row set so its first
+            // visible range is computed against the real document, rather
+            // than a loading indicator that will be replaced asynchronously.
+            loaded = false
             let input = diffs
             let headers = fileHeaders
             let task = Task.detached(priority: .userInitiated) {
@@ -39,6 +52,11 @@ struct DiffDocumentView<Header: View>: View {
             rows = result
             loaded = true
         }
+    }
+
+    private struct Request: Hashable {
+        let diffs: [FileDiff]
+        let fileHeaders: Bool
     }
 }
 
