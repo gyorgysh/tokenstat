@@ -13,9 +13,11 @@ at the end.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-12
+
 Devices and Workspaces on the phone got a clearer layout, plan limits keep
-Codex's general and secondary names after sync, and the update check looks at
-the app as well as hostd.
+Codex's general and secondary names after sync, and the Mac no longer freezes
+when you flip through the sidebar with a chat open.
 
 ### Added
 
@@ -24,6 +26,9 @@ the app as well as hostd.
   presets: folders first, chats first, sessions first. The choice is saved on
   this device, used on the Workspaces tab and on a host opened from Devices,
   and listed in search. Hosts stay above the arrangement.
+- Skip this version on the update card, including after a download is ready.
+  Automatic checks at launch and after reconnect honour the skip. Check for
+  updates yourself to clear it and hear about that release again.
 
 ### Changed
 
@@ -47,6 +52,15 @@ the app as well as hostd.
 - The update check compares the app marketing version and hostd. Mac and
   Windows send the bundle version. Newer is true when either lags the
   release. Omit the app version and only hostd is compared, as before.
+- Clicking a folder always opens Launch. The folder row stays selected while
+  Launch is up. Sessions only lights when a terminal is in front.
+- Bypass permissions applies to agent launches as well as shells, on the Mac
+  and on the phone.
+- Switching branch with unsaved files open asks first: save and switch,
+  discard and switch, or cancel. Discard reloads the buffers so a later save
+  cannot write the old branch's text over the new one.
+- Streaming chat markdown parses on a short cadence instead of once per
+  token, and only http, https and mailto links stay tappable.
 
 ### Fixed
 
@@ -54,6 +68,18 @@ the app as well as hostd.
   icon first.
 - A large event count on Insights no longer spills out of its panel next to
   a short token figure.
+- Leaving a terminal for Launch or Sessions no longer collapses the centre
+  pane. The AppKit terminal is hidden for real, and Launch sits as a layout
+  sibling of the terminal surface rather than inside a zero-height reader.
+- Flipping through the sidebar with a chat open no longer freezes the Mac.
+  A chat kept behind another screen stops measuring its transcript until it
+  is front again. Pull requests do the same after a visit.
+- An automation interval under a minute keeps its seconds through edit and
+  save, instead of collapsing to a whole minute.
+- Commit and push banners stay on the folder that produced them. One
+  workspace's result no longer appears over another's panel.
+- A chat approval with time left no longer looks expired while the live
+  list is still loading.
 
 ## [1.0.2] - 2026-09-12
 
