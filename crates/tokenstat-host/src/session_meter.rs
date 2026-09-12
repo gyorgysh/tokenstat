@@ -902,10 +902,13 @@ fn cached_events(
     parse: impl FnOnce(&str) -> Vec<UsageEvent>,
 ) -> Option<Arc<Vec<UsageEvent>>> {
     let mtime = path.metadata().ok()?.modified().ok()?;
-    if let Ok(guard) = parse_cache().lock()
-        && let Some(hit) = guard.get(path)
+    if let Ok(mut guard) = parse_cache().lock()
+        && let Some(hit) = guard.get_mut(path)
         && hit.mtime == mtime
     {
+        // True LRU: a hit refreshes recency, so the log polled four times a
+        // second is not evicted ahead of one parsed once and never touched.
+        hit.at = Instant::now();
         return Some(Arc::clone(&hit.events));
     }
     let contents = std::fs::read_to_string(path).ok()?;
@@ -967,10 +970,16 @@ fn cached_db_events(
     // Mtime **or** recency. A store the measured session is writing to changes
     // on every poll, so mtime alone stops being a cache at the one moment the
     // meter is actually being watched.
-    if let Ok(guard) = parse_cache().lock()
-        && let Some(hit) = guard.get(&key)
+    if let Ok(mut guard) = parse_cache().lock()
+        && let Some(hit) = guard.get_mut(&key)
         && (hit.mtime == mtime || hit.at.elapsed() < LIVE_PARSE_FLOOR)
     {
+        // True LRU, but only on an mtime match: refreshing the stamp on a
+        // floor hit would extend the freshness window itself, and a store
+        // polled constantly would then never reparse.
+        if hit.mtime == mtime {
+            hit.at = Instant::now();
+        }
         return Some(Arc::clone(&hit.events));
     }
     let events = Arc::new(parse(path));

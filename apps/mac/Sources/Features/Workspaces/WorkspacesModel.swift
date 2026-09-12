@@ -930,18 +930,28 @@ final class WorkspacesModel {
                 $0.trust == .approved && ($0.address?.isEmpty == false || tunnelOn)
             }
             guard generation == nextRemoteLoad else { return }
+            // Stage into locals across the per-peer awaits below. Mutating the
+            // shared dictionaries before each dial lets an older sweep resume
+            // after a newer one and publish stale folders over live ones.
+            var stagedFolders = remoteFolders
+            var stagedFailures = remotePeerFailures
+            var stagedNextDial = remotePeerNextDial
+            var stagedEverAnswered = remotePeerEverAnswered
+            var stagedSummaries = summaries
+            var didConnectKeys: [String] = []
+            var unreachableKeys: [String] = []
             let liveKeys = Set(peers.map(\.key))
-            for key in remoteFolders.keys where !liveKeys.contains(key) {
-                remoteFolders.removeValue(forKey: key)
-                remotePeerFailures.removeValue(forKey: key)
-                summaries = summaries.filter { !$0.key.hasPrefix("remote:\(key):") }
+            for key in stagedFolders.keys where !liveKeys.contains(key) {
+                stagedFolders.removeValue(forKey: key)
+                stagedFailures.removeValue(forKey: key)
+                stagedSummaries = stagedSummaries.filter { !$0.key.hasPrefix("remote:\(key):") }
             }
             // Suppressed means no folders, enforced every sweep. A dial that
             // was already in flight when Disconnect landed can still come
             // back after, and without this its answer would linger.
             for key in suppressedPeers {
-                if remoteFolders.removeValue(forKey: key) != nil {
-                    summaries = summaries.filter { !$0.key.hasPrefix("remote:\(key):") }
+                if stagedFolders.removeValue(forKey: key) != nil {
+                    stagedSummaries = stagedSummaries.filter { !$0.key.hasPrefix("remote:\(key):") }
                 }
             }
             for peer in peers {
@@ -954,7 +964,7 @@ final class WorkspacesModel {
                 if !Self.isAutoConnectEnabled(for: peer.key) {
                     continue
                 }
-                if let nextDial = remotePeerNextDial[peer.key], Date() < nextDial { continue }
+                if let nextDial = stagedNextDial[peer.key], Date() < nextDial { continue }
                 do {
                     let fetched = try await Bridge.remoteWorkspaces(peer: peer)
                     guard generation == nextRemoteLoad else { return }
@@ -967,20 +977,20 @@ final class WorkspacesModel {
                     // every success re-ran `reconnect` from RootView, which
                     // unsuppresses and spawns an immediate re-sweep: both
                     // Disconnect and auto-connect-off lasted one sweep.
-                    let newlySeen = remoteFolders[peer.key] == nil
-                    remoteFolders[peer.key] = fetched
+                    let newlySeen = stagedFolders[peer.key] == nil
+                    stagedFolders[peer.key] = fetched
                     // One call for every badge on every folder that machine
                     // has. Best effort: a host too old to answer leaves the
                     // badges off, which is what they were before this existed.
                     if let counts = try? await Bridge.remoteWorkspaceSummaries(peer: peer) {
                         guard generation == nextRemoteLoad else { return }
-                        for summary in counts { summaries[summary.id] = summary }
+                        for summary in counts { stagedSummaries[summary.id] = summary }
                     }
-                    remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
-                    remotePeerFailures[peer.key] = 0
-                    remotePeerEverAnswered.insert(peer.key)
+                    stagedNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
+                    stagedFailures[peer.key] = 0
+                    stagedEverAnswered.insert(peer.key)
                     if newlySeen {
-                        NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
+                        didConnectKeys.append(peer.key)
                     }
                 } catch {
                     guard generation == nextRemoteLoad else { return }
@@ -998,46 +1008,65 @@ final class WorkspacesModel {
                         // twice a minute for the rest of the session. Its
                         // folders stay: the host is reachable, it has simply
                         // not said yes.
-                        let refusals = (remotePeerFailures[peer.key] ?? 0) + 1
-                        remotePeerFailures[peer.key] = refusals
-                        let neverOpened = !remotePeerEverAnswered.contains(peer.key)
-                        remotePeerNextDial[peer.key] = Date().addingTimeInterval(
+                        let refusals = (stagedFailures[peer.key] ?? 0) + 1
+                        stagedFailures[peer.key] = refusals
+                        let neverOpened = !stagedEverAnswered.contains(peer.key)
+                        stagedNextDial[peer.key] = Date().addingTimeInterval(
                             neverOpened && refusals >= Self.failuresBeforeBackingOff
                                 ? Self.peerColdRetrySeconds
                                 : Self.peerRetrySeconds
                         )
                         continue
                     }
-                    let failures = (remotePeerFailures[peer.key] ?? 0) + 1
-                    remotePeerFailures[peer.key] = failures
+                    let failures = (stagedFailures[peer.key] ?? 0) + 1
+                    stagedFailures[peer.key] = failures
                     // A machine that answered before is worth asking again
                     // soon: it is probably asleep and will be back. One that
                     // has never answered at all is usually a phone or a tablet,
                     // which cannot host a folder in the first place, and asking
                     // it every thirty seconds for the rest of the session is
                     // three pointless tunnel dials a minute, forever.
-                    let neverAnswered = !remotePeerEverAnswered.contains(peer.key)
+                    let neverAnswered = !stagedEverAnswered.contains(peer.key)
                     let wait = neverAnswered && failures >= Self.failuresBeforeBackingOff
                         ? Self.peerColdRetrySeconds
                         : Self.peerRetrySeconds
-                    remotePeerNextDial[peer.key] = Date().addingTimeInterval(wait)
+                    stagedNextDial[peer.key] = Date().addingTimeInterval(wait)
                     if failures >= Self.maxPeerFailures {
-                        let hadFolders = remoteFolders.removeValue(forKey: peer.key) != nil
+                        let hadFolders = stagedFolders.removeValue(forKey: peer.key) != nil
                         // Clear the Devices "Connected" mark without suppressing
                         // re-dial. Using the Disconnect path here would hide a
                         // machine that only went to sleep until the user pressed
                         // Connect again.
                         if hadFolders {
-                            NotificationCenter.default.post(
-                                name: .remotePeerBecameUnreachable,
-                                object: peer.key
-                            )
+                            unreachableKeys.append(peer.key)
                         }
                     }
                 }
             }
             guard generation == nextRemoteLoad else { return }
+            // Re-validate before publishing: an older sweep resuming after a
+            // newer one must not delete folders the newer sweep just went live
+            // with, so suppressed keys are enforced again on the staged copy.
+            for key in suppressedPeers {
+                if stagedFolders.removeValue(forKey: key) != nil {
+                    stagedSummaries = stagedSummaries.filter { !$0.key.hasPrefix("remote:\(key):") }
+                }
+            }
+            remoteFolders = stagedFolders
+            remotePeerFailures = stagedFailures
+            remotePeerNextDial = stagedNextDial
+            remotePeerEverAnswered = stagedEverAnswered
+            summaries = stagedSummaries
             publishFolders()
+            for key in didConnectKeys {
+                NotificationCenter.default.post(name: .remotePeerDidConnect, object: key)
+            }
+            for key in unreachableKeys {
+                NotificationCenter.default.post(
+                    name: .remotePeerBecameUnreachable,
+                    object: key
+                )
+            }
         } catch {
             // Not surfaced. The peer list failing is not a reason to put an
             // error over a screen full of working local folders.
@@ -1246,6 +1275,9 @@ final class WorkspacesModel {
         nextHistoryLoad &+= 1
         let request = nextHistoryLoad
         historyLoads[id] = request
+        defer {
+            if historyLoads[id] == request { historyLoads.removeValue(forKey: id) }
+        }
         do {
             let commits = try await Bridge.workspaceLog(id: id)
             guard historyLoads[id] == request else { return }

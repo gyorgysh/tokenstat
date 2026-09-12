@@ -117,7 +117,19 @@ fn fold(events: &[Value]) -> Folded {
 
 pub(crate) fn is_shell(verb: &str) -> bool {
     let verb = verb.to_ascii_lowercase();
-    verb.contains("bash") || verb.contains("shell") || verb.contains("command") || verb == "run"
+    // Substring match for the compound names (`run_terminal_command`,
+    // `shell_exec`): the shell word can sit anywhere in them.
+    if verb.contains("bash")
+        || verb.contains("shell")
+        || verb.contains("command")
+        || verb.contains("terminal")
+    {
+        return true;
+    }
+    // Token match for the short names, so `sh` and `exec` do not fire on
+    // verbs that merely contain those letters (`push`, `execute_turn`).
+    verb.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|token| matches!(token, "sh" | "zsh" | "exec" | "run"))
 }
 
 fn render(folded: &Folded, folder: &str, budget: usize) -> String {

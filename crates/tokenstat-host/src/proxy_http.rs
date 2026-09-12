@@ -125,9 +125,10 @@ fn pump_one_http(
 
     if meta.no_body {
         local.write_all(rewritten_resp.as_bytes()).map_err(|_| ())?;
-        if !remote.buf.is_empty() {
-            local.write_all(&remote.buf).map_err(|_| ())?;
-        }
+        // No body follows by definition (HEAD, 204, 304), so buffered bytes
+        // are never the rest of this response. Forwarding them would graft
+        // the next response's head onto a body that does not exist.
+        remote.buf.clear();
         finish(reader, writer);
         return Ok(());
     }

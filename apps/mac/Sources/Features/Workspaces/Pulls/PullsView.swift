@@ -114,6 +114,7 @@ struct PullsView: View {
                 await model.load(workspaceID: workspaceID, peer: peer)
             }
             .onChange(of: model.scope) { _, _ in
+                guard isActive else { return }
                 Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
             }
             .onChange(of: model.state) { _, _ in

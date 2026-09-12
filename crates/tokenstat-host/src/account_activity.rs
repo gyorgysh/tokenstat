@@ -204,6 +204,10 @@ mod stored {
     /// Whether a stored answer belongs to the login in hand.
     ///
     /// Signed out means no login in hand, so nothing on disk is adopted.
+    /// That is deliberate, not a gap: a snapshot is another account's grid,
+    /// and serving it while signed out (or after switching accounts) would
+    /// show one login's numbers as another's. Signed out therefore always
+    /// fetches or reports empty, never the remembered answer.
     pub(super) fn belongs_to(stored: &str, current: Option<&str>) -> bool {
         current == Some(stored)
     }
@@ -565,6 +569,11 @@ const MACHINE_FRESH_FOR: Duration = Duration::from_secs(10 * 60);
 
 /// Most machines one call will ask the series endpoint about. One HTTP request
 /// per id, so an unbounded list is a way for one caller to multiply the work.
+///
+/// Truncation is silent by design: beyond 64 machines only the first 64 are
+/// counted, and the answer carries no flag saying so. Surfacing one would
+/// mean a new wire shape for a case no real account hits; the cap is a
+/// backstop against a runaway caller, not a limit anyone is expected to reach.
 const MAX_MACHINE_USAGE: usize = 64;
 
 struct MachineCache {

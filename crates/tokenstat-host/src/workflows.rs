@@ -464,11 +464,14 @@ impl Store {
         if !valid_path_token(run_id) {
             return Err("invalid run id".into());
         }
-        if !valid_path_token(node_id) {
+        // Run ids are minted by the host and always strict tokens. Node ids
+        // come from saved graphs, including ones written before validation
+        // required tokens, so legacy ids are encoded rather than rejected.
+        if node_id.is_empty() || node_id.len() > MAX_PATH_ID * 4 || node_id.contains('\0') {
             return Err("invalid node id".into());
         }
         let dir = self.runs_dir.join(run_id);
-        let path = dir.join(format!("{node_id}.txt"));
+        let path = dir.join(format!("{}.txt", step_file_stem(node_id)));
         if !self.path_within_runs_dir(&dir) {
             return Err("the transcript path is outside the runs directory".into());
         }
@@ -1217,12 +1220,18 @@ pub fn validate(workflow: &Workflow) -> Result<(), String> {
             return Err("every node needs an id".into());
         }
         // Node ids become transcript path components under the runs dir, so a
-        // saved graph may only use the same plain tokens a generated id does.
+        // new graph may only use the same plain tokens a generated id does.
+        // Graphs saved before that rule keep working: `step_path` encodes
+        // their ids, which keeps them inside the runs dir whatever they hold.
         if !valid_path_token(&node.id) {
-            return Err(format!(
-                "node id {} may only contain letters, numbers, dashes and underscores",
-                node.id
-            ));
+            if node.id.len() > MAX_PATH_ID * 4 || node.id.contains('\0') {
+                return Err(format!("node id {} is not usable", node.id));
+            }
+            eprintln!(
+                "workflow {}: node id {} predates path-safe ids and is grandfathered; \
+                 new nodes may only contain letters, numbers, dashes and underscores",
+                workflow.id, node.id
+            );
         }
         if !ids.insert(node.id.clone()) {
             return Err(format!("duplicate node id {}", node.id));
@@ -1864,6 +1873,28 @@ fn align_char_boundary(text: &str, index: usize) -> usize {
         index -= 1;
     }
     index
+}
+
+/// Filesystem stem for a node transcript.
+///
+/// New graphs save strict tokens, which stay readable as-is. Older graphs may
+/// carry ids with dots, slashes, spaces or colons; percent-encoding those
+/// bytes keeps every id working while keeping the file inside the run
+/// directory. Strict ids take the fast path so existing transcripts keep
+/// their names.
+fn step_file_stem(node_id: &str) -> String {
+    if valid_path_token(node_id) {
+        return node_id.to_string();
+    }
+    let mut out = String::with_capacity(node_id.len());
+    for byte in node_id.bytes() {
+        if byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 /// Non-empty, bounded, `[A-Za-z0-9_-]`. Ids that reach the filesystem are

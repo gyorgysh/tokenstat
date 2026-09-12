@@ -1143,12 +1143,16 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
                 }
             }
             // Refuse rather than queue past the bound: a flood of opens must
-            // not grow the map or the host's backlog without limit. The map
-            // guard is dropped before the refusal frame so a slow outbound
-            // queue cannot pin every other channel's routing.
+            // not grow the map or the host's backlog without limit. A live
+            // channel already holding this id must not be overwritten either:
+            // the duplicate is refused, not merged into the existing channel.
+            // A dead entry (errored on the last socket) is still replaced, so
+            // a reconnect reuses the id. The map guard is dropped before the
+            // refusal frame so a slow outbound queue cannot pin every other
+            // channel's routing.
             let state = Arc::new(ChannelState::new(id));
             let mut queued = false;
-            if map.len() < MAX_CHANNELS {
+            if map.len() < MAX_CHANNELS && !live_duplicate(&map, id) {
                 map.insert(id, Arc::clone(&state));
                 queued = session
                     .inbound_tx
@@ -1192,6 +1196,19 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
         }
         _ => {}
     }
+}
+
+/// Whether `id` already names a live channel.
+///
+/// A dead entry is not a duplicate: the relay restarts its ids at 1 on every
+/// socket, so after a reconnect the same id names a new channel and replaces
+/// the errored one. Only a live holder makes an OPENED a duplicate worth a
+/// `CH_CLOSE`.
+fn live_duplicate(map: &HashMap<u32, Arc<ChannelState>>, id: u32) -> bool {
+    map.get(&id).is_some_and(|existing| {
+        let inner = existing.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.error.is_none() && !inner.eof
+    })
 }
 
 fn mark_all_channels(session: &TunnelSession, reason: &str) {

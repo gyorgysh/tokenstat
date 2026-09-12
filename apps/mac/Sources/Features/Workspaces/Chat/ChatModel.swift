@@ -1043,7 +1043,7 @@ final class ChatModel {
         }
         guard selectionMatches(id: id, generation: generation) else { return }
         if savedCopy == nil {
-            await loadApprovals(id: id, generation: generation)
+            await loadApprovals(id: id, generation: generation, quiet: wasSavedCopy)
         }
         guard selectionMatches(id: id, generation: generation) else { return }
         if instructions == nil, savedCopy == nil {
@@ -1604,7 +1604,7 @@ final class ChatModel {
                 accepted = true
                 let remaining = try ChatOutboxStore.shared.accept(deliveryItem, revision: updated.sendRevision, for: reference)
                 publish(remaining)
-                clearSubmittedDraft(deliveryItem, reference: reference)
+                clearSubmittedDraft(item, reference: reference)
                 authorizedQueueItems.remove(deliveryItem.id)
                 if current() {
                     replace(updated)
@@ -1820,9 +1820,9 @@ final class ChatModel {
     /// its rows stay text, never live controls.
     func approvalIsPending(_ approval: ChatApproval) -> Bool {
         guard savedCopy == nil, approval.decision == nil else { return false }
+        guard approvalsLoaded else { return false }
         if approvals.contains(where: { $0.id == approval.id }) { return true }
-        return !approvalsLoaded
-            || Double(approval.expiresAtMs) / 1000 > Date().timeIntervalSince1970
+        return Double(approval.expiresAtMs) / 1000 > Date().timeIntervalSince1970
     }
 
     /// Workspace ownership does not require a selected conversation: personas
@@ -3492,6 +3492,11 @@ struct ChatDisplayItem: Identifiable, Equatable {
         // Tool logs are history; only the host knows whether a process lives.
         if !running {
             closeRunningTools(failed: false, at: nil, detail: "Ended without a tool result")
+        }
+        for (callId, indexes) in toolIndexes {
+            let live = Set(indexes.filter { items.indices.contains($0) })
+            if live.isEmpty { toolIndexes.removeValue(forKey: callId) }
+            else { toolIndexes[callId] = live.sorted() }
         }
         return items
     }

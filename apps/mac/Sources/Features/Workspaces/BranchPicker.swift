@@ -372,8 +372,14 @@ private struct BranchPickerContent: View {
             outcome = result
             guard result.ok else { return }
             await onChanged()
-            if reloadAfter, let model {
-                await model.discardUnsavedBuffers(in: workspaceID)
+            if let model {
+                if reloadAfter {
+                    await model.discardUnsavedBuffers(in: workspaceID)
+                } else if saveFirst {
+                    for path in model.openFiles(in: workspaceID) {
+                        await model.loadText(path, in: workspaceID)
+                    }
+                }
             }
             dismiss()
         } catch {

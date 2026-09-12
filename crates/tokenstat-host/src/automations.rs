@@ -1554,7 +1554,21 @@ impl Store {
             return;
         }
         let _ = std::fs::remove_file(&raw);
-        let _ = std::fs::remove_file(transcript::readable_path(&raw));
+        // The readable sibling is derived from the raw path, but it is still
+        // checked rather than trusted: it is a second delete, and a second
+        // delete earns its own containment proof.
+        let readable = transcript::readable_path(&raw);
+        if !readable.is_absolute() {
+            return;
+        }
+        let contained = readable
+            .parent()
+            .and_then(|parent| parent.canonicalize().ok())
+            .is_some_and(|resolved| resolved.starts_with(&root));
+        if !contained {
+            return;
+        }
+        let _ = std::fs::remove_file(readable);
     }
 
     /// The drain thread calls this when a run's process has exited.

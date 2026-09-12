@@ -884,8 +884,9 @@ fn git_allowing(dir: &Path, args: &[&str], codes: &[i32]) -> Option<String> {
 /// Decode git's C-style path quoting.
 ///
 /// With `core.quotePath=false` git still quotes a path holding a double quote,
-/// a backslash or a control character, and writes the bytes as in C: `\n`,
-/// `\t`, `\r`, `\\`, `\"`, and three-digit octal for everything else.
+/// a backslash or a control character, and writes the bytes as in C: `\a`,
+/// `\b`, `\f`, `\n`, `\r`, `\t`, `\v`, `\\`, `\"`, and three-digit octal for
+/// everything else.
 fn unquote_path(raw: &str) -> String {
     let Some(inner) = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
         return raw.to_string();
@@ -902,6 +903,18 @@ fn unquote_path(raw: &str) -> String {
         i += 1;
         let Some(&escape) = bytes.get(i) else { break };
         match escape {
+            b'a' => {
+                out.push(0x07);
+                i += 1;
+            }
+            b'b' => {
+                out.push(0x08);
+                i += 1;
+            }
+            b'f' => {
+                out.push(0x0c);
+                i += 1;
+            }
             b'n' => {
                 out.push(b'\n');
                 i += 1;
@@ -912,6 +925,10 @@ fn unquote_path(raw: &str) -> String {
             }
             b'r' => {
                 out.push(b'\r');
+                i += 1;
+            }
+            b'v' => {
+                out.push(0x0b);
                 i += 1;
             }
             b'0'..=b'7' => {
@@ -927,7 +944,15 @@ fn unquote_path(raw: &str) -> String {
                         _ => break,
                     }
                 }
-                out.push(value as u8);
+                // Three octal digits reach 511, but a byte holds 255. Git
+                // never emits such an escape, so a value above 255 is a
+                // corrupt or hostile input, not a character: emit the
+                // replacement character rather than truncate it silently.
+                if value > 255 {
+                    out.extend_from_slice("\u{fffd}".as_bytes());
+                } else {
+                    out.push(value as u8);
+                }
             }
             other => {
                 out.push(other);

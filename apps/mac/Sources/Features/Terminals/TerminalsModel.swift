@@ -431,8 +431,8 @@ final class TerminalsModel {
             // lands in between from adopting it as a new tab.
             guard sessions.contains(where: { $0.id == session.id }) else {
                 closingHostIDs.insert(info.id)
+                defer { closingHostIDs.remove(info.id) }
                 try? await Bridge.ptyClose(id: info.id)
-                closingHostIDs.remove(info.id)
                 return nil
             }
             session.attach(info: info)
@@ -493,11 +493,11 @@ final class TerminalsModel {
             let hostID = session.hostID
             closingHostIDs.insert(hostID)
             Task {
+                defer { closingHostIDs.remove(hostID) }
                 try? await Bridge.ptyClose(id: hostID)
                 // Whether or not it worked. A pty that survived the call is
                 // still running, and a later reconcile should say so rather
                 // than hide it forever.
-                closingHostIDs.remove(hostID)
             }
         }
         collapseIfNeeded(afterClosing: session)

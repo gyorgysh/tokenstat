@@ -81,7 +81,13 @@ EOF
 }
 
 helper() {
-    python3 /dev/fd/3 "$@" 3<<'PY'
+    # Materialize the program in a temp file. `python3 /dev/fd/3 … 3<<'PY'`
+    # silently runs an empty program where /dev/fd/3 does not resolve to the
+    # heredoc (exit 0, no output), which made version reads fail. stdin stays
+    # free for `helper redact`.
+    if [ -z "${UPLOAD_IOS_HELPER_PY:-}" ] || [ ! -f "$UPLOAD_IOS_HELPER_PY" ]; then
+        UPLOAD_IOS_HELPER_PY="$(mktemp "${TMPDIR:-/tmp}/ts-ios-helper.XXXXXX")" || exit 1
+        cat >"$UPLOAD_IOS_HELPER_PY" <<'PY'
 import os, re, shutil, subprocess, sys, tempfile, zipfile, plistlib
 
 def redact():
@@ -321,6 +327,8 @@ if cmd not in commands:
     raise SystemExit("unknown helper command")
 commands[cmd]()
 PY
+    fi
+    python3 "$UPLOAD_IOS_HELPER_PY" "$@"
 }
 
 redact() {
@@ -526,6 +534,10 @@ cleanup() {
     if [ -n "${TEMP_HOME:-}" ]; then
         rm -rf "$TEMP_HOME"
         TEMP_HOME=""
+    fi
+    if [ -n "${UPLOAD_IOS_HELPER_PY:-}" ]; then
+        rm -f "$UPLOAD_IOS_HELPER_PY"
+        UPLOAD_IOS_HELPER_PY=""
     fi
 }
 trap cleanup EXIT
