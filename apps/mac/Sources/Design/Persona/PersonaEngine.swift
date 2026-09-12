@@ -620,8 +620,12 @@ final class PersonaEngine {
     /// How shut the eyes are from blinking alone, zero to one.
     var blink: CGFloat {
         guard blinkHold > 0 else { return 0 }
-        // Fast down, slower up: a real blink is not symmetric.
-        let progress = 1 - blinkHold / 0.10
+        // Fast down, slower up: a real blink is not symmetric. The hold may
+        // be longer than the down phase (a mood change blinks at 0.13), so
+        // the progress is clamped to start of the cycle: dividing by 0.10
+        // without it turned an over-long hold negative, and the renderer
+        // widened the eyes instead of shutting them.
+        let progress = max(0, min(1, 1 - blinkHold / 0.10))
         return progress < 0.35 ? progress / 0.35 : max(0, 1 - (progress - 0.35) / 0.65)
     }
 

@@ -17,9 +17,10 @@
 //! wants, and drops the guard before touching the disk. Holding one across a
 //! `git log` would rebuild the contention this module exists to remove.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tokenstat_workspace::{Registry, Workspace};
+use tokenstat_workspace::{Registry, RegistryError, Workspace};
 
 /// Where the list is read from and written to.
 ///
@@ -45,9 +46,38 @@ fn path() -> PathBuf {
 
 fn cell() -> &'static RwLock<Registry> {
     static REGISTRY: OnceLock<RwLock<Registry>> = OnceLock::new();
-    // A registry that will not parse is surfaced as an empty one rather than
-    // refusing to start, the same way opening an archive treats it.
-    REGISTRY.get_or_init(|| RwLock::new(Registry::load_from(&path()).unwrap_or_default()))
+    // A registry that will not parse is moved aside rather than surfaced as an
+    // empty one: starting over would drop the folder list on the next save.
+    REGISTRY.get_or_init(|| RwLock::new(load_initial()))
+}
+
+fn load_initial() -> Registry {
+    let path = path();
+    match Registry::load_from(&path) {
+        Ok(registry) => registry,
+        Err(RegistryError::Json(error)) => {
+            let kept = preserve_corrupt(&path)
+                .map(|kept| kept.display().to_string())
+                .unwrap_or_else(|| "nothing (the file could not be moved)".to_string());
+            eprintln!("workspaces: {path:?} is unreadable ({error}); kept it at {kept}");
+            Registry::default()
+        }
+        Err(error) => {
+            eprintln!("workspaces: {path:?} could not be read: {error}");
+            Registry::default()
+        }
+    }
+}
+
+/// Keep an unparsable list beside the original so the next save cannot erase
+/// it, while the process still comes up with an empty registry.
+fn preserve_corrupt(path: &Path) -> Option<PathBuf> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or(0);
+    let kept = path.with_extension(format!("json.corrupt-{stamp}"));
+    fs::rename(path, &kept).ok().map(|()| kept)
 }
 
 /// Persist the list. Always through here, never `Registry::save`, so the test
@@ -87,4 +117,27 @@ pub fn folder(id: &str) -> Result<Workspace, String> {
         return Err(format!("the folder is missing: {}", ws.path.display()));
     }
     Ok(ws)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_corrupt_registry_is_kept_beside_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspaces.json");
+        fs::write(&path, b"{ not json").unwrap();
+        let kept = preserve_corrupt(&path).expect("the unreadable file must be kept");
+        assert!(
+            !path.exists(),
+            "the original path is cleared for the next save"
+        );
+        assert_eq!(fs::read(&kept).unwrap(), b"{ not json");
+        assert!(
+            kept.to_string_lossy().contains(".corrupt-"),
+            "{}",
+            kept.display()
+        );
+    }
 }

@@ -17,25 +17,40 @@ enum ClientWebPages {
     static let host = "https://tokenstat.ai"
 
     static func privacy(host: String = host) -> URL {
-        withMobileFlag(URL(string: "\(host)/privacy")!)
+        withMobileFlag(url("\(host)/privacy"))
     }
 
     static func terms(host: String = host) -> URL {
-        withMobileFlag(URL(string: "\(host)/terms")!)
+        withMobileFlag(url("\(host)/terms"))
     }
 
     static func publicProfile(host: String, handle: String) -> URL {
-        withMobileFlag(URL(string: "\(host)/\(handle)")!)
+        withMobileFlag(url("\(host)/\(handle)"))
     }
 
     static func accountDeletion(host: String = host) -> URL {
-        var parts = URLComponents(string: "\(host)/settings/data")!
+        guard var parts = URLComponents(string: "\(host)/settings/data") else {
+            return withMobileFlag(url(host))
+        }
         parts.queryItems = [
             URLQueryItem(name: "mobile", value: "1"),
             URLQueryItem(name: "focus", value: "delete"),
         ]
         parts.fragment = "delete"
-        return parts.url!
+        return parts.url ?? withMobileFlag(url(host))
+    }
+
+    /// A URL built from account data, or the site itself when the pieces do
+    /// not form one. `host` and `handle` are not constants, and a phone must
+    /// not trap because one of them arrived odd.
+    private static func url(_ string: String) -> URL {
+        URL(string: string) ?? fallback
+    }
+
+    /// The site root, and a non-failing last resort beside it. A file URL is
+    /// a URL, and the browser sheet refuses anything that is not http/https.
+    private static var fallback: URL {
+        URL(string: host) ?? URL(fileURLWithPath: "/")
     }
 
     /// Idempotent: a URL that already carries `mobile=1` is left alone.

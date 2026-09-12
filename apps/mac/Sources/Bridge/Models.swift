@@ -350,6 +350,25 @@ struct RemoteListing: Codable, Sendable, Hashable {
 
         var id: String { path ?? name }
         var isDirectory: Bool { kind == "directory" }
+
+        /// The host omits `path`, `isRepo`, `isRegistered`, `size` and
+        /// `modified` on an entry it could not stat, which is what a broken
+        /// symlink is. A default in the declaration does not make the key
+        /// optional for the generated decoder, so one unreadable entry used to
+        /// throw and take the whole listing with it; a missing flag reads as
+        /// false, which is all that can honestly be said about such an entry.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            path = try container.decodeIfPresent(String.self, forKey: .path)
+            kind = try container.decode(String.self, forKey: .kind)
+            symlink = try container.decodeIfPresent(Bool.self, forKey: .symlink) ?? false
+            hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
+            isRepo = try container.decodeIfPresent(Bool.self, forKey: .isRepo) ?? false
+            isRegistered = try container.decodeIfPresent(Bool.self, forKey: .isRegistered) ?? false
+            size = try container.decodeIfPresent(UInt64.self, forKey: .size)
+            modified = try container.decodeIfPresent(UInt64.self, forKey: .modified)
+        }
     }
 
     var path: String
@@ -1338,6 +1357,16 @@ extension Sequence where Element == Bucket {
     }
 }
 
+extension UInt64 {
+    /// Saturating addition for values that arrived over the wire. A hostile
+    /// or corrupt total must saturate the figure on screen, not trap it; a
+    /// wrapping sum would be silently wrong instead.
+    func saturatingAdd(_ other: UInt64) -> UInt64 {
+        let (sum, overflow) = addingReportingOverflow(other)
+        return overflow ? .max : sum
+    }
+}
+
 /// A heat value as money.
 ///
 /// The activity calendar carries microdollars, not tokens: a day's colour is
@@ -1636,7 +1665,7 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
         case trustState
         case kind
         case platform
-        case labelSource = "label_source"
+        case labelSource
     }
 
     /// Hosts only; clients (phones) are not dialable from Devices.

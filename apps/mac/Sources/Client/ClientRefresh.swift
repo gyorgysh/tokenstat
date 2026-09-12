@@ -43,11 +43,14 @@ enum ClientRefresh {
     /// Run `work` for a pull to refresh, at most once per window per screen.
     ///
     /// `key` names the screen. Two screens refresh independently: pulling
-    /// Devices must not make Home's next pull a no-op.
+    /// Devices must not make Home's next pull a no-op. The window is also
+    /// scoped to the signed-in account, so the first pull after an account
+    /// switch is never swallowed by the outgoing account's timestamp.
     static func pull(_ key: String, work: () async -> Void) async {
         began()
+        let window = scoped(key)
         let now = Date()
-        if let last = lastRun[key], now.timeIntervalSince(last) < minimumInterval {
+        if let last = lastRun[window], now.timeIntervalSince(last) < minimumInterval {
             // Long enough that the spinner reads as a refresh that happened,
             // short enough that nobody waits for it.
             try? await Task.sleep(for: .milliseconds(450))
@@ -58,7 +61,14 @@ enum ClientRefresh {
         // otherwise spend most of its window running, and the pull somebody
         // makes right after it finishes (because it finished badly) would be
         // the one that gets swallowed.
-        lastRun[key] = Date()
+        lastRun[window] = Date()
+    }
+
+    /// The screen's key under the account currently on screen. Nil scope means
+    /// no account is known yet, and the screen alone is all there is to name.
+    private static func scoped(_ key: String) -> String {
+        guard let scope = WorkSessionContext.shared.scope else { return key }
+        return "\(scope.origin)|\(scope.identity)|\(key)"
     }
 }
 

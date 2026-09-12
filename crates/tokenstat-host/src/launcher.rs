@@ -713,6 +713,9 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
                             .args(["-9", &format!("-{pid}")])
                             .status();
                     }
+                    // Reap the child; a killed but unwaited process is a
+                    // zombie for as long as the daemon lives.
+                    let _ = child.wait();
                     return Err(format!("the {id} installer timed out"));
                 }
                 std::thread::sleep(Duration::from_millis(200));

@@ -20,6 +20,10 @@ use tokenstat_core::PriceTable;
 
 use crate::session::Session;
 
+/// A bundled book is a small JSON snapshot. Far past any real one, and far
+/// short of what a caller pointing this at some other file could cost.
+const MAX_SEED_BYTES: u64 = 32 * 1024 * 1024;
+
 /// Replace a session's cached book with what is on disk.
 ///
 /// Called after a successful refresh. Cheap enough for the hourly cadence: one
@@ -30,6 +34,7 @@ pub fn reload(session: &mut Session) {
 }
 
 /// What seeding did, so a front end can say so rather than guess.
+#[derive(Debug)]
 pub struct Seeded {
     /// False when a book was already there. Not a failure: the local one is
     /// newer than anything a bundle could carry.
@@ -79,6 +84,14 @@ fn seed_into(
         });
     }
 
+    let metadata = std::fs::metadata(from).map_err(|e| format!("{}: {e}", from.display()))?;
+    if metadata.len() > MAX_SEED_BYTES {
+        return Err(format!(
+            "{} is larger than {} MiB and is not a price book",
+            from.display(),
+            MAX_SEED_BYTES / (1024 * 1024)
+        ));
+    }
     let text = std::fs::read_to_string(from).map_err(|e| format!("{}: {e}", from.display()))?;
     let table = PriceTable::parse(&text)
         .ok_or_else(|| format!("{} is not a price book", from.display()))?;
@@ -254,6 +267,21 @@ mod tests {
             "a book that will not parse must not be copied into place: an \
              unreadable book is worse than none, because none is refreshable"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_too_large_to_be_a_book_is_refused() {
+        let dir = temp_dir("oversize");
+        let bundled = dir.join("bundled.json");
+        let file = std::fs::File::create(&bundled).unwrap();
+        file.set_len(MAX_SEED_BYTES + 1).unwrap();
+
+        let mut session = Session::open_client(Some("UTC")).expect("client session");
+        let book = dir.join("data").join("current.json");
+        let error = seed_into(&mut session, &bundled, &book).expect_err("must refuse");
+        assert!(error.contains("larger than"), "{error}");
+        assert!(!book.exists(), "nothing may be copied into place");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

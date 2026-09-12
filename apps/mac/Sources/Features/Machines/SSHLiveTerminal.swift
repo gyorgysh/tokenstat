@@ -823,6 +823,11 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         }
     }
 
+    /// Armed Ctrl for the phone's key bar. The bar has no letter keys, so the
+    /// session folds the next typed byte and this is what arms it; see
+    /// `ClientTerminalKeys.control`.
+    var controlArmed: Bool = false
+
     /// Put the keyboard away, or bring it back, without ending the session.
     func toggleKeyboard() {
         #if !os(macOS)
@@ -891,8 +896,17 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         // stored `let` a nonisolated method may read.
         let handle = id
         Task { @MainActor [weak self] in
-            self?.predict(bytes)
-            try? await Bridge.writeSSHSession(id: handle, data: bytes)
+            var out = bytes
+            // The armed Ctrl belongs to the next typed key: fold it here, in
+            // the same path typing takes, so the bar's flag has an effect.
+            if let self, self.controlArmed {
+                self.controlArmed = false
+                if !out.isEmpty, let folded = TerminalControlCode.fold(out[0]) {
+                    out[0] = folded
+                }
+            }
+            self?.predict(out)
+            try? await Bridge.writeSSHSession(id: handle, data: out)
         }
     }
 
@@ -1041,6 +1055,10 @@ struct SSHLiveTerminalScreen: View {
                 scrolls: Binding(
                     get: { session.scrolls },
                     set: { session.scrolls = $0 }
+                ),
+                control: Binding(
+                    get: { session.controlArmed },
+                    set: { session.controlArmed = $0 }
                 ),
                 leading: snippetKey
             )

@@ -11,5 +11,5 @@
 #![forbid(unsafe_code)]
 
 fn main() -> anyhow::Result<()> {
-    tokenstat_mcp::serve()
+    tokenstat_mcp::serve(None)
 }

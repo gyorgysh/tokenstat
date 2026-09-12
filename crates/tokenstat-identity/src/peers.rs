@@ -22,6 +22,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
@@ -90,6 +91,8 @@ pub struct PeerStore {
     peers: BTreeMap<String, Peer>,
 }
 
+const MAX_PENDING_PEERS: usize = 128;
+
 impl PeerStore {
     /// The store, re-read only when the file has actually changed.
     ///
@@ -145,10 +148,27 @@ impl PeerStore {
 
     pub fn save(&self) -> Result<(), IdentityError> {
         let path = store_path()?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| IdentityError::Io {
+                path: parent.display().to_string(),
+                source: e,
+            })?;
+        }
         let text = serde_json::to_string_pretty(self).map_err(|e| IdentityError::Io {
             path: path.display().to_string(),
             source: std::io::Error::other(e),
         })?;
+        // Write beside the store and rename over it. Truncating in place left a
+        // window where a crash stored half a file, and the loader's fallback
+        // for an unreadable store is "no peers" — which would quietly discard
+        // approvals and revocations alike. A unique suffix keeps two savers
+        // from interleaving into the same temporary.
+        static SAVE_SEQ: AtomicU64 = AtomicU64::new(0);
+        let tmp = path.with_extension(format!(
+            "json.tmp.{}.{}",
+            std::process::id(),
+            SAVE_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         #[cfg(unix)]
         {
             use std::io::Write;
@@ -158,24 +178,32 @@ impl PeerStore {
                 .create(true)
                 .truncate(true)
                 .mode(0o600)
-                .open(&path)
+                .open(&tmp)
                 .map_err(|e| IdentityError::Io {
-                    path: path.display().to_string(),
+                    path: tmp.display().to_string(),
                     source: e,
                 })?;
             file.write_all(text.as_bytes())
                 .map_err(|e| IdentityError::Io {
-                    path: path.display().to_string(),
+                    path: tmp.display().to_string(),
                     source: e,
                 })?;
-        }
-        #[cfg(not(unix))]
-        {
-            std::fs::write(&path, text).map_err(|e| IdentityError::Io {
-                path: path.display().to_string(),
+            file.sync_all().map_err(|e| IdentityError::Io {
+                path: tmp.display().to_string(),
                 source: e,
             })?;
         }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&tmp, text).map_err(|e| IdentityError::Io {
+                path: tmp.display().to_string(),
+                source: e,
+            })?;
+        }
+        std::fs::rename(&tmp, &path).map_err(|e| IdentityError::Io {
+            path: path.display().to_string(),
+            source: e,
+        })?;
         Ok(())
     }
 
@@ -228,6 +256,7 @@ impl PeerStore {
                 peer.trust
             }
             None => {
+                self.drop_oldest_pending();
                 self.peers.insert(
                     id,
                     Peer {
@@ -244,6 +273,34 @@ impl PeerStore {
                     },
                 );
                 Trust::Pending
+            }
+        }
+    }
+
+    fn drop_oldest_pending(&mut self) {
+        while self
+            .peers
+            .values()
+            .filter(|peer| peer.trust == Trust::Pending)
+            .count()
+            >= MAX_PENDING_PEERS
+        {
+            let oldest = self
+                .peers
+                .iter()
+                .filter(|(_, peer)| peer.trust == Trust::Pending)
+                .min_by(|(_, left), (_, right)| {
+                    left.last_seen
+                        .cmp(&right.last_seen)
+                        .then_with(|| left.first_seen.cmp(&right.first_seen))
+                        .then_with(|| left.key.cmp(&right.key))
+                })
+                .map(|(key, _)| key.clone());
+            let Some(key) = oldest else {
+                break;
+            };
+            if self.peers.remove(&key).is_none() {
+                break;
             }
         }
     }
@@ -385,6 +442,23 @@ mod tests {
         let peer = store.get(&key(1)).expect("recorded");
         assert_eq!(peer.label, "laptop");
         assert_eq!(peer.address.as_deref(), Some("10.0.0.2:7878"));
+    }
+
+    #[test]
+    fn pending_strangers_are_bounded_and_newest_survive() {
+        let mut store = PeerStore::default();
+        let total = MAX_PENDING_PEERS + 8;
+        for n in 0..total {
+            let stamp = format!("2026-08-04T{:02}:{:02}Z", 10 + n / 60, n % 60);
+            store.seen(&key(n as u8), "stranger", None, &stamp);
+        }
+        let pending = store
+            .list()
+            .into_iter()
+            .filter(|peer| peer.trust == Trust::Pending)
+            .count();
+        assert_eq!(pending, MAX_PENDING_PEERS);
+        assert!(store.get(&key((total - 1) as u8)).is_some());
     }
 
     /// The one that matters. A peer that keeps knocking must not talk its way

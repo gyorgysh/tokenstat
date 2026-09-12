@@ -76,7 +76,9 @@ final class ConnectivityModel {
     var isOnline: Bool { status == .online }
     var isOffline: Bool { status == .offline }
 
-    private let monitor = NWPathMonitor()
+    /// Recreated on every start: an `NWPathMonitor` cannot be restarted after
+    /// `cancel()`, and `stop()` cancels this one.
+    private var monitor: NWPathMonitor?
     private let queue = DispatchQueue(label: "ai.tokenstat.connectivity")
     private var probeTask: Task<Void, Never>?
     private var started = false
@@ -92,6 +94,8 @@ final class ConnectivityModel {
     func start() {
         guard !started else { return }
         started = true
+        let monitor = NWPathMonitor()
+        self.monitor = monitor
         monitor.pathUpdateHandler = { [weak self] path in
             let key = Self.routeKey(path)
             let satisfied = path.status == .satisfied
@@ -106,7 +110,8 @@ final class ConnectivityModel {
     }
 
     func stop() {
-        monitor.cancel()
+        monitor?.cancel()
+        monitor = nil
         probeTask?.cancel()
         started = false
     }

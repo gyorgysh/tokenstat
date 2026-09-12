@@ -84,9 +84,14 @@ struct ClientHostHeader: View {
             if !(isHeadless || isHeadlessPlatform(accountPlatform)) { viewScreen }
         }
         .task(id: peerKey) {
-            if let headless = try? await Bridge.peerHeadless(peerKey) {
+            // Same stale-run guard as the security card: a probe for the last
+            // peer must not write a headless flag onto the new peer's header.
+            let wanted = peerKey
+            if let headless = try? await Bridge.peerHeadless(wanted) {
+                guard !Task.isCancelled, wanted == peerKey else { return }
                 isHeadless = headless
             } else {
+                guard !Task.isCancelled, wanted == peerKey else { return }
                 isHeadless = isHeadlessPlatform(accountPlatform)
             }
         }

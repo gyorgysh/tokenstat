@@ -181,6 +181,10 @@ struct WorkflowsEditor: View {
                 } else {
                     Button("Run", .run) { running = graph }
                         .buttonStyle(AccentButtonStyle(small: true))
+                        .disabled(model.isDirty)
+                        .help(model.isDirty
+                            ? "Save or discard the unsaved changes before running."
+                            : "Run this workflow")
                 }
             }
         }

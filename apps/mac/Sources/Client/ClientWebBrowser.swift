@@ -100,7 +100,13 @@ private struct ClientInAppWebView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let configuration = WKWebViewConfiguration()
+        // Every sheet gets its own in-memory store. The default store shares
+        // tokenstat.ai cookies across the app and survives sign-out, so the
+        // next account could open these pages already signed in as the last
+        // one. Nothing here needs to outlive the sheet.
+        configuration.websiteDataStore = .nonPersistent()
+        let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         context.coordinator.observe(webView)
         webView.load(URLRequest(url: url))

@@ -432,12 +432,15 @@ fn write_keychain(service: &str, blob: &str) -> Result<(), String> {
         .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|e| e.to_string())?;
-    if let Some(stdin) = child.stdin.as_mut() {
+    if let Some(mut stdin) = child.stdin.take() {
         // No trailing newline: Claude Code may not trim the Keychain value.
         stdin
             .write_all(blob.as_bytes())
             .map_err(|e| e.to_string())?;
         stdin.flush().map_err(|e| e.to_string())?;
+        // Dropped at the end of this block, closing the pipe. `security` reads
+        // the secret until EOF, so waiting with stdin still open can block
+        // forever.
     }
     let status = child.wait().map_err(|e| e.to_string())?;
     status

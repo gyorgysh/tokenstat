@@ -129,7 +129,7 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
             let share = m.counters.total() as f64 / grand as f64;
             let a = accent();
             let c = &m.counters;
-            let label = model_label(&m.key);
+            let label = sanitize_label(&model_label(&m.key));
             // What this model's usage would have cost at list rates. It was not
             // billed that way on a plan, so it is labelled as value, never as
             // money charged. `~` marks estimate floors (Cursor Auto).
@@ -293,8 +293,10 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
             .days()
             .map(|c| {
                 format!(
-                    r#"{{"date":"{}","cost_micros":{},"level":{}}}"#,
-                    c.date, c.value, c.level
+                    r#"{{"date":{},"cost_micros":{},"level":{}}}"#,
+                    json_string(&c.date.to_string()),
+                    c.value,
+                    c.level
                 )
             })
             .collect();

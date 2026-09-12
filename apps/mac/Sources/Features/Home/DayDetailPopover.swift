@@ -189,12 +189,16 @@ struct DayDetailPopover: View {
         let total = detail.rows.reduce(
             into: (fresh: UInt64(0), cacheRead: UInt64(0), cacheWrite: UInt64(0), output: UInt64(0))
         ) { acc, part in
-            acc.fresh += part.fresh ?? 0
-            acc.cacheRead += part.cacheRead ?? 0
-            acc.cacheWrite += (part.cacheWrite5m ?? 0) + (part.cacheWrite1h ?? 0)
-            acc.output += part.output ?? 0
+            acc.fresh = acc.fresh.saturatingAdd(part.fresh ?? 0)
+            acc.cacheRead = acc.cacheRead.saturatingAdd(part.cacheRead ?? 0)
+            acc.cacheWrite = acc.cacheWrite.saturatingAdd(
+                (part.cacheWrite5m ?? 0).saturatingAdd(part.cacheWrite1h ?? 0)
+            )
+            acc.output = acc.output.saturatingAdd(part.output ?? 0)
         }
-        let grand = total.fresh + total.cacheRead + total.cacheWrite + total.output
+        let grand = total.fresh.saturatingAdd(total.cacheRead)
+            .saturatingAdd(total.cacheWrite)
+            .saturatingAdd(total.output)
         guard grand > 0 else { return AnyView(EmptyView()) }
 
         let segments: [(label: String, value: UInt64, color: Color)] = [

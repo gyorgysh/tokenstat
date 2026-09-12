@@ -63,7 +63,13 @@ final class WorkspaceFileWatcher {
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             0.5,
             FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer)
-        ) else { return }
+        ) else {
+            // A failed create must not leave `paths` claiming this list is
+            // watched: the next `watch` with the same folders would skip the
+            // retry. Clearing it lets the next sync try again.
+            paths = []
+            return
+        }
         self.stream = stream
         FSEventStreamSetDispatchQueue(stream, .main)
         FSEventStreamStart(stream)

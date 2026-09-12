@@ -13,6 +13,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 exec python3 - <<'PY'
+from __future__ import annotations
+
 from pathlib import Path
 import re
 import sys

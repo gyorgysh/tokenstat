@@ -90,14 +90,17 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
     private func adopt(_ sessions: [ScreenCaptureSession]) async throws {
         let (added, removed) = lock.withLock {
             let previous = Set(active.keys)
-            active = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+            active = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
             let current = Set(active.keys)
             return (current.subtracting(previous), previous.subtracting(current))
         }
 
         for id in removed {
             lock.withLock { encoders.removeValue(forKey: id) }?.stop()
-            pressure[id] = nil; clearFrames[id] = nil
+            lock.withLock {
+                pressure[id] = nil
+                clearFrames[id] = nil
+            }
         }
         for id in added {
             let created = ScreenVideoEncoder { [weak self] frame in
@@ -160,13 +163,19 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
     private func push(_ frame: Data, to id: String) async {
         let encoder = encoder(for: id)
         let congested = if let result = try? await Bridge.screenCapturePush(id: id, frame: frame) { !result.accepted } else { true }
-        if congested {
-            pressure[id, default: 0] += 1; clearFrames[id] = 0
-            if pressure[id] == 3 { await encoder?.setQuality(0.7) }
-        } else {
-            pressure[id] = 0; clearFrames[id, default: 0] += 1
-            if clearFrames[id] == 300 { await encoder?.setQuality(1) }
+        let quality: CGFloat? = lock.withLock {
+            if congested {
+                pressure[id, default: 0] += 1
+                clearFrames[id] = 0
+                if pressure[id] == 3 { return 0.7 }
+            } else {
+                pressure[id] = 0
+                clearFrames[id, default: 0] += 1
+                if clearFrames[id] == 300 { return 1 }
+            }
+            return nil
         }
+        if let quality { await encoder?.setQuality(quality) }
     }
 
     private func fail(_ id: String, error: Error) async {
@@ -557,8 +566,16 @@ private enum ScreenInput {
     private static func moveType() -> (CGEventType, CGMouseButton) {
         if held.contains(.left) { return (.leftMouseDragged, .left) }
         if held.contains(.right) { return (.rightMouseDragged, .right) }
-        if held.contains(.center) { return (.otherMouseDragged, .center) }
+        if let other = held.first(where: { $0 != .left && $0 != .right }) {
+            return (.otherMouseDragged, other)
+        }
         return (.mouseMoved, .left)
+    }
+
+    private static func mouseType(_ button: CGMouseButton, down: Bool) -> CGEventType {
+        if button == .right { return down ? .rightMouseDown : .rightMouseUp }
+        if button == .left { return down ? .leftMouseDown : .leftMouseUp }
+        return down ? .otherMouseDown : .otherMouseUp
     }
 
     /// Put the pointer somewhere, as a drag when a button is held.
@@ -576,7 +593,7 @@ private enum ScreenInput {
         let source = CGEventSource(stateID: .hidSystemState)
         let point = CGEvent(source: nil)?.location ?? .zero
         for button in held {
-            let type: CGEventType = button == .right ? .rightMouseUp : (button == .center ? .otherMouseUp : .leftMouseUp)
+            let type = mouseType(button, down: false)
             CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)?
                 .post(tap: .cghidEventTap)
         }
@@ -635,23 +652,20 @@ private enum ScreenInput {
         case "mouse":
             let button = CGMouseButton(rawValue: UInt32(event.button ?? 0)) ?? .left
             let down = event.down == true
-            let type: CGEventType = down ? (button == .right ? .rightMouseDown : .leftMouseDown) : (button == .right ? .rightMouseUp : .leftMouseUp)
             if down { held.insert(button) } else { held.remove(button) }
-            cg = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
+            cg = CGEvent(mouseEventSource: source, mouseType: mouseType(button, down: down), mouseCursorPosition: point, mouseButton: button)
         // Press and release in one message, with the click count the caller
         // means. A touch client cannot rely on two separate messages arriving
         // close enough together for macOS to read them as a double click.
         case "click":
             let button = CGMouseButton(rawValue: UInt32(event.button ?? 0)) ?? .left
-            let downType: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
-            let upType: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
             // One pair, carrying the count. macOS reads the click count off the
             // event rather than timing the events, so posting the pair once per
             // click would make a double click arrive as three clicks: the first
             // click of the pair has already been sent as its own press.
             let clicks = max(1, min(3, event.clickCount ?? 1))
             postMove(source, to: point)
-            for type in [downType, upType] {
+            for type in [mouseType(button, down: true), mouseType(button, down: false)] {
                 let click = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
                 click?.setIntegerValueField(.mouseEventClickState, value: Int64(clicks))
                 if let flags = event.flags { click?.flags = CGEventFlags(rawValue: flags) }

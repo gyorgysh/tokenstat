@@ -25,7 +25,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -229,6 +229,8 @@ fn save(store: &Store) -> Result<(), String> {
 /// a terminal open polls `pty.read` several times a second. A file stamp is far
 /// cheaper than a read and a parse, and keying on it means a grant somebody
 /// just took away still means the next request rather than the next minute.
+/// The length and [`ALLOWED_CACHE_MAX_AGE`] guard the cross-process case, where
+/// another process's write can land in the same filesystem stamp tick.
 pub(crate) fn is_allowed(peer_id: &str) -> bool {
     allowed_now().is_some_and(|allowed| allowed.contains(peer_id))
 }
@@ -262,7 +264,19 @@ pub(crate) fn require_current_access() -> Result<(), crate::error::DispatchError
     Ok(())
 }
 
-type AllowedCached = Mutex<Option<(Option<SystemTime>, std::sync::Arc<HashSet<String>>)>>;
+/// A cross-process revocation is invisible to this process's cache, so the
+/// cached set is also bounded by age: same-stamp-same-size edits on a coarse
+/// filesystem still take effect within this window.
+const ALLOWED_CACHE_MAX_AGE: Duration = Duration::from_secs(2);
+
+type AllowedCached = Mutex<
+    Option<(
+        Option<SystemTime>,
+        u64,
+        Instant,
+        std::sync::Arc<HashSet<String>>,
+    )>,
+>;
 
 fn allowed_cache() -> &'static AllowedCached {
     static CACHE: OnceLock<AllowedCached> = OnceLock::new();
@@ -284,18 +298,23 @@ fn allowed_now() -> Option<std::sync::Arc<HashSet<String>>> {
     let path = path().ok()?;
     // A file that is not there yet has no grants in it, and a clock that will
     // not answer means re-reading, which is correct and merely slower.
-    let stamp = fs::metadata(&path).and_then(|m| m.modified()).ok();
+    let (stamp, len) = match fs::metadata(&path) {
+        Ok(meta) => (meta.modified().ok(), meta.len()),
+        Err(_) => (None, 0),
+    };
     if let Ok(guard) = cache.lock()
-        && let Some((seen, allowed)) = guard.as_ref()
+        && let Some((seen, seen_len, read_at, allowed)) = guard.as_ref()
         && *seen == stamp
+        && *seen_len == len
         && stamp.is_some()
+        && read_at.elapsed() < ALLOWED_CACHE_MAX_AGE
     {
         return Some(std::sync::Arc::clone(allowed));
     }
 
     let allowed = std::sync::Arc::new(load().ok()?.allowed.into_iter().collect::<HashSet<_>>());
     if let Ok(mut guard) = cache.lock() {
-        *guard = Some((stamp, std::sync::Arc::clone(&allowed)));
+        *guard = Some((stamp, len, Instant::now(), std::sync::Arc::clone(&allowed)));
     }
     Some(allowed)
 }
@@ -405,6 +424,9 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
         m if m.starts_with("workflow.") => true,
         m if m.starts_with("automation.") => true,
         m if m.starts_with("chat.") => true,
+        // A watching claim suppresses the push for one conversation, so only a
+        // device that could have that conversation on screen may place one.
+        "app.watching" => true,
         "work.search"
         | "work.continuity.get"
         | "work.continuity.put"
@@ -1184,6 +1206,7 @@ mod tests {
             "launcher.install",
             "harness.config.set",
             "proxy.listen",
+            "app.watching",
             "fs.browse",
             "fs.mkdir",
             "host.provisionStatus",

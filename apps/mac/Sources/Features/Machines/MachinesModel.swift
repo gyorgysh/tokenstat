@@ -131,7 +131,7 @@ final class MachinesModel {
     func peer(for machine: Machine) -> Peer? {
         let identity = machine.publicIdentity ?? machine.machineID
         return peers.first { peer in
-            peer.key == identity || peer.fingerprint == identity || peer.label == machine.label
+            peer.key == identity || peer.fingerprint == identity
         }
     }
 
@@ -452,7 +452,8 @@ final class MachinesModel {
     }
 
     func approve(_ peer: Peer) async {
-        await change(peer) { try await Bridge.approve(key: peer.key) }
+        let changed = await change(peer) { try await Bridge.approve(key: peer.key) }
+        guard changed else { return }
         showNotice("\(peer.label) may now reach this device.")
     }
 
@@ -460,14 +461,16 @@ final class MachinesModel {
         // Revoke ends trust and any workspace listing for this peer. Leaving
         // Connected set after revoke made the row offer Disconnect for a
         // machine that could no longer answer.
-        await change(peer) { try await Bridge.revoke(key: peer.key) }
+        let changed = await change(peer) { try await Bridge.revoke(key: peer.key) }
+        guard changed else { return }
         connectedPeerKeys.remove(peer.key)
         NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer.key)
         showNotice("\(peer.label) can no longer reach this device.")
     }
 
     func forget(_ peer: Peer) async {
-        await change(peer) { try await Bridge.forget(key: peer.key) }
+        let changed = await change(peer) { try await Bridge.forget(key: peer.key) }
+        guard changed else { return }
         showNotice("\(peer.label) is forgotten. It will arrive as a stranger next time.")
     }
 
@@ -532,6 +535,16 @@ final class MachinesModel {
         guard let id = machine.machineID else { return }
         do {
             try await Bridge.unlinkMachine(id: id)
+            // An unlinked machine is gone for good: record the denial for its
+            // host and drop what it left here, so a sealed copy does not stay
+            // readable at the model layer until the directory refresh lands.
+            // This mirrors the revocation path in Bridge.workspaceAccessAllowed.
+            if let host = machine.publicIdentity, !host.isEmpty,
+               let scope = WorkSessionContext.shared.scope {
+                WorkAccessStore.shared.record(false, scope: scope, host: host)
+                await WorkSearchCache.shared.revokeHost(host, scope: scope)
+                await WorkCacheAccess.purge(host: host, scope: scope)
+            }
             showNotice("\(machine.displayName) removed from the account.")
             await load()
         } catch {
@@ -641,13 +654,15 @@ final class MachinesModel {
         status = try? await Bridge.remoteStatus()
     }
 
-    private func change(_ peer: Peer, _ action: () async throws -> Void) async {
+    private func change(_ peer: Peer, _ action: () async throws -> Void) async -> Bool {
         do {
             try await action()
             errorMessage = nil
             await refreshPeers()
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 

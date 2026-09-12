@@ -310,13 +310,16 @@ const AUTO_SCAN_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 /// looks frozen until the shell SIGKILLs the process (`zsh: killed`).
 pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
     enable_raw_mode().context("enabling raw mode")?;
+    // The guard exists before anything else touches the terminal, so a failed
+    // alternate-screen entry cannot leave raw mode behind.
+    let _guard = TerminalGuard;
+    install_signal_handlers();
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("entering alternate screen")?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("creating terminal")?;
 
     // Always leave the user's terminal usable, even on panic or early error.
-    let _guard = TerminalGuard;
     let panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         restore_terminal();
@@ -404,6 +407,41 @@ impl Drop for TerminalGuard {
         restore_terminal();
     }
 }
+
+/// Restore the terminal and exit when the process is asked to stop.
+///
+/// SIGTERM (logout, `kill`) and SIGHUP (terminal closed) otherwise kill the
+/// process with the alternate screen and raw mode still active. The handler is
+/// a best effort: it does the same restore the guard does and then exits
+/// through `_exit`, which cannot run the guard's destructor or Rust's exit
+/// handlers.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn install_signal_handlers() {
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            handle_stop_signal as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGHUP,
+            handle_stop_signal as *const () as libc::sighandler_t,
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn install_signal_handlers() {}
+
+#[cfg(unix)]
+#[allow(unsafe_code)]
+extern "C" fn handle_stop_signal(signal: libc::c_int) {
+    restore_terminal();
+    unsafe {
+        libc::_exit(128 + signal);
+    }
+}
+
 fn rollup_months(days: &[Bucket]) -> Vec<Bucket> {
     let mut months: Vec<Bucket> = Vec::new();
     for d in days {

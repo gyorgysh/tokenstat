@@ -36,7 +36,7 @@ struct WorkOriginalFilesSheet: View {
                 if loading { ProgressView("Reading saved originals…") }
                 else if files.isEmpty { Text("No original draft files are saved for this account.").font(Theme.callout) }
                 else {
-                    Text("\(files.count) files · \(ByteCountFormatter.string(fromByteCount: Int64(files.reduce(0) { $0 + $1.bytes }), countStyle: .file)) on this device")
+                    Text("\(files.count) files · \(ByteCountFormatter.string(fromByteCount: Int64(clamping: files.reduce(UInt64(0)) { $0.saturatingAdd(UInt64(clamping: $1.bytes)) }), countStyle: .file)) on this device")
                         .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                     ForEach(Array(files.prefix(limit))) { file in
                         VStack(alignment: .leading, spacing: Theme.Space.s) {

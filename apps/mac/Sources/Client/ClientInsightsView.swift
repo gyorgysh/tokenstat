@@ -346,7 +346,10 @@ final class ClientInsightsModel {
     private func fetch() async {
         let asked = cut
         isLoading = true
-        defer { isLoading = false }
+        // A fetch that is no longer this screen's cut must not clear the
+        // spinner the current cut's fetch just raised, or the pane reads as
+        // blank while rows are still on the way.
+        defer { if asked == cut { isLoading = false } }
         do {
             let report = try await Bridge.accountReport(group: asked.wire)
             // The reader moved on while this was in flight. Keep the rows, they

@@ -424,6 +424,17 @@ final class TerminalsModel {
                 modelID: modelID,
                 hidden: hidden
             )
+            // The tab can be closed while the spawn is in flight. Attaching
+            // would resurrect it and leaving the host process alone would
+            // orphan it, so close what the host just made instead. Listing the
+            // host id while the close is in flight keeps a reconcile that
+            // lands in between from adopting it as a new tab.
+            guard sessions.contains(where: { $0.id == session.id }) else {
+                closingHostIDs.insert(info.id)
+                try? await Bridge.ptyClose(id: info.id)
+                closingHostIDs.remove(info.id)
+                return nil
+            }
             session.attach(info: info)
             dedupe(hostID: info.id, keeping: session)
             if selectAfter {

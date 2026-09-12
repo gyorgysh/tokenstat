@@ -158,9 +158,20 @@ impl Buffer {
         }
     }
 
-    fn push(&mut self, bytes: &[u8]) {
+    /// Append a read chunk.
+    ///
+    /// `bounded` trims the window from the front when the session is already
+    /// dead. While the session is alive the reader loop holds back-pressure at
+    /// [`BUFFER_BYTES`], so the window cannot grow; once the direct child is
+    /// gone a grandchild can keep the pty open and keep writing with nobody
+    /// reading, and without this trim that output would grow without bound.
+    fn push(&mut self, bytes: &[u8], bounded: bool) {
         self.data.extend_from_slice(bytes);
         self.total += bytes.len() as u64;
+        if bounded && self.data.len() > BUFFER_BYTES {
+            let excess = self.data.len() - BUFFER_BYTES;
+            self.data.drain(..excess);
+        }
     }
 
     /// Offset of the oldest byte still held.
@@ -464,10 +475,11 @@ impl Manager {
                                 let _ = w.write_all(CURSOR_POSITION_REPLY);
                                 let _ = w.flush();
                             }
+                            let dead = !alive.load(Ordering::SeqCst);
                             buffer
                                 .lock()
                                 .unwrap_or_else(PoisonError::into_inner)
-                                .push(bytes);
+                                .push(bytes, dead);
                             *last_activity.lock().unwrap_or_else(PoisonError::into_inner) =
                                 Some(now_ms());
                         }
@@ -2588,7 +2600,7 @@ mod tests {
     fn a_full_buffer_is_reported_as_paused_without_loss() {
         let mut b = Buffer::new();
         let written = BUFFER_BYTES;
-        b.push(&vec![b'a'; written]);
+        b.push(&vec![b'a'; written], false);
         let chunk = b.read_from(0);
         assert_eq!(chunk.dropped, 0);
         assert_eq!(chunk.bytes.len(), READ_CHUNK_BYTES);
@@ -2603,7 +2615,7 @@ mod tests {
     #[test]
     fn the_buffer_can_hold_exactly_the_reader_window() {
         let mut b = Buffer::new();
-        b.push(&[b'x'; BUFFER_BYTES]);
+        b.push(&[b'x'; BUFFER_BYTES], false);
         assert_eq!(b.data.len(), BUFFER_BYTES);
         assert_eq!(b.total, BUFFER_BYTES as u64);
     }
@@ -2611,7 +2623,7 @@ mod tests {
     #[test]
     fn acknowledging_a_reader_releases_prefix_without_changing_offsets() {
         let mut b = Buffer::new();
-        b.push(b"0123456789");
+        b.push(b"0123456789", false);
         b.discard_before(4);
         let chunk = b.read_from(4);
         assert_eq!(chunk.bytes, b"456789");

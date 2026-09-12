@@ -32,7 +32,7 @@ struct WorkCacheManagementSheet: View {
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Text(titles[record.id] ?? label(record)).font(Theme.body.weight(.semibold))
                                 .lineLimit(3)
-                            Text("\(ByteCountFormatter.string(fromByteCount: Int64(record.bytes), countStyle: .file)) · Saved \(Date(timeIntervalSince1970: Double(record.updatedMs) / 1000).formatted(date: .abbreviated, time: .shortened))")
+                            Text("\(ByteCountFormatter.string(fromByteCount: Int64(clamping: record.bytes), countStyle: .file)) · Saved \(Date(timeIntervalSince1970: Double(record.updatedMs) / 1000).formatted(date: .abbreviated, time: .shortened))")
                                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                             ViewThatFits(in: .horizontal) {
                                 HStack { actions(record) }
@@ -149,7 +149,7 @@ struct WorkCacheManagementSheet: View {
             busy = false
             if current {
                 failure = remove ? "This copy could not be removed. Try again."
-                    : "This copy could not be kept offline. It needs \(ByteCountFormatter.string(fromByteCount: Int64(record.bytes), countStyle: .file)) within the offline storage limit. Remove another copy or increase the limit in Settings, then try again."
+                    : "This copy could not be kept offline. It needs \(ByteCountFormatter.string(fromByteCount: Int64(clamping: record.bytes), countStyle: .file)) within the offline storage limit. Remove another copy or increase the limit in Settings, then try again."
             }
         }
     }

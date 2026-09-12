@@ -11,7 +11,9 @@ import UIKit
 ///
 /// Read state is device furniture, not host data. Reading a conversation on
 /// an iPad must not silently clear the dot on a phone somebody has not looked
-/// at yet, and no transcript or receipt needs to leave either device.
+/// at yet, and no transcript or receipt needs to leave either device. It is
+/// keyed by the signed-in scope as well, so one account's receipts are never
+/// read under another after a sign-out on the same device.
 @MainActor @Observable
 final class ClientChatReadState {
     static let shared = ClientChatReadState()
@@ -19,25 +21,21 @@ final class ClientChatReadState {
     private static let defaultsKey = "chat.readReceipts.v1"
     private static let trackingStartedKey = "chat.readTrackingStartedAt.v1"
     private var reads: [String: Int64]
-    /// There is no server receipt to migrate when this feature first appears.
-    /// Treating every older agent reply as unseen would pin years of history in
-    /// Recents, so this device's first use is the honest unread baseline.
-    private let trackingStartedAt: Int64
 
     private init() {
-        let defaults = UserDefaults.standard
-        reads = defaults
+        reads = UserDefaults.standard
             .data(forKey: Self.defaultsKey)
             .flatMap { try? JSONDecoder().decode([String: Int64].self, from: $0) }
             ?? [:]
-        if let stored = defaults.object(forKey: Self.trackingStartedKey) as? NSNumber,
-           stored.int64Value > 0 {
-            trackingStartedAt = stored.int64Value
-        } else {
-            let now = Int64(Date().timeIntervalSince1970 * 1000)
-            trackingStartedAt = now
-            defaults.set(now, forKey: Self.trackingStartedKey)
-        }
+    }
+
+    /// The account this device is reading under, folded into every key. A
+    /// sign-out leaves the old entries on disk but nothing can address them.
+    private var namespace: String {
+        guard let scope = WorkSessionContext.shared.scope else { return "none" }
+        return [scope.kind.rawValue, scope.origin, scope.identity]
+            .map(WorkReferenceKey.encode)
+            .joined(separator: "|")
     }
 
     func isUnread(peer: String, chat: ChatConversation) -> Bool {
@@ -67,13 +65,15 @@ final class ClientChatReadState {
         guard lastMessageAuthor == "agent", let at = lastMessageAtMs else {
             return false
         }
-        let lastRead = reads[key(peer: peer, chatID: chatID), default: trackingStartedAt]
-        return max(lastRead, trackingStartedAt) < at
+        let namespace = self.namespace
+        let started = trackingStarted(for: namespace)
+        let lastRead = reads[key(peer: peer, chatID: chatID, in: namespace), default: started]
+        return max(lastRead, started) < at
     }
 
     func markRead(peer: String?, chat: ChatConversation) {
         guard let at = chat.lastMessageAtMs else { return }
-        let key = key(peer: peer ?? "local", chatID: chat.id)
+        let key = key(peer: peer ?? "local", chatID: chat.id, in: namespace)
         guard reads[key, default: 0] < at else { return }
         reads[key] = at
         if let data = try? JSONEncoder().encode(reads) {
@@ -81,8 +81,24 @@ final class ClientChatReadState {
         }
     }
 
-    private func key(peer: String, chatID: String) -> String {
-        "\(peer)/\(chatID)"
+    /// There is no server receipt to migrate when a scope first appears.
+    /// Treating every older agent reply as unseen would pin years of history in
+    /// Recents, so a scope's first use is the honest unread baseline. Stored
+    /// per scope, because two accounts on one device must not share a baseline
+    /// either.
+    private func trackingStarted(for namespace: String) -> Int64 {
+        let key = "\(Self.trackingStartedKey).\(namespace)"
+        if let stored = UserDefaults.standard.object(forKey: key) as? NSNumber,
+           stored.int64Value > 0 {
+            return stored.int64Value
+        }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        UserDefaults.standard.set(now, forKey: key)
+        return now
+    }
+
+    private func key(peer: String, chatID: String, in namespace: String) -> String {
+        "\(namespace)/\(peer)/\(chatID)"
     }
 }
 
@@ -287,6 +303,12 @@ struct ClientRecentChatView: View {
         let saved: Bool
     }
 
+    /// Shown when there is no account scope to open a conversation under,
+    /// which is what a signed-in account with no handle has.
+    private static let noAccountScopeMessage =
+        "This conversation cannot open until the account has a handle. "
+        + "Sign out and sign in again."
+
     private var machine: Machine? {
         account.account?.machines.first { $0.publicIdentity == peer }
     }
@@ -412,6 +434,13 @@ struct ClientRecentChatView: View {
 
     private func loadSaved() async {
         let generation = loadGeneration
+        // Same as the live read: a scope the account cannot build (no handle)
+        // must not leave the skeleton up.
+        guard WorkSessionContext.shared.scope?.kind == .account else {
+            model.error = Self.noAccountScopeMessage
+            loaded = true
+            return
+        }
         guard visible, !Task.isCancelled, account.signedIn, machine != nil,
               model.savedCopy == nil, model.selected == nil, !savedUnavailable,
               let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
@@ -437,7 +466,14 @@ struct ClientRecentChatView: View {
             loaded = true
             return
         }
-        guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
+        // An account without a handle has no scope to key the live read on.
+        // That is an answer, not a pending one: say so instead of leaving the
+        // skeleton up forever.
+        guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else {
+            model.error = Self.noAccountScopeMessage
+            loaded = true
+            return
+        }
         func stillCurrent() -> Bool {
             visible && generation == loadGeneration && !Task.isCancelled
                 && scope == WorkSessionContext.shared.scope

@@ -917,10 +917,17 @@ struct NewAutomationSheet: View {
     @State private var effortChoice = ""
     @State private var scheduleKind: ScheduleKind = .once
     @State private var intervalMinutes = "60"
+    /// Raw host interval until the picker is touched, so 90 seconds survives a
+    /// round trip instead of being shown as and saved back as one minute.
+    @State private var intervalSeconds: UInt64 = 0
+    @State private var intervalTouched = false
     @State private var scheduleTime = Date()
     @State private var scheduleWeekday = 0
     /// Custom multi-day pick, Monday = bit 0. Defaults to Mon–Fri.
     @State private var customDays = AutomationSchedule.weekdaysMask
+    /// The mask of a multi-day weekly pick, kept unless the day menu is used.
+    @State private var weeklyDays = 0
+    @State private var weeklyDayEdited = false
     @State private var budgetMinutes = "180"
     @State private var noTimeLimit = false
     @State private var working = false
@@ -939,9 +946,45 @@ struct NewAutomationSheet: View {
     /// Presets plus the current value when it is not one of them, so editing an
     /// older "every 45 minutes" job still shows a truthful label.
     private var intervalMenuMinutes: [Int] {
-        let current = max(1, Int(intervalMinutes) ?? 60)
+        let seconds = intervalCurrentSeconds
+        guard seconds % 60 == 0 else { return intervalPresets }
+        let current = max(1, Int(seconds / 60))
         if intervalPresets.contains(current) { return intervalPresets }
         return (intervalPresets + [current]).sorted()
+    }
+
+    /// The interval the picker stands for: the raw host value until a preset
+    /// is chosen, then whole minutes. Never traps on a huge typed number.
+    private var intervalCurrentSeconds: UInt64 {
+        if !intervalTouched, intervalSeconds > 0 {
+            return max(intervalSeconds, 60)
+        }
+        let minutes = min(UInt64(intervalMinutes) ?? 60, UInt64.max / 60)
+        return max(minutes * 60, 60)
+    }
+
+    private func intervalMenuLabel(_ seconds: UInt64) -> String {
+        if seconds % 60 != 0 {
+            return "\(seconds) seconds"
+        }
+        return intervalPresetLabel(Int(seconds / 60))
+    }
+
+    /// What the weekly day menu shows: every masked day while a loaded
+    /// multi-day pick is untouched, otherwise the single chosen day.
+    private var weeklyDayLabel: String {
+        if !weeklyDayEdited, weeklyDays != 0 {
+            return (0..<7).compactMap { bit in
+                (weeklyDays & (1 << bit)) != 0 ? weekdays[bit].1 : nil
+            }.joined(separator: ", ")
+        }
+        return weekdays.first { $0.0 == scheduleWeekday }?.1 ?? "Day"
+    }
+
+    private func weeklyDaySelected(_ day: Int) -> Bool {
+        if weeklyDayEdited { return scheduleWeekday == day }
+        if weeklyDays != 0 { return (weeklyDays & (1 << day)) != 0 }
+        return scheduleWeekday == day
     }
 
     var body: some View {
@@ -1019,7 +1062,7 @@ struct NewAutomationSheet: View {
                 applyBudget(
                     model.queueNoLimit
                         ? 0
-                        : (UInt64(model.queueBudgetMinutes) ?? 180) * 60
+                        : min(UInt64(model.queueBudgetMinutes) ?? 180, UInt64.max / 60) * 60
                 )
             }
         }
@@ -1214,8 +1257,9 @@ struct NewAutomationSheet: View {
                             ForEach(intervalMenuMinutes, id: \.self) { minutes in
                                 Button {
                                     intervalMinutes = String(minutes)
+                                    intervalTouched = true
                                 } label: {
-                                    if (Int(intervalMinutes) ?? 0) == minutes {
+                                    if intervalCurrentSeconds == UInt64(minutes) * 60 {
                                         Label(intervalPresetLabel(minutes), systemImage: "checkmark")
                                     } else {
                                         Text(intervalPresetLabel(minutes))
@@ -1223,7 +1267,7 @@ struct NewAutomationSheet: View {
                                 }
                             }
                         } label: {
-                            frequencyMenuLabel(intervalPresetLabel(Int(intervalMinutes) ?? 60))
+                            frequencyMenuLabel(intervalMenuLabel(intervalCurrentSeconds))
                         }
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
@@ -1237,8 +1281,9 @@ struct NewAutomationSheet: View {
                             ForEach(weekdays, id: \.0) { day in
                                 Button {
                                     scheduleWeekday = day.0
+                                    weeklyDayEdited = true
                                 } label: {
-                                    if scheduleWeekday == day.0 {
+                                    if weeklyDaySelected(day.0) {
                                         Label(day.1, systemImage: "checkmark")
                                     } else {
                                         Text(day.1)
@@ -1246,7 +1291,7 @@ struct NewAutomationSheet: View {
                                 }
                             }
                         } label: {
-                            frequencyMenuLabel(weekdays.first { $0.0 == scheduleWeekday }?.1 ?? "Day")
+                            frequencyMenuLabel(weeklyDayLabel)
                         }
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
@@ -1347,6 +1392,8 @@ struct NewAutomationSheet: View {
 
     private func applySchedule(_ schedule: AutomationSchedule) {
         scheduleKind = schedule.kind
+        intervalTouched = false
+        intervalSeconds = schedule.kind == .interval ? schedule.everySeconds : 0
         intervalMinutes = String(max(1, schedule.everySeconds / 60))
         scheduleTime = Calendar.current.date(
             bySettingHour: schedule.hour,
@@ -1355,6 +1402,8 @@ struct NewAutomationSheet: View {
             of: Date()
         ) ?? Date()
         scheduleWeekday = schedule.weekday
+        weeklyDayEdited = false
+        weeklyDays = schedule.kind == .weekly ? schedule.weekdays & 0b0111_1111 : 0
         if schedule.weekdays != 0 {
             customDays = schedule.weekdays
         } else if schedule.kind == .custom || schedule.kind == .weekdays {
@@ -1369,12 +1418,11 @@ struct NewAutomationSheet: View {
         let comps = cal.dateComponents([.hour, .minute], from: scheduleTime)
         let hour = comps.hour ?? 9
         let minute = comps.minute ?? 0
-        let every = max((UInt64(intervalMinutes) ?? 60) * 60, 60)
         switch scheduleKind {
         case .once:
             return AutomationSchedule(kind: .once)
         case .interval:
-            return AutomationSchedule(kind: .interval, everySeconds: every)
+            return AutomationSchedule(kind: .interval, everySeconds: intervalCurrentSeconds)
         case .daily:
             return AutomationSchedule(kind: .daily, hour: hour, minute: minute)
         case .weekdays:
@@ -1383,8 +1431,11 @@ struct NewAutomationSheet: View {
                 weekdays: AutomationSchedule.weekdaysMask
             )
         case .weekly:
+            // A loaded multi-day weekly keeps its mask until the day menu is
+            // used; writing `weekdays: 0` here collapsed Mon/Wed to Monday.
             return AutomationSchedule(
-                kind: .weekly, hour: hour, minute: minute, weekday: scheduleWeekday
+                kind: .weekly, hour: hour, minute: minute, weekday: scheduleWeekday,
+                weekdays: weeklyDayEdited ? 0 : weeklyDays
             )
         case .custom:
             // Do not invent days when none are selected. The host rejects an
@@ -1421,7 +1472,7 @@ struct NewAutomationSheet: View {
 
     private var savedBudget: UInt64 {
         if noTimeLimit { return 0 }
-        let minutes = UInt64(budgetMinutes) ?? 180
+        let minutes = min(UInt64(budgetMinutes) ?? 180, UInt64.max / 60)
         return max(minutes, 1) * 60
     }
 

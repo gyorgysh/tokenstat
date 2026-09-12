@@ -17,6 +17,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -29,6 +30,11 @@ use crate::automations::{self, DEFAULT_BUDGET_SECONDS, ScheduleSpec};
 const RUNS_KEPT: usize = 100;
 /// Prompt and HTTP body expansion cap, same order as automation transcripts.
 const OUTPUT_CAP: usize = 64 * 1024;
+/// Raw pty bytes kept for the lossy fallback. A node that never produces a
+/// parseable piece cannot drive this store out of memory.
+const RAW_TAIL_CAP: usize = 4 * 1024 * 1024;
+/// Longest run or node id accepted as a path component.
+const MAX_PATH_ID: usize = 128;
 const MAX_NODES: usize = 64;
 const MAX_EDGES: usize = 128;
 const MAX_LOOP_TIMES: u32 = 20;
@@ -431,7 +437,10 @@ impl Store {
         node_id: &str,
         offset: u64,
     ) -> Result<(String, u64), String> {
-        let path = self.step_path(run_id, node_id);
+        let path = self.step_path(run_id, node_id)?;
+        if !self.path_within_runs_dir(&path) {
+            return Err("the transcript path is outside the runs directory".into());
+        }
         let bytes = std::fs::read(&path).unwrap_or_default();
         let text = if bytes.is_empty() {
             self.get_run(run_id)
@@ -451,14 +460,45 @@ impl Store {
         Ok((slice.to_string(), start as u64 + slice.len() as u64))
     }
 
-    fn step_path(&self, run_id: &str, node_id: &str) -> PathBuf {
-        self.runs_dir.join(run_id).join(format!("{node_id}.txt"))
+    fn step_path(&self, run_id: &str, node_id: &str) -> Result<PathBuf, String> {
+        if !valid_path_token(run_id) {
+            return Err("invalid run id".into());
+        }
+        if !valid_path_token(node_id) {
+            return Err("invalid node id".into());
+        }
+        let dir = self.runs_dir.join(run_id);
+        let path = dir.join(format!("{node_id}.txt"));
+        if !self.path_within_runs_dir(&dir) {
+            return Err("the transcript path is outside the runs directory".into());
+        }
+        Ok(path)
+    }
+
+    /// Canonical containment for a step-transcript path. A path that does not
+    /// exist yet is safe because the ids are already plain tokens.
+    fn path_within_runs_dir(&self, path: &Path) -> bool {
+        let Ok(root) = self.runs_dir.canonicalize() else {
+            return true;
+        };
+        match path.canonicalize() {
+            Ok(resolved) => resolved.starts_with(&root),
+            Err(_) => match path.parent().and_then(|parent| parent.canonicalize().ok()) {
+                Some(resolved) => resolved.starts_with(&root),
+                None => true,
+            },
+        }
     }
 
     fn write_step_file(&self, run_id: &str, node_id: &str, text: &str) {
-        let path = self.step_path(run_id, node_id);
+        let Ok(path) = self.step_path(run_id, node_id) else {
+            return;
+        };
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
+            if !self.path_within_runs_dir(parent) {
+                return;
+            }
         }
         let _ = std::fs::write(path, text.as_bytes());
     }
@@ -478,16 +518,41 @@ impl Store {
     }
 
     fn upsert_run(&self, run: WorkflowRun) -> Result<(), String> {
-        let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(existing) = runs.iter_mut().find(|r| r.id == run.id) {
-            *existing = run;
-        } else {
-            runs.insert(0, run);
-            if runs.len() > RUNS_KEPT {
-                runs.truncate(RUNS_KEPT);
+        // Transcript directories to delete once the lock is released. Doing
+        // filesystem work under the runs mutex would block every get/upsert on
+        // the eviction of a run nobody asked about.
+        let mut orphan_dirs: Vec<std::path::PathBuf> = Vec::new();
+        {
+            let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(existing) = runs.iter_mut().find(|r| r.id == run.id) {
+                // The same run is re-persisted as it progresses. A different
+                // run arriving under the same id (a generation collision) must
+                // not silently replace the one already recorded.
+                if existing.started_at_ms != run.started_at_ms {
+                    return Err(format!("a workflow run with id {} already exists", run.id));
+                }
+                *existing = run;
+            } else {
+                runs.insert(0, run);
+                if runs.len() > RUNS_KEPT {
+                    let evicted: Vec<WorkflowRun> = runs.drain(RUNS_KEPT..).collect();
+                    let kept: HashSet<String> = runs.iter().map(|r| r.id.clone()).collect();
+                    for old in &evicted {
+                        // A record that never finished, or an id another record
+                        // still uses, keeps its transcript directory.
+                        if !matches!(old.status.as_str(), "running" | "waiting")
+                            && !kept.contains(&old.id)
+                            && valid_path_token(&old.id)
+                        {
+                            orphan_dirs.push(self.runs_dir.join(&old.id));
+                        }
+                    }
+                }
             }
         }
-        drop(runs);
+        for dir in orphan_dirs {
+            let _ = std::fs::remove_dir_all(dir);
+        }
         self.save_runs()
     }
 
@@ -504,7 +569,7 @@ impl Store {
             return Err("the run queue is full".into());
         }
         let run = WorkflowRun {
-            id: format!("wfr-{}", now_ms()),
+            id: mint_run_id(),
             workflow_id: workflow.id.clone(),
             name: workflow.name.clone(),
             workspace_id: bound,
@@ -922,10 +987,17 @@ impl Store {
         // as a job somebody scheduled. See `RunRecord::parent_run_id`.
         let started =
             automations::shared().start_now(id, override_prompt.as_deref(), Some(&run.id))?;
+        let deadline = run_deadline(run);
         loop {
             if self.is_killed(&run.id) {
                 let _ = automations::shared().kill_run(&started.id);
                 return Err("stopped".into());
+            }
+            // The node must not outlive the workflow's own budget just
+            // because the automation's budget is longer.
+            if deadline.is_some_and(|d| Instant::now() >= d) {
+                let _ = automations::shared().kill_run(&started.id);
+                return Err("the run budget is spent".into());
             }
             std::thread::sleep(DRAIN_POLL);
             let Some(current) = automations::shared().get_run(&started.id) else {
@@ -1057,7 +1129,12 @@ pub fn design(
         ..Node::default()
     };
     let design_reader = format!("workflow-design:{}", scratch.id);
-    let (status, transcript, _) = drain_pty(
+    // A design call spawns an agent like any other run, so it takes the same
+    // queue slot and fails with the same words when the queue is full.
+    if !automations::shared().try_take_slot() {
+        return Err("the run queue is full".into());
+    }
+    let drained = drain_pty(
         DrainPty {
             run: &mut scratch,
             argv: &argv,
@@ -1069,7 +1146,9 @@ pub fn design(
         |_| {},
         || false,
         |_| {},
-    )?;
+    );
+    automations::shared().release_slot();
+    let (status, transcript, _) = drained?;
     if status != "ok" {
         return Err(format!(
             "the design backend did not finish cleanly:\n{transcript}"
@@ -1136,6 +1215,14 @@ pub fn validate(workflow: &Workflow) -> Result<(), String> {
     for node in &workflow.nodes {
         if node.id.trim().is_empty() {
             return Err("every node needs an id".into());
+        }
+        // Node ids become transcript path components under the runs dir, so a
+        // saved graph may only use the same plain tokens a generated id does.
+        if !valid_path_token(&node.id) {
+            return Err(format!(
+                "node id {} may only contain letters, numbers, dashes and underscores",
+                node.id
+            ));
         }
         if !ids.insert(node.id.clone()) {
             return Err(format!("duplicate node id {}", node.id));
@@ -1779,6 +1866,16 @@ fn align_char_boundary(text: &str, index: usize) -> usize {
     index
 }
 
+/// Non-empty, bounded, `[A-Za-z0-9_-]`. Ids that reach the filesystem are
+/// generated by the host, but node ids come from a client-saved graph.
+fn valid_path_token(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_PATH_ID
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 fn cap_output(text: &str) -> String {
     if text.len() <= OUTPUT_CAP {
         text.to_string()
@@ -1927,6 +2024,15 @@ fn fail_run(run: &mut WorkflowRun, message: &str) {
     });
 }
 
+/// Process-wide counter that keeps two runs started in the same millisecond
+/// from sharing an id, which is also their transcript directory name.
+static RUN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn mint_run_id() -> String {
+    let sequence = RUN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("wfr-{}-{sequence}", now_ms())
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1938,7 +2044,13 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    let tmp = path.with_extension("json.tmp");
+    // A unique suffix keeps two savers from interleaving into one temporary.
+    static SAVE_SEQ: AtomicU64 = AtomicU64::new(0);
+    let tmp = path.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        SAVE_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::write(&tmp, body).map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -2008,6 +2120,10 @@ fn drain_pty(
             Ok(chunk) => {
                 if !chunk.bytes.is_empty() {
                     raw.extend_from_slice(&chunk.bytes);
+                    if raw.len() > RAW_TAIL_CAP {
+                        let excess = raw.len() - RAW_TAIL_CAP;
+                        raw.drain(..excess);
+                    }
                     let piece = parser.push(&chunk.bytes);
                     if !piece.is_empty() {
                         readable.push_str(&piece);
@@ -2038,6 +2154,10 @@ fn drain_pty(
                     && !chunk.bytes.is_empty()
                 {
                     raw.extend_from_slice(&chunk.bytes);
+                    if raw.len() > RAW_TAIL_CAP {
+                        let excess = raw.len() - RAW_TAIL_CAP;
+                        raw.drain(..excess);
+                    }
                     readable.push_str(&parser.push(&chunk.bytes));
                     offset = chunk.next_offset;
                 }
@@ -2057,7 +2177,15 @@ fn drain_pty(
     let info = manager.info(&pty_id).ok();
     let exit = info.as_ref().and_then(|i| i.exit_code);
     let alive = info.as_ref().map(|i| i.alive).unwrap_or(false);
-    if !matched {
+    if matched {
+        // wait:output delivered what the node wanted. Kill the process and
+        // drop the pty now; nothing may outlive the node, least of all into a
+        // Gate, which waits without a deadline.
+        run.live_pty_ids.retain(|id| id != &pty_id);
+        let _ = manager.kill(&pty_id);
+        let _ = manager.close(&pty_id);
+        persist(run);
+    } else {
         run.live_pty_ids.retain(|id| id != &pty_id);
         persist(run);
         let _ = manager.close(&pty_id);

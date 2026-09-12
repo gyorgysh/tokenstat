@@ -88,10 +88,31 @@ fn pump_one_http(
         reader: &reader,
         buf: Vec::new(),
     };
-    let resp_head = remote.read_headers().ok_or(())?;
-    let resp_text = String::from_utf8_lossy(&resp_head);
-    let (rewritten_resp, meta) =
+    let mut resp_head = remote.read_headers().ok_or(())?;
+    let mut resp_text = String::from_utf8_lossy(&resp_head).into_owned();
+    // An interim response (100 Continue, 103 Early Hints) is not the answer.
+    // It carries no body, and the real response follows on the same
+    // connection, so forward it and read on; treating it as final would close
+    // the connection the client is still waiting on.
+    let mut interim: Vec<u8> = Vec::new();
+    let mut interim_hops = 0;
+    while interim_hops < 8
+        && response_status(&resp_text).is_some_and(|status| (100..200).contains(&status))
+    {
+        let (rewritten_interim, _) =
+            rewrite_response_headers(&resp_text, target_port, listen_port).ok_or(())?;
+        interim.extend_from_slice(rewritten_interim.as_bytes());
+        resp_head = remote.read_headers().ok_or(())?;
+        resp_text = String::from_utf8_lossy(&resp_head).into_owned();
+        interim_hops += 1;
+    }
+    let (rewritten_resp, mut meta) =
         rewrite_response_headers(&resp_text, target_port, listen_port).ok_or(())?;
+    meta.no_body =
+        response_has_no_body(head_text.starts_with("HEAD "), response_status(&resp_text));
+    if !interim.is_empty() {
+        local.write_all(&interim).map_err(|_| ())?;
+    }
 
     if is_upgrade || meta.is_upgrade {
         local.write_all(rewritten_resp.as_bytes()).map_err(|_| ())?;
@@ -99,6 +120,15 @@ fn pump_one_http(
             local.write_all(&remote.buf).map_err(|_| ())?;
         }
         pump_split(local, reader, writer);
+        return Ok(());
+    }
+
+    if meta.no_body {
+        local.write_all(rewritten_resp.as_bytes()).map_err(|_| ())?;
+        if !remote.buf.is_empty() {
+            local.write_all(&remote.buf).map_err(|_| ())?;
+        }
+        finish(reader, writer);
         return Ok(());
     }
 
@@ -344,12 +374,34 @@ struct ResponseMeta {
     compressed: bool,
     chunked: bool,
     is_upgrade: bool,
+    no_body: bool,
 }
 
 impl ResponseMeta {
     fn can_rewrite_body(&self) -> bool {
-        self.is_rewritable && !self.compressed && !self.chunked && self.content_length.is_some()
+        self.is_rewritable
+            && !self.compressed
+            && !self.chunked
+            && !self.no_body
+            && self.content_length.is_some()
     }
+}
+
+fn response_has_no_body(request_head: bool, status: Option<u16>) -> bool {
+    // 1xx is not here: an interim response is followed by the real one, and
+    // the caller forwards it and keeps reading. Only these are final and
+    // bodiless.
+    request_head || status.is_some_and(|status| status == 204 || status == 304)
+}
+
+fn response_status(block: &str) -> Option<u16> {
+    block
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
 }
 
 fn content_type_is_rewritable(ct: &str) -> bool {
@@ -567,6 +619,25 @@ const ws = "ws://localhost:5173/";"#;
         let (_, meta) = rewrite_response_headers(raw, 5173, 9).unwrap();
         assert!(meta.is_rewritable);
         assert!(meta.compressed);
+        assert!(!meta.can_rewrite_body());
+    }
+
+    #[test]
+    fn bodiless_responses_are_not_body_rewrite_candidates() {
+        assert!(response_has_no_body(true, Some(200)));
+        // 1xx is interim, not final: the caller forwards it and reads the real
+        // response that follows, so it is not a bodiless final answer.
+        assert!(!response_has_no_body(false, Some(100)));
+        assert!(response_has_no_body(false, Some(204)));
+        assert!(response_has_no_body(false, Some(304)));
+        assert!(!response_has_no_body(false, Some(200)));
+        assert!(!response_has_no_body(false, None));
+
+        let raw =
+            "HTTP/1.1 304 Not Modified\r\nContent-Type: text/html\r\nContent-Length: 12\r\n\r\n";
+        assert_eq!(response_status(raw), Some(304));
+        let (_, mut meta) = rewrite_response_headers(raw, 5173, 9).unwrap();
+        meta.no_body = response_has_no_body(false, response_status(raw));
         assert!(!meta.can_rewrite_body());
     }
 

@@ -5,6 +5,23 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
+/// Fold a printable byte under Ctrl the way a keyboard does.
+///
+/// Lives outside the phone key bar because the same fold is applied on the
+/// shared typing path (`SSHLiveTerminal.send`), which compiles for macOS too.
+enum TerminalControlCode {
+    /// The C0 code for a printable byte, or nil when there is none.
+    static func fold(_ byte: UInt8) -> UInt8? {
+        switch byte {
+        case 0x61...0x7A: return byte - 0x60  // a–z
+        case 0x41...0x5A: return byte - 0x40  // A–Z
+        case 0x5B...0x5F: return byte - 0x40  // [ \\ ] ^ _
+        case 0x20: return 0  // space is NUL
+        default: return nil
+        }
+    }
+}
+
 #if !os(macOS)
 import SwiftUI
 import UIKit
@@ -29,6 +46,14 @@ struct ClientTerminalKeys: View {
     let toggleKeyboard: () -> Void
     /// Whether a drag scrolls the buffer instead of reaching the program.
     @Binding var scrolls: Bool
+    /// The armed Ctrl state, when the session that receives typed keys owns it.
+    ///
+    /// Control only means something for a key that reaches the program, and the
+    /// bar has no letter keys: the letters arrive through the terminal's own
+    /// input path. So the session holds the flag and folds the next typed byte,
+    /// and this bar only arms it. Nil on a screen whose session does not take
+    /// the flag; that screen keeps the arming local to the bar.
+    var control: Binding<Bool>? = nil
     /// Keys this session has that others do not, at the head of the bar.
     ///
     /// An SSH session has saved snippets and an agent session does not. Rather
@@ -39,10 +64,14 @@ struct ClientTerminalKeys: View {
     /// Armed for the next key only, like a real modifier tapped once. Sticky
     /// on purpose: a phone cannot hold one key while pressing another.
     @State private var shift = false
-    @State private var control = false
+    @State private var localControl = false
     /// Whether the soft keyboard is up. Read from the system rather than from
     /// what this bar last did, so a tap on the terminal keeps the key honest.
     @State private var keyboardUp = true
+
+    /// Where the armed Ctrl flag lives: the session when it supplied one, this
+    /// bar otherwise.
+    private var controlArmed: Binding<Bool> { control ?? $localControl }
 
     /// Whether this iPad has a keyboard plugged into it. Optional lookup: this
     /// bar is also drawn on a phone, where nothing installs the model.
@@ -96,7 +125,7 @@ struct ClientTerminalKeys: View {
                 // bar carried and ours dropped.
                 modifier("scroll", isOn: scrolls) { scrolls.toggle() }
                 modifier("esc", isOn: false) { fire(Key.escape) }
-                modifier("ctrl", isOn: control) { control.toggle() }
+                modifier("ctrl", isOn: controlArmed.wrappedValue) { controlArmed.wrappedValue.toggle() }
                 modifier("shift", isOn: shift) { shift.toggle() }
                 // One key, two meanings, and the label says which one is
                 // armed. Shift+Tab as a separate button would have been a
@@ -136,28 +165,25 @@ struct ClientTerminalKeys: View {
 
     /// Send one key, applying and then clearing whatever was armed.
     ///
-    /// Control folds a letter to its C0 code the way a keyboard does: `ctrl`
-    /// then `c` is 0x03. Shift is consumed by the key that read it, so it is
+    /// Control folds a printable byte to its C0 code the way a keyboard does:
+    /// `ctrl` then `c` is 0x03. The bar's own keys are symbols and escape
+    /// sequences, so the fold that matters for letters happens where the
+    /// letters arrive: `ClientTerminalSession.send(source:data:)` reads the
+    /// same armed flag. Shift is consumed by the key that read it, so it is
     /// cleared here whether or not that key did anything with it.
     private func fire(_ bytes: [UInt8]) {
         var out = bytes
-        if control, out.count == 1, let folded = Self.controlCode(out[0]) {
+        if controlArmed.wrappedValue, out.count == 1, let folded = Self.controlCode(out[0]) {
             out = [folded]
         }
         send(out)
         if shift { shift = false }
-        if control { control = false }
+        if controlArmed.wrappedValue { controlArmed.wrappedValue = false }
     }
 
     /// The C0 code for a printable byte, or nil when there is none.
     static func controlCode(_ byte: UInt8) -> UInt8? {
-        switch byte {
-        case 0x61...0x7A: return byte - 0x60  // a–z
-        case 0x41...0x5A: return byte - 0x40  // A–Z
-        case 0x5B...0x5F: return byte - 0x40  // [ \ ] ^ _
-        case 0x20: return 0  // space is NUL
-        default: return nil
-        }
+        TerminalControlCode.fold(byte)
     }
 
     /// A key whose face is a symbol rather than what it types.

@@ -13,6 +13,10 @@ import Foundation
 enum DesktopSyncScheduler {
     static func start() {
         Task.detached {
+            // The app is choosing its transport. This loop reads through it,
+            // and a tick before the route is settled would schedule in-process
+            // work the daemon ends up owning.
+            await BridgeLaunch.wait()
             while !Task.isCancelled {
                 guard !Bridge.isHosted else { return }
                 let status: SyncScheduleStatus

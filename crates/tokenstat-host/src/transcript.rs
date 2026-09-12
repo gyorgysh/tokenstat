@@ -1615,7 +1615,11 @@ fn codex_file_change_detail(item: &Value) -> Option<String> {
         let joined = lines.join("\n");
         // Inspector text, not a patch dump: cap multi-file output.
         if joined.len() > 4000 {
-            format!("{}…", &joined[..4000])
+            let mut end = 4000;
+            while end > 0 && !joined.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}…", &joined[..end])
         } else {
             joined
         }

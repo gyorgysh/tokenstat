@@ -243,24 +243,44 @@ struct RootView: View {
                 // internet is back, until some call happens to succeed.
                 connection.reset()
                 Task {
+                    await BridgeLaunch.wait()
                     await account.load()
                     await home.refreshIfStale()
                     await appUpdate.checkAndInstall()
                 }
-                Task { await workspaces.loadRemote() }
-                Task { await Bridge.nudgeTunnel(reconnect: true) }
+                Task {
+                    await BridgeLaunch.wait()
+                    await workspaces.loadRemote()
+                }
+                Task {
+                    await BridgeLaunch.wait()
+                    await Bridge.nudgeTunnel(reconnect: true)
+                }
             }
             // Waking from sleep is the same story as the network coming back: the
             // machine's egress is only just arriving, so the tunnel supervisor
             // should reconnect now rather than wait out a backoff sized for a
             // laptop that was off.
             .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
-                Task { await Bridge.nudgeTunnelOnForeground() }
+                Task {
+                    await BridgeLaunch.wait()
+                    await Bridge.nudgeTunnelOnForeground()
+                }
             }
+            // A tap on a banner is kept until it resolves. On a cold launch
+            // the folders and sessions it names are still loading, and taking
+            // it up front lost the destination with nothing to show for it.
+            // The load handlers below retry; a tap that never resolves goes
+            // stale rather than chasing a destination forever.
             .onChange(of: notificationOpen.request, initial: true) { _, request in
-                guard let request else { return }
-                notificationOpen.take()
-                openFromNotification(request)
+                guard request != nil else { return }
+                openPendingNotification()
+            }
+            .onChange(of: workspaces.folders.map(\.id)) { _, _ in
+                openPendingNotification()
+            }
+            .onChange(of: terminals.sessions.map(\.id)) { _, _ in
+                openPendingNotification()
             }
             // One accent for every control in the window. Set here so a toggle,
             // a segmented picker or a prominent button does not have to
@@ -364,6 +384,7 @@ struct RootView: View {
             HeatmapPopoverOverlay(model: home, hover: heatmapHover, windowSize: windowSize)
         }
         .task(id: WorkSessionContext.shared.scope) {
+            await BridgeLaunch.wait()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
         }
         .sheet(item: $savedConversation) { DesktopSavedConversation(destination: $0) }
@@ -456,7 +477,10 @@ struct RootView: View {
                 overlayHeldByPress = false
                 applyScope(from: next)
                 guard next.isGlobal(.home) else { return }
-                Task { await home.refreshIfStale() }
+                Task {
+                    await BridgeLaunch.wait()
+                    await home.refreshIfStale()
+                }
             }
             .onChange(of: workspaces.front(in: route.workspaceID ?? "")) { _, front in
                 syncRouteToFront(front)
@@ -478,6 +502,7 @@ struct RootView: View {
             // remote workspaces / agent tiles are a cache hit on first click.
             // Never starts before archive ready, so Home keeps the host first.
             .task(id: home.isArchiveReady) {
+                await BridgeLaunch.wait()
                 guard home.isArchiveReady else { return }
                 await warmSecondarySurfaces()
             }
@@ -486,7 +511,10 @@ struct RootView: View {
             // relaunch left running instead of showing nothing over four live
             // shells. For the life of the shell, not the life of a screen,
             // because the sidebar draws them whichever screen is in front.
-            .task { await sshSessions.watch() }
+            .task {
+                await BridgeLaunch.wait()
+                await sshSessions.watch()
+            }
             // Sign-in goes into a sheet over this window rather than into the
             // whole browser, so the approval is the one-question page and not
             // the marketing site. See `MacWebAuth`.
@@ -502,6 +530,7 @@ struct RootView: View {
             // Live automations belong on the workspace sidebar, so the run list
             // has to stay current even when the Automations screen is not open.
             .task {
+                await BridgeLaunch.wait()
                 await automations.load()
                 while !Task.isCancelled {
                     let interval: Duration = automations.runs.contains(where: \.isRunning)
@@ -513,6 +542,7 @@ struct RootView: View {
                 }
             }
             .task {
+                await BridgeLaunch.wait()
                 await workflows.load()
                 while !Task.isCancelled {
                     let interval: Duration = workflows.runs.contains(where: \.isLive)
@@ -532,6 +562,7 @@ struct RootView: View {
             // failures into the board's own error banner, where a background tick
             // has no business writing.
             .task {
+                await BridgeLaunch.wait()
                 await todo.load()
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(60))
@@ -544,6 +575,7 @@ struct RootView: View {
             .task {
                 try? await Task.sleep(for: .milliseconds(400))
                 guard !Task.isCancelled else { return }
+                await BridgeLaunch.wait()
                 await account.load()
             }
             // Update check talks to the network and is not part of first paint.
@@ -555,6 +587,7 @@ struct RootView: View {
             .task {
                 // Local folder names for the sidebar first. Git status is part of
                 // that call, but it is still cheaper than also dialling peers.
+                await BridgeLaunch.wait()
                 await workspaces.loadLocal()
                 // Remote peers wait for the post-heatmap warm (or the 600ms
                 // fallback below) so a cold Home does not compete with dials.
@@ -575,7 +608,10 @@ struct RootView: View {
                     // notification (same object) is simply an extra reload.
                     workspaces.reconnect(peer: key)
                 } else {
-                    Task { await workspaces.loadRemote() }
+                    Task {
+                        await BridgeLaunch.wait()
+                        await workspaces.loadRemote()
+                    }
                 }
             }
             // An explicit Disconnect drops the peer's folders now instead of
@@ -590,6 +626,7 @@ struct RootView: View {
                 // host free for Home's archive answers.
                 try? await Task.sleep(for: .milliseconds(350))
                 guard !Task.isCancelled else { return }
+                await BridgeLaunch.wait()
                 await terminals.load()
                 // Sessions can start on this machine from a remote window or an
                 // automation; the sidebar has to learn about them without an app
@@ -1642,6 +1679,8 @@ struct RootView: View {
                         // The launcher is its own surface, so a folder sitting
                         // on the launch grid is not showing a terminal and no
                         // session row may claim to be what you are looking at.
+                        let showingLauncher = isCurrent
+                            && workspaces.isShowingLauncher(in: folder.id)
                         let showingTerminal = isCurrent
                             && workspaces.isShowingTerminal(in: folder.id)
                             && terminals.active(in: folder.id) != nil
@@ -1667,11 +1706,11 @@ struct RootView: View {
                                 folder: folder,
                                 // Collapsed, the card carries the lit state of
                                 // whatever is inside it, because none of it is
-                                // on screen to carry its own. Expanded, one of
-                                // the section rows is the lit one and two
-                                // accent bars in the same group is the bug the
-                                // nested rows already avoid.
-                                isSelected: isCurrent && !isExpanded,
+                                // on screen to carry its own. Expanded, the
+                                // section (or session) row is lit — except on
+                                // Launch, which is the folder's own surface and
+                                // has no section row of its own.
+                                isSelected: isCurrent && (!isExpanded || showingLauncher),
                                 isCurrent: isCurrent
                             ) { selectWorkspace(folder.id) }
                         }
@@ -1757,7 +1796,12 @@ struct RootView: View {
                                 WorkspaceSectionRow(
                                     section: section,
                                     count: count(of: section, in: folder),
-                                    isSelected: route == .workspace(id: folder.id, section: section),
+                                    // Sessions is the route for both the
+                                    // terminal and Launch. Only light it when
+                                    // a terminal is actually in front; Launch
+                                    // lights the folder card instead.
+                                    isSelected: route == .workspace(id: folder.id, section: section)
+                                        && (section != .sessions || !showingLauncher),
                                     removeAllChats: section == .chat ? {
                                         workspacePendingChatRemoval = folder
                                     } : nil
@@ -2217,7 +2261,8 @@ struct RootView: View {
                             ? "\($0.machineLabel ?? "Remote") / \($0.name)"
                             : $0.name
                     },
-                    workspaceIsRemote: folder?.isRemote == true
+                    workspaceIsRemote: folder?.isRemote == true,
+                    isActive: showsPulls
                 )
                 .opacity(showsPulls ? 1 : 0)
                 .allowsHitTesting(showsPulls)
@@ -2903,8 +2948,16 @@ struct RootView: View {
     /// The folder card is the way back to its launcher. Section rows remember
     /// and open their own destinations; making the parent repeat the last one
     /// left no route back after somebody had opened Chat or Tasks.
+    ///
+    /// Always Launch, never the last terminal or the last section. Going
+    /// through `openSection(.sessions)` used to call `showTerminal` first, so
+    /// a second click on the same folder while Sessions was already the route
+    /// could leave the terminal in front and only light the Sessions row.
     private func selectWorkspace(_ id: String) {
-        openSection(.sessions, in: id) {
+        navigate(to: .workspace(id: id, section: .sessions)) {
+            workspaces.selectedID = id
+            lastSection[id] = .sessions
+            expandedWorkspaces.insert(id)
             #if os(macOS)
             workspaces.showLauncher(in: id)
             #endif
@@ -2951,6 +3004,9 @@ struct RootView: View {
     /// window that is already up stays where it is.
     private func settleLaunchPlace() async {
         defer { placeSettled = true }
+        // The route this reads is built from identifiers a call has to fetch:
+        // wait for the transport before asking who owns what.
+        await BridgeLaunch.wait()
         guard WorkPlaceLaunch.claim(), LaunchPreferences.restoresLocation, let stored = WorkContinuityStore.shared.place() else { return }
         if let section = stored.globalSection {
             if let global = GlobalSection(rawValue: section), global != .account {
@@ -2960,20 +3016,24 @@ struct RootView: View {
         }
         await WorkSessionContext.shared.resolveLocalHostIdentity()
         let deadline = ContinuousClock.now + Self.placeDeadline
-        // Wait for the account to say who is signed in before opening a
-        // folder. Everything inside one is scoped to that answer, and a
-        // screen mounted while it is still unknown asks for its contents
-        // under one owner and is handed them under another: the chat pane
-        // opened that way rejects its own answer and selects nothing.
-        while WorkSessionContext.shared.scope == nil {
-            guard ContinuousClock.now < deadline else { return }
-            try? await Task.sleep(for: .milliseconds(40))
-            guard !Task.isCancelled else { return }
-        }
-        // A folder on another machine is not in the list yet: the peer sweep
-        // is deliberately behind Home's first paint. Ask now, because the
-        // place being on that machine is the reason to dial it at all.
-        if stored.folder?.hostIdentity != WorkSessionContext.shared.localHostIdentity {
+        // Only a folder on another machine waits for the account. That one is
+        // account content and the scope that stored it is what proves it may
+        // reopen: a screen mounted before the answer arrives asks for its
+        // contents under one owner and is handed them under another (the chat
+        // pane opened that way rejects its own answer and selects nothing). A
+        // folder on this machine is this machine's own registration, visible
+        // to whoever is at the keyboard, and never waits for a sign-in.
+        let folderIsRemote = stored.folder?.hostIdentity != WorkSessionContext.shared.localHostIdentity
+        if folderIsRemote {
+            while WorkSessionContext.shared.scope == nil {
+                guard ContinuousClock.now < deadline else { return }
+                try? await Task.sleep(for: .milliseconds(40))
+                guard !Task.isCancelled else { return }
+            }
+            // A folder on another machine is not in the list yet: the peer
+            // sweep is deliberately behind Home's first paint. Ask now,
+            // because the place being on that machine is the reason to dial
+            // it at all.
             Task { await workspaces.loadRemote() }
         }
         while ContinuousClock.now < deadline {
@@ -3063,31 +3123,50 @@ struct RootView: View {
         }
     }
 
+    /// Try the waiting notification tap, and consume it only once it lands.
+    ///
+    /// A cold launch gets the tap before the folders and sessions it names
+    /// have loaded, so a miss keeps the request for the next load trigger
+    /// rather than dropping it. Once `NotificationOpen.patience` runs out the
+    /// tap is stale, and the browser lands on a usable screen instead of
+    /// chasing a destination that is not coming.
+    private func openPendingNotification() {
+        guard let request = notificationOpen.request else { return }
+        if openFromNotification(request) {
+            notificationOpen.take()
+            return
+        }
+        if notificationOpen.dropIfStale() { landAfterFailedTap() }
+    }
+
     /// A tap on a notification. A named session opens it; a named
     /// conversation opens that thread. Only a push naming neither falls back
     /// to whatever session is currently waiting.
-    private func openFromNotification(_ request: NotificationOpen.Request) {
+    ///
+    /// `true` once the tap has a destination, `false` while the lists it needs
+    /// are still missing. The caller keeps a false tap and retries when they
+    /// arrive.
+    private func openFromNotification(_ request: NotificationOpen.Request) -> Bool {
         if let session = sessionMatching(request) {
             openSection(.sessions, in: session.workspaceID) {
                 terminals.select(session)
             }
-            return
+            return true
         }
         guard request.kind == .chat, let conversationID = request.conversationID, !conversationID.isEmpty else {
-            // A session banner whose terminal has since closed, or a payload
-            // naming nothing this build understands. The window is already
-            // forward from `offer`; put a screen in it rather than activate
-            // over whatever happened to be open and say nothing.
-            landAfterFailedTap()
-            return
+            // A session banner whose terminal is not in the list (or has since
+            // closed), or a payload naming nothing this build understands.
+            // Sessions may still be arriving, so this is not an answer yet.
+            return false
         }
         let folderID = request.workspaceID.flatMap { workspaceID in
             workspaces.folders.first { $0.id == workspaceID }?.id
         } ?? chat.folderID ?? workspaces.selectedID ?? workspaces.folders.first?.id
-        // No folder at all is an empty app, and there is no screen to land on.
-        guard let folderID, !folderID.isEmpty else { return }
+        // No folder at all means the folders have not loaded (or the app has
+        // none), and there is no screen to land on yet.
+        guard let folderID, !folderID.isEmpty else { return false }
         if chat.selected?.id == conversationID, showsChat, chatFolder == folderID {
-            return
+            return true
         }
         chat.reveal(id: conversationID, in: folderID)
         expandedWorkspaces.insert(folderID)
@@ -3101,6 +3180,7 @@ struct RootView: View {
                 await chat.select(conversation)
             }
         }
+        return true
     }
 
     /// Where a tap ends up when what it named cannot be found. The sessions
@@ -3149,11 +3229,7 @@ struct RootView: View {
             navigate(to: .workspacesOverview)
         case .launcher:
             guard let id = workspaces.selectedID ?? workspaces.folders.first?.id else { return }
-            openSection(.sessions, in: id) {
-                #if os(macOS)
-                workspaces.showLauncher(in: id)
-                #endif
-            }
+            selectWorkspace(id)
         }
     }
 }

@@ -169,7 +169,7 @@ mod stored {
 
     /// Bump when the shape changes. An older file is dropped rather than
     /// migrated: it is a cache, and the fix for a stale cache is a fetch.
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
 
     /// A file older than this is not worth opening on. Beyond a fortnight the
     /// grid it would draw is mostly a picture of a fortnight ago.
@@ -178,6 +178,12 @@ mod stored {
     #[derive(Serialize, Deserialize)]
     pub(super) struct Snapshot {
         pub v: u32,
+        /// Which login wrote the answer. The account id itself only arrives
+        /// over the network, so this is the offline identity the host builds
+        /// from the host and bearer token; a snapshot from another login is
+        /// not this login's answer, however recent it is.
+        #[serde(default)]
+        pub account: String,
         pub fetched_at_ms: i64,
         pub covered_from: Option<String>,
         pub rows: Vec<SeriesRow>,
@@ -195,6 +201,13 @@ mod stored {
         Some(tokenstat_paths::data_dir()?.join("account-series.json"))
     }
 
+    /// Whether a stored answer belongs to the login in hand.
+    ///
+    /// Signed out means no login in hand, so nothing on disk is adopted.
+    pub(super) fn belongs_to(stored: &str, current: Option<&str>) -> bool {
+        current == Some(stored)
+    }
+
     /// Whether a file this old is still worth opening on.
     ///
     /// A clock that moved backwards makes the age negative. That reads as
@@ -204,11 +217,14 @@ mod stored {
         now_ms - fetched_at_ms <= KEEP_FOR_MS
     }
 
-    pub(super) fn load(now_ms: i64) -> Option<Snapshot> {
+    pub(super) fn load(now_ms: i64, account: Option<&str>) -> Option<Snapshot> {
         let path = path()?;
         let text = std::fs::read_to_string(path).ok()?;
         let snapshot: Snapshot = serde_json::from_str(&text).ok()?;
         if snapshot.v != VERSION {
+            return None;
+        }
+        if !belongs_to(&snapshot.account, account) {
             return None;
         }
         if !worth_opening(snapshot.fetched_at_ms, now_ms) {
@@ -547,6 +563,10 @@ pub struct MachineUsage {
 /// screen that refetched on every appearance would multiply itself.
 const MACHINE_FRESH_FOR: Duration = Duration::from_secs(10 * 60);
 
+/// Most machines one call will ask the series endpoint about. One HTTP request
+/// per id, so an unbounded list is a way for one caller to multiply the work.
+const MAX_MACHINE_USAGE: usize = 64;
+
 struct MachineCache {
     days: u16,
     rows: Vec<MachineUsage>,
@@ -579,6 +599,9 @@ pub fn machine_usage(
     if machines.is_empty() {
         return Ok(Vec::new());
     }
+    // A caller with more devices than this sees the first of them rather than
+    // turning one call into that many HTTP requests.
+    let machines = &machines[..machines.len().min(MAX_MACHINE_USAGE)];
     if let Ok(guard) = machine_cache().lock() {
         if let Some(c) = guard.as_ref() {
             if c.days == days
@@ -796,6 +819,29 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// The login this process would use, read without touching the network.
+///
+/// The account id only comes from `/api/v1/me`, so the offline identity is the
+/// API host plus a digest of the bearer token the keychain holds for it. Only
+/// the digest is written, so the secret stays out of the cache file, and two
+/// logins never share a stored answer.
+fn account_identity() -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let host = tokenstat_sync::profile::resolve_api_host(None).ok()?;
+    let token = tokenstat_sync::keychain::load_token(&host).ok().flatten()?;
+    let mut digest = Sha256::new();
+    digest.update(host.as_bytes());
+    digest.update(b"\0");
+    digest.update(token.as_bytes());
+    Some(
+        digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
+}
+
 /// Adopt the answer left on disk by an earlier run of this process.
 ///
 /// Deliberately adopted as already stale: it is good enough to draw, and not
@@ -805,7 +851,8 @@ fn adopt_stored(guard: &mut Option<Cache>) {
     if guard.is_some() {
         return;
     }
-    if let Some(snapshot) = stored::load(now_ms()) {
+    let identity = account_identity();
+    if let Some(snapshot) = stored::load(now_ms(), identity.as_deref()) {
         *guard = Some(adopted(snapshot));
     }
 }
@@ -883,7 +930,8 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
                 last_error: None,
             };
             stored::save(&stored::Snapshot {
-                v: 1,
+                v: 2,
+                account: account_identity().unwrap_or_default(),
                 fetched_at_ms,
                 covered_from: entry.covered_from.clone(),
                 rows: entry.rows.clone(),
@@ -1007,7 +1055,8 @@ mod tests {
         // fetch. Both halves matter: the first is why the file exists, the
         // second is why a phone still ends up showing this minute's numbers.
         let cache = adopted(stored::Snapshot {
-            v: 1,
+            v: 2,
+            account: "host:digest".into(),
             fetched_at_ms: now_ms() - 60_000,
             covered_from: Some("2026-01-01".into()),
             rows: vec![a_row("2026-08-11")],
@@ -1029,11 +1078,21 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_from_another_login_is_not_adopted() {
+        // Signing out or into another account must not serve the previous
+        // account's grid, however fresh the file is.
+        assert!(stored::belongs_to("host:digest", Some("host:digest")));
+        assert!(!stored::belongs_to("host:digest", Some("host:other")));
+        assert!(!stored::belongs_to("host:digest", None));
+    }
+
+    #[test]
     fn a_snapshot_survives_a_round_trip() {
         // The cache file is the wire shape, so a change to `SeriesRow` that
         // broke this would also have broken the fetch it is a copy of.
         let snapshot = stored::Snapshot {
-            v: 1,
+            v: 2,
+            account: "host:digest".into(),
             fetched_at_ms: 1_786_000_000_000,
             covered_from: Some("2026-07-01".into()),
             rows: vec![a_row("2026-08-10"), a_row("2026-08-11")],
@@ -1047,7 +1106,8 @@ mod tests {
         };
         let text = serde_json::to_string(&snapshot).expect("encode");
         let back: stored::Snapshot = serde_json::from_str(&text).expect("decode");
-        assert_eq!(back.v, 1);
+        assert_eq!(back.v, 2);
+        assert_eq!(back.account, "host:digest");
         assert_eq!(back.fetched_at_ms, snapshot.fetched_at_ms);
         assert_eq!(back.covered_from.as_deref(), Some("2026-07-01"));
         assert_eq!(back.rows.len(), 2);

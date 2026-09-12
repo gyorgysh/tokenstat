@@ -259,9 +259,23 @@ fn read_layout(
         }
     };
 
+    let mut row_failed = false;
     for row in rows {
-        let Ok((id, session, time_created, data, directory)) = row else {
-            continue;
+        let (id, session, time_created, data, directory) = match row {
+            Ok(row) => row,
+            Err(e) => {
+                // Surface the first unreadable row: the scan still advances
+                // this file's watermark, so silence would make a truncated
+                // read indistinguishable from a complete one.
+                if !row_failed {
+                    out.warnings.push(Warning::Unreadable {
+                        path: path.to_path_buf(),
+                        reason: format!("reading rows stopped: {e}"),
+                    });
+                    row_failed = true;
+                }
+                continue;
+            }
         };
         if !seen.insert(id.clone()) {
             continue;

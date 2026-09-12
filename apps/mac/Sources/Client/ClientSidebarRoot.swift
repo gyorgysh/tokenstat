@@ -613,8 +613,12 @@ struct ClientSidebarRoot: View {
             if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }
+        // Compare before consuming. `take` always clears, so a newer tap that
+        // arrived while this one resolved would be swallowed by the equality
+        // check and both would be dropped. Peeking leaves it for its own turn.
         guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
-              NotificationOpen.shared.take() == request else { return }
+              NotificationOpen.shared.request == request else { return }
+        _ = NotificationOpen.shared.take()
         switch opened {
         case let .session(session):
             workspaces.openSession(session)

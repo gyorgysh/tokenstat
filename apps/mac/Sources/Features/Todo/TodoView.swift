@@ -941,7 +941,9 @@ private struct NewCardForm: View {
     }
 
     private func save() async {
-        let minutes = UInt64(budgetMinutes) ?? 180
+        // Clamp before multiplying: a typed number near UInt64.max must not
+        // trap the sheet. Normal minute values are unchanged.
+        let minutes = min(UInt64(budgetMinutes) ?? 180, UInt64.max / 60)
         let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
         await model.create(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1084,7 +1086,9 @@ struct DelegateSheet: View {
     }
 
     private func run(inFront: Bool) async {
-        let minutes = UInt64(budgetMinutes) ?? 180
+        // Clamp before multiplying: a typed number near UInt64.max must not
+        // trap the sheet. Normal minute values are unchanged.
+        let minutes = min(UInt64(budgetMinutes) ?? 180, UInt64.max / 60)
         let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
         let saved = await model.updateCard(
             card,

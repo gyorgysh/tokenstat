@@ -13,6 +13,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -52,6 +53,10 @@ const EXIT_SETTLE: Duration = Duration::from_secs(2);
 /// Monday through Friday as a bitset, Monday = bit 0.
 const WEEKDAYS_MASK: u8 = 0b0001_1111;
 
+/// An interval longer than this is a typo, and the multiplication in
+/// `next_run_ms` must not overflow.
+const MAX_INTERVAL_SECONDS: u64 = 365 * 24 * 60 * 60;
+
 /// The kinds a schedule can take.
 ///
 /// Wire values are camelCase (`once`, `interval`, `daily`, `weekdays`,
@@ -80,7 +85,8 @@ pub enum ScheduleKind {
 #[serde(rename_all = "camelCase", default)]
 pub struct ScheduleSpec {
     pub kind: ScheduleKind,
-    /// Interval only. Seconds between runs, floored at one minute.
+    /// Interval only. Seconds between runs, at least a minute and at most a
+    /// year.
     pub every_seconds: u64,
     /// Wall-clock kinds only. Local hour, 0..23.
     pub hour: u8,
@@ -103,6 +109,8 @@ impl ScheduleSpec {
             ScheduleKind::Interval => {
                 if self.every_seconds < 60 {
                     Err("an interval must be at least a minute".into())
+                } else if self.every_seconds > MAX_INTERVAL_SECONDS {
+                    Err("an interval must be at most a year".into())
                 } else {
                     Ok(())
                 }
@@ -159,7 +167,10 @@ impl ScheduleSpec {
     pub fn next_run_ms(&self, from: i64) -> Option<i64> {
         match self.kind {
             ScheduleKind::Once => None,
-            ScheduleKind::Interval => Some(from + self.every_seconds as i64 * 1000),
+            ScheduleKind::Interval => {
+                let step = i64::try_from(self.every_seconds).ok()?.checked_mul(1000)?;
+                from.checked_add(step)
+            }
             ScheduleKind::Daily => next_wall_clock(from, self.hour, self.minute, None),
             ScheduleKind::Weekdays | ScheduleKind::Weekly | ScheduleKind::Custom => {
                 let mask = self.day_mask();
@@ -1474,7 +1485,7 @@ impl Store {
             snapshot.effort.as_deref(),
             snapshot.budget_seconds,
         )?;
-        let run_id = format!("run-{}", now_ms());
+        let run_id = mint_run_id();
         let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
         let pending = Pending {
             job: snapshot.clone(),
@@ -1502,10 +1513,48 @@ impl Store {
 
     fn push_run(&self, run: RunRecord) -> Result<(), String> {
         let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        if runs.iter().any(|existing| existing.id == run.id) {
+            return Err(format!("a run with id {} already exists", run.id));
+        }
         runs.insert(0, run);
-        runs.truncate(RUNS_KEPT);
+        let evicted: Vec<RunRecord> = if runs.len() > RUNS_KEPT {
+            runs.drain(RUNS_KEPT..).collect()
+        } else {
+            Vec::new()
+        };
+        let kept: HashSet<String> = runs.iter().map(|r| r.transcript_path.clone()).collect();
         drop(runs);
+        for old in &evicted {
+            self.remove_run_files(old, &kept);
+        }
         self.save_runs()
+    }
+
+    /// Delete a run's raw and readable transcripts once its record is
+    /// evicted. A run that has not finished, or a path another record still
+    /// points at, keeps its files.
+    fn remove_run_files(&self, run: &RunRecord, kept: &HashSet<String>) {
+        if matches!(run.status.as_str(), "running" | "queued") {
+            return;
+        }
+        if kept.contains(&run.transcript_path) {
+            return;
+        }
+        let raw = PathBuf::from(&run.transcript_path);
+        if !raw.is_absolute() {
+            return;
+        }
+        let Ok(root) = self.runs_dir.canonicalize() else {
+            return;
+        };
+        let Some(parent) = raw.parent().and_then(|parent| parent.canonicalize().ok()) else {
+            return;
+        };
+        if !parent.starts_with(&root) {
+            return;
+        }
+        let _ = std::fs::remove_file(&raw);
+        let _ = std::fs::remove_file(transcript::readable_path(&raw));
     }
 
     /// The drain thread calls this when a run's process has exited.
@@ -1602,7 +1651,7 @@ impl Store {
             job.budget_seconds,
         )?;
 
-        let run_id = format!("run-{}", now_ms());
+        let run_id = mint_run_id();
         let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
         let pending = Pending {
             job: job.clone(),
@@ -1614,7 +1663,15 @@ impl Store {
         if self.try_take_slot() {
             match self.spawn_pending(pending, workspace.id.clone()) {
                 Ok((run, budget)) => {
-                    self.persist_and_drain(run, budget, |r| self.push_run(r), true)
+                    match self.persist_and_drain(run, budget, |r| self.push_run(r), true) {
+                        Ok(out) => Ok(out),
+                        Err(e) => {
+                            // The drain never started, so the slot is ours to
+                            // return; otherwise a failed save would eat it.
+                            self.release_slot();
+                            Err(e)
+                        }
+                    }
                 }
                 Err(e) => {
                     self.release_slot();
@@ -1640,7 +1697,15 @@ impl Store {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push_back(pending);
-            self.push_run(run.clone())?;
+            if let Err(e) = self.push_run(run.clone()) {
+                // The queued record was never persisted, so drop the pending
+                // entry rather than let the pump start an orphan.
+                self.waiting
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .retain(|p| p.run_id != run.id);
+                return Err(e);
+            }
             Ok(run)
         }
     }
@@ -2103,9 +2168,24 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    let tmp = path.with_extension("json.tmp");
+    // A unique suffix keeps two savers from interleaving into one temporary.
+    static SAVE_SEQ: AtomicU64 = AtomicU64::new(0);
+    let tmp = path.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        SAVE_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::write(&tmp, body).map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Process-wide counter that keeps two runs started in the same millisecond
+/// from sharing a record id and a transcript path.
+static RUN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn mint_run_id() -> String {
+    let sequence = RUN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("run-{}-{sequence}", now_ms())
 }
 
 fn now_ms() -> i64 {

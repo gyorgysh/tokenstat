@@ -27,6 +27,9 @@ struct ClientWorkspacesView: View {
     @State private var showSetup = false
     @State private var customizing = false
     @State private var layout = WorkspacesLayout.shared
+    /// The folder handoff this view has already pushed, so a reconnect does
+    /// not push it again after somebody backed out of it.
+    @State private var handledFolderHandoff: String?
     /// Which folder chooser is showing, if any. Same question as the device
     /// page: chats and sessions live inside folders.
     @State private var starting: WorkspaceSection?
@@ -201,6 +204,7 @@ struct ClientWorkspacesView: View {
             .task {
                 await model.refresh(account: account.account)
                 await model.autoConnectLastHost()
+                openFolderHandoff()
                 if handlesNotifications { await fulfillNotification() }
             }
             .onChange(of: notificationOpen.request) { _, _ in
@@ -212,6 +216,19 @@ struct ClientWorkspacesView: View {
             // what makes "keep trying until online" work without a timer.
             .onChange(of: model.hosts) { _, _ in
                 Task { await model.autoConnectLastHost() }
+            }
+            // A handoff can set only the folder, with no push (setup ends by
+            // opening a project). The sidebar reads `folderID` itself; this
+            // layout has no such read, so turn it into the push this stack
+            // understands once the host has answered and the folder is known.
+            .onChange(of: navigation.folderID, initial: true) { _, _ in
+                openFolderHandoff()
+            }
+            .onChange(of: model.connectedKey) { _, _ in
+                openFolderHandoff()
+            }
+            .onChange(of: model.folders) { _, _ in
+                openFolderHandoff()
             }
             .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
                 guard let key = model.connectedKey ?? UserDefaults.standard.string(forKey: "client.lastConnectedHost"),
@@ -268,7 +285,7 @@ struct ClientWorkspacesView: View {
     private func isHeadlessHost(named host: String) -> Bool {
         let machines = account.account?.machines ?? []
         let platform = machines.first {
-            ($0.label ?? $0.machineID) == host
+            ($0.label?.isEmpty == false ? $0.label : $0.machineID) == host
         }?.platform
         return isHeadlessPlatform(platform)
     }
@@ -297,8 +314,12 @@ struct ClientWorkspacesView: View {
             if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }
+        // Compare before consuming. `take` always clears, so a newer tap that
+        // arrived while this one resolved would be swallowed by the equality
+        // check and both would be dropped. Peeking leaves it for its own turn.
         guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
-              NotificationOpen.shared.take() == request else { return }
+              NotificationOpen.shared.request == request else { return }
+        _ = NotificationOpen.shared.take()
         switch opened {
         case let .session(session):
             model.openSession(session)
@@ -337,6 +358,41 @@ struct ClientWorkspacesView: View {
         if navigation.destination != .workspaces {
             navigation.destination = .workspaces
         }
+    }
+
+    /// Turn a folder named without a push into the push this layout uses.
+    ///
+    /// Setup ends by calling `open(folderID:section:)`, which is all the
+    /// sidebar needs: it reads `folderID` for its own detail. The tab stack
+    /// has no such read, so the same handoff landed on the host list. Resolve
+    /// it once the connected host's folder list contains it, and only once per
+    /// value, so a reconnect cannot reopen what somebody just backed out of.
+    private func openFolderHandoff() {
+        guard handlesNotifications,
+              let folderID = navigation.folderID,
+              handledFolderHandoff != folderID,
+              let peer = model.connectedKey,
+              let host = model.hosts.first(where: { $0.peerKey == peer }),
+              let folder = model.folders.first(where: {
+                  "remote:\(peer):\(ClientRemote.rawWorkspaceID(of: $0) ?? $0.id)" == folderID
+              })
+        else { return }
+        handledFolderHandoff = folderID
+        let push = ClientFolderPush(
+            peerKey: peer,
+            hostName: host.name,
+            folder: folder,
+            section: navigation.section
+        )
+        // A chooser already pushed this exact folder. Marking it handled is
+        // enough; a second push would stack the same screen twice.
+        guard navigation.workspacesPath.last != push else { return }
+        navigation.pushFolder(
+            peerKey: peer,
+            hostName: host.name,
+            folder: folder,
+            section: navigation.section
+        )
     }
 
     @ViewBuilder
@@ -673,15 +729,15 @@ final class ClientWorkspacesModel {
         chosenPeer = host.peerKey
         if isConnecting == host.peerKey || pendingPeer == host.peerKey { return }
         pendingPeer = host.peerKey
-        for _ in 0..<80 {
-            if Task.isCancelled {
-                if pendingPeer == host.peerKey { pendingPeer = nil }
-                return
-            }
-            if isConnecting == nil, pendingPeer == host.peerKey { break }
+        // Wait out the in-flight dial however long its ladder takes. The old
+        // fixed twenty-second cap dropped the tap while a dial that had not
+        // answered was still running, and a dial can take a minute or more.
+        // Nothing else may start while this is queued, so once the field is
+        // clear this attempt is the one that dials.
+        while !Task.isCancelled, pendingPeer == host.peerKey, isConnecting != nil {
             try? await Task.sleep(for: .milliseconds(250))
         }
-        guard isConnecting == nil, pendingPeer == host.peerKey else {
+        guard !Task.isCancelled, isConnecting == nil, pendingPeer == host.peerKey else {
             if pendingPeer == host.peerKey { pendingPeer = nil }
             return
         }

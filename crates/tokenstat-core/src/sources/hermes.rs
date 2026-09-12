@@ -162,8 +162,24 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         }
     };
 
+    let mut row_failed = false;
     for row in rows {
-        let Ok(row) = row else { continue };
+        let row = match row {
+            Ok(row) => row,
+            Err(e) => {
+                // Surface the first unreadable row: the scan still advances
+                // this file's watermark, so silence would make a truncated
+                // read indistinguishable from a complete one.
+                if !row_failed {
+                    out.warnings.push(Warning::Unreadable {
+                        path: path.to_path_buf(),
+                        reason: format!("reading rows stopped: {e}"),
+                    });
+                    row_failed = true;
+                }
+                continue;
+            }
+        };
         if row.input <= 0 && row.output <= 0 && row.cache_read <= 0 && row.cache_write <= 0 {
             continue;
         }

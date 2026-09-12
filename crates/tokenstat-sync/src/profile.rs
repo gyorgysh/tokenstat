@@ -4,6 +4,7 @@
 //! in core, then gzip-posts it with a bearer token from the OS keychain.
 //! Project paths, sessions, prompts, and hostnames never enter this path.
 
+use std::fmt;
 use std::io::Write;
 use std::thread;
 use std::time::Duration;
@@ -304,7 +305,7 @@ fn normalize_pairing_code(raw: &str) -> Result<String, ProfileError> {
 /// Returned by [`device_start`] and handed back to [`device_poll`] until the
 /// user confirms. Holding it rather than a bare code keeps the caller from
 /// having to remember the host and schema range across the two calls.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DeviceLogin {
     pub host: String,
     pub machine: String,
@@ -320,6 +321,23 @@ pub struct DeviceLogin {
     device_code: String,
     schema_min_v: u32,
     schema_max_v: u32,
+}
+
+impl fmt::Debug for DeviceLogin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeviceLogin")
+            .field("host", &self.host)
+            .field("machine", &self.machine)
+            .field("user_code", &self.user_code)
+            .field("verification_uri", &self.verification_uri)
+            .field("verification_uri_complete", &self.verification_uri_complete)
+            .field("expires_in", &self.expires_in)
+            .field("interval", &self.interval)
+            .field("device_code", &"[redacted]")
+            .field("schema_min_v", &self.schema_min_v)
+            .field("schema_max_v", &self.schema_max_v)
+            .finish()
+    }
 }
 
 impl DeviceLogin {
@@ -931,12 +949,23 @@ pub fn mint_pairing_code(host_flag: Option<&str>) -> Result<PairingCode, Profile
 ///
 /// Minted with the long-lived login/sync bearer. The returned secret is
 /// `tunnel:connect` only and expires; it is not written to the keychain.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TunnelToken {
     pub token: String,
     pub expires_at: String,
     pub expires_in: u64,
     pub machine: String,
+}
+
+impl fmt::Debug for TunnelToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TunnelToken")
+            .field("token", &"[redacted]")
+            .field("expires_at", &self.expires_at)
+            .field("expires_in", &self.expires_in)
+            .field("machine", &self.machine)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1958,8 +1987,11 @@ fn open_browser(url: &str) -> Result<(), ProfileError> {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", _url])
+        // `cmd /C start` would let `&` in a server-supplied URL split the
+        // command line. The protocol handler gets the URL directly, with no
+        // shell in between, so it stays a single argv entry.
+        let _ = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", _url])
             .status();
     }
     Ok(())

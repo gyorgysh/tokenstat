@@ -331,6 +331,28 @@ final class TranscriptFollowState {
     /// is still laid out (sized) behind other destinations, so without this
     /// they would drive a proxy nobody can see.
     @ObservationIgnored var active = true
+
+    /// Stop every scroll-driven walk while the pane is behind another screen.
+    ///
+    /// Root keeps Chat mounted at opacity zero so a return finds the same
+    /// conversation. Opacity does not stop layout: parent route changes still
+    /// move the hidden ScrollView's geometry, `note` treated that as a fling,
+    /// Observation redrew the LazyVStack, and `OnScrollGeometryChange` fired
+    /// again on the same frame. That loop is the multi-second main-thread
+    /// freeze when clicking through the sidebar. Cancel work and ignore
+    /// metrics until the pane is front again.
+    func freeze() {
+        active = false
+        repinDelivery.cancel()
+        scrollReset?.cancel()
+        scrollReset = nil
+        setScrolling(false)
+        settling = false
+        abandoned = false
+        undrivenDrift = 0
+        farMovedFrames = 0
+        retreatingFrames = 0
+    }
     /// Whether the last frame put the end under the viewport.
     ///
     /// Read by the loops that hold the end while a conversation opens. One
@@ -406,6 +428,10 @@ final class TranscriptFollowState {
     @ObservationIgnored private(set) var steadyFrames = 0
 
     func note(_ metrics: TranscriptMetrics) {
+        // A hidden pane still receives geometry as the parent ZStack
+        // re-lays out. Acting on it is what redrew markdown behind opacity
+        // zero while the person was on another destination.
+        guard active else { return }
         let grew = metrics.contentHeight > lastContentHeight + 0.5
         let shrank = metrics.contentHeight < lastContentHeight - 0.5
         let moved = abs(metrics.distanceFromTop - lastOffset) > 0.5

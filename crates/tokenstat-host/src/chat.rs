@@ -39,6 +39,14 @@ const PAGE_BYTES: u64 = 256 * 1024;
 /// rather than pulling the whole archive into memory looking for a newline.
 const PAGE_RECORD_BYTES: u64 = 4 * 1024 * 1024;
 const ATTACHMENT_CAP: usize = 12 * 1024 * 1024;
+/// The most assistant text the end-of-turn output-link pass reads. Links are
+/// taken from the final reply, so only its tail has to survive.
+const ASSISTANT_TEXT_TAIL: usize = 512 * 1024;
+/// The most raw backend spill kept for one turn, and how much of it survives
+/// a truncation. The spill exists so a parser fix can rematerialize a turn,
+/// not so one runaway turn can grow without bound.
+const RAW_CAP: u64 = 8 * 1024 * 1024;
+const RAW_RETAIN: u64 = 4 * 1024 * 1024;
 /// How long a pending approval stays answerable.
 ///
 /// Tied to the hook's own deadline rather than picked. The hook stops waiting
@@ -411,6 +419,44 @@ struct TurnBinding {
     backend: String,
 }
 
+/// Retires a turn credential that never reached the drain thread owning it.
+///
+/// Every fallible step between minting the token and a successful spawn runs
+/// with this guard alive. Missing one would leave a token in the map that
+/// hooks could still present, and its file on disk, after the send refused.
+struct PendingTurnCredential {
+    store: Arc<Store>,
+    token: Option<String>,
+    file: Option<PathBuf>,
+}
+
+impl PendingTurnCredential {
+    fn new(store: &Arc<Store>, token: String, file: PathBuf) -> Self {
+        Self {
+            store: Arc::clone(store),
+            token: Some(token),
+            file: Some(file),
+        }
+    }
+
+    /// The spawned turn's drain thread now owns cleanup. Disarm.
+    fn release(&mut self) {
+        self.token = None;
+        self.file = None;
+    }
+}
+
+impl Drop for PendingTurnCredential {
+    fn drop(&mut self) {
+        if let Some(token) = self.token.take() {
+            self.store.revoke_turn_token(&token);
+        }
+        if let Some(file) = self.file.take() {
+            let _ = fs::remove_file(file);
+        }
+    }
+}
+
 pub fn shared() -> Arc<Store> {
     static STORE: OnceLock<Arc<Store>> = OnceLock::new();
     Arc::clone(STORE.get_or_init(|| Arc::new(Store::load())))
@@ -695,12 +741,21 @@ impl Store {
         shell_prefix: Option<String>,
     ) -> Result<Approval, String> {
         let chat = self.get(conversation_id)?;
-        let allowed = chat.allowed_tools.iter().any(|tool| tool == verb)
-            || shell_prefix.as_ref().is_some_and(|prefix| {
+        // A shell tool is never allowed by its bare name. The verb names the
+        // tool, not the command, so matching it would approve anything the
+        // agent later runs through it. Shell approval is exact: a saved
+        // two-word prefix has to equal the prefix this request derived, and a
+        // command too compound to have one always comes back as a card.
+        let shell_call = shell_prefix.is_some() || crate::chat_brain::is_shell(verb);
+        let allowed = if shell_call {
+            shell_prefix.as_ref().is_some_and(|prefix| {
                 chat.allowed_shell_prefixes
                     .iter()
                     .any(|allowed| prefix == allowed)
-            });
+            })
+        } else {
+            chat.allowed_tools.iter().any(|tool| tool == verb)
+        };
         let now = now_ms();
         let approval = Approval {
             // A timestamp alone collides for back-to-back tool requests. The
@@ -901,8 +956,14 @@ impl Store {
                     if !chat.allowed_shell_prefixes.contains(prefix) {
                         chat.allowed_shell_prefixes.push(prefix.clone());
                     }
-                } else if !chat.allowed_tools.contains(&out.verb) {
-                    chat.allowed_tools.push(out.verb.clone());
+                } else if !crate::chat_brain::is_shell(&out.verb) {
+                    // A compound shell command has no prefix worth saving, and
+                    // saving the bare tool verb would allow every future
+                    // command through that tool. The answer still stands for
+                    // this call; nothing is remembered.
+                    if !chat.allowed_tools.contains(&out.verb) {
+                        chat.allowed_tools.push(out.verb.clone());
+                    }
                 }
                 Ok(())
             })?;
@@ -1682,7 +1743,7 @@ impl Store {
         let path = safe_join(&self.root, id)?.join("brain.md");
         fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
             .map_err(|error| error.to_string())?;
-        fs::write(path, brief).map_err(|error| error.to_string())
+        write_private_file(&path, brief.as_bytes())
     }
 
     /// Keep the full export beside the brief it outgrew. Returns the absolute
@@ -1691,7 +1752,7 @@ impl Store {
         let path = safe_join(&self.root, id)?.join("history.md");
         fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
             .map_err(|error| error.to_string())?;
-        fs::write(&path, markdown).map_err(|error| error.to_string())?;
+        write_private_file(&path, markdown.as_bytes())?;
         Ok(path.display().to_string())
     }
 
@@ -1931,8 +1992,7 @@ impl Store {
         let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
             .ok_or("This conversation is already running in another instance of tokenstat.")?;
         let attachments = self.attachment_paths(id, attachment_ids)?;
-        let response_output_dir = self.response_output_dir(id);
-        fs::create_dir_all(&response_output_dir).map_err(|e| e.to_string())?;
+        let response_output_dir = self.prepare_response_output_dir(id)?;
         let resume_token = chat
             .resume_tokens
             .get(&chat.backend)
@@ -2013,6 +2073,12 @@ impl Store {
         } else {
             None
         };
+        // Until a process is spawned, this credential is this function's to
+        // retire. Any `?` below would otherwise leave its token registered and
+        // its file on disk after the send has already failed.
+        let mut pending_credential = turn
+            .as_ref()
+            .map(|(token, file)| PendingTurnCredential::new(self, token.clone(), file.clone()));
         let mut environment = Vec::new();
         if let Some((_, turn_file)) = &turn {
             environment.push((
@@ -2142,6 +2208,10 @@ impl Store {
                 return Err(error.into());
             }
         };
+        // The process exists and its drain thread will retire the credential.
+        if let Some(pending) = pending_credential.as_mut() {
+            pending.release();
+        }
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -2246,24 +2316,31 @@ impl Store {
                 &raw_path,
                 &response_output_dir,
             );
-            let _ = store.finish_turn(&chat_id, &info.id, Some(runner), || {
-                let _ = fs::remove_dir_all(&response_output_dir);
-                if let Some(token) = turn_token {
-                    store.revoke_turn_token(&token);
-                }
-                if let Some(file) = turn_file {
-                    let _ = fs::remove_file(file);
-                }
-                if let Some(home) = codex_hook_home {
-                    let _ = fs::remove_dir_all(home);
-                }
-                if let Some(home) = agy_hook_home {
-                    let _ = fs::remove_dir_all(home);
-                }
-                if let Some(home) = opencode_hook_home {
-                    let _ = fs::remove_dir_all(home);
-                }
-            });
+            let _ = store.finish_turn(
+                &chat_id,
+                &info.id,
+                Some(runner),
+                || {
+                    if let Some(token) = turn_token {
+                        store.revoke_turn_token(&token);
+                    }
+                    if let Some(file) = turn_file {
+                        let _ = fs::remove_file(file);
+                    }
+                },
+                || {
+                    let _ = fs::remove_dir_all(&response_output_dir);
+                    if let Some(home) = codex_hook_home {
+                        let _ = fs::remove_dir_all(home);
+                    }
+                    if let Some(home) = agy_hook_home {
+                        let _ = fs::remove_dir_all(home);
+                    }
+                    if let Some(home) = opencode_hook_home {
+                        let _ = fs::remove_dir_all(home);
+                    }
+                },
+            );
         });
         recorded.map_err(DispatchError::delivery_unknown)
     }
@@ -2430,8 +2507,13 @@ impl Store {
         id: &str,
         pty: &str,
         runner: Option<crate::chat_receipts::RunnerLease>,
+        retire_credentials: impl FnOnce(),
         cleanup: impl FnOnce(),
     ) -> Result<(), String> {
+        // This turn's credential and turn file are its own whatever the
+        // conversation is doing now. A newer turn owning the conversation
+        // must not keep a dead turn's token or file alive.
+        retire_credentials();
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         // Hands off only when a newer turn owns the conversation. An unowned
         // one is still this drainer's to retire: its cleanup must run even
@@ -2709,10 +2791,40 @@ impl Store {
             .join(format!("{turn_started_at_ms}.ndjson"))
     }
 
+    /// The folder this conversation's outputs are staged in.
+    ///
+    /// The path stays stable for the life of the conversation because it is
+    /// named inside the standing file rule, and a path that moved every turn
+    /// would move the standing fingerprint with it and re-send the rules on
+    /// every turn. It lives under the private data directory rather than the
+    /// shared temp directory, and `prepare_response_output_dir` empties and
+    /// recreates it fresh for each turn.
     fn response_output_dir(&self, id: &str) -> PathBuf {
-        std::env::temp_dir()
-            .join("tokenstat-chat-output")
-            .join(safe_file_name(id))
+        self.root.join(safe_file_name(id)).join("output")
+    }
+
+    /// Create this turn's staging directory fresh, accessible only to the
+    /// user. A leftover from a crashed turn is removed first so its files can
+    /// never be mistaken for this turn's output.
+    fn prepare_response_output_dir(&self, id: &str) -> Result<PathBuf, String> {
+        let directory = self.response_output_dir(id);
+        if fs::symlink_metadata(&directory).is_ok() {
+            fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+        }
+        let parent = directory.parent().ok_or("invalid chat output path")?;
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            let mut builder = fs::DirBuilder::new();
+            builder.mode(0o700);
+            builder
+                .create(&directory)
+                .map_err(|error| error.to_string())?;
+        }
+        #[cfg(not(unix))]
+        fs::create_dir(&directory).map_err(|error| error.to_string())?;
+        Ok(directory)
     }
 
     fn write_turn_file(&self, id: &str, token: &str) -> Result<PathBuf, String> {
@@ -2729,8 +2841,12 @@ impl Store {
             options.mode(0o600);
         }
         let mut file = options.open(&path).map_err(|error| error.to_string())?;
-        file.write_all(token.as_bytes())
-            .map_err(|error| error.to_string())?;
+        if let Err(error) = file.write_all(token.as_bytes()) {
+            // A half-written credential file is still a credential-shaped
+            // file; the send has failed, so it must not stay behind.
+            let _ = fs::remove_file(&path);
+            return Err(error.to_string());
+        }
         Ok(path)
     }
 
@@ -2883,13 +2999,21 @@ impl Store {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
-        let temporary = self.root.join("personas.tmp");
+        // Two saves can overlap. A fixed temp name let the second writer
+        // rename the first writer's half-written file into place, and a crash
+        // could leave that truncated file where the next load would trust it.
+        // The pid plus a process-wide counter gives each attempt its own file.
+        let temporary = ChatTemporary(self.root.join(format!(
+            ".personas-{}-{:x}.tmp",
+            std::process::id(),
+            RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        )));
         fs::write(
-            &temporary,
+            &temporary.0,
             serde_json::to_vec_pretty(&index).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        fs::rename(temporary, self.root.join("personas.json")).map_err(|e| e.to_string())
+        fs::rename(&temporary.0, self.root.join("personas.json")).map_err(|e| e.to_string())
     }
 
     /// Settle anything nobody answered, and forget what is long settled.
@@ -2958,14 +3082,77 @@ fn has_live_approval(approvals: &[Approval], conversation_id: &str, now: i64) ->
     })
 }
 
+/// Append one backend chunk to the turn's raw spill, keeping the file bounded.
+///
+/// Raw output is what lets a parser correction rematerialize an old turn, so
+/// it is kept rather than dropped. The cap keeps one runaway turn from filling
+/// the data directory: when the file would pass it, the oldest bytes go and a
+/// marker line records that they did.
 fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
+    use std::io::{Read, Seek, SeekFrom};
     fs::create_dir_all(path.parent().ok_or("invalid chat raw path")?).map_err(|e| e.to_string())?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
+    let mut options = OpenOptions::new();
+    options.create(true).read(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(path).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // A spill from an older build may predate the 0600 creation mode.
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+    }
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    if len + bytes.len() as u64 <= RAW_CAP {
+        return file.write_all(bytes).map_err(|e| e.to_string());
+    }
+    let keep = RAW_RETAIN.saturating_sub(bytes.len() as u64).min(len);
+    let start = len - keep;
+    let mut tail = vec![0u8; keep as usize];
+    file.seek(SeekFrom::Start(start))
         .map_err(|e| e.to_string())?;
+    file.read_exact(&mut tail).map_err(|e| e.to_string())?;
+    // A chunk boundary can land mid-line. Drop the partial first line rather
+    // than keep a record no reader can parse.
+    match tail.iter().position(|byte| *byte == b'\n') {
+        Some(newline) => drop(tail.drain(..=newline)),
+        None => tail.clear(),
+    }
+    let marker = format!(
+        "{{\"tokenstat\":\"raw truncated\",\"droppedBytes\":{start},\"atMs\":{}}}\n",
+        now_ms()
+    );
+    file.set_len(0).map_err(|e| e.to_string())?;
+    file.write_all(marker.as_bytes())
+        .map_err(|e| e.to_string())?;
+    file.write_all(&tail).map_err(|e| e.to_string())?;
     file.write_all(bytes).map_err(|e| e.to_string())
+}
+
+/// Write a chat-owned file at user-only permissions, refusing to follow a
+/// symlink at the path. Raw output, `brain.md` and `history.md` are private
+/// records; the process umask is not a permission model.
+fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let mut options = OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(path).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // A file from an older build may predate the 0600 creation mode.
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|error| error.to_string())?;
+    }
+    file.write_all(contents).map_err(|error| error.to_string())
 }
 
 /// One timeline row for a file the person attached to their own message.
@@ -3010,6 +3197,15 @@ fn collect_agent_text(events: &[Event], text: &mut String) {
         if let Event::Text { delta } = event {
             text.push_str(delta);
         }
+    }
+    // Trim in one pass once the buffer is twice the tail, rather than moving
+    // it on every delta.
+    if text.len() > ASSISTANT_TEXT_TAIL * 2 {
+        let mut cut = text.len() - ASSISTANT_TEXT_TAIL;
+        while cut < text.len() && !text.is_char_boundary(cut) {
+            cut += 1;
+        }
+        text.drain(..cut);
     }
 }
 
@@ -3361,26 +3557,27 @@ pub fn backends(force: bool) -> Vec<Value> {
 }
 
 /// Grok evaluates explicit rules before its headless `dontAsk` fallback. A
-/// saved tool name maps to its documented bare `ToolPrefix`; a saved shell
-/// prefix maps to `Bash(glob)`. Never turn arbitrary labels into rule syntax.
+/// saved non-shell tool name maps to its documented bare `ToolPrefix`.
+///
+/// Shell calls are deliberately left out. `Bash(prefix*)` matched anything
+/// that merely began with the prefix, so an appended `; curl …` passed an
+/// allow meant for `git status`. An exact rule would instead refuse the
+/// ordinary flags that made the prefix worth saving. So the `PreToolUse` hook
+/// stays the one gate for shells, where `request_approval` matches the
+/// derived prefix exactly and answers a repeat without a card.
 fn grok_allow_rules(chat: &Conversation) -> Vec<String> {
     let mut rules: Vec<String> = chat
         .allowed_tools
         .iter()
         .filter(|tool| {
             !tool.is_empty()
+                && !crate::chat_brain::is_shell(tool)
                 && tool
                     .chars()
                     .all(|character| character.is_ascii_alphanumeric() || character == '_')
         })
         .cloned()
         .collect();
-    rules.extend(
-        chat.allowed_shell_prefixes
-            .iter()
-            .filter(|prefix| !prefix.is_empty() && !prefix.contains(['(', ')', '\n', '\r']))
-            .map(|prefix| format!("Bash({prefix}*)")),
-    );
     rules.sort();
     rules.dedup();
     rules
@@ -4231,7 +4428,13 @@ mod tests {
         // The running-bit write now fails: the index it would update is gone.
         fs::remove_file(store.root.join("conversations.json")).unwrap();
         let cleaned = std::cell::Cell::new(false);
-        let result = store.finish_turn("stuck-finish", "dead-pty", None, || cleaned.set(true));
+        let result = store.finish_turn(
+            "stuck-finish",
+            "dead-pty",
+            None,
+            || {},
+            || cleaned.set(true),
+        );
         assert!(result.is_err());
         assert!(cleaned.get(), "turn cleanup still runs");
         assert!(
@@ -4865,30 +5068,45 @@ mod tests {
         fs::create_dir_all(&output).unwrap();
         fs::write(output.join("result.txt"), "turn output").unwrap();
 
+        let retired = std::cell::Cell::new(false);
         store
-            .finish_turn("cleanup", "previous-pty", None, || {
-                panic!("stale owner cleaned current files")
-            })
+            .finish_turn(
+                "cleanup",
+                "previous-pty",
+                None,
+                || retired.set(true),
+                || panic!("stale owner cleaned current files"),
+            )
             .unwrap();
+        assert!(
+            retired.get(),
+            "a credential is retired even when a newer turn owns the conversation"
+        );
         assert!(output.exists());
         assert!(store.get("cleanup").unwrap().running);
         let runner =
             crate::chat_receipts::RunnerLease::try_acquire(&store.root, "cleanup").unwrap();
         assert!(runner.is_some());
         store
-            .finish_turn("cleanup", "current-pty", runner, || {
-                assert!(
-                    crate::chat_receipts::RunnerLease::try_acquire(&store.root, "cleanup")
-                        .unwrap()
-                        .is_none()
-                );
-                assert!(store.get("cleanup").unwrap().running);
-                assert_eq!(
-                    store.active.lock().unwrap().get("cleanup").unwrap(),
-                    "current-pty"
-                );
-                fs::remove_dir_all(&output).unwrap();
-            })
+            .finish_turn(
+                "cleanup",
+                "current-pty",
+                runner,
+                || {},
+                || {
+                    assert!(
+                        crate::chat_receipts::RunnerLease::try_acquire(&store.root, "cleanup")
+                            .unwrap()
+                            .is_none()
+                    );
+                    assert!(store.get("cleanup").unwrap().running);
+                    assert_eq!(
+                        store.active.lock().unwrap().get("cleanup").unwrap(),
+                        "current-pty"
+                    );
+                    fs::remove_dir_all(&output).unwrap();
+                },
+            )
             .unwrap();
         assert!(
             crate::chat_receipts::RunnerLease::try_acquire(&store.root, "cleanup")
@@ -6595,6 +6813,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(broader.decision, None);
+        // A compound command has no prefix worth saving, so "always allow"
+        // must not fall back to saving the bare shell tool verb.
+        let compound = store
+            .request_approval(
+                "chat-test",
+                "Bash",
+                "Bash git status; curl example.invalid",
+                None,
+            )
+            .unwrap();
+        store.resolve_approval(&compound.id, "allowAlways").unwrap();
+        assert!(
+            !store
+                .get("chat-test")
+                .unwrap()
+                .allowed_tools
+                .iter()
+                .any(|tool| tool == "Bash"),
+            "a compound shell command must not become a standing tool allow"
+        );
+        let later = store
+            .request_approval("chat-test", "Bash", "Bash git status", None)
+            .unwrap();
+        assert_eq!(later.decision, None, "a later shell call still asks");
     }
 
     #[test]

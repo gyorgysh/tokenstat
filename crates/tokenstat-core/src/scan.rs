@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use rayon::prelude::*;
 
 use crate::error::{CoreError, Warning};
-use crate::model::SourceId;
 use crate::sources::claude_stats::Reconciliation;
 use crate::sources::{
     antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, devin,
@@ -163,6 +162,10 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
     let marks = store.watermarks()?;
     let mut all_events = Vec::new();
     let mut marks_to_store = Vec::new();
+    // A recovery pass is applied after the ordinary inserts, in its own
+    // transaction, so the old derived rows are only dropped once their
+    // replacements can be written. See `replace_recovered`.
+    let mut pending_recovery: Option<(Vec<crate::model::UsageEvent>, String)> = None;
 
     // Claude Code.
     if let Some(projects) = claude_code::discover(&home) {
@@ -256,8 +259,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
                         // From our copy, not the file: a day the vendor has
                         // since dropped is still recoverable from here.
                         let daily = vendor_daily_tokens(store)?;
-                        store.clear_recovered()?;
-                        store.set_meta("claude_rollup_logic", &stamp)?;
                         let have = store.archive_by_date_model()?;
                         let recovered = claude_stats::backfill_events(&stats, &daily, &have, tz);
                         report.warnings.extend(recovered.warnings);
@@ -268,7 +269,11 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
                             .collect::<std::collections::HashSet<_>>()
                             .len() as u64;
                         report.events_recovered = events.len() as u64;
-                        all_events.extend(events);
+                        // Applied below, after the ordinary inserts, and only
+                        // then stamped: a pass that fails or produces nothing
+                        // must not delete rows a later scan would never
+                        // rebuild.
+                        pending_recovery = Some((events, stamp));
                         let (head_sig, sig_len) = watermark::head_signature(contents.as_bytes());
                         marks_to_store.push((
                             stats_key,
@@ -562,19 +567,22 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         );
     }
 
-    let recovered = all_events
-        .iter()
-        .filter(|e| e.source == SourceId::ClaudeCodeRollup)
-        .count() as u64;
     const INSERT_CHUNK: usize = 4_096;
     let mut inserted = 0u64;
     for chunk in all_events.chunks(INSERT_CHUNK) {
         inserted += store.insert_events(chunk, tz)?;
     }
+    // The derived recovery lands here, after every ordinary row is in and in
+    // one transaction with the deletion of the rows it replaces. Stamping the
+    // logic version is the last step, so a failure leaves the old rows and an
+    // unstamped archive rather than a hole no later scan would rebuild.
+    if let Some((events, stamp)) = pending_recovery {
+        inserted += store.replace_recovered(&events, tz)?;
+        store.set_meta("claude_rollup_logic", &stamp)?;
+    }
     store.evict_recovered_where_live()?;
     store.delete_openclaw_session_rollups(&openclaw_turn_sessions)?;
     report.events_new = inserted;
-    report.events_recovered = recovered;
     store.set_watermarks(&marks_to_store)?;
 
     store.set_meta("last_scan_ms", &now_ms().to_string())?;

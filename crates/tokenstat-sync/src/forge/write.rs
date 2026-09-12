@@ -159,7 +159,7 @@ fn with_credential<T>(
     };
     match operation(&credential) {
         Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
-            let refreshed = auth::refresh_stored(&repo.host)?;
+            let refreshed = auth::refresh_stored(&repo.host, credential.bearer())?;
             operation(&refreshed).map_err(Into::into)
         }
         result => result.map_err(Into::into),

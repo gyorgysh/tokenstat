@@ -437,6 +437,10 @@ struct ChatView: View {
             if !active {
                 showingHandoff = false
                 model.saveDraftNow()
+                // Tear down scroll work before the LazyVStack is discarded.
+                follow.freeze()
+            } else {
+                follow.active = true
             }
         }
         .onChange(of: model.readingIdentity) { _, _ in
@@ -517,13 +521,24 @@ struct ChatView: View {
         }
     }
 
+    @ViewBuilder
     private func transcript(_ chat: ChatConversation) -> some View {
+        // Root keeps this pane mounted behind other destinations. Building the
+        // LazyVStack while nobody can see it still measures markdown on every
+        // parent layout pass, which is the multi-second main-thread freeze when
+        // flipping through the sidebar. Model state stays; settle re-pins on
+        // return. The library overview path above still keeps rows mounted
+        // while browsing conversations inside Chat.
+        if !isActive {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
         // Once per pass, not once per reader of it. `visibleItems` copies the
         // window out of the conversation every time it is asked, and the
         // `ForEach` and the spinner both ask.
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
-        return ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
             ScrollView {
                 // Lazy on purpose. A long conversation is hundreds of rows of
                 // markdown, and a plain stack lays out and re-measures every
@@ -644,6 +659,7 @@ struct ChatView: View {
                 coverArmed = true
             }
             .chatScrollMetrics { metrics in
+                guard isActive else { return }
                 #if DEBUG
                 TranscriptProbe.shared.noteMetrics()
                 TranscriptProbe.shared.pinned = follow.pinned
@@ -715,9 +731,15 @@ struct ChatView: View {
                 }
             }
             .onChange(of: isActive, initial: true) { _, active in
-                follow.active = active
+                if active {
+                    follow.active = true
+                } else {
+                    // Drop metrics and pending repins before the stack tears
+                    // down; otherwise a last geometry sample can still mark
+                    // scrolling and invalidate work on the way out.
+                    follow.freeze()
+                }
                 // The presentation-keyed task owns settling on reactivation.
-
             }
             // A request that arrives while a reply is still streaming would
             // otherwise be pushed off the top of the page before anyone saw
@@ -808,6 +830,7 @@ struct ChatView: View {
                 try? await Task.sleep(for: .milliseconds(480))
                 settleMood = nil
             }
+        }
         }
     }
 
@@ -1084,7 +1107,7 @@ struct ChatView: View {
 
     private func pendingApproval(_ item: ChatDisplayItem) -> Bool {
         if case let .approval(approval) = item.kind {
-            return model.approvals.contains { $0.id == approval.id }
+            return model.approvalIsPending(approval)
         }
         return false
     }

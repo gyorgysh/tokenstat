@@ -97,7 +97,7 @@ extension MarkdownText {
                         _ = MarkdownInline.attributed(text)
                     case let .list(items):
                         for item in items { _ = MarkdownInline.attributed(item.text) }
-                    case let .table(header, rows):
+                    case let .table(header, rows, _):
                         for cell in header { _ = MarkdownInline.attributed(cell) }
                         for row in rows {
                             for cell in row { _ = MarkdownInline.attributed(cell) }
@@ -192,21 +192,83 @@ private enum MarkdownCache {
     /// rebuilt every `Text` chain of the reply from scratch.
     static let segments = ParsedTextCache<[MessageSegment]>(limit: 800)
 
-    /// The same two answers for the row being written, one revision deep.
+    /// The rows being written: their last revisions and one parse clock.
     ///
     /// A live row cannot share the caches above: its text is a new string on
     /// every token, so each parse of it misses and what it stores is never
     /// read again, and hundreds of revisions of one message evict every
-    /// settled row in the conversation. But it must be cached *somehow*. A
-    /// hover, a scroll frame or any sibling row updating re-runs
-    /// `MessageMarkdown.init` many times between two tokens, and rebuilding
-    /// every `Text` chain of the largest row in the conversation on each of
-    /// those is the per-edge cost the segment cache exists to remove.
+    /// settled row in the conversation.
     ///
-    /// One entry is the whole answer: the revision on screen hits, and the
-    /// previous one is evicted the moment it is replaced.
-    static let liveBlocks = ParsedTextCache<[MarkdownBlock]>(limit: 1)
-    static let liveSegments = ParsedTextCache<[MessageSegment]>(limit: 1)
+    /// One revision per row is kept instead, with one clock, and
+    /// `LiveMarkdown.cadence` bounds how often a new one may replace it. A
+    /// token inside the cadence keeps the revision already on screen and comes
+    /// back through the view's task when the interval is up, so a stream that
+    /// arrives faster than a person can read it costs twenty whole-message
+    /// parses a second rather than one per token.
+    static let live = LiveMarkdown()
+}
+
+/// One revision per streaming row, and one clock across all of them.
+///
+/// A turn can stream its prose and its reasoning at the same time, so the
+/// cache cannot be a single slot: each caller's scope and style is the slot,
+/// and a row that finds another row's revision there would draw the wrong
+/// text. Slots hold each row's own last revision, and the shared clock bounds
+/// the total reparses whether one row is streaming or two.
+///
+/// Touched from the main thread only: `MessageMarkdown.init` reads it while a
+/// token arrives and the live row's task writes the next revision back.
+private final class LiveMarkdown {
+    /// How long a parsed revision stays on screen.
+    ///
+    /// Thirty to sixty milliseconds is below the point where text arriving
+    /// later reads as a delay, and far above the token rate, so the parse no
+    /// longer runs once per token.
+    static let cadence: TimeInterval = 0.05
+
+    private final class Revision {
+        let text: String
+        let segments: [MessageSegment]
+        let parsedAt: TimeInterval
+
+        init(text: String, segments: [MessageSegment], parsedAt: TimeInterval) {
+            self.text = text
+            self.segments = segments
+            self.parsedAt = parsedAt
+        }
+    }
+
+    private let revisions = NSCache<NSString, Revision>()
+    private var lastParse: TimeInterval = 0
+
+    init() {
+        revisions.countLimit = 4
+    }
+
+    /// This slot's revision when there is one, and whether the task should
+    /// replace it once the cadence is up. Nil means parse now.
+    func take(slot: String, text: String) -> (segments: [MessageSegment], needsRefresh: Bool)? {
+        guard let revision = revisions.object(forKey: slot as NSString) else { return nil }
+        if revision.text == text { return (revision.segments, false) }
+        if Date.timeIntervalSinceReferenceDate - lastParse < Self.cadence {
+            return (revision.segments, true)
+        }
+        return nil
+    }
+
+    func store(_ segments: [MessageSegment], text: String, slot: String) {
+        lastParse = Date.timeIntervalSinceReferenceDate
+        revisions.setObject(
+            Revision(text: text, segments: segments, parsedAt: lastParse),
+            forKey: slot as NSString
+        )
+    }
+
+    /// How long the next parse must still wait, for a task that kept its
+    /// revision because it arrived inside the cadence.
+    func remaining() -> TimeInterval {
+        max(0, Self.cadence - (Date.timeIntervalSinceReferenceDate - lastParse))
+    }
 }
 
 /// A short, stable name for a piece of text.
@@ -266,7 +328,10 @@ private struct MarkdownBlock: Identifiable {
         /// needs a scroller of its own.
         case code(language: String?, text: String, key: String, widest: Int)
         case rule
-        case table(header: [String], rows: [[String]])
+        /// `overflow` counts rows the parser refused to build: a table wider
+        /// or longer than the caps below is a view-graph bomb, and the count
+        /// is shown as a final "+N more rows" row instead.
+        case table(header: [String], rows: [[String]], overflow: Int)
     }
 
     let id: Int
@@ -335,8 +400,14 @@ private struct MarkdownBlockView: View {
                 )
                 .frame(height: 1)
                 .padding(.vertical, Theme.Space.xs)
-        case let .table(header, rows):
-            MarkdownTable(header: header, rows: rows, bodyFont: bodyFont, selectable: selectable)
+        case let .table(header, rows, overflow):
+            MarkdownTable(
+                header: header,
+                rows: rows,
+                overflow: overflow,
+                bodyFont: bodyFont,
+                selectable: selectable
+            )
         }
     }
 
@@ -394,6 +465,9 @@ private struct MarkdownListRow: View {
 /// Separated from the view so the same work can be done ahead of time, off the
 /// main thread, by `MarkdownText.warm`.
 private enum MarkdownInline {
+    /// The only schemes a conversation may hand the URL handler.
+    private static let linkSchemes: Set<String> = ["http", "https", "mailto"]
+
     static func attributed(_ source: String) -> AttributedString {
         MarkdownCache.inline.value(for: source) {
             let safe = MarkdownSanitizer.inline(source)
@@ -401,8 +475,29 @@ private enum MarkdownInline {
                 interpretedSyntax: .inlineOnlyPreservingWhitespace,
                 failurePolicy: .returnPartiallyParsedIfPossible
             )
-            return (try? AttributedString(markdown: safe, options: options)) ?? AttributedString(source)
+            let parsed = (try? AttributedString(markdown: safe, options: options)) ?? AttributedString(source)
+            return strippingUnsafeLinks(parsed)
         }
+    }
+
+    /// Remove links to anything but the three schemes above.
+    ///
+    /// The block sanitizer polices the href of an HTML anchor, but Markdown's
+    /// own `[label](url)` never goes through it, and `AttributedString` makes
+    /// any scheme tappable: `x-man-page:`, `file:`, and an app's custom
+    /// scheme all became live links. This walks the runs once and drops the
+    /// link, leaving the label as plain text.
+    private static func strippingUnsafeLinks(_ attributed: AttributedString) -> AttributedString {
+        guard attributed.runs.contains(where: { $0.link != nil }) else { return attributed }
+        var result = attributed
+        for run in attributed.runs {
+            guard let url = run.link else { continue }
+            let scheme = url.scheme?.lowercased() ?? ""
+            if !linkSchemes.contains(scheme) {
+                result[run.range].link = nil
+            }
+        }
+        return result
     }
 }
 
@@ -457,6 +552,10 @@ private enum MessageSegment {
 
 struct MessageMarkdown: View {
     private let cachedSegments: [MessageSegment]
+    private let source: String
+    private let liveSlot: String
+    private let isLive: Bool
+    private let needsRefresh: Bool
     private let bodyFont: Font
     private let codeFont: Font
     private let style: MarkdownStyle
@@ -465,6 +564,10 @@ struct MessageMarkdown: View {
     /// that is rebuilt 2.5x a second for the whole reply; settled rows
     /// keep it, the live row gets it back when the turn ends.
     private let selectable: Bool
+    /// The last revision the live row's task parsed, so a token that arrived
+    /// inside the cadence still reaches the screen without waiting for the
+    /// next token to arrive.
+    @State private var refreshed: (source: String, segments: [MessageSegment])?
 
     init(
         _ markdown: String,
@@ -475,29 +578,51 @@ struct MessageMarkdown: View {
         cacheScope: String = "chat",
         live: Bool = false
     ) {
-        // A row still being written goes to its own one-deep cache rather
-        // than into the conversation's: its text is a new string on every
-        // token, so storing revisions there evicts the settled rows, which
-        // then reparse on the next measuring pass the lazy stack makes. See
-        // `MarkdownCache.liveBlocks`.
-        let blocks = live ? MarkdownCache.liveBlocks : MarkdownCache.blocks
-        let parsed = blocks.value(for: markdown) {
-            var parser = MarkdownParser(markdown)
-            return parser.blocks()
-        }
         self.bodyFont = bodyFont
         self.codeFont = codeFont
         self.style = style
         self.selectable = selectable
-        // Built once per message text and held across inits. A whole-card
-        // hover or a scroll re-runs this `init` without changing the text;
-        // rebuilding every `Text` chain there was the per-edge cost that
-        // brought the hitches back. The scope names the caller's font set,
-        // which is baked into the chains and cannot be keyed from `Font`.
-        let key = "\(cacheScope):\(style == .aside ? "a" : "d"):\(markdown)"
-        let segments = live ? MarkdownCache.liveSegments : MarkdownCache.segments
-        cachedSegments = segments.value(for: key) {
-            Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
+        self.source = markdown
+        self.isLive = live
+        if live {
+            // A row still being written keeps one revision in its own slot
+            // rather than joining the conversation's: its text is a new
+            // string on every token, and storing revisions there evicts the
+            // settled rows, which then reparse on the next measuring pass the
+            // lazy stack makes. See `MarkdownCache.live`. The revision is
+            // replaced at most once per `LiveMarkdown.cadence`; a token that
+            // arrives sooner keeps the revision on screen and is picked up by
+            // the body's task.
+            let slot = "\(cacheScope):\(style == .aside ? "a" : "d")"
+            self.liveSlot = slot
+            let cache = MarkdownCache.live
+            if let shown = cache.take(slot: slot, text: markdown) {
+                cachedSegments = shown.segments
+                needsRefresh = shown.needsRefresh
+            } else {
+                var parser = MarkdownParser(markdown)
+                let parsed = parser.blocks()
+                let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
+                cache.store(segments, text: markdown, slot: slot)
+                cachedSegments = segments
+                needsRefresh = false
+            }
+        } else {
+            let parsed = MarkdownCache.blocks.value(for: markdown) {
+                var parser = MarkdownParser(markdown)
+                return parser.blocks()
+            }
+            // Built once per message text and held across inits. A whole-card
+            // hover or a scroll re-runs this `init` without changing the text;
+            // rebuilding every `Text` chain there was the per-edge cost that
+            // brought the hitches back. The scope names the caller's font set,
+            // which is baked into the chains and cannot be keyed from `Font`.
+            let key = "\(cacheScope):\(style == .aside ? "a" : "d"):\(markdown)"
+            self.liveSlot = ""
+            needsRefresh = false
+            cachedSegments = MarkdownCache.segments.value(for: key) {
+                Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
+            }
         }
     }
 
@@ -629,9 +754,18 @@ struct MessageMarkdown: View {
         return out
     }
 
+    /// What to draw: the live task's latest revision when it belongs to this
+    /// text, otherwise the segments built in `init`.
+    private var shownSegments: [MessageSegment] {
+        if isLive, let refreshed, refreshed.source == source {
+            return refreshed.segments
+        }
+        return cachedSegments
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ForEach(Array(cachedSegments.enumerated()), id: \.offset) { _, segment in
+            ForEach(Array(shownSegments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
                 case let .text(chain):
                     Group {
@@ -660,6 +794,23 @@ struct MessageMarkdown: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The trailing half of the live cadence. A token that arrived inside
+        // the interval kept the previous revision; this task waits out the
+        // remainder and publishes the one it was created for, so the last
+        // token of a stream still lands when no further token is coming.
+        .task(id: source) {
+            guard isLive, needsRefresh else { return }
+            let wait = MarkdownCache.live.remaining()
+            if wait > 0 {
+                try? await Task.sleep(for: .seconds(wait))
+            }
+            guard !Task.isCancelled else { return }
+            var parser = MarkdownParser(source)
+            let parsed = parser.blocks()
+            let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
+            MarkdownCache.live.store(segments, text: source, slot: liveSlot)
+            refreshed = (source, segments)
+        }
     }
 
     private static func headingFont(style: MarkdownStyle, bodyFont: Font, level: Int) -> Font {
@@ -923,6 +1074,9 @@ private struct MarkdownSelectable: ViewModifier {
 private struct MarkdownTable: View {
     let header: [String]
     let rows: [[String]]
+    /// Rows the parser counted but did not build. Drawn as one caption row so
+    /// a pathological table cannot become tens of thousands of views.
+    var overflow: Int = 0
     let bodyFont: Font
     var selectable: Bool = true
 
@@ -937,6 +1091,13 @@ private struct MarkdownTable: View {
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                     tableRow(row, header: false)
                         .background(index.isMultiple(of: 2) ? Theme.panel : Theme.accentSoft.opacity(0.34))
+                }
+                if overflow > 0 {
+                    Text("+\(overflow) more rows")
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, Theme.Space.m)
+                        .padding(.vertical, Theme.Space.s)
                 }
             }
         }
@@ -1024,9 +1185,23 @@ private enum MarkdownSanitizer {
         return output.joined(separator: "\n")
     }
 
+    /// The most text HTML conversion will read.
+    ///
+    /// GitHub caps a body at 64 KB, so any document past this is not a
+    /// conversation that grew long: it is input built to be expensive. What
+    /// is beyond the cap is left exactly as it arrived and only the prefix is
+    /// converted, so an oversized body still renders as plain text.
+    private static let htmlCap = 128 * 1024
+
     private static func convertHTMLBlocks(_ source: String) -> String {
         var safe = source
         var codeSpans: [String] = []
+
+        if source.count > htmlCap,
+           let split = source.index(source.startIndex, offsetBy: htmlCap, limitedBy: source.endIndex)
+        {
+            return convertHTMLBlocks(String(source[..<split])) + String(source[split...])
+        }
 
         // Most bodies are plain Markdown with no tags and no entities in them.
         // Everything between here and the whitespace tidy-up exists to turn
@@ -1048,25 +1223,7 @@ private enum MarkdownSanitizer {
         // Preserve links before stripping their tags. A linked `<code>` label
         // deliberately becomes a normal linked label: AttributedString cannot
         // express code styling nested inside a Markdown link consistently.
-        safe = replace(
-            pattern: #"(?i)<a\s+[^>]*href\s*=\s*[\"']([^\"']+)[\"'][^>]*>([\s\S]*?)</a\s*>"#,
-            in: safe
-        ) { match, string in
-            let href = substring(match.range(at: 1), in: string)
-            var label = substring(match.range(at: 2), in: string)
-            label = label.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
-            label = label.trimmingCharacters(in: .whitespacesAndNewlines)
-            if label.isEmpty { label = href }
-            // A body is untrusted text. Only hand the URL handler a scheme the
-            // author would have chosen to open; anything else is shown as its
-            // label, so a `javascript:` or `file:` href can no more become a
-            // live link than it could when this tag was escaped outright.
-            if let scheme = URL(string: href)?.scheme?.lowercased(),
-               !["http", "https", "mailto"].contains(scheme) {
-                return label
-            }
-            return "[\(label)](\(href))"
-        }
+        safe = replacingAnchors(in: safe)
 
         // Inline emphasis survives the HTML-to-Markdown boundary.
         safe = replace(pattern: #"(?i)<strong[^>]*>"#, in: safe) { _, _ in "**" }
@@ -1103,7 +1260,7 @@ private enum MarkdownSanitizer {
             in: safe
         ) { _, _ in "\n\n" }
 
-        safe = replace(pattern: #"<!--[\s\S]*?-->"#, in: safe) { _, _ in "" }
+        safe = strippingComments(in: safe)
         // Only discard things that actually have the shape of HTML tags.
         // A broad `<[^>]+>` also eats Markdown autolinks such as
         // `<https://example.com>` and prose such as `one < two and three >
@@ -1118,12 +1275,12 @@ private enum MarkdownSanitizer {
         // Source indentation beside HTML tags is not content. Keep exactly
         // one blank line between blocks: compact on screen, still enough for
         // the parser to end one block before beginning the next.
-        safe = safe.replacingOccurrences(of: #"[ \t]+\n"#, with: "\n", options: .regularExpression)
-        safe = safe.replacingOccurrences(of: #"\n[ \t]+"#, with: "\n", options: .regularExpression)
-        safe = safe.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+        safe = replace(pattern: #"[ \t]+\n"#, in: safe) { _, _ in "\n" }
+        safe = replace(pattern: #"\n[ \t]+"#, in: safe) { _, _ in "\n" }
+        safe = replace(pattern: #"\n{3,}"#, in: safe) { _, _ in "\n\n" }
         // Consecutive HTML `<li>` rows should be one Markdown list, not 81
         // one-row lists separated by card-sized paragraph spacing.
-        safe = safe.replacingOccurrences(of: #"\n{2,}(?=- )"#, with: "\n", options: .regularExpression)
+        safe = replace(pattern: #"\n{2,}(?=- )"#, in: safe) { _, _ in "\n" }
         for (slot, code) in codeSpans.enumerated() {
             safe = safe.replacingOccurrences(of: "\u{E000}\(slot)\u{E001}", with: code)
         }
@@ -1174,7 +1331,7 @@ private enum MarkdownSanitizer {
         in source: String,
         transform: (NSTextCheckingResult, NSString) -> String
     ) -> String {
-        guard let expression = try? NSRegularExpression(pattern: pattern) else { return source }
+        guard let expression = expression(pattern) else { return source }
         let string = source as NSString
         let matches = expression.matches(in: source, range: NSRange(location: 0, length: string.length))
         let result = NSMutableString(string: source)
@@ -1182,6 +1339,251 @@ private enum MarkdownSanitizer {
             result.replaceCharacters(in: match.range, with: transform(match, string))
         }
         return result as String
+    }
+
+    /// Compiled patterns, so one document does not compile the same shape
+    /// twenty times and every scroll afterward does not compile it again.
+    /// `ParsedTextCache` is an `NSCache`, which is thread safe: `warm` runs
+    /// through here on a detached task while a row may be parsing on the
+    /// main one.
+    private static let expressions = ParsedTextCache<NSRegularExpression?>(limit: 64)
+
+    private static func expression(_ pattern: String) -> NSRegularExpression? {
+        expressions.value(for: pattern) { try? NSRegularExpression(pattern: pattern) }
+    }
+
+    /// Convert `<a href="…">label</a>` to Markdown in one pass.
+    ///
+    /// The regular expression this replaced searched for a close tag with
+    /// `[\s\S]*?` from every open one, and its open-tag shape scanned to the
+    /// end of the document for every `<a` with no `>`, so input full of
+    /// half-written anchors was quadratic. Open and close tags are each found
+    /// in one forward scan here, then paired by position, so no part of the
+    /// text is ever rescanned.
+    private static func replacingAnchors(in source: String) -> String {
+        guard source.range(of: "<a", options: [.caseInsensitive]) != nil else { return source }
+        let string = source as NSString
+        let opens = anchorTags(in: string, closing: false)
+        let closes = anchorTags(in: string, closing: true)
+        guard !opens.isEmpty || !closes.isEmpty else { return source }
+        let output = NSMutableString()
+        var cursor = 0
+        var openIndex = 0
+        var closeIndex = 0
+        var open: (href: String, tagEnd: Int)?
+
+        while true {
+            if let current = open {
+                guard closeIndex < closes.count else {
+                    // No close: the text stays as it is, exactly as it did
+                    // when the regular expression declined to match and the
+                    // generic tag stripper removed the lone open tag.
+                    break
+                }
+                let close = closes[closeIndex]
+                closeIndex += 1
+                guard close.location >= current.tagEnd else { continue }
+                let label = string.substring(
+                    with: NSRange(location: current.tagEnd, length: close.location - current.tagEnd)
+                )
+                output.append(anchorMarkdown(href: current.href, label: label))
+                cursor = close.location + close.length
+                open = nil
+                continue
+            }
+
+            while openIndex < opens.count, opens[openIndex].location < cursor { openIndex += 1 }
+            while closeIndex < closes.count, closes[closeIndex].location < cursor { closeIndex += 1 }
+            let nextOpen = openIndex < opens.count ? opens[openIndex] : nil
+            let nextClose = closeIndex < closes.count ? closes[closeIndex] : nil
+            guard nextOpen != nil || nextClose != nil else { break }
+            if let close = nextClose, nextOpen == nil || close.location < nextOpen!.location {
+                // A stray close tag. Keep it for the generic stripper, which
+                // is what removed it before.
+                output.append(string.substring(with: NSRange(location: cursor, length: close.location + close.length - cursor)))
+                cursor = close.location + close.length
+                closeIndex += 1
+                continue
+            }
+            let tag = nextOpen!
+            output.append(string.substring(with: NSRange(location: cursor, length: tag.location - cursor)))
+            cursor = tag.location + tag.length
+            openIndex += 1
+            let text = string.substring(with: tag)
+            if let href = hrefValue(in: text) {
+                open = (href, cursor)
+            } else {
+                output.append(text)
+            }
+        }
+
+        if cursor < string.length {
+            output.append(string.substring(from: cursor))
+        }
+        return output as String
+    }
+
+    /// Every `<a …>` or `</a>` in the text, in one forward scan.
+    ///
+    /// `<a` only counts when a letter cannot continue it, so `<abbr>` is not
+    /// an anchor, and a tag with no `>` ends the scan instead of being
+    /// searched for again: that is what keeps this linear where the regular
+    /// expression was not.
+    private static func anchorTags(in string: NSString, closing: Bool) -> [NSRange] {
+        let literal = closing ? "</a" : "<a"
+        var tags: [NSRange] = []
+        var search = 0
+        while search < string.length {
+            let found = string.range(
+                of: literal,
+                options: [.caseInsensitive],
+                range: NSRange(location: search, length: string.length - search)
+            )
+            guard found.location != NSNotFound else { break }
+            var index = found.location + found.length
+            guard index < string.length, isAnchorBoundary(string.character(at: index)) else {
+                search = found.location + 1
+                continue
+            }
+            if closing {
+                while index < string.length, isHTMLWhitespace(string.character(at: index)) { index += 1 }
+                guard index < string.length, string.character(at: index) == 62 else {
+                    search = found.location + 1
+                    continue
+                }
+                tags.append(NSRange(location: found.location, length: index + 1 - found.location))
+                search = index + 1
+            } else {
+                let end = string.range(
+                    of: ">",
+                    options: [],
+                    range: NSRange(location: index, length: string.length - index)
+                )
+                guard end.location != NSNotFound else { break }
+                tags.append(NSRange(location: found.location, length: end.location + 1 - found.location))
+                search = end.location + 1
+            }
+        }
+        return tags
+    }
+
+    /// The `href` attribute of one already-bounded tag, or nil.
+    private static func hrefValue(in tag: String) -> String? {
+        guard let expression = expression(#"(?i)href\s*=\s*["']([^"']+)["']"#) else { return nil }
+        let string = tag as NSString
+        let match = expression.firstMatch(in: tag, range: NSRange(location: 0, length: string.length))
+        guard let match, match.range(at: 1).location != NSNotFound else { return nil }
+        return string.substring(with: match.range(at: 1))
+    }
+
+    /// The label and destination as Markdown, or the label alone when the
+    /// destination is not one the app will open.
+    ///
+    /// A body is untrusted text. Only http, https and mailto reach the URL
+    /// handler; anything else is shown as its label, so a `javascript:` or
+    /// `file:` href can no more become a live link than it could when the tag
+    /// was dropped outright. A destination with whitespace or a bracket in it
+    /// could otherwise break out of the `[label](url)` shape and inject
+    /// Markdown, so those are refused too, and the label's own brackets are
+    /// escaped so it cannot close the link early.
+    private static func anchorMarkdown(href: String, label rawLabel: String) -> String {
+        var label = strippingTags(in: rawLabel)
+        label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if label.isEmpty { label = href }
+        guard let scheme = URL(string: href)?.scheme?.lowercased(),
+              ["http", "https", "mailto"].contains(scheme),
+              !href.contains(where: { $0.isWhitespace || "()<>`\"'".contains($0) })
+        else {
+            return label
+        }
+        label = label
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "[", with: "\\[")
+            .replacingOccurrences(of: "]", with: "\\]")
+        return "[\(label)](\(href))"
+    }
+
+    /// Drop `<!-- … -->` in one forward pass.
+    ///
+    /// The lazy `[\s\S]*?-->` this replaced rescanned a document's whole
+    /// remainder from every `<!--` when no `-->` followed, which is quadratic
+    /// on text built exactly that way. An unterminated comment is left alone,
+    /// as before.
+    private static func strippingComments(in source: String) -> String {
+        guard source.range(of: "<!--") != nil else { return source }
+        let string = source as NSString
+        let output = NSMutableString()
+        var cursor = 0
+        while cursor < string.length {
+            let open = string.range(
+                of: "<!--",
+                options: [],
+                range: NSRange(location: cursor, length: string.length - cursor)
+            )
+            guard open.location != NSNotFound else { break }
+            output.append(string.substring(with: NSRange(location: cursor, length: open.location - cursor)))
+            let afterOpen = open.location + open.length
+            let close = string.range(
+                of: "-->",
+                options: [],
+                range: NSRange(location: afterOpen, length: string.length - afterOpen)
+            )
+            guard close.location != NSNotFound else {
+                output.append(string.substring(from: open.location))
+                return output as String
+            }
+            cursor = close.location + close.length
+        }
+        if cursor < string.length {
+            output.append(string.substring(from: cursor))
+        }
+        return output as String
+    }
+
+    /// Remove `<…>` tag spans from a label, in one forward pass.
+    ///
+    /// `[^>]+` between literal brackets scans to the end of the string from
+    /// every `<` when no `>` follows, so a label built from `<` characters
+    /// was quadratic. This never looks past the next `<` or `>`, and leaves
+    /// an unterminated tag in place as the regular expression did.
+    private static func strippingTags(in source: String) -> String {
+        guard source.contains("<") else { return source }
+        let string = source as NSString
+        let output = NSMutableString()
+        var cursor = 0
+        while cursor < string.length {
+            let open = string.range(
+                of: "<",
+                options: [],
+                range: NSRange(location: cursor, length: string.length - cursor)
+            )
+            guard open.location != NSNotFound else { break }
+            output.append(string.substring(with: NSRange(location: cursor, length: open.location - cursor)))
+            let afterOpen = open.location + open.length
+            let close = string.range(
+                of: ">",
+                options: [],
+                range: NSRange(location: afterOpen, length: string.length - afterOpen)
+            )
+            guard close.location != NSNotFound else {
+                output.append(string.substring(from: open.location))
+                return output as String
+            }
+            cursor = close.location + close.length
+        }
+        if cursor < string.length {
+            output.append(string.substring(from: cursor))
+        }
+        return output as String
+    }
+
+    /// A tag boundary: whitespace or the `>` that ends an attribute list.
+    private static func isAnchorBoundary(_ character: unichar) -> Bool {
+        character == 62 || isHTMLWhitespace(character)
+    }
+
+    private static func isHTMLWhitespace(_ character: unichar) -> Bool {
+        character == 32 || character == 9 || character == 10 || character == 13
     }
 
     private static func substring(_ range: NSRange, in string: NSString) -> String {
@@ -1266,22 +1668,41 @@ private struct MarkdownParser {
         return make(.rule)
     }
 
+    /// A table past these bounds stops growing the view graph.
+    ///
+    /// A body can carry a table with any number of rows and columns, and each
+    /// cell becomes its own `Text` with its own padding and overlay: a
+    /// thousand-row, forty-column table is forty thousand views inside one
+    /// row of a lazy stack. The reader cannot use a table that size anyway,
+    /// so the parser keeps the first slice and counts the rest for a
+    /// "+N more rows" row.
+    private static let maxTableRows = 100
+    private static let maxTableColumns = 32
+
     private mutating func readTable() -> MarkdownBlock? {
         guard index + 1 < lines.count else { return nil }
-        let header = tableCells(lines[index])
+        var header = tableCells(lines[index])
         let separator = tableCells(lines[index + 1])
         guard header.count >= 2,
               separator.count == header.count,
               separator.allSatisfy(isTableSeparator) else { return nil }
         index += 2
+        if header.count > Self.maxTableColumns {
+            header = Array(header.prefix(Self.maxTableColumns))
+        }
         var rows: [[String]] = []
+        var overflow = 0
         while index < lines.count {
             let cells = tableCells(lines[index])
             guard cells.count >= 2, !lines[index].trimmingCharacters(in: .whitespaces).isEmpty else { break }
-            rows.append(cells)
+            if rows.count < Self.maxTableRows {
+                rows.append(Array(cells.prefix(Self.maxTableColumns)))
+            } else {
+                overflow += 1
+            }
             index += 1
         }
-        return make(.table(header: header, rows: rows))
+        return make(.table(header: header, rows: rows, overflow: overflow))
     }
 
     private mutating func readQuote() -> MarkdownBlock? {

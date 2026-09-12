@@ -71,13 +71,25 @@ fn remove_staged_file(path: &Path, home: &Path) -> Result<()> {
     // hardlink spelling must still retire the wizard's file, and a symlink
     // pointing at it must not delete through the link check below.
     let staged = home.join(".tokenstat-pairing");
-    let same = path == staged
+    let canonical_same = path == staged
         || std::fs::canonicalize(path).ok().as_ref() == Some(&staged)
         || std::fs::canonicalize(&staged)
             .ok()
             .as_ref()
             .zip(std::fs::canonicalize(path).ok().as_ref())
             .is_some_and(|(a, b)| a == b);
+    // Canonicalize spells one path per inode, so two hardlinks to the staged
+    // file still compare unequal. The device/inode pair names the file itself
+    // and catches every alias.
+    #[cfg(unix)]
+    let same = canonical_same || {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(path)
+            .and_then(|p| std::fs::metadata(&staged).map(|s| (p, s)))
+            .is_ok_and(|(p, s)| p.dev() == s.dev() && p.ino() == s.ino())
+    };
+    #[cfg(not(unix))]
+    let same = canonical_same;
     if same {
         std::fs::remove_file(&staged).context("Could not remove the staged pairing-code file")?;
     }
@@ -180,6 +192,23 @@ mod tests {
         assert!(other.is_file());
         remove_staged_file(&staged, &home).unwrap();
         assert!(!staged.exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hardlink_alias_still_retires_the_staged_file() {
+        let home = std::env::temp_dir().join(format!("tokenstat-hardlink-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let staged = home.join(".tokenstat-pairing");
+        let alias = home.join("alias-code");
+        std::fs::write(&staged, "WXYZ-1234").unwrap();
+        std::fs::hard_link(&staged, &alias).unwrap();
+        remove_staged_file(&alias, &home).unwrap();
+        // The reserved file is retired even when the read came through the
+        // hardlink; the caller's own alias path is not what gets removed.
+        assert!(!staged.exists());
+        assert!(alias.is_file());
         std::fs::remove_dir_all(home).unwrap();
     }
 

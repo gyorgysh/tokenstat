@@ -39,6 +39,9 @@ struct PullsView: View {
     /// their navigation stack, so this stays optional for those call sites.
     var workspaceName: String? = nil
     var workspaceIsRemote = false
+    /// Root keeps this pane mounted after a visit so a return is instant.
+    /// When false, skip loading and heavy layout; opacity alone still measures.
+    var isActive: Bool = true
 
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -48,6 +51,12 @@ struct PullsView: View {
     private var canConnectHere: Bool { connectionHostName == nil }
 
     var body: some View {
+        Group {
+        if !isActive {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.background)
+        } else {
         RemoteHostFeatureGate(feature: .pulls, peer: peer, hostName: connectionHostName) {
             Group {
             if let selectedPull {
@@ -100,7 +109,10 @@ struct PullsView: View {
             .navigationTitle("Pull requests")
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .task(id: workspaceID) { await model.load(workspaceID: workspaceID, peer: peer) }
+            .task(id: "\(workspaceID)-\(isActive)") {
+                guard isActive else { return }
+                await model.load(workspaceID: workspaceID, peer: peer)
+            }
             .onChange(of: model.scope) { _, _ in
                 Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
             }
@@ -108,6 +120,8 @@ struct PullsView: View {
                 Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
             }
             .sheet(isPresented: loginPresented) { loginSheet }
+        }
+        }
         }
     }
 

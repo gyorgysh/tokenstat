@@ -35,6 +35,12 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     private(set) var outputPaused = false
     var transportError: String?
 
+    /// Ctrl on the key bar armed for the next key. The bar has no letter keys,
+    /// so the flag lives here and `send(source:data:)` folds the next typed
+    /// byte to its C0 code. Cleared by that fold, or by the next bar key, so
+    /// it behaves like a modifier tapped once.
+    var controlArmed = false
+
     @ObservationIgnored private var terminalView: TerminalView?
     @ObservationIgnored private var offset: UInt64 = 0
     /// Output on its way to the emulator, minus what it cannot read correctly.
@@ -451,7 +457,17 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = Array(data)
         Task { @MainActor in
-            eventStream.continuation.yield(.write(bytes))
+            // Ctrl armed on the bar applies to the key that is typed here, not
+            // to a bar key. The fold and the clear happen on the main actor so
+            // they cannot race the bar's toggle.
+            var out = bytes
+            if controlArmed {
+                controlArmed = false
+                if let first = out.first, let folded = ClientTerminalKeys.controlCode(first) {
+                    out[0] = folded
+                }
+            }
+            eventStream.continuation.yield(.write(out))
         }
     }
 
@@ -592,6 +608,10 @@ struct ClientTerminalScreen: View {
                 scrolls: Binding(
                     get: { session.scrolls },
                     set: { session.scrolls = $0 }
+                ),
+                control: Binding(
+                    get: { session.controlArmed },
+                    set: { session.controlArmed = $0 }
                 )
             )
         }

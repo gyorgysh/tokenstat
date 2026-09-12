@@ -476,6 +476,14 @@ pub struct MachineDto {
     pub trust_state: Option<String>,
     /// `"host"` uploads usage; `"client"` is a phone (P5). Missing means host.
     pub kind: Option<String>,
+    /// What the machine says it is, e.g. `"Ubuntu 24.04 · x86_64"`, which a
+    /// CLI-only install sends at login. Missing on a record that never
+    /// carried one.
+    pub platform: Option<String>,
+    /// `"user"` when somebody chose the label, so that machine's own
+    /// registration does not take the rename back. Missing means the machine
+    /// still names itself.
+    pub label_source: Option<String>,
 }
 
 impl MachineDto {
@@ -493,6 +501,8 @@ impl MachineDto {
             public_identity: field("public_identity").or_else(|| field("identity")),
             trust_state: field("trust_state").or_else(|| field("trust")),
             kind: field("kind"),
+            platform: field("platform"),
+            label_source: field("label_source"),
         }
     }
 }

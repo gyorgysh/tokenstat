@@ -149,6 +149,8 @@ final class DeviceAccessRequests {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+            await refresh()
+            return
         }
         if asking?.id == request.id { asking = nil }
         withdraw(request)

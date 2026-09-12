@@ -230,23 +230,40 @@ enum AppInstaller {
     /// code-signed before this point, so the only new trust being granted is
     /// "let this user write to the folder the app lives in".
     ///
-    /// Same staging shape as the unprivileged path: the new bundle is copied
-    /// to a sibling first, and only once it is whole on disk is the old one
-    /// removed and the new one moved over it. A failure part way through
-    /// leaves the running application untouched.
+    /// Same staging shape as the unprivileged path, with one difference: the
+    /// old bundle is renamed aside rather than deleted, and any failure after
+    /// that puts it back. Removing it first left a window where the copy could
+    /// fail with no application on disk and nothing to restore.
     private static func replaceAuthenticated(
         _ fresh: URL,
         at current: URL,
         in parent: URL
     ) throws {
         let staged = parent.appendingPathComponent("Tokenstat.app.incoming")
+        let aside = parent.appendingPathComponent("Tokenstat.app.previous")
+        // The swap group is last and handles its own rollback: move the new
+        // bundle in, clear the quarantine bit, and only then drop the aside
+        // copy. A failure at any of those three undoes the rename and reports
+        // a non-zero status, which is what the caller turns into an error.
+        let swap = [
+            "( /bin/mv \(shellQuote(staged.path)) \(shellQuote(current.path))",
+            "&& /usr/bin/xattr -dr com.apple.quarantine \(shellQuote(current.path))",
+            "&& /bin/rm -rf \(shellQuote(aside.path))",
+            "|| { /bin/rm -rf \(shellQuote(current.path)) \(shellQuote(staged.path));",
+            "/bin/mv \(shellQuote(aside.path)) \(shellQuote(current.path));",
+            "exit 1; } )",
+        ].joined(separator: " ")
+        // Earlier steps only ever stage, so their failure needs the staged
+        // path cleaned up and nothing else. The old bundle is not touched
+        // until the swap group's first rename succeeds.
         let command = [
             "/bin/rm -rf \(shellQuote(staged.path))",
             "/usr/bin/ditto \(shellQuote(fresh.path)) \(shellQuote(staged.path))",
-            "/bin/rm -rf \(shellQuote(current.path))",
-            "/bin/mv \(shellQuote(staged.path)) \(shellQuote(current.path))",
-            "/usr/bin/xattr -dr com.apple.quarantine \(shellQuote(current.path))",
+            "/bin/rm -rf \(shellQuote(aside.path))",
+            "/bin/mv \(shellQuote(current.path)) \(shellQuote(aside.path))",
+            swap,
         ].joined(separator: " && ")
+            + " || { /bin/rm -rf \(shellQuote(staged.path)); exit 1; }"
 
         // The shell command goes inside an AppleScript string, so double
         // quotes have to be escaped for AppleScript before the shell ever

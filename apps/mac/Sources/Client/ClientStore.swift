@@ -187,6 +187,10 @@ final class ClientStore {
     var autoRenewProductID: String?
     var willAutoRenew = true
     var expirationDate: Date?
+    /// Whether StoreKit has actually answered about renewal. `willAutoRenew`
+    /// is false both for "renewal is off" and for "nobody has said", and the
+    /// paywall must not present the second as the first.
+    private(set) var renewalStatusKnown = false
     /// Whether this Apple ID may still take the group's introductory offer.
     /// One per subscription group per Apple ID, which is a different question
     /// from the account's own `trialUsed`: somebody can be new here and have
@@ -419,6 +423,7 @@ final class ClientStore {
         var liveProductID: String?
         var liveAutoRenewID: String?
         var liveWillRenew = false
+        var liveRenewalKnown = false
         var liveExpiration: Date?
         var foundLive = false
         for product in products {
@@ -432,6 +437,7 @@ final class ClientStore {
                     if let info = try? checkVerified(status.renewalInfo) {
                         liveAutoRenewID = info.autoRenewPreference
                         liveWillRenew = info.willAutoRenew
+                        liveRenewalKnown = true
                     }
                     if let transaction = try? checkVerified(status.transaction) {
                         liveProductID = transaction.productID
@@ -448,11 +454,13 @@ final class ClientStore {
             autoRenewProductID = liveAutoRenewID
             willAutoRenew = liveWillRenew
             expirationDate = liveExpiration
+            renewalStatusKnown = liveRenewalKnown
         } else {
             currentProductID = nil
             autoRenewProductID = nil
             willAutoRenew = false
             expirationDate = nil
+            renewalStatusKnown = false
         }
     }
 

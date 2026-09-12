@@ -243,6 +243,31 @@ fn handle(owned: OwnedHandle, session: &Mutex<Session>) -> Result<(), String> {
     let mut reader = BufReader::new(file);
     let mut buf = Vec::new();
 
+    /// Read and discard the rest of an oversized line without holding it.
+    ///
+    /// The line must be consumed to its newline, or the tail would be framed
+    /// as the next request; and it must not be buffered, or the request cap
+    /// above would mean nothing. So: chunk by chunk, discard, stop at the
+    /// newline.
+    fn discard_line(reader: &mut impl BufRead) -> std::io::Result<()> {
+        loop {
+            let available = reader.fill_buf()?;
+            if available.is_empty() {
+                return Ok(());
+            }
+            match available.iter().position(|b| *b == b'\n') {
+                Some(at) => {
+                    reader.consume(at + 1);
+                    return Ok(());
+                }
+                None => {
+                    let len = available.len();
+                    reader.consume(len);
+                }
+            }
+        }
+    }
+
     loop {
         buf.clear();
         let n = reader
@@ -256,8 +281,10 @@ fn handle(owned: OwnedHandle, session: &Mutex<Session>) -> Result<(), String> {
         let oversize = buf.len() > MAX_REQUEST_LINE || !buf.ends_with(b"\n");
         if oversize {
             if !buf.ends_with(b"\n") {
-                let mut drain = Vec::new();
-                let _ = reader.read_until(b'\n', &mut drain);
+                // Consume the rest of the line, discarding it chunk by chunk:
+                // a tail left in the stream would be framed as the next
+                // request, and a tail buffered whole would defeat the cap.
+                let _ = discard_line(&mut reader);
             }
             let response = json!({
                 "id": Value::Null,

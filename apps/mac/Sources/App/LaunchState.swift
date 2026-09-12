@@ -32,6 +32,11 @@ final class LaunchState {
     func prepare() async {
         let started = ContinuousClock.now
 
+        // The transport first. The handshake was started with the app so its
+        // probe could run while the window was built; waiting here keeps every
+        // call below on the route the session finishes on. See `BridgeLaunch`.
+        await BridgeLaunch.wait()
+
         await Task.detached(priority: .userInitiated) {
             #if os(macOS)
             HostAgentInstaller.refreshIfStale()

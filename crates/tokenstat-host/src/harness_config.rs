@@ -122,12 +122,29 @@ fn backup_path(path: &Path) -> PathBuf {
 }
 
 fn write_private(path: &Path, text: &str) -> Result<(), String> {
-    fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
+    let mut file = options.open(path).map_err(|e| io_error(path, e))?;
+    #[cfg(unix)]
+    {
+        // The creation mode only covers a new file. An older one may still be
+        // world-readable, and these settings can name credentials.
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|e| io_error(path, e))?;
+    }
+    use std::io::Write;
+    file.write_all(text.as_bytes())
+        .map_err(|e| io_error(path, e))?;
     Ok(())
+}
+
+fn io_error(path: &Path, error: std::io::Error) -> String {
+    format!("{}: {error}", path.display())
 }
 
 #[derive(Clone, Copy)]
@@ -189,9 +206,9 @@ struct Schema {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default()
+    // Not `$HOME` alone: a systemd unit starts with no HOME, and joining onto
+    // an empty path put `.codex/config.toml` under the daemon's CWD.
+    tokenstat_paths::home_dir().unwrap_or_default()
 }
 
 fn schema(id: &str) -> Option<Schema> {
@@ -702,7 +719,12 @@ fn toml_get(text: &str, section: Option<&str>, key: &str) -> Option<String> {
         if trimmed.starts_with('#') || trimmed.is_empty() {
             continue;
         }
-        let (left, right) = trimmed.split_once('=')?;
+        let (left, right) = match trimmed.split_once('=') {
+            Some(pair) => pair,
+            // A multi-line value or a stray line without an assignment must
+            // not stop the scan before the key this is looking for.
+            None => continue,
+        };
         if left.trim() == key {
             return Some(unquote(right.trim()));
         }

@@ -97,9 +97,14 @@ struct UpdateCard: View {
             Text("v\(update.latest) is installed. Restart when you’re ready to use it.")
                 .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Restart now", .refresh) { update.relaunch() }
-                .buttonStyle(AccentButtonStyle(small: true))
-                .help("Restarts tokenstat to finish the update. Save your work first.")
+            HStack(spacing: Theme.Space.s) {
+                Button("Restart now", .refresh) { update.relaunch() }
+                    .buttonStyle(AccentButtonStyle(small: true))
+                    .help("Restarts tokenstat to finish the update. Save your work first.")
+                Button("Skip this version", .dismiss) { update.skipThisVersion() }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .help("Stops this card until you check for updates yourself.")
+            }
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)

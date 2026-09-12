@@ -226,7 +226,7 @@ struct WorkspaceHistoryView: View {
                         .padding(Theme.Space.m)
                     }
                 }
-            } else if let error = model.historyError {
+            } else if let error = model.historyError(for: folder.id) {
                 InspectorEmptyState(
                     systemImage: "exclamationmark.circle",
                     title: "Could not load history",

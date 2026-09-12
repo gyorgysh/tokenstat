@@ -297,12 +297,22 @@ enum Bridge {
     /// Whether this envelope is the daemon saying it is at its connection
     /// ceiling.
     ///
-    /// Read from the raw response rather than after decoding, because it has
-    /// to cover every path a call can take out of here, and each of those
-    /// decodes into a different type. A busy daemon is not a failed call: the
-    /// crowd clears in milliseconds and asking again is the whole fix.
+    /// The substring is only a cheap filter: the verdict comes from the
+    /// decoded envelope, so a success that happens to quote the code is not
+    /// treated as a refusal and sent again. A busy daemon is not a failed
+    /// call: the crowd clears in milliseconds and asking again is the whole
+    /// fix.
     private static func isBusy(_ response: String) -> Bool {
-        response.contains("\"host_busy\"")
+        guard response.contains("host_busy") else { return false }
+        struct Failure: Decodable { let code: String }
+        struct Refusal: Decodable {
+            let ok: Bool
+            let error: Failure?
+        }
+        guard let refusal = try? JSONDecoder().decode(Refusal.self, from: Data(response.utf8)) else {
+            return false
+        }
+        return !refusal.ok && refusal.error?.code == "host_busy"
     }
 
     /// Wait between busy attempts. Runs on the calls queue, where blocking is
@@ -951,7 +961,9 @@ extension Bridge {
     /// checksums. The daemon stops at a file on disk; `AppInstaller` decides
     /// whether to trust it.
     static func appUpdateDownload() async throws -> DownloadedFile {
-        try await background("app.updateDownload", as: DownloadedFile.self)
+        // The host blocks for the whole DMG download here, so this needs the
+        // same patience as `hostUpdateApply`, not the 60-second default.
+        try await background("app.updateDownload", patience: Patience.long, as: DownloadedFile.self)
     }
 
     static func appUpdateCheck() async throws -> AppUpdate {

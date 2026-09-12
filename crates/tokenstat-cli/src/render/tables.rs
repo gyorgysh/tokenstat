@@ -38,11 +38,12 @@ fn fold_recovered_sources(rows: Vec<Bucket>) -> Vec<Bucket> {
 }
 
 fn bucket_key_label(group: GroupBy, key: &str) -> String {
-    match group {
+    let label = match group {
         GroupBy::Model => model_label(key),
         GroupBy::Source => SourceId::label(key).to_string(),
         _ => key.to_string(),
-    }
+    };
+    sanitize_label(&label)
 }
 
 pub fn grouped(store: &Store, group: GroupBy, q: &Query, label: &str, json: bool) -> Result<()> {

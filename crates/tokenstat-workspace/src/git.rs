@@ -543,7 +543,7 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
             };
             // A rename prints `R100<tab>old<tab>new`. The new name is the one a
             // reader is looking for, and the one the diff is keyed by.
-            let path = parts.next().unwrap_or(first).to_string();
+            let path = unquote_path(parts.next().unwrap_or(first));
             detail.files.push(FileChange {
                 path,
                 kind: kind_from_xy(status),
@@ -854,12 +854,88 @@ fn git_allowing(dir: &Path, args: &[&str], codes: &[i32]) -> Option<String> {
         .env("GIT_PAGER", "cat")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
+        // A path below is a file name, never a pattern. Without this, a name
+        // beginning with `:` is read as pathspec magic and can widen a lookup
+        // to the whole repository, and a name holding `*` matches more than the
+        // file it names.
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        // `-C` names the repository, but these variables outrank it. A daemon
+        // started from a wrapper that exports one would otherwise read a
+        // different repository than the folder the user chose.
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_OBJECT_DIRECTORY")
+        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+        .env_remove("GIT_PREFIX")
+        .env_remove("GIT_COMMON_DIR")
+        // Paths are decoded by `unquote_path`, so ask git not to quote bytes
+        // above ASCII. Names holding a quote, a backslash or a control still
+        // arrive C-quoted, which is what that function is for.
+        .args(["-c", "core.quotePath=false"])
         .args(args)
         .output()
         .ok()?;
     codes
         .contains(&out.status.code().unwrap_or(-1))
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Decode git's C-style path quoting.
+///
+/// With `core.quotePath=false` git still quotes a path holding a double quote,
+/// a backslash or a control character, and writes the bytes as in C: `\n`,
+/// `\t`, `\r`, `\\`, `\"`, and three-digit octal for everything else.
+fn unquote_path(raw: &str) -> String {
+    let Some(inner) = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+        return raw.to_string();
+    };
+    let bytes = inner.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        let Some(&escape) = bytes.get(i) else { break };
+        match escape {
+            b'n' => {
+                out.push(b'\n');
+                i += 1;
+            }
+            b't' => {
+                out.push(b'\t');
+                i += 1;
+            }
+            b'r' => {
+                out.push(b'\r');
+                i += 1;
+            }
+            b'0'..=b'7' => {
+                let mut value = 0u16;
+                let mut digits = 0;
+                while digits < 3 {
+                    match bytes.get(i) {
+                        Some(&digit @ b'0'..=b'7') => {
+                            value = value * 8 + u16::from(digit - b'0');
+                            i += 1;
+                            digits += 1;
+                        }
+                        _ => break,
+                    }
+                }
+                out.push(value as u8);
+            }
+            other => {
+                out.push(other);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Parse `git status --porcelain=v2 --branch`.
@@ -891,7 +967,7 @@ fn parse_porcelain_v2(raw: &str, status: &mut GitStatus) {
                 .unwrap_or(0);
         } else if let Some(path) = line.strip_prefix("? ") {
             status.files.push(FileChange {
-                path: path.to_string(),
+                path: unquote_path(path),
                 kind: ChangeKind::Untracked,
                 added: None,
                 removed: None,
@@ -899,7 +975,7 @@ fn parse_porcelain_v2(raw: &str, status: &mut GitStatus) {
         } else if let Some(rest) = line.strip_prefix("1 ") {
             if let Some((xy, path)) = entry(rest, 6) {
                 status.files.push(FileChange {
-                    path,
+                    path: unquote_path(&path),
                     kind: kind_from_xy(xy),
                     added: None,
                     removed: None,
@@ -909,7 +985,7 @@ fn parse_porcelain_v2(raw: &str, status: &mut GitStatus) {
             // Rename: the path field is `new<tab>old`. The new name is what a
             // reader is looking for.
             if let Some((_, path)) = entry(rest, 7) {
-                let new = path.split('\t').next().unwrap_or(&path).to_string();
+                let new = unquote_path(path.split('\t').next().unwrap_or(&path));
                 status.files.push(FileChange {
                     path: new,
                     kind: ChangeKind::Renamed,
@@ -920,7 +996,7 @@ fn parse_porcelain_v2(raw: &str, status: &mut GitStatus) {
         } else if let Some(rest) = line.strip_prefix("u ") {
             if let Some((_, path)) = entry(rest, 8) {
                 status.files.push(FileChange {
-                    path,
+                    path: unquote_path(&path),
                     kind: ChangeKind::Conflicted,
                     added: None,
                     removed: None,
@@ -1000,7 +1076,7 @@ fn apply_numstat(raw: &str, status: &mut GitStatus) {
         };
         // A rename prints `docs/{old => new}` here but the plain new name in
         // status, so rebuild it before matching.
-        let path = numstat_new_path(path);
+        let path = numstat_new_path(&unquote_path(path));
         if let Some(f) = status.files.iter_mut().find(|f| f.path == path) {
             f.added = a.parse().ok();
             f.removed = r.parse().ok();

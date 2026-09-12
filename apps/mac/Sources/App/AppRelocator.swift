@@ -191,6 +191,11 @@ enum AppRelocator {
         let staged = destination.deletingLastPathComponent()
             .appendingPathComponent("\(destination.lastPathComponent).incoming")
         try? manager.removeItem(at: staged)
+        // A copy that fails part way through leaves a partial bundle beside
+        // the destination. It is never the one on disk, so it is only ever
+        // litter, and litter in /Applications is remembered.
+        var placed = false
+        defer { if !placed { try? manager.removeItem(at: staged) } }
         try manager.copyItem(at: bundle, to: staged)
 
         if manager.fileExists(atPath: destination.path) {
@@ -198,6 +203,7 @@ enum AppRelocator {
         } else {
             try manager.moveItem(at: staged, to: destination)
         }
+        placed = true
 
         // The quarantine flag is what causes translocation, so a copy that kept
         // it would be launched from a random read-only path again and the move
@@ -220,9 +226,28 @@ enum AppRelocator {
     private static func relaunch(_ destination: URL) {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: destination, configuration: configuration) { _, _ in
-            Task { @MainActor in NSApp.terminate(nil) }
+        NSWorkspace.shared.openApplication(at: destination, configuration: configuration) { _, error in
+            Task { @MainActor in
+                // Quitting on a failed open would take away the only window
+                // with nothing to say why. Stay running and point at the copy
+                // that was moved.
+                if let error {
+                    reportOpenFailure(error)
+                    return
+                }
+                NSApp.terminate(nil)
+            }
         }
+    }
+
+    @MainActor
+    private static func reportOpenFailure(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "tokenstat was moved to Applications but could not be opened."
+        alert.informativeText = "\(error.localizedDescription)\n\nOpen tokenstat from your Applications folder, or quit and open it by hand."
+        alert.addButton(withTitle: "Continue")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 }
 #endif

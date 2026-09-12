@@ -710,13 +710,22 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 /// and `--help` is big enough to make that a real risk on some platforms. Also
 /// stdin is closed, so a binary that decided to prompt cannot hang us.
 fn run_probe(bin: &Path, args: &[&str], timeout: Duration) -> Result<(bool, String), UpdateError> {
-    let dir = tempfile_dir()?;
+    /// Removes the probe's private directory however the probe returns:
+    /// success, error, timeout. A leaked directory per probe is unbounded
+    /// across a long-lived daemon.
+    struct ProbeDir(PathBuf);
+    impl Drop for ProbeDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let dir = ProbeDir(tempfile_dir()?);
     // Unique per call: two probes overlapping in one process (the preflight pair,
     // or a caller doing this concurrently) must not read each other's output or
     // delete a file still being written.
     static PROBE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = PROBE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let out_path = dir.join(format!(
+    let out_path = dir.0.join(format!(
         "probe-{}-{seq}.txt",
         args.first().unwrap_or(&"x").trim_start_matches('-')
     ));
@@ -742,7 +751,6 @@ fn run_probe(bin: &Path, args: &[&str], timeout: Duration) -> Result<(bool, Stri
         }
     };
     let text = fs::read_to_string(&out_path).unwrap_or_default();
-    let _ = fs::remove_file(&out_path);
     Ok((status.success(), text))
 }
 
@@ -806,14 +814,18 @@ fn make_runnable(path: &Path) -> Result<(), UpdateError> {
 
 /// Prove the downloaded binary works before it replaces a working one.
 ///
-/// Three questions, in order of how cheaply they fail: does it run at all, is it
-/// the version the release claims, and on macOS, is it signed at least as well as
-/// what it is replacing.
+/// The signature is checked first: it is the only question that can be
+/// answered without executing the downloaded code, and a signed install must
+/// not run a candidate it would refuse. Then the order continues by how
+/// cheaply the checks fail: does it run at all, and is it the version the
+/// release claims.
 fn verify_candidate(
     candidate: &Path,
     expect_version: &str,
     current: &Path,
 ) -> Result<(), UpdateError> {
+    verify_signature(candidate, current)?;
+
     let (ok, out) = run_probe(candidate, &["--version"], PROBE_TIMEOUT)?;
     if !ok {
         return Err(UpdateError::Message(format!(
@@ -853,7 +865,6 @@ fn verify_candidate(
         ));
     }
 
-    verify_signature(candidate, current)?;
     Ok(())
 }
 
@@ -1176,9 +1187,34 @@ fn hex_sha256(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// A fresh private directory for one update transaction.
+///
+/// The name is random rather than pid-derived, so another local user cannot
+/// predict it and plant a binary for this process to execute, and the
+/// directory is created 0700 so nothing else can enter even after the name is
+/// seen. `create_dir` refuses a name that already exists, which a symlink
+/// counts as.
 fn tempfile_dir() -> Result<PathBuf, UpdateError> {
-    let base = std::env::temp_dir().join(format!("tokenstat-update-{}", std::process::id()));
-    fs::create_dir_all(&base)?;
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|error| {
+        UpdateError::Message(format!(
+            "could not make a private update directory: {error}"
+        ))
+    })?;
+    let mut name = String::from("tokenstat-update-");
+    for byte in bytes {
+        name.push_str(&format!("{byte:02x}"));
+    }
+    let base = std::env::temp_dir().join(name);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().mode(0o700).create(&base)?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir(&base)?;
+    }
     Ok(base)
 }
 
@@ -1247,8 +1283,14 @@ fn walkdir_shallow(dir: &Path) -> Result<Vec<PathBuf>, UpdateError> {
         }
         for e in fs::read_dir(dir)? {
             let e = e?;
+            let file_type = e.file_type()?;
+            // A symlink in the archive could point at a binary outside the
+            // private extraction directory, so it is never a candidate.
+            if file_type.is_symlink() {
+                continue;
+            }
             let p = e.path();
-            if p.is_dir() {
+            if file_type.is_dir() {
                 rec(&p, out, depth + 1)?;
             } else {
                 out.push(p);
@@ -1683,6 +1725,34 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn the_update_staging_dir_is_private_and_random() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let first = tempfile_dir().unwrap();
+        let second = tempfile_dir().unwrap();
+        assert_ne!(first, second, "staging names must not be predictable");
+        assert_eq!(
+            fs::metadata(&first).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "staging dir must be private"
+        );
+        let _ = fs::remove_dir_all(&first);
+        let _ = fs::remove_dir_all(&second);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_symlinked_candidate_is_never_returned() {
+        let dir = scratch("symlink-candidate");
+        let real = fake_binary(&dir, "real", "echo tokenstat 0.2.0");
+        std::os::unix::fs::symlink(&real, dir.join("tokenstat")).unwrap();
+        let err = find_binary(&dir).unwrap_err();
+        assert!(err.to_string().contains("did not contain"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn the_sweep_clears_leftovers_from_a_previous_cycle() {
         let dir = scratch("sweep");
         let dest = dir.join("tokenstat");
@@ -1770,7 +1840,7 @@ mod tests {
 
         let err = verify_candidate(&candidate, "0.0.1", &current).unwrap_err();
         assert!(
-            err.to_string().contains("not signed by a real identity"),
+            err.to_string().contains("failed codesign verification"),
             "{err}"
         );
         let _ = fs::remove_dir_all(&dir);

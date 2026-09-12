@@ -237,7 +237,10 @@ struct ClientPaywallView: View {
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.accent)
             }
-            if isCurrent, !store.willAutoRenew {
+            // Only when StoreKit has actually answered. `willAutoRenew` is
+            // false both for "renewal is off" and for "nobody has said", and
+            // an offline open must not present the second as the first.
+            if isCurrent, store.renewalStatusKnown, !store.willAutoRenew {
                 Text(renewalOffCaption(account: account, item: item))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
@@ -297,9 +300,13 @@ struct ClientPaywallView: View {
             }
         } else if queued == item {
             actionButton("Switches next renewal", .scheduled, accent: false, busy: false, enabled: false) {}
-            if let keep = store.product(for: current ?? item) {
+            // Only when the plan being kept is known. `current ?? item` fell
+            // back to the queued product itself when the store could not name
+            // the current one, which made "keep this plan" buy the switch the
+            // card said would wait.
+            if let current, let keep = store.product(for: current) {
                 actionButton(
-                    "Keep \(current?.title ?? "this plan")",
+                    "Keep \(current.title)",
                     .save,
                     accent: false,
                     busy: store.purchasingProductID == keep.id,

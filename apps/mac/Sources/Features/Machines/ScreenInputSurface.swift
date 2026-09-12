@@ -188,7 +188,7 @@ struct ScreenInputSurface: NSViewRepresentable {
         override func keyDown(with event: NSEvent) {
             guard enabled, let actions else { return super.keyDown(with: event) }
             let flags = event.modifierFlags.screenFlags
-            if let characters = event.charactersIgnoringModifiers, !characters.isEmpty,
+            if let characters = event.characters, !characters.isEmpty,
                !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control),
                let scalar = characters.unicodeScalars.first, scalar.value >= 32, scalar.value != 127
             {

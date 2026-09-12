@@ -145,13 +145,13 @@ final class HomeModel {
     /// Value at list rates over the last seven calendar days, the same measure
     /// the heatmap colours by, so the two cannot disagree.
     var weekValue: Money {
-        let micros = calendarDays.suffix(7).reduce(UInt64(0)) { $0 + $1.value }
-        return Money(micros: Int64(micros), estimated: false, complete: true)
+        let micros = calendarDays.suffix(7).reduce(UInt64(0)) { $0.saturatingAdd($1.value) }
+        return Money(micros: Int64(clamping: micros), estimated: false, complete: true)
     }
 
     var todayValue: Money {
         let micros = calendarDays.last { $0.date == calendar?.last }?.value ?? 0
-        return Money(micros: Int64(micros), estimated: false, complete: true)
+        return Money(micros: Int64(clamping: micros), estimated: false, complete: true)
     }
 
     /// Dated cells from the delivered grid, oldest first. The tiles read this

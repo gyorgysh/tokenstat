@@ -537,6 +537,12 @@ fn read_key(path: &std::path::Path) -> Result<Option<[u8; 32]>, IdentityError> {
         path: path.display().to_string(),
         source: e,
     })?;
+    // An interrupted create can leave a zero-length file behind. Treat it as
+    // "no identity yet" so the next load regenerates instead of failing, which
+    // would otherwise need a manual delete to recover from.
+    if bytes.is_empty() {
+        return Ok(None);
+    }
     let seed: [u8; 32] = bytes
         .as_slice()
         .try_into()
@@ -545,13 +551,14 @@ fn read_key(path: &std::path::Path) -> Result<Option<[u8; 32]>, IdentityError> {
 }
 
 fn write_key(path: &std::path::Path, seed: &[u8; 32]) -> Result<(), IdentityError> {
-    // Written before the permissions are set, so there is a window where the
-    // file is readable by the user's own umask. Create it empty and restricted
-    // first, then write, so the window holds no key.
+    // One open, created restricted, so there is never a window where the key
+    // exists with the process umask's permissions; a crash cannot leave a
+    // truncated empty file that blocks the next identity creation either.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        std::fs::OpenOptions::new()
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
@@ -561,11 +568,28 @@ fn write_key(path: &std::path::Path, seed: &[u8; 32]) -> Result<(), IdentityErro
                 path: path.display().to_string(),
                 source: e,
             })?;
+        file.write_all(seed).map_err(|e| IdentityError::Io {
+            path: path.display().to_string(),
+            source: e,
+        })?;
+        drop(file);
+        // `mode` only applies at creation, so an existing key created with a
+        // looser mode is tightened here, and a failure is worth surfacing.
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+            IdentityError::Io {
+                path: path.display().to_string(),
+                source: e,
+            }
+        })?;
+        Ok(())
     }
-    std::fs::write(path, seed).map_err(|e| IdentityError::Io {
-        path: path.display().to_string(),
-        source: e,
-    })
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, seed).map_err(|e| IdentityError::Io {
+            path: path.display().to_string(),
+            source: e,
+        })
+    }
 }
 
 #[cfg(test)]

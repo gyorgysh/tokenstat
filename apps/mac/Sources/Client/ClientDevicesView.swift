@@ -172,10 +172,19 @@ struct ClientDevicesView: View {
         // An id that matches nothing would otherwise sit in the model
         // forever, and the push it was asking for can never happen. Clearing
         // it lets Devices open on its list next time instead of on nothing.
+        // The same change is when per-device spend goes stale: a machine
+        // added, removed or renamed must refetch its share, and the load
+        // dedupes on the host id set so unchanged lists cost nothing.
         .onChange(of: machines) { _, _ in
             if let wanted = navigation.deviceMachineID,
                !machines.contains(where: { $0.machineID == wanted }) {
                 navigation.deviceMachineID = nil
+            }
+            Task {
+                await model.load(
+                    machines: machines,
+                    days: DeviceHistory.days(for: account.account?.tier)
+                )
             }
         }
         .task {

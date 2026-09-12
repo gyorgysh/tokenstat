@@ -44,8 +44,14 @@ pub fn load_token(host: &str) -> Result<Option<String>, KeychainError> {
     #[cfg(target_os = "macos")]
     {
         if let Some(t) = legacy_keychain_load(host)? {
-            let _ = file_store(host, &t);
-            let _ = legacy_keychain_delete(host);
+            // The legacy entry is the only durable copy of the secret. Delete
+            // it only once the file store has actually accepted it, or a
+            // failed write loses the token twice over. A write that cannot
+            // happen is not a failed read: the token is still returned, and
+            // the legacy entry stays for the next attempt.
+            if file_store(host, &t).is_ok() {
+                let _ = legacy_keychain_delete(host);
+            }
             return Ok(Some(t));
         }
     }

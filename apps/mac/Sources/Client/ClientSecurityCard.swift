@@ -152,12 +152,20 @@ struct ClientSecurityCard: View {
     }
 
     private func load() async {
-        identity = try? await Bridge.machineIdentity()
-        guard let peerKey else {
+        // The task id is `peerKey`, but a task already past its first await is
+        // not stopped by the next one starting. Capture what this run is for
+        // and refuse to publish into a different peer's screen.
+        let wanted = peerKey
+        let identity = try? await Bridge.machineIdentity()
+        guard !Task.isCancelled, wanted == peerKey else { return }
+        self.identity = identity
+        guard let wanted else {
             peer = nil
             return
         }
-        peer = (try? await Bridge.peers())?.first { $0.key == peerKey }
+        let found = (try? await Bridge.peers())?.first { $0.key == wanted }
+        guard !Task.isCancelled, wanted == peerKey else { return }
+        peer = found
     }
 }
 

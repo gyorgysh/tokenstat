@@ -74,7 +74,7 @@ struct ChatInstructionsCard: View {
 
             if showingAdded {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text(model.instructions?.added ?? "Loading…")
+                    Text(addedInstructions)
                         .font(Theme.mono(11))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
@@ -85,10 +85,12 @@ struct ChatInstructionsCard: View {
                             Theme.background,
                             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                         )
-                    Text("Every conversation gets this so an agent can put a file or image into this chat. It is sent once, and it tells the agent not to talk about it.")
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let instructions = model.instructions, !instructions.added.isEmpty {
+                        Text("Every conversation gets this so an agent can put a file or image into this chat. It is sent once, and it tells the agent not to talk about it.")
+                            .font(Theme.caption)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .transition(.opacity)
             }
@@ -110,6 +112,14 @@ struct ChatInstructionsCard: View {
     }
 
     private var changed: Bool { draft != chat.systemPrompt }
+
+    /// The rule to show, or the state of looking for it. A finished read that
+    /// came back empty is not still loading: say the text is not available
+    /// rather than leave a spinner that never resolves.
+    private var addedInstructions: String {
+        if let added = model.instructions?.added, !added.isEmpty { return added }
+        return model.instructionsLoaded ? "Not available on this computer." : "Loading…"
+    }
 
     /// Name the channel for the agent actually selected.
     ///

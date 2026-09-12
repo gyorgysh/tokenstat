@@ -160,6 +160,8 @@ pub enum VaultError {
     Http(#[from] reqwest::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
     #[error("not signed in")]
     NotSignedIn,
     #[error("this device is not enrolled in the SSH vault")]
@@ -225,10 +227,30 @@ fn read_error(status: reqwest::StatusCode, bytes: &[u8]) -> VaultError {
     }
 }
 
+/// Read a response body with a hard size cap.
+///
+/// A vault payload can be large, but not unbounded: the server does not get to
+/// decide how much memory one answer costs. Reading through the `Read` impl
+/// rather than `bytes()` also bounds what is buffered before the cap is known.
+fn read_capped(response: reqwest::blocking::Response) -> Result<Vec<u8>, VaultError> {
+    use std::io::Read;
+    const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    response
+        .take(MAX_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err(VaultError::Server(format!(
+            "vault response exceeded {MAX_RESPONSE_BYTES} bytes"
+        )));
+    }
+    Ok(bytes)
+}
+
 fn send<T: DeserializeOwned>(request: RequestBuilder) -> Result<T, VaultError> {
     let response = request.send()?;
     let status = response.status();
-    let bytes = response.bytes()?;
+    let bytes = read_capped(response)?;
     if status.is_success() {
         return Ok(serde_json::from_slice(&bytes)?);
     }
@@ -238,7 +260,7 @@ fn send<T: DeserializeOwned>(request: RequestBuilder) -> Result<T, VaultError> {
 fn send_empty(request: RequestBuilder) -> Result<(), VaultError> {
     let response = request.send()?;
     let status = response.status();
-    let bytes = response.bytes()?;
+    let bytes = read_capped(response)?;
     if status.is_success() {
         return Ok(());
     }

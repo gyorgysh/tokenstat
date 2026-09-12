@@ -966,11 +966,9 @@ struct MachinesView: View {
 
     /// The peer record for an account machine, matched on identity only.
     ///
-    /// Deliberately stricter than `MachinesModel.peer(for:)`, which also
-    /// matches on equal labels: two devices nobody has named both carry an
-    /// empty label, so that fallback can pair a peer with a machine it has
-    /// nothing to do with. That is tolerable when it decides whether to offer a
-    /// Connect button and not when it decides which rows to hide.
+    /// Stricter than `MachinesModel.peer(for:)`, which falls back to the
+    /// account record's machine id: only a machine with a public key on this
+    /// account can be the peer that decides which rows to hide.
     private func linkedPeer(for machine: Machine) -> Peer? {
         guard let identity = machine.publicIdentity, !identity.isEmpty else { return nil }
         return model.peers.first { $0.key == identity || $0.fingerprint == identity }
@@ -1362,7 +1360,7 @@ private struct DevicePermissionCard: View {
     private func load() async {
         do {
             let values = try await Bridge.screenPermissions()
-            permissions = Dictionary(uniqueKeysWithValues: values.map { ($0.peerID, $0) })
+            permissions = Dictionary(values.map { ($0.peerID, $0) }, uniquingKeysWith: { _, last in last })
             workspaceAllowed = Set((try? await Bridge.workspaceAccessList()) ?? [])
             transferDestination = try? await Bridge.screenTransferDestination().path
             error = nil

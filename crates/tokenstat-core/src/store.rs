@@ -22,6 +22,52 @@ use crate::watermark::Watermark;
 
 const SCHEMA_VERSION: i64 = 1;
 
+/// Upsert for one row of `event`. Shared by [`Store::insert_events`] and
+/// [`Store::replace_recovered`] so the max-on-conflict semantics cannot drift
+/// between the two writers.
+const UPSERT_EVENT_SQL: &str = r#"INSERT INTO event
+   (id, source, ts_ms, local_date, local_hour, model, session, project,
+    input_fresh, cache_read, cache_write_5m, cache_write_1h, output,
+    billing, confidence)
+   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+   ON CONFLICT(id) DO UPDATE SET
+     input_fresh    = CASE
+       WHEN excluded.input_fresh IS NULL THEN input_fresh
+       WHEN input_fresh IS NULL THEN excluded.input_fresh
+       ELSE MAX(input_fresh, excluded.input_fresh) END,
+     cache_read     = CASE
+       WHEN excluded.cache_read IS NULL THEN cache_read
+       WHEN cache_read IS NULL THEN excluded.cache_read
+       ELSE MAX(cache_read, excluded.cache_read) END,
+     cache_write_5m = CASE
+       WHEN excluded.cache_write_5m IS NULL THEN cache_write_5m
+       WHEN cache_write_5m IS NULL THEN excluded.cache_write_5m
+       ELSE MAX(cache_write_5m, excluded.cache_write_5m) END,
+     cache_write_1h = CASE
+       WHEN excluded.cache_write_1h IS NULL THEN cache_write_1h
+       WHEN cache_write_1h IS NULL THEN excluded.cache_write_1h
+       ELSE MAX(cache_write_1h, excluded.cache_write_1h) END,
+     output         = CASE
+       WHEN excluded.output IS NULL THEN output
+       WHEN output IS NULL THEN excluded.output
+       ELSE MAX(output, excluded.output) END
+   WHERE COALESCE(excluded.output, -1)         > COALESCE(event.output, -1)
+      OR COALESCE(excluded.input_fresh, -1)    > COALESCE(event.input_fresh, -1)
+      OR COALESCE(excluded.cache_read, -1)     > COALESCE(event.cache_read, -1)
+      OR COALESCE(excluded.cache_write_5m, -1) > COALESCE(event.cache_write_5m, -1)
+      OR COALESCE(excluded.cache_write_1h, -1) > COALESCE(event.cache_write_1h, -1)"#;
+
+/// Clamp a token count into SQLite's signed 64-bit domain.
+///
+/// A counter can exceed `i64::MAX` (the model keeps them unsigned, and a JSON
+/// file its owner edited is untrusted input), and `as i64` would wrap to a
+/// negative number and corrupt every sum and max-on-conflict that reads it.
+/// Saturating keeps the stored figure a lower bound instead of making it wrong
+/// in the other direction.
+fn clamp_i64(v: u64) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
+
 /// Meta key marking that [`Store::relabel_legacy_recovery`] has run.
 const LEGACY_RECOVERY_KEY: &str = "legacy_recovery_relabelled";
 
@@ -503,65 +549,42 @@ impl Store {
         tz: &jiff::tz::TimeZone,
     ) -> Result<u64, CoreError> {
         let tx = self.conn.transaction()?;
-        let mut touched = 0u64;
-        {
-            let mut stmt = tx.prepare(
-                r#"INSERT INTO event
-                   (id, source, ts_ms, local_date, local_hour, model, session, project,
-                    input_fresh, cache_read, cache_write_5m, cache_write_1h, output,
-                    billing, confidence)
-                   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
-                   ON CONFLICT(id) DO UPDATE SET
-                     input_fresh    = CASE
-                       WHEN excluded.input_fresh IS NULL THEN input_fresh
-                       WHEN input_fresh IS NULL THEN excluded.input_fresh
-                       ELSE MAX(input_fresh, excluded.input_fresh) END,
-                     cache_read     = CASE
-                       WHEN excluded.cache_read IS NULL THEN cache_read
-                       WHEN cache_read IS NULL THEN excluded.cache_read
-                       ELSE MAX(cache_read, excluded.cache_read) END,
-                     cache_write_5m = CASE
-                       WHEN excluded.cache_write_5m IS NULL THEN cache_write_5m
-                       WHEN cache_write_5m IS NULL THEN excluded.cache_write_5m
-                       ELSE MAX(cache_write_5m, excluded.cache_write_5m) END,
-                     cache_write_1h = CASE
-                       WHEN excluded.cache_write_1h IS NULL THEN cache_write_1h
-                       WHEN cache_write_1h IS NULL THEN excluded.cache_write_1h
-                       ELSE MAX(cache_write_1h, excluded.cache_write_1h) END,
-                     output         = CASE
-                       WHEN excluded.output IS NULL THEN output
-                       WHEN output IS NULL THEN excluded.output
-                       ELSE MAX(output, excluded.output) END
-                   WHERE COALESCE(excluded.output, -1)         > COALESCE(event.output, -1)
-                      OR COALESCE(excluded.input_fresh, -1)    > COALESCE(event.input_fresh, -1)
-                      OR COALESCE(excluded.cache_read, -1)     > COALESCE(event.cache_read, -1)
-                      OR COALESCE(excluded.cache_write_5m, -1) > COALESCE(event.cache_write_5m, -1)
-                      OR COALESCE(excluded.cache_write_1h, -1) > COALESCE(event.cache_write_1h, -1)"#,
-            )?;
-            for e in events {
-                let n = stmt.execute(params![
-                    &e.id.0[..],
-                    e.source.as_str(),
-                    e.ts.utc_ms,
-                    e.ts.local_date(tz),
-                    e.ts.local_hour(tz) as i64,
-                    e.model,
-                    e.session,
-                    e.project,
-                    e.counters.input_fresh.map(|v| v as i64),
-                    e.counters.cache_read.map(|v| v as i64),
-                    e.counters.cache_write_5m.map(|v| v as i64),
-                    e.counters.cache_write_1h.map(|v| v as i64),
-                    e.counters.output.map(|v| v as i64),
-                    e.billing.as_str(),
-                    e.confidence.as_str(),
-                ])?;
-                touched += n as u64;
-            }
-        }
+        let touched = Self::insert_events_in_tx(&tx, events, tz)?;
         tx.commit()?;
         // Count both brand-new ids and counter upgrades. A streaming partial
         // that only raises output would otherwise look like "nothing new".
+        Ok(touched)
+    }
+
+    /// The insert itself, against a caller-owned transaction so a swap that
+    /// must also delete can be one unit. See [`Self::replace_recovered`].
+    fn insert_events_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        events: &[UsageEvent],
+        tz: &jiff::tz::TimeZone,
+    ) -> Result<u64, CoreError> {
+        let mut touched = 0u64;
+        let mut stmt = tx.prepare(UPSERT_EVENT_SQL)?;
+        for e in events {
+            let n = stmt.execute(params![
+                &e.id.0[..],
+                e.source.as_str(),
+                e.ts.utc_ms,
+                e.ts.local_date(tz),
+                e.ts.local_hour(tz) as i64,
+                e.model,
+                e.session,
+                e.project,
+                e.counters.input_fresh.map(clamp_i64),
+                e.counters.cache_read.map(clamp_i64),
+                e.counters.cache_write_5m.map(clamp_i64),
+                e.counters.cache_write_1h.map(clamp_i64),
+                e.counters.output.map(clamp_i64),
+                e.billing.as_str(),
+                e.confidence.as_str(),
+            ])?;
+            touched += n as u64;
+        }
         Ok(touched)
     }
 
@@ -1133,7 +1156,13 @@ impl Store {
             };
             let mut model: String = r.get(2)?;
             if model.len() > 128 {
-                model.truncate(128);
+                // Walk back to a char boundary: truncate panics inside a
+                // multibyte character, and model ids come from vendor files.
+                let mut end = 128;
+                while !model.is_char_boundary(end) {
+                    end -= 1;
+                }
+                model.truncate(end);
             }
             Ok(SyncRollupBucket {
                 d: r.get(0)?,
@@ -1163,12 +1192,11 @@ impl Store {
     /// exactly what it still does today under the name `claude_code_rollup` at
     /// confidence `derived`. So they are relabelled to say what they are.
     ///
-    /// The source name is left alone. [`Self::clear_recovered`] deletes
-    /// `claude_code_rollup` on every scan so the derivation can be recomputed,
-    /// and these rows cannot be recomputed: they cover days the vendor's window
-    /// has long since dropped, which makes them the only surviving record of
-    /// those days. Renaming them into that source would delete them on the next
-    /// scan.
+    /// The source name is left alone. [`Self::replace_recovered`] rewrites
+    /// `claude_code_rollup` whenever the derivation is stale, and these rows
+    /// cannot be recomputed: they cover days the vendor's window has long since
+    /// dropped, which makes them the only surviving record of those days.
+    /// Renaming them into that source would delete them on the next scan.
     ///
     /// Runs once, guarded by a meta key, so an owner who prefers them unpublished
     /// can delete them and not have a later scan undo that.
@@ -1195,6 +1223,31 @@ impl Store {
         self.conn
             .execute("DELETE FROM event WHERE source = 'claude_code_rollup'", [])?;
         Ok(())
+    }
+
+    /// Swap the derived recovery rows for a fresh derivation, atomically.
+    ///
+    /// The scan recomputes recovery from scratch whenever the vendor rollup or
+    /// the derivation changes, so a corrected (possibly lower) reading has to
+    /// replace what an older build wrote; the delete and the insert share one
+    /// transaction so the archive can never hold neither. An empty replacement
+    /// deletes nothing, because a rollup that parses but states no usable
+    /// per-model totals is not evidence that the history already recovered did
+    /// not happen. The caller must not stamp the recovery logic version unless
+    /// this returns `Ok`.
+    pub fn replace_recovered(
+        &mut self,
+        events: &[UsageEvent],
+        tz: &jiff::tz::TimeZone,
+    ) -> Result<u64, CoreError> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM event WHERE source = 'claude_code_rollup'", [])?;
+        let touched = Self::insert_events_in_tx(&tx, events, tz)?;
+        tx.commit()?;
+        Ok(touched)
     }
 
     /// Drop OpenClaw session-rollup rows once turn-level events exist for that
@@ -1313,9 +1366,9 @@ impl Store {
                     source,
                     r.day,
                     r.model,
-                    r.tokens as i64,
-                    r.messages as i64,
-                    r.sessions as i64,
+                    clamp_i64(r.tokens),
+                    clamp_i64(r.messages),
+                    clamp_i64(r.sessions),
                     now
                 ],
             )?;
@@ -1344,10 +1397,10 @@ impl Store {
                 params![
                     source,
                     r.model,
-                    r.input as i64,
-                    r.output as i64,
-                    r.cache_read as i64,
-                    r.cache_write as i64,
+                    clamp_i64(r.input),
+                    clamp_i64(r.output),
+                    clamp_i64(r.cache_read),
+                    clamp_i64(r.cache_write),
                     now
                 ],
             )?;
@@ -1671,6 +1724,56 @@ mod tests {
         let t = s.totals(&Query::default()).unwrap();
         assert_eq!(t.events, 1);
         assert_eq!(t.counters.output, Some(1));
+    }
+
+    #[test]
+    fn replacing_recovery_never_deletes_history_for_an_empty_pass() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut rollup = ev("roll", 1_700_000_000_000, "m", 9);
+        rollup.source = SourceId::ClaudeCodeRollup;
+        s.insert_events(&[rollup], &tz).unwrap();
+
+        // A rollup that parses but states no usable per-model totals produces
+        // nothing. The derived rows it cannot replace have to survive.
+        assert_eq!(s.replace_recovered(&[], &tz).unwrap(), 0);
+        let t = s.totals(&Query::default()).unwrap();
+        assert_eq!(t.events, 1);
+        assert_eq!(t.counters.output, Some(9));
+    }
+
+    #[test]
+    fn replacing_recovery_lowers_rows_a_corrected_pass_wrote_differently() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        // The id recovery derives for the pair, so the swap is a replacement
+        // rather than an addition. insert_events alone would keep the larger
+        // figure; replace_recovered has to delete before inserting.
+        let id = EventId::derive(&["claude_rollup", "2023-11-14", "m"]);
+        let mut inflated = ev("ignored", 1_700_000_000_000, "m", 9);
+        inflated.id = id;
+        inflated.source = SourceId::ClaudeCodeRollup;
+        s.insert_events(&[inflated], &tz).unwrap();
+
+        let mut corrected = ev("ignored", 1_700_000_000_000, "m", 4);
+        corrected.id = id;
+        corrected.source = SourceId::ClaudeCodeRollup;
+        assert_eq!(s.replace_recovered(&[corrected], &tz).unwrap(), 1);
+        let t = s.totals(&Query::default()).unwrap();
+        assert_eq!(t.events, 1);
+        assert_eq!(t.counters.output, Some(4), "the corrected figure must win");
+    }
+
+    #[test]
+    fn a_counter_above_i64_max_is_clamped_rather_than_wrapped() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut huge = ev("huge", 1_700_000_000_000, "m", 0);
+        huge.counters.output = Some(u64::MAX);
+        s.insert_events(&[huge], &tz).unwrap();
+        let t = s.totals(&Query::default()).unwrap();
+        // Casting would have stored -1 and made every sum below it wrong.
+        assert_eq!(t.counters.output, Some(i64::MAX as u64));
     }
 
     #[test]

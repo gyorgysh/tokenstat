@@ -40,7 +40,9 @@ pub mod store;
 pub mod sync_payload;
 pub mod watermark;
 
-pub use budget::{BudgetLimits, BudgetStatus, list_value, status as budget_status};
+pub use budget::{
+    BudgetLimits, BudgetStatus, ListValue, list_value, list_value_detail, status as budget_status,
+};
 pub use catalog::{
     CanonicalOffer, Catalog, CatalogModel, CheapestOffer, Plan, PlanLimit, PlanModel, Plans, Scores,
 };

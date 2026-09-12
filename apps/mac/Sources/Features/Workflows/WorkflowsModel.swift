@@ -70,6 +70,10 @@ final class WorkflowsModel {
     private var pollingKey: String?
     private var noticeGeneration = 0
     private var isVisible = false
+    /// The screen left while a tail was in flight. The host can compact the
+    /// readable file meanwhile, so the next poll has to start from zero rather
+    /// than append at an offset that now points at different bytes.
+    private var transcriptNeedsReset = false
 
     func appeared() async {
         isVisible = true
@@ -80,6 +84,7 @@ final class WorkflowsModel {
     func disappeared() {
         isVisible = false
         stopPolling()
+        transcriptNeedsReset = true
     }
 
     func pickerBackends(keeping id: String? = nil) -> [AgentBackend] {
@@ -248,6 +253,8 @@ final class WorkflowsModel {
         #endif
         if let graph = graphs.first(where: { $0.id == id }), let last = lastRun(for: graph) {
             watch(last)
+        } else if selectedRun?.workflowID != id {
+            clearForeignRunSelection()
         }
     }
 
@@ -274,7 +281,21 @@ final class WorkflowsModel {
         redoStack = []
         selectedGraphID = graph.id.isEmpty ? nil : graph.id
         selectedFocus = .graph
+        // A run from another graph must not keep feeding the inspector its
+        // steps and transcript after the canvas switched away.
+        if selectedRun?.workflowID != graph.id {
+            clearForeignRunSelection()
+        }
         editorEpoch += 1
+    }
+
+    /// Drop a run that belongs to another graph, along with its tail.
+    private func clearForeignRunSelection() {
+        stopPolling()
+        selectedRunID = nil
+        selectedStepID = nil
+        transcriptText = ""
+        transcriptOffset = 0
     }
 
     func closeEditor() {
@@ -500,7 +521,8 @@ final class WorkflowsModel {
     }
 
     func setWorkingBudgetMinutes(_ minutes: UInt64) {
-        mutate { $0.budgetSeconds = minutes * 60 }
+        let capped = min(minutes, UInt64.max / 60)
+        mutate { $0.budgetSeconds = capped * 60 }
     }
 
     private func nextNodeID(in graph: WorkflowGraph) -> String {
@@ -745,7 +767,16 @@ final class WorkflowsModel {
     }
 
     func syncWatching() {
+        if transcriptNeedsReset, isVisible {
+            transcriptNeedsReset = false
+            transcriptText = ""
+            transcriptOffset = 0
+        }
         guard let run = selectedRun, let stepID = selectedStepID else {
+            stopPolling()
+            return
+        }
+        guard run.workflowID == selectedGraphID else {
             stopPolling()
             return
         }
@@ -811,24 +842,31 @@ final class WorkflowsModel {
             slices += 1
             let before = transcriptOffset
             await fetchTranscript(runID: runID, nodeID: nodeID, resetIfNeeded: false)
-            if selectedRunID != runID || selectedStepID != nodeID { return }
+            if !isWatching(runID: runID, nodeID: nodeID) { return }
             if transcriptOffset <= before { return }
             if transcriptText.utf8.count >= transcriptDisplayCap { return }
         }
     }
 
+    /// Whether the poll still belongs to the graph and step on screen.
+    private func isWatching(runID: String, nodeID: String) -> Bool {
+        guard selectedRunID == runID, selectedStepID == nodeID else { return false }
+        return selectedRun?.workflowID == selectedGraphID
+    }
+
     private func fetchTranscript(runID: String, nodeID: String, resetIfNeeded: Bool) async {
-        if resetIfNeeded, selectedRunID != runID || selectedStepID != nodeID {
+        if resetIfNeeded, !isWatching(runID: runID, nodeID: nodeID) {
             stopPolling()
             return
         }
         do {
             let chunk = try await Bridge.workflowTranscript(runID: runID, nodeID: nodeID, offset: transcriptOffset)
-            if selectedRunID != runID || selectedStepID != nodeID { return }
+            if !isWatching(runID: runID, nodeID: nodeID) { return }
             if chunk.nextOffset < transcriptOffset {
                 transcriptText = ""
                 transcriptOffset = 0
                 let again = try await Bridge.workflowTranscript(runID: runID, nodeID: nodeID, offset: 0)
+                if !isWatching(runID: runID, nodeID: nodeID) { return }
                 transcriptText = Self.capped(again.text)
                 transcriptOffset = again.nextOffset
                 return

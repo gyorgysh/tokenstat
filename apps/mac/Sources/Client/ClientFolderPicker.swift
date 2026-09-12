@@ -216,13 +216,23 @@ struct ClientFolderPicker: View {
             self.error = "A folder name is one name, without a path in it."
             return
         }
+        // Same guard as a browse: creating and then listing is two awaits, and
+        // a browse started while they run must win the screen.
+        generation &+= 1
+        let current = generation
         loading = true
         error = nil
-        defer { loading = false }
+        defer { if current == generation { loading = false } }
         do {
             let made = try await Bridge.makeDirectory(peer: peer, path: "\(here)/\(name)")
-            listing = try await Bridge.browse(peer: peer, path: made)
-        } catch { self.error = ClientSetupModel.readable(error) }
+            guard current == generation else { return }
+            let answer = try await Bridge.browse(peer: peer, path: made)
+            guard current == generation else { return }
+            listing = answer
+        } catch {
+            guard current == generation else { return }
+            self.error = ClientSetupModel.readable(error)
+        }
     }
 
     private func add(path: String) async {

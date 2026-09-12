@@ -56,7 +56,10 @@ struct RunHistoryStrip: View {
     static let slots = 8
 
     private var shown: [Tick] {
-        ticks.count > limit ? Array(ticks.suffix(limit)) : ticks
+        // `suffix` of a negative length traps; a caller passing a bad limit
+        // gets an empty strip rather than a crash.
+        let cap = max(0, limit)
+        return ticks.count > cap ? Array(ticks.suffix(cap)) : ticks
     }
 
     var body: some View {

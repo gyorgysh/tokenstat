@@ -93,6 +93,15 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// without bound. Streams are drained continuously, so real use never gets
 /// near this.
 const MAX_CHANNEL_BUFFER: usize = 32 * 1024 * 1024;
+/// How many relay-opened channels may wait for the host to accept them. Each
+/// waits out its own Noise handshake before the next is served, so an
+/// unbounded queue would let one flood pin handshake time and memory without
+/// ever being read.
+const INBOUND_QUEUE: usize = 64;
+/// The most channels one socket may keep live, inbound and dialled together.
+/// A relay that opens past this is refused a channel rather than allowed to
+/// grow the map without bound.
+const MAX_CHANNELS: usize = 256;
 /// Bound queued outbound data when the relay or peer is slow.
 const MAX_OUTBOUND_QUEUE: usize = 8 * 1024 * 1024;
 const OUTBOUND_FRAME_QUEUE: usize = 64;
@@ -148,7 +157,7 @@ pub struct TunnelSession {
     writer: Mutex<Option<Writer>>,
     writer_bytes: Arc<AtomicUsize>,
     /// The relay-dialled channels, for the host to answer.
-    inbound_tx: Mutex<Option<mpsc::Sender<Arc<ChannelState>>>>,
+    inbound_tx: Mutex<Option<mpsc::SyncSender<Arc<ChannelState>>>>,
     inbound_rx: Mutex<Option<mpsc::Receiver<Arc<ChannelState>>>>,
     /// Every live channel, by its local id.
     channels: Mutex<HashMap<u32, Arc<ChannelState>>>,
@@ -250,7 +259,7 @@ impl TunnelSession {
     /// Start the session and its supervisor. The supervisor owns the socket,
     /// reconnects it with backoff, and keeps it registered until `shutdown`.
     pub fn spawn(endpoint: &str, identity: &MachineIdentity, token: &str) -> Arc<Self> {
-        let (inbound_tx, inbound_rx) = mpsc::channel::<Arc<ChannelState>>();
+        let (inbound_tx, inbound_rx) = mpsc::sync_channel::<Arc<ChannelState>>(INBOUND_QUEUE);
         let (wake_tx, wake_rx) = mpsc::channel::<()>();
         let session = Arc::new(Self {
             endpoint: endpoint.to_string(),
@@ -1133,15 +1142,28 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
                     return;
                 }
             }
+            // Refuse rather than queue past the bound: a flood of opens must
+            // not grow the map or the host's backlog without limit. The map
+            // guard is dropped before the refusal frame so a slow outbound
+            // queue cannot pin every other channel's routing.
             let state = Arc::new(ChannelState::new(id));
-            map.insert(id, Arc::clone(&state));
-            if let Some(tx) = session
-                .inbound_tx
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .as_ref()
-            {
-                let _ = tx.send(state);
+            let mut queued = false;
+            if map.len() < MAX_CHANNELS {
+                map.insert(id, Arc::clone(&state));
+                queued = session
+                    .inbound_tx
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_ref()
+                    .and_then(|tx| tx.try_send(state).ok())
+                    .is_some();
+                if !queued {
+                    map.remove(&id);
+                }
+            }
+            drop(map);
+            if !queued {
+                let _ = session.send_channel_frame(CH_CLOSE, id, &[]);
             }
         }
         CH_DATA | CH_CLOSE | CH_ERROR => {
@@ -1351,7 +1373,7 @@ mod tests {
     }
 
     fn inert_session() -> Arc<TunnelSession> {
-        let (inbound_tx, inbound_rx) = mpsc::channel();
+        let (inbound_tx, inbound_rx) = mpsc::sync_channel(1);
         Arc::new(TunnelSession {
             endpoint: String::new(),
             key_hex: String::new(),
@@ -1550,6 +1572,44 @@ mod tests {
         let opened = inbound.try_recv().expect("OPENED delivered as inbound");
         assert_eq!(opened.id, 1);
         assert!(!Arc::ptr_eq(&opened, &dead));
+    }
+
+    #[test]
+    fn an_overfull_inbound_queue_refuses_instead_of_growing() {
+        // The test session's queue holds one: the second OPENED must be
+        // dropped and taken back out of the map, not queued behind the first.
+        let session = inert_session();
+        let inbound = session.take_inbound().expect("inbound");
+        dispatch_frame(&session, &opened_frame(1));
+        dispatch_frame(&session, &opened_frame(2));
+        assert_eq!(inbound.try_recv().expect("first inbound").id, 1);
+        assert!(inbound.try_recv().is_err(), "queue must stay bounded");
+        let map = session.channels.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(map.contains_key(&1));
+        assert!(
+            !map.contains_key(&2),
+            "a refused channel must not stay in the map"
+        );
+    }
+
+    #[test]
+    fn a_full_channel_map_refuses_new_inbound_channels() {
+        let session = inert_session();
+        let _inbound = session.take_inbound().expect("inbound");
+        {
+            let mut map = session.channels.lock().unwrap_or_else(|e| e.into_inner());
+            for id in 1..=MAX_CHANNELS as u32 {
+                map.insert(id, Arc::new(ChannelState::new(id)));
+            }
+        }
+        dispatch_frame(&session, &opened_frame(MAX_CHANNELS as u32 + 1));
+        assert!(
+            !session
+                .channels
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&(MAX_CHANNELS as u32 + 1))
+        );
     }
 
     #[test]

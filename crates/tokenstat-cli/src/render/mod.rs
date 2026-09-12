@@ -119,7 +119,7 @@ pub(super) fn csv_escape(s: &str) -> String {
 }
 
 pub(super) fn json_str(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    json_string(s)
 }
 
 pub(super) fn opt_num(v: Option<u64>) -> String {
@@ -137,7 +137,7 @@ pub(super) fn format_age(secs: i64) -> String {
 
 pub(super) fn json_opt(v: Option<&str>) -> String {
     match v {
-        Some(s) => format!("\"{}\"", s.replace('"', "\\\"")),
+        Some(s) => json_string(s),
         None => "null".to_string(),
     }
 }
@@ -152,8 +152,8 @@ pub(super) fn print_json_buckets(rows: &[Bucket]) -> Result<()> {
         let c = &r.counters;
         write!(
             out,
-            r#"{{"key":"{}","input_fresh":{},"cache_read":{},"cache_write_5m":{},"cache_write_1h":{},"output":{},"total":{},"events":{},"sessions":{}}}"#,
-            r.key.replace('"', "\\\""),
+            r#"{{"key":{},"input_fresh":{},"cache_read":{},"cache_write_5m":{},"cache_write_1h":{},"output":{},"total":{},"events":{},"sessions":{}}}"#,
+            json_string(&r.key),
             num(c.input_fresh),
             num(c.cache_read),
             num(c.cache_write_5m),
@@ -180,6 +180,16 @@ pub(super) fn json_string(s: &str) -> String {
 pub(super) fn json_string_array(items: &[String]) -> String {
     let parts: Vec<String> = items.iter().map(|s| json_string(s)).collect();
     format!("[{}]", parts.join(","))
+}
+
+/// Replace control characters in a log-derived label.
+///
+/// Keys come from files this tool did not write. A raw `\x1b` in a model id or
+/// project path would otherwise reach the terminal as an escape sequence.
+pub(super) fn sanitize_label(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
 }
 
 /// Unreported stays `null` in JSON, so a consumer can tell it from zero.
@@ -218,5 +228,21 @@ mod tests {
     fn json_distinguishes_null_from_zero() {
         assert_eq!(num(None), "null");
         assert_eq!(num(Some(0)), "0");
+    }
+
+    #[test]
+    fn json_helpers_escape_backslashes_and_control_characters() {
+        let raw = "a\\b\"c\nd\u{1}";
+        for encoded in [json_str(raw), json_opt(Some(raw))] {
+            let decoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(decoded, raw);
+        }
+        assert_eq!(json_opt(None), "null");
+    }
+
+    #[test]
+    fn log_derived_labels_cannot_carry_escape_sequences() {
+        assert_eq!(sanitize_label("a\u{1b}[31mb"), "a\u{FFFD}[31mb");
+        assert_eq!(sanitize_label("claude-opus-5"), "claude-opus-5");
     }
 }

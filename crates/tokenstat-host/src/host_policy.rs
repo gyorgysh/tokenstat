@@ -394,7 +394,7 @@ pub(crate) fn unit_restarts_always(text: &str) -> bool {
 
 /// True when the installed supervisor would start this process again
 /// after a clean exit. A stale KeepAlive=true plus `exit(0)` is a loop.
-#[cfg(all(unix, not(test)))]
+#[cfg(all(target_os = "macos", not(test)))]
 fn supervisor_restarts_on_clean_exit() -> bool {
     let Some(home) = std::env::var_os("HOME") else {
         return true;
@@ -406,7 +406,14 @@ fn supervisor_restarts_on_clean_exit() -> bool {
     }
 }
 
-#[cfg(any(test, unix))]
+/// On systemd, `Restart=always` is the same promise, and an absent or
+/// unreadable unit is the same as no supervisor at all.
+#[cfg(all(unix, not(target_os = "macos"), not(test)))]
+fn supervisor_restarts_on_clean_exit() -> bool {
+    systemd_unit_restarts_always()
+}
+
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) fn plist_restarts_on_clean_exit(text: &str) -> bool {
     let Some(rest) = text.split("<key>KeepAlive</key>").nth(1) else {
         return false;
@@ -724,6 +731,13 @@ mod tests {
         ));
         assert!(refuse(
             r#"{"id":8,"method":"ssh.session.open","params":{}}"#
+        ));
+        // Agent launches are work even though no terminal is attached.
+        assert!(refuse(
+            r#"{"id":9,"method":"chat.send","params":{"id":"c1"}}"#
+        ));
+        assert!(refuse(
+            r#"{"id":10,"method":"automation.run","params":{"id":"a1"}}"#
         ));
         assert!(!should_refuse_inbound_with(
             true,

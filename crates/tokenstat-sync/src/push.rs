@@ -167,6 +167,8 @@ fn post(
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(5))
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
+        // The bearer must not follow a redirect to another host.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|err| ProfileError::Message(err.to_string()))?;
     let resp = client
@@ -177,7 +179,7 @@ fn post(
         .send()
         .map_err(|err| ProfileError::Message(err.to_string()))?;
     let status = resp.status();
-    let text = resp.text().unwrap_or_default();
+    let text = capped_text(resp, 64 * 1024)?;
     if !status.is_success() {
         return Err(ProfileError::Message(format!(
             "{path} failed ({status}): {}",
@@ -185,6 +187,29 @@ fn post(
         )));
     }
     Ok(text)
+}
+
+/// Read a response body through its `Read` impl with a hard cap.
+fn capped_text(response: reqwest::blocking::Response, max: usize) -> Result<String, ProfileError> {
+    use std::io::Read;
+    let mut reader = response.take(max as u64 + 1);
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 8 * 1024];
+    loop {
+        let n = reader
+            .read(&mut chunk)
+            .map_err(|err| ProfileError::Message(err.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..n]);
+    }
+    if bytes.len() > max {
+        return Err(ProfileError::Message(format!(
+            "server response exceeded {max} bytes"
+        )));
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Notify without waiting and without being able to fail the caller.

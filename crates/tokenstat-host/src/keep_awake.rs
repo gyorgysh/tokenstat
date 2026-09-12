@@ -19,8 +19,8 @@
 //! Always-on host is on. A tunnel that is merely present, a sync, a
 //! `workspace.list` / `pty.list` poll, and a local terminal must do the
 //! same. Sleep is prevented only while a remote peer is actually using a
-//! workspace or a terminal on this machine, or for the life of hostd when
-//! Always-on host is on.
+//! workspace, a terminal, or an agent on this machine, or for the life of
+//! hostd when Always-on host is on.
 //!
 //! The assertion is `PreventUserIdleSystemSleep` on macOS and
 //! `PowerRequestSystemRequired` on Windows. Closing the lid is still
@@ -28,7 +28,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -66,12 +66,19 @@ fn lock_inner() -> std::sync::MutexGuard<'static, Inner> {
     state().inner.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Milliseconds on a monotonic clock that only runs in this process.
+///
+/// A wall-clock deadline is wrong here: a backwards clock step (NTP, a manual
+/// set) pushes `grace_until_ms` into the future and holds sleep until the
+/// clock catches up. `Instant` cannot step, and the condvar below waits on the
+/// same clock.
 fn now_ms() -> i64 {
-    jiff::Timestamp::now().as_millisecond()
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as i64
 }
 
-/// Whether an inbound RPC means a remote peer is working in a workspace
-/// or a terminal here. List polls and everything else do not.
+/// Whether an inbound RPC means a remote peer is working in a workspace,
+/// a terminal, or an agent here. List polls and everything else do not.
 pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
     match method {
         // List polls. A client asking what is running is not somebody
@@ -79,11 +86,45 @@ pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
         // the poll alone would hold sleep open for as long as the app is open.
         "workspace.list" | "pty.list" | "ssh.session.list" => false,
         "workflow.list" | "workflow.get" | "workflow.runs" | "workflow.transcript" => false,
+        // Polls inside the agent families. A Chat screen asks about events,
+        // approvals and receipts on a timer, and an Automations or todo screen
+        // polls its lists: none of that is somebody working, and counting it
+        // would hold sleep open for as long as a remote screen is open.
+        "chat.list"
+        | "chat.events"
+        | "chat.eventPage"
+        | "chat.approvals"
+        | "chat.receipt"
+        | "chat.recent"
+        | "chat.backends"
+        | "chat.instructions"
+        | "chat.personas"
+        | "chat.personaDefault"
+        | "chat.personaDraft"
+        | "chat.attachment" => false,
+        "automation.list"
+        | "automation.runs"
+        | "automation.transcript"
+        | "automation.queue"
+        | "automation.backends" => false,
+        "launcher.catalog" => false,
+        "harness.config.get" => false,
+        "todo.list" => false,
         m if m.starts_with("workspace.") => true,
         m if m.starts_with("pty.") => true,
         m if m.starts_with("workflow.") => true,
         m if m.starts_with("ssh.") => true,
         m if m.starts_with("screen.transfer.") => true,
+        // These families launch agents: a chat turn, a scheduled automation,
+        // a launcher, a harness install, and a delegated card all run a
+        // process here, so none of them is somebody merely reading.
+        m if m.starts_with("chat.") => true,
+        m if m.starts_with("automation.") => true,
+        m if m.starts_with("launcher.") => true,
+        m if m.starts_with("harness.") => true,
+        m if m.starts_with("todo.") => true,
+        // Reading a handoff is a poll; writing one is work.
+        "work.continuity.put" => true,
         "stream.open" => matches!(stream_kind, Some("pty.subscribe" | "screen.video")),
         _ => false,
     }
@@ -467,6 +508,23 @@ mod tests {
         assert!(!counts_as_work("ssh.session.list", None));
         assert!(!counts_as_work("stream.open", Some("proxy")));
         assert!(!counts_as_work("stream.open", None));
+    }
+
+    #[test]
+    fn agent_launches_count_as_work() {
+        for method in [
+            "chat.send",
+            "automation.run",
+            "launcher.install",
+            "harness.config.set",
+            "todo.delegate",
+            "work.continuity.put",
+        ] {
+            assert!(counts_as_work(method, None), "{method} must count");
+        }
+        // The handoff poll and attachment read are not the work.
+        assert!(!counts_as_work("work.continuity.get", None));
+        assert!(!counts_as_work("work.continuity.attachments", None));
     }
 
     #[test]

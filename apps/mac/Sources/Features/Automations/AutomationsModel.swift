@@ -69,6 +69,10 @@ final class AutomationsModel {
     /// The run id the poll task is actually tailing. Distinct from
     /// `watchingRunID` so switching runs restarts the loop.
     private var pollingID: String?
+    /// The screen left while a tail was in flight. The host can compact the
+    /// readable file meanwhile, so the next poll has to start from zero rather
+    /// than append at an offset that now points at different bytes.
+    private var transcriptNeedsReset = false
     private var noticeGeneration = 0
 
     /// True while the screen is on show.
@@ -91,6 +95,7 @@ final class AutomationsModel {
     func disappeared() {
         isVisible = false
         stopPolling()
+        transcriptNeedsReset = true
     }
 
     /// Picker list: hidden workspace tiles stay out, except the current pick.
@@ -329,7 +334,7 @@ final class AutomationsModel {
             budget = 0
         } else {
             let trimmed = queueBudgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let minutes = UInt64(trimmed), minutes > 0 else {
+            guard let minutes = UInt64(trimmed), minutes > 0, minutes <= UInt64.max / 60 else {
                 errorMessage = "Time limit must be a whole number of minutes."
                 return
             }
@@ -531,6 +536,11 @@ final class AutomationsModel {
 
     /// Start or stop the transcript poll to match what is on screen.
     func syncWatching() {
+        if transcriptNeedsReset, isVisible {
+            transcriptNeedsReset = false
+            transcriptText = ""
+            transcriptOffset = 0
+        }
         guard let live = selectedRun ?? liveRun else {
             stopPolling()
             return

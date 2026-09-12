@@ -875,6 +875,28 @@ fn parse_cache() -> &'static Mutex<HashMap<PathBuf, CachedParse>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// The parse cache holds whole usage histories, so it is bounded. A machine
+/// that opens many stores cannot grow it without limit; the oldest parse is
+/// dropped first, and a miss is only a reparse.
+const PARSE_CACHE_ENTRIES: usize = 64;
+
+fn cache_parse(key: PathBuf, entry: CachedParse) {
+    let Ok(mut guard) = parse_cache().lock() else {
+        return;
+    };
+    guard.insert(key, entry);
+    while guard.len() > PARSE_CACHE_ENTRIES {
+        let Some(oldest) = guard
+            .iter()
+            .min_by_key(|(_, cached)| cached.at)
+            .map(|(key, _)| key.clone())
+        else {
+            break;
+        };
+        guard.remove(&oldest);
+    }
+}
+
 fn cached_events(
     path: &Path,
     parse: impl FnOnce(&str) -> Vec<UsageEvent>,
@@ -888,16 +910,14 @@ fn cached_events(
     }
     let contents = std::fs::read_to_string(path).ok()?;
     let events = Arc::new(parse(&contents));
-    if let Ok(mut guard) = parse_cache().lock() {
-        guard.insert(
-            path.to_path_buf(),
-            CachedParse {
-                mtime,
-                at: Instant::now(),
-                events: Arc::clone(&events),
-            },
-        );
-    }
+    cache_parse(
+        path.to_path_buf(),
+        CachedParse {
+            mtime,
+            at: Instant::now(),
+            events: Arc::clone(&events),
+        },
+    );
     Some(events)
 }
 
@@ -954,16 +974,14 @@ fn cached_db_events(
         return Some(Arc::clone(&hit.events));
     }
     let events = Arc::new(parse(path));
-    if let Ok(mut guard) = parse_cache().lock() {
-        guard.insert(
-            key,
-            CachedParse {
-                mtime,
-                at: Instant::now(),
-                events: Arc::clone(&events),
-            },
-        );
-    }
+    cache_parse(
+        key,
+        CachedParse {
+            mtime,
+            at: Instant::now(),
+            events: Arc::clone(&events),
+        },
+    );
     Some(events)
 }
 

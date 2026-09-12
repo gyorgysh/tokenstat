@@ -292,7 +292,7 @@ struct HomeInspector: View {
             return DayGroupRow(
                 key: name,
                 label: shortModel(name).isEmpty ? name : shortModel(name),
-                tokens: detail.rows.filter { $0.model == name }.reduce(0) { $0 + $1.tokens },
+                tokens: detail.rows.filter { $0.model == name }.reduce(UInt64(0)) { $0.saturatingAdd($1.tokens) },
                 value: nil,
                 monospaced: true
             )
@@ -337,7 +337,7 @@ struct HomeInspector: View {
         for part in parts {
             let raw = key(part)
             if let i = index[raw] {
-                totals[i].1 += part.tokens
+                totals[i].1 = totals[i].1.saturatingAdd(part.tokens)
             } else {
                 index[raw] = totals.count
                 totals.append((raw, part.tokens))
@@ -362,7 +362,7 @@ struct HomeInspector: View {
         func fold(_ pick: (DayPart) -> UInt64?) -> UInt64? {
             let values = rows.compactMap(pick)
             guard !values.isEmpty else { return nil }
-            return values.reduce(0, +)
+            return values.reduce(UInt64(0)) { $0.saturatingAdd($1) }
         }
         return (
             fold(\.fresh),
@@ -377,12 +377,16 @@ struct HomeInspector: View {
         let total = detail.rows.reduce(
             into: (fresh: UInt64(0), cacheRead: UInt64(0), cacheWrite: UInt64(0), output: UInt64(0))
         ) { acc, part in
-            acc.fresh += part.fresh ?? 0
-            acc.cacheRead += part.cacheRead ?? 0
-            acc.cacheWrite += (part.cacheWrite5m ?? 0) + (part.cacheWrite1h ?? 0)
-            acc.output += part.output ?? 0
+            acc.fresh = acc.fresh.saturatingAdd(part.fresh ?? 0)
+            acc.cacheRead = acc.cacheRead.saturatingAdd(part.cacheRead ?? 0)
+            acc.cacheWrite = acc.cacheWrite.saturatingAdd(
+                (part.cacheWrite5m ?? 0).saturatingAdd(part.cacheWrite1h ?? 0)
+            )
+            acc.output = acc.output.saturatingAdd(part.output ?? 0)
         }
-        let grand = total.fresh + total.cacheRead + total.cacheWrite + total.output
+        let grand = total.fresh.saturatingAdd(total.cacheRead)
+            .saturatingAdd(total.cacheWrite)
+            .saturatingAdd(total.output)
         guard grand > 0 else { return AnyView(EmptyView()) }
 
         let segments: [(label: String, value: UInt64, color: Color)] = [

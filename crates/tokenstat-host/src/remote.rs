@@ -3028,6 +3028,7 @@ struct ForwardParams {
 /// not wait out the rest of that backoff. When no session is live, this tries
 /// the same start a retry tick would, now rather than later.
 fn nudge(params: &str) -> Result<Value, String> {
+    crate::request_context::refuse_remote("remote control")?;
     let p: NudgeParams = if params.trim().is_empty() {
         NudgeParams::default()
     } else {
@@ -3078,6 +3079,7 @@ fn nudge(params: &str) -> Result<Value, String> {
 /// the one call that remints and, if the user left the switch on, brings
 /// the socket up without anybody flipping it.
 fn reconsider_plan() -> Result<Value, String> {
+    crate::request_context::refuse_remote("remote control")?;
     let settings = load_settings();
     if !settings.tunnel {
         return Ok(json!({"reconsidered": true, "tunnel": false}));

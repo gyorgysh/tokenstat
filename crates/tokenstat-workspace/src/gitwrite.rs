@@ -45,20 +45,39 @@ impl GitOutcome {
     }
 }
 
+/// A git command for a mutating operation, with the environment pinned.
+///
+/// `-C` names the repository, but `GIT_DIR`, `GIT_WORK_TREE` and
+/// `GIT_INDEX_FILE` outrank it, so a daemon started from a wrapper that exports
+/// one would operate on a repository the user never chose. Paths handed to
+/// these commands are literal file names, never patterns, so pathspec magic is
+/// off for the same reason it is in the read-only module.
+fn git_command(dir: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(dir)
+        .env("GIT_PAGER", "cat")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_OBJECT_DIRECTORY")
+        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+        .env_remove("GIT_PREFIX")
+        .env_remove("GIT_COMMON_DIR")
+        .args(["-c", "core.quotePath=false"]);
+    command
+}
+
 /// Run a git command that changes the repository.
 ///
 /// `GIT_TERMINAL_PROMPT=0` matters more here than in the read-only module: a
 /// push that wants a password must fail with a message the window can show,
 /// not block forever on a terminal that does not exist.
 fn git(dir: &Path, args: &[&str]) -> GitOutcome {
-    match Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .env("GIT_PAGER", "cat")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args(args)
-        .output()
-    {
+    match git_command(dir).args(args).output() {
         Ok(out) => GitOutcome::from(out),
         Err(e) => GitOutcome::failed(format!("could not run git: {e}")),
     }
@@ -114,9 +133,7 @@ pub fn commit(dir: &Path, message: &str) -> GitOutcome {
 /// No force, ever, and no flag to ask for one. A force push is not something to
 /// offer behind a button in a side panel.
 pub fn push(dir: &Path) -> GitOutcome {
-    let has_upstream = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let has_upstream = git_command(dir)
         .args(["rev-parse", "--abbrev-ref", "@{upstream}"])
         .output()
         .map(|o| o.status.success())
@@ -172,9 +189,7 @@ pub fn fetch_pull(dir: &Path, number: u32, branch: &str) -> GitOutcome {
     if number == 0 || branch.is_empty() || !valid_branch(dir, branch) {
         return GitOutcome::failed("that is not a valid local branch name");
     }
-    let exists = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let exists = git_command(dir)
         .args([
             "show-ref",
             "--verify",
@@ -205,9 +220,7 @@ pub fn fetch_pull(dir: &Path, number: u32, branch: &str) -> GitOutcome {
 }
 
 fn valid_branch(dir: &Path, name: &str) -> bool {
-    Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    git_command(dir)
         .args(["check-ref-format", "--branch", name])
         .output()
         .map(|output| output.status.success())

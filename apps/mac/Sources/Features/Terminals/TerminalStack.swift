@@ -40,6 +40,15 @@ struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
     /// Whether this stack may claim first responder. False while the workspace
     /// surface is kept mounted under another destination (Home, Insights, …).
     var claimsFocus: Bool = true
+    /// Whether the terminal layer is what the person should see.
+    ///
+    /// SwiftUI `.opacity(0)` does **not** hide an `NSViewRepresentable`: the
+    /// AppKit host keeps painting and eats the SwiftUI cover above it (Launch
+    /// becomes a black hole with tile gears clipped on the left edge). The
+    /// stack view itself is `isHidden` when this is false. Sessions stay
+    /// parented at their last frames, so bringing the layer back does not
+    /// SIGWINCH.
+    var isSurfaceVisible: Bool = true
     /// Which visible half last took a click, so first responder follows it.
     var onActivate: ((Session) -> Void)? = nil
 
@@ -71,7 +80,8 @@ struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
             focused: focused.flatMap(\.terminalViewIfLoaded),
             axis: splitAxis,
             fraction: fraction,
-            claimsFocus: claimsFocus
+            claimsFocus: claimsFocus,
+            surfaceVisible: isSurfaceVisible
         )
     }
 
@@ -126,6 +136,13 @@ final class TerminalStackView: NSView {
     private var fraction: CGFloat = 0.5
     private var clickMonitor: Any?
 
+    /// No intrinsic size: SwiftUI must assign the frame. An intrinsic built
+    /// from hidden terminal subviews was collapsing the GeometryReader above
+    /// this stack after a Sessions/Launch flip.
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
     func sync(
         views: [TerminalView],
         leading: TerminalView?,
@@ -133,12 +150,22 @@ final class TerminalStackView: NSView {
         focused: TerminalView?,
         axis: Axis?,
         fraction: CGFloat,
-        claimsFocus: Bool
+        claimsFocus: Bool,
+        surfaceVisible: Bool
     ) {
         leadingView = leading
         trailingView = trailing
         splitAxis = axis
         self.fraction = fraction
+
+        // Hide the whole AppKit host while Launch/Files/… is in front. SwiftUI
+        // opacity does not reach NSViewRepresentable; without this the black
+        // terminal layer covers the cover and only clipped tile gears show.
+        let wasHidden = isHidden
+        if isHidden != !surfaceVisible {
+            isHidden = !surfaceVisible
+        }
+
         // Views just re-parented into this stack need a repaint even when they
         // stay visible: a fresh TerminalStackView after a folder switch hands
         // the same emulator instance into a new hierarchy, and without a
@@ -170,7 +197,7 @@ final class TerminalStackView: NSView {
             sub.removeFromSuperview()
         }
 
-        var requestPaint = !reparented.isEmpty
+        var requestPaint = !reparented.isEmpty || (wasHidden && surfaceVisible)
         var flippedVisible = Set<ObjectIdentifier>()
         for view in views {
             let visible = view === leading || view === trailing
@@ -190,7 +217,7 @@ final class TerminalStackView: NSView {
             scheduleFullPaint()
         }
 
-        if !claimsFocus {
+        if !surfaceVisible || !claimsFocus {
             if lastClaimsFocus {
                 shown = nil
             }

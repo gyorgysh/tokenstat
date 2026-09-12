@@ -49,7 +49,7 @@ struct WorkFolderCacheSettings: View {
                         .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 }
                 ThemeRule()
-                Text("\(records.count) saved items · \(ByteCountFormatter.string(fromByteCount: Int64(records.reduce(0) { $0 + $1.bytes }), countStyle: .file))")
+                Text("\(records.count) saved items · \(ByteCountFormatter.string(fromByteCount: Int64(clamping: records.reduce(UInt64(0)) { $0.saturatingAdd($1.bytes) }), countStyle: .file))")
                     .font(Theme.callout)
                 Button("Clear this folder’s saved work", .delete) { Task { await clear() } }
                     .buttonStyle(SecondaryButtonStyle())

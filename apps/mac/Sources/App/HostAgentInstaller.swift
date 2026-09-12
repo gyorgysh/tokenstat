@@ -281,10 +281,15 @@ enum HostAgentInstaller {
     /// All lifecycle entry points honor this, including launch-time refresh
     /// and quit. Guarding only Bridge.connect would still let an older app
     /// replace or stop the newer helper immediately afterwards.
-    private static var hasNewerHelper: Bool {
+    private static var hasNewerHelper: Bool { hasNewerHelper(patience: 5) }
+
+    /// `patience` is how long the socket probe may wait for a host that is
+    /// not answering. Callers that cannot wait use a short one and fall back
+    /// to the installed-versus-bundled version compare below.
+    private static func hasNewerHelper(patience: TimeInterval) -> Bool {
         let socketPath = identityDirectory.deletingLastPathComponent().appendingPathComponent("host.sock").path
         if let transport = SocketTransport.connecting(to: socketPath),
-           let response = try? transport.call(method: "protocol", params: "{}", patience: 5),
+           let response = try? transport.call(method: "protocol", params: "{}", patience: patience),
            let object = try? JSONSerialization.jsonObject(with: Data(response.utf8)) as? [String: Any],
            object["ok"] as? Bool == true,
            let result = object["result"] as? [String: Any],
@@ -348,11 +353,19 @@ enum HostAgentInstaller {
         }
     }
 
+    /// How long the quit-time probe waits for the host.
+    ///
+    /// The ordinary patience is for a connection somebody is waiting on;
+    /// quitting must not stand behind a wedged host for it. The version
+    /// compare in `hasNewerHelper` still catches a newer installed helper
+    /// when the socket says nothing.
+    private static let quitProbePatience: TimeInterval = 0.5
+
     /// Stop hostd when Always-on is off. Leaves the job loaded so the next
     /// app launch can kickstart it. KeepAlive must already be false on the
     /// loaded job, or launchd will start it again.
     static func stopIfNotAlwaysOn() {
-        guard !resolvedAlwaysOn(), !hasNewerHelper else { return }
+        guard !resolvedAlwaysOn(), !hasNewerHelper(patience: quitProbePatience) else { return }
         let service = "gui/\(getuid())/\(label)"
         _ = try? run("/bin/launchctl", ["kill", "SIGTERM", service])
     }

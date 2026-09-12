@@ -56,6 +56,32 @@ final class ClientAppDelegate: NSObject, UIApplicationDelegate {
 }
 #endif
 
+/// The transport handshake, chosen once and awaited by the launch gate.
+///
+/// `Bridge.connect()` can sit for the interactive patience on a host that
+/// accepts the socket and then says nothing, and in the initializer that wait
+/// landed before the first frame. It runs here instead, off the main thread;
+/// `LaunchState.prepare` awaits it under the splash, and the launch work that
+/// could touch the bridge waits with it, so no view calls across a transport
+/// that has not been chosen.
+enum BridgeLaunch {
+    @MainActor private static var handshake: Task<Void, Never>?
+
+    /// Start the handshake once, without waiting for it.
+    @MainActor static func begin() {
+        guard handshake == nil else { return }
+        handshake = Task.detached(priority: .userInitiated) {
+            Bridge.connect()
+        }
+    }
+
+    /// Wait until the transport has been chosen.
+    static func wait() async {
+        let task = await MainActor.run { handshake }
+        await task?.value
+    }
+}
+
 extension Notification.Name {
     #if os(macOS)
     /// Posted by the File menu, acted on by the window that owns the folders.
@@ -90,10 +116,13 @@ struct TokenstatApp: App {
 
     /// Pick the transport before any view can call across it.
     ///
-    /// In the initializer rather than in a `.task`, because a view that renders
+    /// Started here rather than in a `.task`, because a view that renders
     /// first would make its opening calls in-process and its later ones over
     /// the daemon, so the terminals a session starts with would belong to a
-    /// different owner than the ones it ends with.
+    /// different owner than the ones it ends with. The handshake itself is
+    /// not waited on until the launch gate: `Bridge.connect()` can block for
+    /// the interactive patience on a host that never answers, and that wait
+    /// must not sit in front of the first frame. See `BridgeLaunch`.
     init() {
         // First, and before any view exists. A font registered after the first
         // Text is built leaves that screen in the fallback face until
@@ -101,7 +130,7 @@ struct TokenstatApp: App {
         AppFonts.register()
         Self.adoptPreferencesFromPreviousBundleID()
         Self.excludeSecretsFromBackup()
-        Bridge.connect()
+        BridgeLaunch.begin()
         // Before anything can deliver: a delegate installed later loses the
         // callbacks for whatever arrived first, and on a Mac that is the
         // difference between a banner and silence while the app is in front.
@@ -110,7 +139,12 @@ struct TokenstatApp: App {
         #if os(macOS)
         // A device can ask to see this screen, or to open the work on it, at
         // any moment. The poll is what turns that into a sheet or a banner.
-        DeviceAccessRequests.shared.start()
+        // It reads through the bridge, so it waits for the transport like
+        // every other piece of launch work.
+        Task {
+            await BridgeLaunch.wait()
+            DeviceAccessRequests.shared.start()
+        }
         #endif
         #if os(iOS)
         // A token is only asked for when somebody has already said yes, and
@@ -122,6 +156,7 @@ struct TokenstatApp: App {
         // daemon the bundled book is the only one there will be until a refresh
         // lands. Never replaces a fetched book, so this is safe every launch.
         Task {
+            await BridgeLaunch.wait()
             await Bridge.pricingSeed()
             // Seed only copies the bundled book when none exists. A machine
             // with no CLI still needs a fetch, or Home prices against that
@@ -133,7 +168,10 @@ struct TokenstatApp: App {
         #if os(macOS)
         HostOwnerLock.acquire()
         DesktopSyncScheduler.start()
-        ScreenCaptureCoordinator.shared.start()
+        Task {
+            await BridgeLaunch.wait()
+            ScreenCaptureCoordinator.shared.start()
+        }
         #endif
         // Host bring-up is owned by `LaunchState.prepare` (the splash in
         // RootView). A second ensureHosted here would race that path.

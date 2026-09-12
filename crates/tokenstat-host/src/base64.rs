@@ -39,11 +39,24 @@ pub fn encode(input: &[u8]) -> String {
 /// byte is worse than a refused write.
 pub fn decode(input: &str) -> Result<Vec<u8>, String> {
     let mut bits = Vec::with_capacity(input.len());
+    let mut padding = 0usize;
     for c in input.bytes() {
         match c {
             b'\n' | b'\r' | b' ' => continue,
-            b'=' => break,
+            b'=' => {
+                // Padding closes the stream. One or two marks are valid and
+                // nothing may follow them, so trailing garbage after `==` is
+                // refused rather than ignored.
+                if padding == 2 {
+                    return Err("not base64: too much padding".into());
+                }
+                padding += 1;
+                continue;
+            }
             _ => {}
+        }
+        if padding > 0 {
+            return Err(format!("not base64: {:?} after padding", c as char));
         }
         let v = ALPHABET
             .iter()
@@ -52,10 +65,28 @@ pub fn decode(input: &str) -> Result<Vec<u8>, String> {
         bits.push(v as u8);
     }
 
+    // Every quantum is four symbols; padding completes the last one. A
+    // missing mark (`Zg`) or a stray one (`Zg=`) is not the same encoding.
+    let expected = (4 - padding) % 4;
+    if bits.len() % 4 != expected {
+        return Err("truncated base64".into());
+    }
+
     let mut out = Vec::with_capacity(bits.len() * 3 / 4);
     for chunk in bits.chunks(4) {
         if chunk.len() < 2 {
             return Err("truncated base64".into());
+        }
+        // Bits that do not belong to an output byte must be zero, or two
+        // different strings would decode to the same bytes.
+        match chunk.len() {
+            2 if chunk[1] & 0b0000_1111 != 0 => {
+                return Err("not canonical base64: unused bits are set".into());
+            }
+            3 if chunk[2] & 0b0000_0011 != 0 => {
+                return Err("not canonical base64: unused bits are set".into());
+            }
+            _ => {}
         }
         let n = chunk
             .iter()
@@ -110,5 +141,21 @@ mod tests {
         // A mangled keystroke would be typed into a live shell.
         assert!(decode("not base64!").is_err());
         assert!(decode("Z").is_err());
+    }
+
+    #[test]
+    fn trailing_garbage_and_loose_padding_are_refused() {
+        // Anything after the first padding mark is not part of the encoding.
+        assert!(decode("Zg==garbage").is_err());
+        // 'h' is index 33, whose low bits are not the zero a one-byte value
+        // leaves spare: non-canonical, and refused rather than rounded.
+        assert!(decode("Zh==").is_err());
+        assert!(decode("Zm9vYg==x").is_err());
+        // Padding is required, and only in the one shape that fits.
+        assert!(decode("Zg").is_err());
+        assert!(decode("Zg=").is_err());
+        assert!(decode("Zm9vYg=").is_err());
+        assert!(decode("Zg===").is_err());
+        assert!(decode("=").is_err());
     }
 }

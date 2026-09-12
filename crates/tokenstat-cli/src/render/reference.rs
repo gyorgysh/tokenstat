@@ -11,10 +11,10 @@ pub fn pricing(refresh: bool, force: bool, json: bool) -> Result<()> {
         let r = tokenstat_sync::pricing::refresh(force)?;
         if json {
             println!(
-                r#"{{"path":"{}","models":{},"effective_from":"{}","large_moves":{}}}"#,
-                r.path.display(),
+                r#"{{"path":{},"models":{},"effective_from":{},"large_moves":{}}}"#,
+                json_string(&r.path.display().to_string()),
                 r.models,
-                r.effective_from,
+                json_string(&r.effective_from),
                 r.large_moves.len()
             );
             return Ok(());
@@ -48,14 +48,14 @@ pub fn pricing(refresh: bool, force: bool, json: bool) -> Result<()> {
     let table = tokenstat_core::PriceTable::load();
     if json {
         println!(
-            r#"{{"path":"{}","present":{},"models":{},"effective_from":{}}}"#,
-            path.display(),
+            r#"{{"path":{},"present":{},"models":{},"effective_from":{}}}"#,
+            json_string(&path.display().to_string()),
             !table.is_empty(),
             table.len(),
             if table.effective_from.is_empty() {
-                "null".into()
+                "null".to_string()
             } else {
-                format!("\"{}\"", table.effective_from)
+                json_string(&table.effective_from)
             }
         );
         return Ok(());
@@ -87,13 +87,13 @@ pub fn catalog(refresh: bool, json: bool) -> Result<()> {
         let r = tokenstat_sync::catalog::refresh()?;
         if json {
             println!(
-                r#"{{"catalog_path":"{}","plans_path":"{}","models":{},"priced_models":{},"plans":{},"effective_from":"{}"}}"#,
-                r.catalog_path.display(),
-                r.plans_path.display(),
+                r#"{{"catalog_path":{},"plans_path":{},"models":{},"priced_models":{},"plans":{},"effective_from":{}}}"#,
+                json_string(&r.catalog_path.display().to_string()),
+                json_string(&r.plans_path.display().to_string()),
                 r.models,
                 r.priced_models,
                 r.plans,
-                r.effective_from
+                json_string(&r.effective_from)
             );
             return Ok(());
         }
@@ -122,15 +122,15 @@ pub fn catalog(refresh: bool, json: bool) -> Result<()> {
     let plans = Plans::load();
     if json {
         println!(
-            r#"{{"path":"{}","present":{},"models":{},"plans":{},"effective_from":{}}}"#,
-            path.display(),
+            r#"{{"path":{},"present":{},"models":{},"plans":{},"effective_from":{}}}"#,
+            json_string(&path.display().to_string()),
             !catalog.is_empty(),
             catalog.len(),
             plans.len(),
             if catalog.effective_from.is_empty() {
-                "null".into()
+                "null".to_string()
             } else {
-                format!("\"{}\"", catalog.effective_from)
+                json_string(&catalog.effective_from)
             }
         );
         return Ok(());
@@ -343,6 +343,7 @@ pub fn models_detail(store: &Store, q: &Query, json: bool) -> Result<()> {
     for r in &rows {
         let label = model_label(&r.key);
         let m = catalog.get(&label);
+        let shown = sanitize_label(&label);
         let mut tail: Vec<String> = Vec::new();
         if let Some(m) = m {
             tail.extend(m.capabilities.iter().cloned());
@@ -354,7 +355,7 @@ pub fn models_detail(store: &Store, q: &Query, json: bool) -> Result<()> {
         }
         println!(
             "  {}  {}  {}  {}  {DIM}{}{DIM:#}  {DIM}{}{DIM:#}",
-            ui::pad_right(&label, label_w),
+            ui::pad_right(&shown, label_w),
             ui::pad_left(&total_cell(&r.counters), 9),
             ui::pad_left(&price_cell(&prices, &r.key, &r.counters), 8),
             ui::pad_left(
@@ -461,9 +462,9 @@ pub fn budget(
 
     if json {
         println!(
-            r#"{{"today":"{}","month":"{}","today_usd":{:.6},"month_usd":{:.6},"daily_limit":{},"monthly_limit":{}}}"#,
-            st.today_date,
-            st.month_key,
+            r#"{{"today":{},"month":{},"today_usd":{:.6},"month_usd":{:.6},"daily_limit":{},"monthly_limit":{}}}"#,
+            json_string(&st.today_date),
+            json_string(&st.month_key),
             st.today_usd,
             st.month_usd,
             st.limits

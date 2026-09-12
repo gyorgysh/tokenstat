@@ -151,6 +151,24 @@ fn start(params: &str) -> Result<Value, String> {
     // Acquire bookkeeping before spawning: a failed lock must not leave an
     // untracked child. Watchers only hold this lock for short metadata updates.
     let mut tracked = jobs().lock().map_err(|_| "clone jobs unavailable")?;
+    // Finished outcomes are the only droppable ones, and room has to exist
+    // before the insert at the end. Running jobs stay: their watchers still
+    // need the entry to register the folder.
+    if tracked.len() >= MAX_RETAINED_JOBS {
+        let finished: Vec<String> = tracked
+            .iter()
+            .filter(|(_, job)| job.outcome.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in finished {
+            tracked.remove(&id);
+        }
+        if tracked.len() >= MAX_RETAINED_JOBS {
+            // Unreachable while `MAX_RUNNING_CLONES` is far smaller, but the
+            // insert must never grow the map past its cap.
+            return Err("too many clones are still running. Wait for one to finish.".into());
+        }
+    }
     let info = tokenstat_pty::manager()
         .spawn(&tokenstat_pty::Spawn {
             command: "git".into(),
@@ -165,18 +183,6 @@ fn start(params: &str) -> Result<Value, String> {
             environment: Vec::new(),
         })
         .map_err(|error| error.to_string())?;
-    if tracked.len() >= MAX_RETAINED_JOBS {
-        let excess = tracked.len() - MAX_RETAINED_JOBS + 1;
-        let finished: Vec<String> = tracked
-            .iter()
-            .filter(|(_, job)| job.outcome.is_some())
-            .take(excess)
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in finished {
-            tracked.remove(&id);
-        }
-    }
     tracked.insert(
         info.id.clone(),
         Job {

@@ -1064,14 +1064,16 @@ fn group_name(group: GroupBy) -> &'static str {
     }
 }
 
-/// Account mutations, login, and update downloads belong to the person at
-/// this machine. An approved phone can work in a folder. It cannot log the
-/// host out, admit another peer's update, or unlink a device.
+/// Account mutations, login, update downloads, and this machine's own
+/// settings belong to the person at it. An approved phone can work in a
+/// folder. It cannot log the host out, re-point the archive, admit another
+/// peer's update, change what leaves this machine, or unlink a device.
 fn owner_only_method(method: &str) -> bool {
     method.starts_with("app.update")
         || matches!(
             method,
-            "account.logout"
+            "open"
+                | "account.logout"
                 | "account.appleActivate"
                 | "account.appleRenewal"
                 | "account.googleActivate"
@@ -1082,6 +1084,10 @@ fn owner_only_method(method: &str) -> bool {
                 | "account.unlinkMachine"
                 | "account.registerMachine"
                 | "account.pairingCode"
+                | "config.limitsSync"
+                | "push.register"
+                | "push.unregister"
+                | "push.test"
         )
 }
 
@@ -1090,8 +1096,8 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         crate::request_context::refuse_remote("account and update methods")?;
     }
     match method {
-        // Re-open against a different archive or timezone. Also the hook a
-        // future remote transport uses to point at another machine.
+        // Re-open against a different archive or timezone. Owner only: a
+        // remote peer must not choose what every other caller reads.
         "open" => {
             let p: OpenParams = parse(params)?;
             *s = Session::open(&p)?;
@@ -1611,6 +1617,8 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         "account.logout" => {
             crate::remote::stop_tunnel();
             let host = tokenstat_sync::logout(None).envelope()?;
+            // The remembered grid belongs to the account that just left.
+            crate::account_activity::invalidate();
             with_session(s, |b| {
                 b.pending_login = None;
                 Ok(())
@@ -1750,6 +1758,9 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         // none of its own. Cheap, offline, and safe to call on every launch:
         // an existing book is never replaced. See `crate::pricing::seed`.
         "pricing.seed" => {
+            // The path is arbitrary disk access and the book is what every
+            // report prices against. A remote peer gets neither.
+            crate::request_context::refuse_remote("price book changes")?;
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct SeedParams {
@@ -5249,6 +5260,34 @@ mod tests {
                     .contains("local-only"),
                 "{update}"
             );
+        });
+    }
+
+    /// A peer that is approved for work in a folder still does not own the
+    /// machine. These either re-point what everyone reads, change what leaves
+    /// this machine, or register a device on the account.
+    #[test]
+    fn a_remote_peer_cannot_change_the_archive_or_account_settings() {
+        crate::request_context::with_remote_peer("phone", || {
+            let mut s = session();
+            for (method, params) in [
+                ("open", r#"{"dbPath":"/tmp/elsewhere.db"}"#),
+                ("pricing.seed", r#"{"path":"/etc/hosts"}"#),
+                ("config.limitsSync", r#"{"enabled":true}"#),
+                ("push.register", r#"{"token":"x","platform":"ios"}"#),
+                ("push.unregister", r#"{"token":"x"}"#),
+                ("push.test", "{}"),
+            ] {
+                let out = call(&mut s, method, params);
+                let v: Value = serde_json::from_str(&out).unwrap();
+                assert_eq!(v["ok"], false, "{method}: {out}");
+                assert!(
+                    v["error"]["message"]
+                        .as_str()
+                        .is_some_and(|m| m.contains("local-only")),
+                    "{method}: {out}"
+                );
+            }
         });
     }
 }

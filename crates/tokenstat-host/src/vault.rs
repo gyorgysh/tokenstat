@@ -539,13 +539,21 @@ fn decrypt_snapshot(
     nonce: &str,
     ciphertext: &str,
 ) -> Result<Snapshot, String> {
-    serde_json::from_slice(&Zeroizing::new(open(
+    let snapshot: Snapshot = serde_json::from_slice(&Zeroizing::new(open(
         vmk,
         nonce,
         ciphertext,
         &snapshot_context(revision),
     )?))
-    .map_err(|e| format!("damaged vault snapshot: {e}"))
+    .map_err(|e| format!("damaged vault snapshot: {e}"))?;
+    // A record at the top of the version range cannot be bumped again.
+    if let Some(record) = snapshot.records.iter().find(|r| r.version == u64::MAX) {
+        return Err(format!(
+            "vault record {} has an exhausted version",
+            record.id
+        ));
+    }
+    Ok(snapshot)
 }
 
 fn read() -> Result<VaultStore, String> {
@@ -966,8 +974,14 @@ fn operation_guard() -> Result<OperationGuard, String> {
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return Err(std::io::Error::last_os_error().to_string());
+        loop {
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+                break;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error.to_string());
+            }
         }
     }
     #[cfg(windows)]
@@ -1138,11 +1152,12 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                     let (remote, vmk) = remote_and_key(&p.recovery)?;
                     let mut snapshot =
                         decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
-                    let version = snapshot
-                        .records
-                        .iter()
-                        .find(|r| r.id == p.id)
-                        .map_or(1, |r| r.version + 1);
+                    let version = match snapshot.records.iter().find(|r| r.id == p.id) {
+                        Some(record) => record.version.checked_add(1).ok_or_else(|| {
+                            format!("vault record {} has an exhausted version", record.id)
+                        })?,
+                        None => 1,
+                    };
                     snapshot.records.retain(|r| r.id != p.id);
                     let (modified_at, device_id) = mutation_stamp()?;
                     snapshot.records.push(PlainRecord {
@@ -1200,11 +1215,12 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                     let (remote, vmk) = remote_and_key(&p.recovery)?;
                     let mut snapshot =
                         decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
-                    let version = snapshot
-                        .records
-                        .iter()
-                        .find(|r| r.id == p.id)
-                        .map_or(1, |r| r.version + 1);
+                    let version = match snapshot.records.iter().find(|r| r.id == p.id) {
+                        Some(record) => record.version.checked_add(1).ok_or_else(|| {
+                            format!("vault record {} has an exhausted version", record.id)
+                        })?,
+                        None => 1,
+                    };
                     snapshot.records.retain(|r| r.id != p.id);
                     let (modified_at, device_id) = mutation_stamp()?;
                     snapshot.records.push(PlainRecord {

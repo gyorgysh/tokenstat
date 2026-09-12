@@ -39,7 +39,7 @@ pub fn list(
     };
     match list_once(repo, scope, state, limit, &credential) {
         Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
-            let refreshed = auth::refresh_stored(&repo.host)?;
+            let refreshed = auth::refresh_stored(&repo.host, credential.bearer())?;
             list_once(repo, scope, state, limit, &refreshed).map_err(Into::into)
         }
         result => result.map_err(Into::into),
@@ -84,7 +84,7 @@ fn list_once(
         .get("x-ratelimit-remaining")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
-    let text = response.text().map_err(ForgeError::from)?;
+    let text = read_response_text(response)?;
     match status.as_u16() {
         401 => Err(HttpFailure::Unauthorized),
         403 if remaining == Some(0) => Err(HttpFailure::Forge(ForgeError::RateLimited { reset })),
@@ -107,7 +107,7 @@ pub fn view(repo: &Repo, number: u32) -> Result<PullDetail, ForgeError> {
     };
     match view_once(repo, number, &credential) {
         Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
-            let refreshed = auth::refresh_stored(&repo.host)?;
+            let refreshed = auth::refresh_stored(&repo.host, credential.bearer())?;
             view_once(repo, number, &refreshed).map_err(Into::into)
         }
         result => result.map_err(Into::into),
@@ -139,7 +139,7 @@ pub fn timeline(
     };
     match timeline_once(repo, number, cursor, &credential) {
         Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
-            let refreshed = auth::refresh_stored(&repo.host)?;
+            let refreshed = auth::refresh_stored(&repo.host, credential.bearer())?;
             timeline_once(repo, number, cursor, &refreshed).map_err(Into::into)
         }
         result => result.map_err(Into::into),
@@ -173,7 +173,7 @@ pub fn diff_text(repo: &Repo, number: u32) -> Result<String, ForgeError> {
     };
     match diff_once(repo, number, &credential) {
         Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
-            let refreshed = auth::refresh_stored(&repo.host)?;
+            let refreshed = auth::refresh_stored(&repo.host, credential.bearer())?;
             diff_once(repo, number, &refreshed).map_err(Into::into)
         }
         result => result.map_err(Into::into),
@@ -225,7 +225,7 @@ fn response_text(response: reqwest::blocking::Response) -> Result<String, HttpFa
         .get("x-ratelimit-remaining")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
-    let text = response.text().map_err(ForgeError::from)?;
+    let text = read_response_text(response)?;
     match status.as_u16() {
         401 => Err(HttpFailure::Unauthorized),
         403 if remaining == Some(0) => Err(HttpFailure::Forge(ForgeError::RateLimited { reset })),
@@ -239,6 +239,27 @@ fn response_text(response: reqwest::blocking::Response) -> Result<String, HttpFa
         )))),
         _ => Ok(text),
     }
+}
+
+/// Read a forge body through the `Read` impl with a hard cap.
+///
+/// The host in a workspace git remote is attacker-influenced, so it must not
+/// decide how much memory one answer costs. A body over the cap becomes an
+/// error rather than being silently truncated.
+fn read_response_text(response: reqwest::blocking::Response) -> Result<String, HttpFailure> {
+    use std::io::Read;
+    const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    response
+        .take(MAX_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| HttpFailure::Forge(ForgeError::Io(error)))?;
+    if bytes.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err(HttpFailure::Forge(ForgeError::Api(format!(
+            "forge response exceeded {MAX_RESPONSE_BYTES} bytes"
+        ))));
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn rate_limit_reset(response: &reqwest::blocking::Response) -> Option<u64> {
@@ -274,7 +295,7 @@ pub fn availability(repo: &Repo) -> Result<Availability, ForgeError> {
     };
     match availability_once(repo, &credential) {
         Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
-            let refreshed = auth::refresh_stored(&repo.host)?;
+            let refreshed = auth::refresh_stored(&repo.host, credential.bearer())?;
             availability_once(repo, &refreshed).map_err(Into::into)
         }
         result => result.map_err(Into::into),
@@ -296,7 +317,7 @@ pub fn connection(host: &str) -> Result<ForgeConnection, ForgeError> {
     };
     match connection_once(&repo, &credential) {
         Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
-            let refreshed = auth::refresh_stored(host)?;
+            let refreshed = auth::refresh_stored(host, credential.bearer())?;
             connection_once(&repo, &refreshed).map_err(Into::into)
         }
         result => result.map_err(Into::into),
@@ -460,7 +481,7 @@ fn get_json<T: DeserializeOwned>(
         .send()
         .map_err(ForgeError::from)?;
     let status = response.status();
-    let text = response.text().map_err(ForgeError::from)?;
+    let text = read_response_text(response)?;
     match status.as_u16() {
         401 => Err(HttpFailure::Unauthorized),
         403 => Err(HttpFailure::Forbidden),

@@ -115,25 +115,59 @@ final class LineNumberRuler: NSRulerView {
         }
     }
 
+    /// What the cached line starts were built from and from which text.
+    private var cachedText = ""
+    private var cachedLength = -1
+    private var cachedLineStarts: [Int] = [0]
+
     /// One-based line for a character offset.
     ///
     /// Counts newlines rather than enumerating lines. `enumerateSubstrings`
     /// with `.byLines` yields a substring for the partial line the offset sits
     /// inside, so counting those puts every caret one line too far down except
     /// when it happens to sit exactly on a line break.
+    ///
+    /// The starts are cached because every draw asks for two line numbers (the
+    /// caret's and the first visible line's), and each lookup used to walk the
+    /// file from offset 0: two full walks of a large buffer on the main thread
+    /// per draw. The cache is keyed on the text it was counted from, so an
+    /// edit of the same length does not reuse stale starts.
     private func lineNumber(for location: Int, in text: NSString) -> Int {
         guard location > 0, location <= text.length else { return 1 }
-        var line = 1
-        var index = 0
-        while index < location {
+        let starts = lineStarts(in: text)
+        // The last line start at or before the offset is its line.
+        var low = 0
+        var high = starts.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if starts[mid] <= location {
+                low = mid
+            } else {
+                high = mid - 1
+            }
+        }
+        return low + 1
+    }
+
+    /// Offsets at which each line begins, counted once per distinct text.
+    private func lineStarts(in text: NSString) -> [Int] {
+        if text.length == cachedLength, cachedText == (text as String) {
+            return cachedLineStarts
+        }
+        var starts: [Int] = [0]
+        var from = 0
+        while from < text.length {
             let found = text.range(
-                of: "\n", range: NSRange(location: index, length: location - index)
+                of: "\n", options: [], range: NSRange(location: from, length: text.length - from)
             )
             guard found.location != NSNotFound else { break }
-            line += 1
-            index = found.location + 1
+            from = found.location + 1
+            starts.append(from)
         }
-        return line
+        cachedText = text as String
+        cachedLength = text.length
+        cachedLineStarts = starts
+        return starts
     }
 }
 #endif

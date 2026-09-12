@@ -75,51 +75,95 @@ private extension Image {
 /// the layout (see `Avatar`), and because the same face is drawn on Home, in
 /// the sidebar footer, and on the Account screen: fetching it three times to
 /// show it three times is a request nobody asked for.
+///
+/// The store is an `NSCache` with count and size limits, so a session that
+/// looks at a hundred people gives the bitmaps back under pressure instead of
+/// holding every face it has ever seen. Fetching and decoding both happen off
+/// the main actor: only the finished `Image` comes back to it.
 @MainActor
 final class AvatarCache {
     static let shared = AvatarCache()
 
-    private var decoded: [String: Image] = [:]
+    private final class Held {
+        let image: Image
+        init(_ image: Image) { self.image = image }
+    }
+
+    private let decoded = NSCache<NSString, Held>()
     /// In flight fetches, so three `Avatar` views for one account share a
     /// single request instead of racing each other.
-    private var pending: [String: Task<Image?, Never>] = [:]
+    private var pending: [String: Task<(image: Image, bytes: Int)?, Never>] = [:]
+
+    init() {
+        decoded.countLimit = 128
+        // The cost is the downloaded byte count, so this really is a cap on
+        // how many bytes of pictures are held at once.
+        decoded.totalCostLimit = 64 * 1024 * 1024
+    }
 
     /// Already decoded, or nil. Synchronous so the first frame can paint the
     /// picture instead of the letter when it is a cache hit.
     func cached(_ url: String) -> Image? {
-        decoded[url]
+        decoded.object(forKey: url as NSString)?.image
     }
 
     func image(for url: String) async -> Image? {
         let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else { return nil }
-        if let hit = decoded[url] { return hit }
-        if let running = pending[url] { return await running.value }
+        if let hit = decoded.object(forKey: url as NSString) { return hit.image }
+        if let running = pending[url] { return await running.value?.image }
 
-        let task = Task<Image?, Never> {
-            guard let parsed = URL(string: url),
-                  let (data, response) = try? await URLSession.shared.data(from: parsed)
-            else {
-                return nil
-            }
-            // A 404 body is not a picture. Treating any bytes as an image is
-            // how a missing upload became a random face.
-            if let http = response as? HTTPURLResponse,
-               !(200..<300).contains(http.statusCode)
-            {
-                return nil
-            }
-            #if os(macOS)
-            return NSImage(data: data).map(Image.init(nsImage:))
-            #else
-            return UIImage(data: data).map(Image.init(uiImage:))
-            #endif
+        let task = Task.detached(priority: .utility) {
+            await AvatarFetch.image(from: url)
         }
         pending[url] = task
-        let image = await task.value
+        let fetched = await task.value
         pending[url] = nil
-        if let image { decoded[url] = image }
-        return image
+        if let fetched {
+            decoded.setObject(Held(fetched.image), forKey: url as NSString, cost: fetched.bytes)
+        }
+        return fetched?.image
+    }
+}
+
+/// Fetching and decoding one avatar, away from the main actor.
+///
+/// The download streams to a temporary file, so a body larger than the cap is
+/// rejected by its size before any of it is read into memory and decoded.
+private enum AvatarFetch {
+    /// Avatars are small uploads. Four megabytes is already absurd; more than
+    /// that is a response doing something other than showing a face.
+    static let byteLimit = 4 * 1024 * 1024
+
+    static func image(from url: String) async -> (image: Image, bytes: Int)? {
+        guard let parsed = URL(string: url) else { return nil }
+        var request = URLRequest(url: parsed)
+        request.timeoutInterval = 15
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        guard let (file, response) = try? await URLSession.shared.download(for: request) else {
+            return nil
+        }
+        defer { try? FileManager.default.removeItem(at: file) }
+        // A 404 body is not a picture. Treating any bytes as an image is
+        // how a missing upload became a random face.
+        if let http = response as? HTTPURLResponse {
+            guard (200..<300).contains(http.statusCode) else { return nil }
+            guard http.expectedContentLength <= Int64(byteLimit) else { return nil }
+        }
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+              let size = (attributes[.size] as? NSNumber)?.intValue,
+              size > 0, size <= byteLimit,
+              let data = try? Data(contentsOf: file, options: .mappedIfSafe)
+        else {
+            return nil
+        }
+        #if os(macOS)
+        guard let image = NSImage(data: data) else { return nil }
+        return (Image(nsImage: image), size)
+        #else
+        guard let image = UIImage(data: data) else { return nil }
+        return (Image(uiImage: image), size)
+        #endif
     }
 }
 

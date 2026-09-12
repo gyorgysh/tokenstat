@@ -2,6 +2,7 @@ use anstream::println;
 use anyhow::Result;
 use tokenstat_core::Store;
 
+use super::{json_opt, json_string};
 use crate::ui::{self, BOLD, DIM, accent, good, warn};
 
 /// Report remote fetch outcomes after scan or `tokenstat fetch`.
@@ -13,15 +14,12 @@ pub fn fetch_reports(reports: &[tokenstat_sync::FetchReport], json: bool) -> Res
                 print!(",");
             }
             print!(
-                r#"{{"vendor":"{}","events":{},"from_cache":{},"skipped_no_token":{},"message":{}}}"#,
-                r.vendor,
+                r#"{{"vendor":{},"events":{},"from_cache":{},"skipped_no_token":{},"message":{}}}"#,
+                json_string(r.vendor),
                 r.events,
                 r.from_cache,
                 r.skipped_no_token,
-                r.message
-                    .as_deref()
-                    .map(|s| format!("\"{}\"", s.replace('"', "\\\"")))
-                    .unwrap_or_else(|| "null".into()),
+                json_opt(r.message.as_deref()),
             );
         }
         println!("]");
@@ -89,8 +87,10 @@ pub fn auth(
                     None => "null",
                 };
                 print!(
-                    r#"{{"vendor":"{}","present":{},"source":{}}}"#,
-                    s.vendor, s.present, source
+                    r#"{{"vendor":{},"present":{},"source":{}}}"#,
+                    json_string(s.vendor),
+                    s.present,
+                    source
                 );
             }
             println!("]");
@@ -179,8 +179,12 @@ pub fn profile_login(host: Option<&str>, json: bool) -> Result<()> {
     let result = tokenstat_sync::login(host).map_err(|e| anyhow::anyhow!("{e}"))?;
     if json {
         println!(
-            r#"{{"host":"{}","handle":"{}","machine":"{}","schema_min_v":{},"schema_max_v":{}}}"#,
-            result.host, result.handle, result.machine, result.schema_min_v, result.schema_max_v
+            r#"{{"host":{},"handle":{},"machine":{},"schema_min_v":{},"schema_max_v":{}}}"#,
+            json_string(&result.host),
+            json_string(&result.handle),
+            json_string(&result.machine),
+            result.schema_min_v,
+            result.schema_max_v
         );
         return Ok(());
     }
@@ -207,8 +211,12 @@ pub fn profile_login_code(host: Option<&str>, code: &str, json: bool) -> Result<
     let result = tokenstat_sync::login_with_code(host, code).map_err(|e| anyhow::anyhow!("{e}"))?;
     if json {
         println!(
-            r#"{{"host":"{}","handle":"{}","machine":"{}","schema_min_v":{},"schema_max_v":{}}}"#,
-            result.host, result.handle, result.machine, result.schema_min_v, result.schema_max_v
+            r#"{{"host":{},"handle":{},"machine":{},"schema_min_v":{},"schema_max_v":{}}}"#,
+            json_string(&result.host),
+            json_string(&result.handle),
+            json_string(&result.machine),
+            result.schema_min_v,
+            result.schema_max_v
         );
         return Ok(());
     }
@@ -285,7 +293,7 @@ fn maybe_install_linked_schedules(host: Option<&str>, quiet: bool) {
 pub fn profile_logout(host: Option<&str>, json: bool) -> Result<()> {
     let host = tokenstat_sync::logout(host).map_err(|e| anyhow::anyhow!("{e}"))?;
     if json {
-        println!(r#"{{"host":"{host}","logged_out":true}}"#);
+        println!(r#"{{"host":{},"logged_out":true}}"#, json_string(&host));
         return Ok(());
     }
     println!();
@@ -434,12 +442,12 @@ pub fn profile_sync(
 
     if json {
         println!(
-            r#"{{"host":"{}","from":"{}","to":"{}","rows":{},"idempotency_key":"{}","prune":{}}}"#,
-            result.host,
-            result.window.from,
-            result.window.to,
+            r#"{{"host":{},"from":{},"to":{},"rows":{},"idempotency_key":{},"prune":{}}}"#,
+            json_string(&result.host),
+            json_string(&result.window.from),
+            json_string(&result.window.to),
             result.rows,
-            result.idempotency_key,
+            json_string(&result.idempotency_key),
             prune
         );
         return Ok(());
@@ -498,7 +506,10 @@ pub fn profile_sync_scheduled(
         tokenstat_sync::ScheduledOutcome::Held { until } => {
             let until = until.unwrap_or_else(|| "later".into());
             if json {
-                println!(r#"{{"skipped":"rate_limited","next_allowed_at":"{until}"}}"#);
+                println!(
+                    r#"{{"skipped":"rate_limited","next_allowed_at":{}}}"#,
+                    json_string(&until)
+                );
             } else {
                 println!("not due yet, next sync allowed at {until}");
             }
@@ -506,8 +517,10 @@ pub fn profile_sync_scheduled(
         }
         tokenstat_sync::ScheduledOutcome::Deferred { reason } => {
             if json {
-                let escaped = reason.replace('\\', "\\\\").replace('"', "\\\"");
-                println!(r#"{{"skipped":"deferred","reason":"{escaped}"}}"#);
+                println!(
+                    r#"{{"skipped":"deferred","reason":{}}}"#,
+                    json_string(&reason)
+                );
             } else if reason.contains("database is locked")
                 || reason.contains("database is busy")
                 || reason.contains("database error")
@@ -531,12 +544,12 @@ pub fn profile_sync_scheduled(
         tokenstat_sync::ScheduledOutcome::Synced(result) => {
             if json {
                 println!(
-                    r#"{{"host":"{}","from":"{}","to":"{}","rows":{},"idempotency_key":"{}"}}"#,
-                    result.host,
-                    result.window.from,
-                    result.window.to,
+                    r#"{{"host":{},"from":{},"to":{},"rows":{},"idempotency_key":{}}}"#,
+                    json_string(&result.host),
+                    json_string(&result.window.from),
+                    json_string(&result.window.to),
                     result.rows,
-                    result.idempotency_key
+                    json_string(&result.idempotency_key)
                 );
             } else {
                 println!(

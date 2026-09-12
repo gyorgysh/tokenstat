@@ -278,6 +278,8 @@ fn wait_bounded(child: &mut std::process::Child) -> std::io::Result<std::process
             Some(status) => return Ok(status),
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
+                // Reap before reporting, or the killed helper stays a zombie.
+                let _ = child.wait();
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
                     "Could not read the journal: timed out",

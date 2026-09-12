@@ -11,7 +11,9 @@
 //! Argument parsing and output formatting only. Collection, deduplication, and
 //! aggregation belong in `tokenstat-core`.
 
-#![forbid(unsafe_code)]
+// `unsafe_code` is denied crate-wide; the interactive client is the one place
+// that allows it locally, for the libc signal handlers that restore a terminal.
+#![deny(unsafe_code)]
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod host_command;
@@ -465,7 +467,7 @@ fn main() -> Result<()> {
     }
 
     if let Command::Mcp = command {
-        return tokenstat_mcp::serve();
+        return tokenstat_mcp::serve(Some(&db_path));
     }
 
     if let Command::Pricing { refresh, force } = command {

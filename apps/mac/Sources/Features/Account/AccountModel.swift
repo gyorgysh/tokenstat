@@ -25,7 +25,9 @@ final class AccountModel {
         didSet {
             let previous = WorkSessionContext.shared.scope
             WorkSessionContext.shared.update(account: account)
-            if previous != WorkSessionContext.shared.scope {
+            // Nil is the unknown scope of a cold launch, not a different owner.
+            // Purging on the first load threw the cache away every time.
+            if let previous, previous != WorkSessionContext.shared.scope {
                 WorkSearchHistory.invalidate(except: WorkSessionContext.shared.scope)
                 // Full downloaded files and OS preview copies are reconstructible.
                 // Clear them when ownership changes and invalidate in-flight writes.
@@ -162,9 +164,10 @@ final class AccountModel {
                 deleteKey: { WorkCacheKey.delete(for: $0) },
                 clear: { _ = try await Bridge.cacheClearScope(scope: $0) })
             guard generation == accountLoadGeneration else { return }
-            let status = try? await Bridge.remoteStatus()
-            guard generation == accountLoadGeneration else { return }
-            remoteStatus = status
+            if let status = try? await Bridge.remoteStatus() {
+                guard generation == accountLoadGeneration else { return }
+                remoteStatus = status
+            }
             #if os(macOS)
             let limits = (try? await Bridge.limitsSync()) ?? LimitsSyncState()
             guard generation == accountLoadGeneration else { return }
@@ -188,7 +191,11 @@ final class AccountModel {
     }
 
     func loadTraffic() async {
-        remoteStatus = try? await Bridge.remoteStatus()
+        // A failed refresh is not a host that reports no traffic. Keep the
+        // last answer rather than replacing it with nil.
+        if let status = try? await Bridge.remoteStatus() {
+            remoteStatus = status
+        }
     }
 
     #if os(macOS)

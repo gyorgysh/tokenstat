@@ -115,7 +115,7 @@ fn fold(events: &[Value]) -> Folded {
     folded
 }
 
-fn is_shell(verb: &str) -> bool {
+pub(crate) fn is_shell(verb: &str) -> bool {
     let verb = verb.to_ascii_lowercase();
     verb.contains("bash") || verb.contains("shell") || verb.contains("command") || verb == "run"
 }

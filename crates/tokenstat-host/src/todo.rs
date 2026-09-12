@@ -6,6 +6,7 @@
 //! here writes to a repository. It moves cards.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,10 @@ pub const COLUMNS: [&str; 4] = ["backlog", "doing", "done", "archive"];
 const ARCHIVE_AFTER_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 /// Extra Done cards above this count are archived, oldest first.
 const DONE_CAP: usize = 20;
+
+/// Separates cards created in the same millisecond so a fast client cannot
+/// mint the same id twice and overwrite a card.
+static CARD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Whether a card is executable work or a private reminder.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -179,7 +184,13 @@ impl Board {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let tmp = self.path.with_extension("json.tmp");
+        // A unique suffix keeps two savers from interleaving into one temporary.
+        static SAVE_SEQ: AtomicU64 = AtomicU64::new(0);
+        let tmp = self.path.with_extension(format!(
+            "json.tmp.{}.{}",
+            std::process::id(),
+            SAVE_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::write(&tmp, &body).map_err(|e| e.to_string())?;
         std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
     }
@@ -293,7 +304,11 @@ impl Board {
         // saved as a reminder of the work before anyone picks an agent.
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         if card.id.is_empty() {
-            card.id = format!("todo-{}", Self::now_ms());
+            card.id = format!(
+                "todo-{}-{}",
+                Self::now_ms(),
+                CARD_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            );
         }
         if cards.iter().any(|c| c.id == card.id) {
             return Err(format!("a card with id {} already exists", card.id));

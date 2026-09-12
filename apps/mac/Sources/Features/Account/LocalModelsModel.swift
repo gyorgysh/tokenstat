@@ -34,7 +34,10 @@ final class LocalModelsModel {
     private(set) var preferenceRevision = 0
 
     func isEnabled(_ providerID: String) -> Bool {
-        LocalProviderPreference.isEnabled(providerID)
+        // Reading the revision makes a setEnabled bump observable, so the row
+        // redraws instead of sitting on the old switch position.
+        _ = preferenceRevision
+        return LocalProviderPreference.isEnabled(providerID)
     }
 
     func setEnabled(_ enabled: Bool, for providerID: String) {

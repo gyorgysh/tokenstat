@@ -18,12 +18,36 @@ pub struct BudgetLimits {
     pub monthly_usd: Option<f64>,
 }
 
+/// A list-rate value and the models it could not price.
+///
+/// `usd` is a floor when `unpriced_models` is not empty: those models hold
+/// tokens in the archive and have no rate anywhere, and treating them as zero
+/// is how a spend figure reads as complete when it is not.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ListValue {
+    pub usd: f64,
+    /// Model ids with no list rate or estimate, raw as recorded.
+    pub unpriced_models: Vec<String>,
+}
+
+impl ListValue {
+    /// True when `usd` accounts for every token in the buckets.
+    pub fn is_complete(&self) -> bool {
+        self.unpriced_models.is_empty()
+    }
+}
+
 /// How today and this calendar month sit against the configured caps.
 #[derive(Debug, Clone)]
 pub struct BudgetStatus {
     pub limits: BudgetLimits,
     pub today_usd: f64,
     pub month_usd: f64,
+    /// Models today's figure could not price. Non-empty means `today_usd` is a
+    /// floor, not a total, and a ratio against the cap understates the spend.
+    pub today_unpriced: Vec<String>,
+    /// As [`Self::today_unpriced`], for the month.
+    pub month_unpriced: Vec<String>,
     pub today_date: String,
     pub month_key: String,
 }
@@ -49,6 +73,18 @@ impl BudgetStatus {
 
     pub fn over_monthly(&self) -> bool {
         self.month_ratio().is_some_and(|r| r >= 1.0)
+    }
+
+    /// True when today's figure is a lower bound because some model has no
+    /// price at all.
+    pub fn today_is_floor(&self) -> bool {
+        !self.today_unpriced.is_empty()
+    }
+
+    /// True when this month's figure is a lower bound because some model has
+    /// no price at all.
+    pub fn month_is_floor(&self) -> bool {
+        !self.month_unpriced.is_empty()
     }
 }
 
@@ -77,14 +113,44 @@ impl BudgetLimits {
     }
 }
 
-/// List-rate value of every model bucket matching `q`.
-pub fn list_value(store: &Store, q: &Query, prices: &PriceTable) -> Result<f64, CoreError> {
+/// List-rate value of every model bucket matching `q`, plus the models it
+/// could not value.
+///
+/// The number alone cannot say whether it covers the usage: an unpriced model
+/// contributes nothing, and reporting only the sum presents that as a complete
+/// figure. Callers that show money should use this and mark the floor.
+pub fn list_value_detail(
+    store: &Store,
+    q: &Query,
+    prices: &PriceTable,
+) -> Result<ListValue, CoreError> {
     let buckets = store.report(GroupBy::Model, q)?;
-    let total: EquivalentValue = buckets
-        .iter()
-        .filter_map(|b| EquivalentValue::price(prices, &b.key, &b.counters))
-        .sum();
-    Ok(total.dollars())
+    let mut micros = 0i64;
+    let mut unpriced_models: Vec<String> = Vec::new();
+    for b in &buckets {
+        match EquivalentValue::price(prices, &b.key, &b.counters) {
+            Some(v) => micros = micros.saturating_add(v.micros()),
+            None => {
+                // An empty bucket contributes nothing and is not a coverage
+                // gap; only usage that could not be valued is.
+                if b.counters.total() > 0 && !unpriced_models.contains(&b.key) {
+                    unpriced_models.push(b.key.clone());
+                }
+            }
+        }
+    }
+    Ok(ListValue {
+        usd: EquivalentValue::from_micros(micros).dollars(),
+        unpriced_models,
+    })
+}
+
+/// List-rate value of every model bucket matching `q`.
+///
+/// The bare number is convenient and cannot say whether it is complete;
+/// [`list_value_detail`] also reports the models nothing could price.
+pub fn list_value(store: &Store, q: &Query, prices: &PriceTable) -> Result<f64, CoreError> {
+    Ok(list_value_detail(store, q, prices)?.usd)
 }
 
 /// Evaluate today's and this month's list-rate spend against stored limits.
@@ -99,7 +165,7 @@ pub fn status(
     let month_key = today_date.get(..7).unwrap_or(&today_date).to_string();
     let month_start = format!("{month_key}-01");
 
-    let today_usd = list_value(
+    let today_value = list_value_detail(
         store,
         &Query {
             since: Some(today_date.clone()),
@@ -108,7 +174,7 @@ pub fn status(
         },
         prices,
     )?;
-    let month_usd = list_value(
+    let month_value = list_value_detail(
         store,
         &Query {
             since: Some(month_start),
@@ -120,8 +186,10 @@ pub fn status(
 
     Ok(BudgetStatus {
         limits,
-        today_usd,
-        month_usd,
+        today_usd: today_value.usd,
+        month_usd: month_value.usd,
+        today_unpriced: today_value.unpriced_models,
+        month_unpriced: month_value.unpriced_models,
         today_date,
         month_key,
     })
@@ -216,5 +284,39 @@ mod tests {
         let st = status(&store, &tz, &prices()).unwrap();
         assert!((st.today_usd - 10.0).abs() < 1e-6);
         assert!(st.over_daily());
+        assert!(!st.today_is_floor());
+    }
+
+    #[test]
+    fn an_unpriced_model_marks_the_value_as_a_floor_not_a_zero_total() {
+        let mut store = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let ev = UsageEvent {
+            id: EventId::derive(&["budget-unpriced-test"]),
+            source: SourceId::ClaudeCode,
+            ts: Timestamp::from_ms(jiff::Timestamp::now().as_millisecond()),
+            model: "model-with-no-price".into(),
+            session: "s".into(),
+            project: "p".into(),
+            counters: Counters {
+                input_fresh: Some(1_000_000),
+                output: Some(0),
+                cache_read: None,
+                cache_write_5m: None,
+                cache_write_1h: None,
+            },
+            extras: crate::model::Extras::default(),
+            billing: BillingMode::Plan,
+            confidence: Confidence::Exact,
+        };
+        store.insert_events(&[ev], &tz).unwrap();
+
+        let st = status(&store, &tz, &prices()).unwrap();
+        assert_eq!(st.today_usd, 0.0);
+        // The zero must not read as "nothing was spent"; a caller can now say
+        // the figure is an unpriceable floor instead of presenting it complete.
+        assert!(st.today_is_floor());
+        assert_eq!(st.today_unpriced, vec!["model-with-no-price"]);
+        assert!(st.month_is_floor());
     }
 }

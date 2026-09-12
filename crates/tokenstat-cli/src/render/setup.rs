@@ -464,7 +464,7 @@ pub fn schedule(
     println!("  {DIM}tokenstat keeps whatever it has already read.{DIM:#}");
     println!();
 
-    print_unit(platform, Unit::Scan, &exe, interval);
+    print_unit(platform, Unit::Scan, &exe, interval)?;
     if want_sync {
         println!();
         println!("  {BOLD}Keep the profile current too{BOLD:#}");
@@ -473,7 +473,7 @@ pub fn schedule(
         println!("  {DIM}scanning is not. It waits its turn and skips a run the server{DIM:#}");
         println!("  {DIM}would refuse, so nothing here has to be tuned.{DIM:#}");
         println!();
-        print_unit(platform, Unit::Sync, &exe, sync_interval);
+        print_unit(platform, Unit::Sync, &exe, sync_interval)?;
     }
     if want_update {
         println!();
@@ -484,7 +484,7 @@ pub fn schedule(
         println!("  {DIM}version before it replaces this binary. If the new one cannot{DIM:#}");
         println!("  {DIM}run, the old one goes back.{DIM:#}");
         println!();
-        print_unit(platform, Unit::Update, &exe, update_interval);
+        print_unit(platform, Unit::Update, &exe, update_interval)?;
     }
     println!();
     Ok(())
@@ -497,7 +497,7 @@ fn print_unit(
     unit: crate::schedule::Unit,
     exe: &str,
     interval: u64,
-) {
+) -> Result<()> {
     use crate::schedule::{self as sched, Platform};
 
     let label = unit.label();
@@ -522,7 +522,7 @@ fn print_unit(
             println!("  Then: launchctl load -w {path}");
         }
         Platform::SystemdUser => {
-            let (service, timer) = sched::systemd_units(unit, exe, interval);
+            let (service, timer) = sched::systemd_units(unit, exe, interval)?;
             println!("  ~/.config/systemd/user/{label}.service");
             println!();
             for line in service.lines() {
@@ -544,4 +544,5 @@ fn print_unit(
             println!("  {DIM}or run: tokenstat schedule --install{DIM:#}");
         }
     }
+    Ok(())
 }

@@ -362,7 +362,7 @@ private struct WorkflowBudgetField: View {
             model.setWorkingBudgetMinutes(0)
             return
         }
-        let value = UInt64(minutes) ?? 180
+        let value = min(UInt64(minutes) ?? 180, UInt64.max / 60)
         model.setWorkingBudgetMinutes(value)
     }
 }

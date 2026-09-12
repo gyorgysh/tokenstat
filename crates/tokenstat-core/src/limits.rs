@@ -522,11 +522,17 @@ impl CodexLimitScan {
                 label: window_label(minutes),
                 scope: Some(scope),
                 percent,
-                resets_at_ms: reported.resets_at.map(|s| s * 1000).or_else(|| {
-                    reported
-                        .resets_in_seconds
-                        .map(|s| observed_at_ms + s * 1000)
-                }),
+                // The reset figures come from the rollout log. Saturating keeps
+                // a corrupt or absurd value from wrapping a deadline into the
+                // past and hiding a window that is still in force.
+                resets_at_ms: reported
+                    .resets_at
+                    .map(|s| s.saturating_mul(1000))
+                    .or_else(|| {
+                        reported
+                            .resets_in_seconds
+                            .map(|s| observed_at_ms.saturating_add(s.saturating_mul(1000)))
+                    }),
                 severity: LimitSeverity::from_percent(percent),
             };
             let key = (

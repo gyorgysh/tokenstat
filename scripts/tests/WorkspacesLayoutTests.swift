@@ -16,7 +16,7 @@ import Foundation
 
         fresh.apply(
             order: WorkspacesLayout.moved(
-                fresh.order, from: IndexSet(integer: 0), to: 3
+                fresh.order, from: IndexSet(integer: 0), to: 2
             ),
             hidden: [.sessions],
             preset: nil
@@ -46,9 +46,7 @@ import Foundation
             from: IndexSet(integer: 0),
             to: 2
         )
-        assert(moved == [.recentChats, .sessions, .folders]
-            || moved == [.sessions, .folders, .recentChats]
-            || moved == [.recentChats, .sessions, .folders])
+        assert(moved == [.sessions, .recentChats, .folders])
         // Visible was [folders, sessions]; move folders after sessions.
         assert(moved.filter { $0 != .recentChats } == [.sessions, .folders])
 

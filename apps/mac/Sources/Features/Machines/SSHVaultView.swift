@@ -40,7 +40,9 @@ final class SSHVaultModel {
     var unreachable: String? { status?.unreachable }
 
     func refresh() async {
-        status = try? await Bridge.sshVaultStatus()
+        if let fresh = try? await Bridge.sshVaultStatus() {
+            status = fresh
+        }
     }
 
     /// Keep the state honest while somebody is looking at it.

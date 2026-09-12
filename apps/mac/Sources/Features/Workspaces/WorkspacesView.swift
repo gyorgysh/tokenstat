@@ -105,7 +105,7 @@ struct WorkspacesView: View {
             .layoutPriority(1)
             Spacer()
             if let git = folder.git, git.isRepo {
-                BranchChip(workspaceID: folder.id, git: git) {
+                BranchChip(workspaceID: folder.id, git: git, model: model) {
                     await model.refresh()
                 }
                     // The chip keeps its whole shape whatever the path does:
@@ -531,7 +531,7 @@ private struct CommitBox: View {
 
     var body: some View {
         Group {
-            if hasChanges || isAhead || model.gitOutcome != nil {
+            if hasChanges || isAhead || model.gitOutcome(for: folder.id) != nil {
                 box
             }
         }
@@ -544,8 +544,8 @@ private struct CommitBox: View {
 
     private var box: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            if let outcome = model.gitOutcome {
-                let action = model.gitOutcomeAction
+            if let outcome = model.gitOutcome(for: folder.id) {
+                let action = model.gitOutcomeAction(for: folder.id)
                 Banner(
                     text: outcome.ok
                         ? (action?.done ?? "Done.")

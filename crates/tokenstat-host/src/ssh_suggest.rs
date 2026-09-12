@@ -670,7 +670,9 @@ fn matches_prefix(name: &str, prefix: &str) -> bool {
 }
 
 fn starts_with_fold(haystack: &str, needle: &str) -> bool {
-    haystack.len() >= needle.len() && haystack[..needle.len()].eq_ignore_ascii_case(needle)
+    haystack
+        .get(..needle.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(needle))
 }
 
 fn contains_fold(haystack: &str, needle: &str) -> bool {
@@ -765,6 +767,14 @@ mod tests {
         let t = token("cat /var/My\\ Files/re");
         assert_eq!(t.text, "/var/My\\ Files/re");
         assert_eq!(t.literal(), "/var/My Files/re");
+    }
+
+    #[test]
+    fn a_multibyte_prefix_never_slices_mid_character() {
+        assert!(!matches_prefix("über.txt", "u"));
+        assert!(matches_prefix("über.txt", "ü"));
+        assert!(matches_prefix("über.txt", "über"));
+        assert!(!matches_prefix("über.txt", "überx"));
     }
 
     #[test]

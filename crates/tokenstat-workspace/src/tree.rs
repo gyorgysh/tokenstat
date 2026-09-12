@@ -63,11 +63,12 @@ pub fn list(root: &Path, relative: &str) -> Result<Vec<TreeEntry>, TreeError> {
         if name == ".git" {
             continue;
         }
-        // `file_type` does not follow symlinks, so a link to a directory is
-        // reported as a link. Ask the target instead: a linked folder should
-        // open like the folder it is.
-        let is_dir = entry
-            .metadata()
+        // `entry.metadata()` is `symlink_metadata`, and `file_type()` does not
+        // follow either, so a link to a directory would be reported as a link.
+        // Ask the target instead: a linked folder should open like the folder
+        // it is, and only a link that cannot be resolved falls back to its own
+        // type.
+        let is_dir = std::fs::metadata(entry.path())
             .map(|m| m.is_dir())
             .unwrap_or(entry.file_type().map(|t| t.is_dir()).unwrap_or(false));
         let path = if relative.is_empty() {
@@ -188,21 +189,29 @@ fn mark_ignored(root: &Path, entries: &mut [TreeEntry]) {
         Err(_) => return,
     };
 
-    if let Some(mut stdin) = child.stdin.take() {
-        let payload: Vec<u8> = entries
-            .iter()
-            .flat_map(|e| {
-                let mut b = e.path.clone().into_bytes();
-                b.push(0);
-                b
-            })
-            .collect();
-        let _ = stdin.write_all(&payload);
-    }
+    // Both ends are pipes, and git answers as it consumes: writing the whole
+    // list before reading stdout can fill git's stdout pipe while git waits on
+    // stdin, with both sides blocked. Write from a second thread and read the
+    // answer on this one.
+    let mut stdin = child.stdin.take();
+    let payload: Vec<u8> = entries
+        .iter()
+        .flat_map(|e| {
+            let mut b = e.path.clone().into_bytes();
+            b.push(0);
+            b
+        })
+        .collect();
+    let writer = std::thread::spawn(move || {
+        if let Some(stdin) = stdin.as_mut() {
+            let _ = stdin.write_all(&payload);
+        }
+    });
 
     let Ok(out) = child.wait_with_output() else {
         return;
     };
+    let _ = writer.join();
     let ignored: std::collections::HashSet<&[u8]> = out
         .stdout
         .split(|b| *b == 0)

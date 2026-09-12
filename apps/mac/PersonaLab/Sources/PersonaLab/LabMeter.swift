@@ -88,7 +88,10 @@ enum LabBench {
             engine.advance(to: 0, mood: mood, moving: true)
         }
 
-        let frames = Int(seconds * 60)
+        // At least one frame: `1...frames` traps on an empty range when
+        // seconds is zero or negative, and a benchmark that runs nothing is
+        // better than one that crashes.
+        let frames = max(1, Int(seconds * 60))
         let started = DispatchTime.now().uptimeNanoseconds
         for frame in 1...frames {
             let time = Double(frame) / 60

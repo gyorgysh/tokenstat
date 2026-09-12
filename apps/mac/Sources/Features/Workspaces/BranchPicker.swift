@@ -12,6 +12,9 @@ import SwiftUI
 struct BranchPickerPresentation<Label: View>: View {
     let workspaceID: String
     let currentBranch: String?
+    /// The model, when the caller has one: a switch has to know about open
+    /// editor buffers before it moves the branch under them.
+    var model: WorkspacesModel? = nil
     let onChanged: () async -> Void
     @ViewBuilder let label: () -> Label
 
@@ -26,6 +29,7 @@ struct BranchPickerPresentation<Label: View>: View {
                 BranchPickerContent(
                     workspaceID: workspaceID,
                     currentBranch: currentBranch,
+                    model: model,
                     onChanged: onChanged,
                     dismiss: { isPresented = false }
                 )
@@ -37,6 +41,7 @@ struct BranchPickerPresentation<Label: View>: View {
                     BranchPickerContent(
                         workspaceID: workspaceID,
                         currentBranch: currentBranch,
+                        model: model,
                         onChanged: onChanged,
                         dismiss: { isPresented = false }
                     )
@@ -60,12 +65,16 @@ struct BranchPickerPresentation<Label: View>: View {
 struct BranchChip: View {
     let workspaceID: String
     var git: GitStatus
+    /// The model, when the caller has one, so a switch can check for unsaved
+    /// editor buffers first.
+    var model: WorkspacesModel? = nil
     let onChanged: () async -> Void
 
     var body: some View {
         BranchPickerPresentation(
             workspaceID: workspaceID,
             currentBranch: git.branch,
+            model: model,
             onChanged: onChanged
         ) {
             HStack(spacing: Theme.Space.xs) {
@@ -100,6 +109,9 @@ struct BranchChip: View {
 private struct BranchPickerContent: View {
     let workspaceID: String
     let currentBranch: String?
+    /// Nil on surfaces that have no model, where there is no buffer state to
+    /// check; those callers keep the old behaviour.
+    var model: WorkspacesModel?
     let onChanged: () async -> Void
     let dismiss: () -> Void
 
@@ -110,6 +122,15 @@ private struct BranchPickerContent: View {
     @State private var outcome: GitOutcome?
     @State private var isCreating = false
     @State private var newName = ""
+    /// A switch parked while the unsaved-work prompt is up.
+    @State private var pendingAction: PendingBranchAction?
+    @State private var confirmingUnsaved = false
+
+    /// A branch switch waiting on the user's answer about unsaved buffers.
+    private enum PendingBranchAction {
+        case checkout(GitBranch)
+        case create(String)
+    }
 
     private var filtered: [GitBranch] {
         guard !query.isEmpty else { return branches }
@@ -189,6 +210,27 @@ private struct BranchPickerContent: View {
         }
         .background(Theme.panel)
         .task { await load() }
+        // Three answers, because Cancel and Discard are different: one keeps
+        // the buffers, the other lets the switch drop them. Without this a
+        // branch move silently left editor buffers holding the old branch's
+        // text, one Save away from overwriting the new branch's file.
+        .confirmationDialog(
+            "Save changes before switching branches?",
+            isPresented: $confirmingUnsaved,
+            titleVisibility: .visible
+        ) {
+            Button("Save and switch") {
+                guard let action = pendingAction else { return }
+                Task { await perform(action, saveFirst: true, reloadAfter: false) }
+            }
+            Button("Discard and switch", role: .destructive) {
+                guard let action = pendingAction else { return }
+                Task { await perform(action, saveFirst: false, reloadAfter: true) }
+            }
+            Button("Cancel", role: .cancel) { pendingAction = nil }
+        } message: {
+            Text("Files open in this workspace have changes that are not written to disk.")
+        }
     }
 
     private var searchField: some View {
@@ -276,32 +318,73 @@ private struct BranchPickerContent: View {
     }
 
     private func checkout(_ branch: GitBranch) async {
-        workingID = branch.id
+        guard confirmUnsavedWork(.checkout(branch)) else { return }
+        await perform(.checkout(branch), saveFirst: false, reloadAfter: false)
+    }
+
+    private func create() async {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        guard confirmUnsavedWork(.create(name)) else { return }
+        await perform(.create(name), saveFirst: false, reloadAfter: false)
+    }
+
+    /// Park the action and raise the prompt when this workspace has unsaved
+    /// buffers; true means the caller may go straight ahead.
+    private func confirmUnsavedWork(_ action: PendingBranchAction) -> Bool {
+        guard model?.hasUnsavedWork(in: workspaceID) == true else { return true }
+        pendingAction = action
+        confirmingUnsaved = true
+        return false
+    }
+
+    /// Switch branch or create one, with the user's answer about unsaved
+    /// buffers applied.
+    ///
+    /// `reloadAfter` is the discard path: the buffers are read back once the
+    /// branch has moved, so a later save cannot write the old branch's text
+    /// over the new branch's file.
+    private func perform(
+        _ action: PendingBranchAction, saveFirst: Bool, reloadAfter: Bool
+    ) async {
+        pendingAction = nil
+        workingID = workingID(for: action)
         defer { workingID = nil }
+        if saveFirst, let model {
+            guard await model.saveAllDirty(in: workspaceID) else {
+                outcome = GitOutcome(
+                    ok: false,
+                    message: "The open files could not be saved, so the branch was not changed."
+                )
+                return
+            }
+        }
         do {
-            let result = try await Bridge.checkout(id: workspaceID, branch: branch)
+            let result: GitOutcome
+            switch action {
+            case let .checkout(branch):
+                result = try await Bridge.checkout(id: workspaceID, branch: branch)
+            case let .create(name):
+                result = try await Bridge.createBranch(
+                    id: workspaceID, name: name, from: currentBranch
+                )
+            }
             outcome = result
             guard result.ok else { return }
             await onChanged()
+            if reloadAfter, let model {
+                await model.discardUnsavedBuffers(in: workspaceID)
+            }
             dismiss()
         } catch {
             outcome = GitOutcome(ok: false, message: error.localizedDescription)
         }
     }
 
-    private func create() async {
-        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        workingID = "create"
-        defer { workingID = nil }
-        do {
-            let result = try await Bridge.createBranch(id: workspaceID, name: name, from: currentBranch)
-            outcome = result
-            guard result.ok else { return }
-            await onChanged()
-            dismiss()
-        } catch {
-            outcome = GitOutcome(ok: false, message: error.localizedDescription)
+    private func workingID(for action: PendingBranchAction) -> String {
+        switch action {
+        case let .checkout(branch): return branch.id
+        case .create: return "create"
         }
     }
 }

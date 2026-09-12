@@ -101,6 +101,10 @@ final class SocketTransport: Transport, @unchecked Sendable {
         // to the pool. The daemon may still be working on that request, and its
         // answer would arrive on the wire in front of the next call's, so the
         // socket is finished even though nothing about it failed.
+
+        // Whether a slot is already reserved for a fresh connection: `acquire`
+        // reserves one when it hands back no pooled connection.
+        var reserved = false
         if let pooled = try acquire(patience: patience) {
             do {
                 pooled.patience = patience
@@ -118,8 +122,17 @@ final class SocketTransport: Transport, @unchecked Sendable {
                 throw Self.silence(path: path, patience: patience)
             } catch {
                 release(pooled, reusable: false)
-                if Self.isMessageSend(method, params), pooled.wroteRequestBytes { throw Self.uncertainSend() }
+                if Self.isMutating(method, params), pooled.wroteRequestBytes { throw Self.uncertainSend() }
             }
+        } else {
+            reserved = true
+        }
+
+        // A pooled attempt that failed released its slot; a retry on a fresh
+        // connection needs one of its own, or `release` would give back a slot
+        // that was never counted and the ceiling would erode.
+        if !reserved {
+            try reserve(patience: patience)
         }
 
         let fresh: Connection
@@ -142,7 +155,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
             throw Self.silence(path: path, patience: patience)
         } catch {
             release(fresh, reusable: false)
-            if Self.isMessageSend(method, params), fresh.wroteRequestBytes { throw Self.uncertainSend() }
+            if Self.isMutating(method, params), fresh.wroteRequestBytes { throw Self.uncertainSend() }
             // A connection that was alive long enough to be opened and then
             // died before answering is a daemon that went away mid-call. The
             // same situation as a refused connect, and the bridge repairs it
@@ -180,7 +193,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
             throw Self.silence(path: path, patience: patience)
         } catch {
             release(fresh, reusable: false)
-            if Self.isMessageSend(method, params), fresh.wroteRequestBytes { throw Self.uncertainSend() }
+            if Self.isMutating(method, params), fresh.wroteRequestBytes { throw Self.uncertainSend() }
             throw Self.unreachable(path: path)
         }
     }
@@ -218,11 +231,33 @@ final class SocketTransport: Transport, @unchecked Sendable {
         .core(code: "delivery_unknown", message: "The connection closed before message delivery was confirmed. Keep the pending copy and check delivery.")
     }
 
-    private static func isMessageSend(_ method: String, _ params: String) -> Bool {
-        if method == "chat.send" { return true }
+    /// Methods whose re-delivery after a lost answer would apply the same work
+    /// a second time.
+    ///
+    /// A conservative list rather than a rule about verbs: anything not named
+    /// here retries on a fresh connection as before, which is what a read
+    /// needs and what a repeated idempotent write survives. A named method
+    /// whose request reached the wire but lost its answer throws
+    /// `delivery_unknown` instead, because sending it again could commit,
+    /// merge, delegate or type the same thing twice.
+    private static let mutatingMethods: Set<String> = [
+        "chat.send",
+        "workspace.commit",
+        "todo.delegate",
+        "automation.run",
+        "pty.write",
+        "ssh.session.write",
+        "pulls.merge",
+    ]
+
+    /// Whether a lost answer for this call must be reported rather than
+    /// retried. `remote.call` carries the peer's method in its params, and a
+    /// peer's write is still a write.
+    private static func isMutating(_ method: String, _ params: String) -> Bool {
+        if mutatingMethods.contains(method) { return true }
         guard method == "remote.call", let data = params.data(using: .utf8),
               let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
-        return value["method"] as? String == "chat.send"
+        return (value["method"] as? String).map(mutatingMethods.contains) ?? false
     }
 
     private static func silence(path: String, patience: TimeInterval) -> BridgeError {
@@ -250,9 +285,21 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// Whether the daemon refused this call because it is at its ceiling.
     ///
     /// It answers and then closes, so the connection is spent whatever the
-    /// caller does about the answer itself.
+    /// caller does about the answer itself. The substring is only a cheap
+    /// filter; the verdict comes from the decoded envelope, so a successful
+    /// result that happens to quote the code is not mistaken for a refusal and
+    /// sent again.
     private static func isBusyRefusal(_ response: String) -> Bool {
-        response.contains("\"host_busy\"")
+        guard response.contains("host_busy") else { return false }
+        struct Failure: Decodable { let code: String }
+        struct Refusal: Decodable {
+            let ok: Bool
+            let error: Failure?
+        }
+        guard let refusal = try? JSONDecoder().decode(Refusal.self, from: Data(response.utf8)) else {
+            return false
+        }
+        return !refusal.ok && refusal.error?.code == "host_busy"
     }
 
     /// Whether this call's work happens on another machine.
@@ -328,11 +375,30 @@ final class SocketTransport: Transport, @unchecked Sendable {
         }
     }
 
-    /// Open a connection for a slot reserved by `acquire` or `reserveUrgent`.
-    /// The caller owns the reservation: a failed connect must call
-    /// `abandonReservation`, a finished call must go through `release`.
+    /// Open a connection for a slot reserved by `acquire`, `reserve` or
+    /// `reserveUrgent`. The caller owns the reservation: a failed connect must
+    /// call `abandonReservation`, a finished call must go through `release`.
     private func open() throws -> Connection {
         try Connection(path: path)
+    }
+
+    /// Take a slot for a fresh connection, waiting for one when every
+    /// connection is busy.
+    ///
+    /// `acquire` reserves its own slot when it returns nil; this is for the
+    /// retry after a pooled connection failed, where the failed connection's
+    /// release already gave the pooled slot back. The caller owns the
+    /// reservation exactly as it would own `acquire`'s.
+    private func reserve(patience: TimeInterval) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        let deadline = Date().addingTimeInterval(patience)
+        while live >= Self.maxLive {
+            if !lock.wait(until: deadline) {
+                throw Self.silence(path: path, patience: patience)
+            }
+        }
+        live += 1
     }
 
     /// Urgent calls bypass the ceiling but not the accounting: the daemon

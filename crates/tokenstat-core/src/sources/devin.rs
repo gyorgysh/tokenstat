@@ -54,6 +54,13 @@
 //! disjoint. That the halved sums land on the vendor's own totals is also what
 //! confirms the duplicate nodes above.
 //!
+//! ## Cache creation is often unknown
+//!
+//! `cache_creation_tokens` is null in the rows seen so far. A JSON null (or a
+//! missing key) means the vendor has no figure, not that it measured zero, so
+//! it is kept as unknown rather than written down as a zero later arithmetic
+//! would trust.
+//!
 //! ## Billing
 //!
 //! Nothing in the database says what a turn cost or which plan paid for it,
@@ -96,7 +103,9 @@ struct Row {
     input: Option<i64>,
     output: Option<i64>,
     cache_read: Option<i64>,
-    cache_creation: Option<i64>,
+    /// `None` when the vendor reported null, omitted the key, or wrote
+    /// something that is not a number. Only a numeric figure becomes `Some`.
+    cache_creation: Option<f64>,
 }
 
 /// Read every turn that carries counters.
@@ -132,6 +141,15 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
 
     // Counters and identifiers only. `m.chat_message` is the conversation and
     // is never selected: SQLite reads it, this process does not.
+    //
+    // `json_valid` guards every JSON access below, because `json_extract`
+    // raises on malformed JSON and one bad row would otherwise abort the
+    // statement and silently truncate the read. The guard is a `CASE` rather
+    // than an `AND json_valid(...)` conjunct: SQLite does not promise to
+    // evaluate WHERE terms in written order, but it does promise to evaluate
+    // only the selected `CASE` branch. `cache_creation_tokens` is pulled
+    // through `json_type` so only a number becomes a counter: a JSON null is
+    // "the vendor has no figure", not a measured zero.
     let mut sql = String::from(
         "SELECT s.id, COALESCE(s.working_directory, ''), COALESCE(s.model, ''),
                 json_extract(m.chat_message, '$.metadata.request_id'),
@@ -142,10 +160,18 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
                 json_extract(m.chat_message, '$.metadata.metrics.input_tokens'),
                 json_extract(m.chat_message, '$.metadata.metrics.output_tokens'),
                 json_extract(m.chat_message, '$.metadata.metrics.cache_read_tokens'),
-                json_extract(m.chat_message, '$.metadata.metrics.cache_creation_tokens')
+                CASE WHEN json_type(m.chat_message,
+                                    '$.metadata.metrics.cache_creation_tokens')
+                          IN ('integer', 'real')
+                     THEN json_extract(m.chat_message,
+                                       '$.metadata.metrics.cache_creation_tokens')
+                END
          FROM message_nodes m
          JOIN sessions s ON s.id = m.session_id
-         WHERE json_extract(m.chat_message, '$.metadata.metrics.output_tokens') IS NOT NULL",
+         WHERE CASE WHEN json_valid(m.chat_message)
+                    THEN json_extract(m.chat_message,
+                                      '$.metadata.metrics.output_tokens')
+               END IS NOT NULL",
     );
     if directory.is_some() {
         sql.push_str(" AND COALESCE(s.working_directory, '') = :dir");
@@ -187,7 +213,7 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             input: r.get::<_, Option<i64>>(8)?,
             output: r.get::<_, Option<i64>>(9)?,
             cache_read: r.get::<_, Option<i64>>(10)?,
-            cache_creation: r.get::<_, Option<i64>>(11)?,
+            cache_creation: r.get::<_, Option<f64>>(11)?,
         })
     }) {
         Ok(rows) => rows,
@@ -205,12 +231,32 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
     // Keep the strongest counters when a duplicate diverges, mirroring the
     // archive's max-on-conflict and the meter's collapse.
     let mut by_id: HashMap<EventId, usize> = HashMap::with_capacity(64);
+    let mut row_failed = false;
 
-    for row in rows.flatten() {
+    for row in rows {
+        let row = match row {
+            Ok(row) => row,
+            Err(e) => {
+                // A row that cannot be read is not a reason to walk away from
+                // the rest silently: surface the first one so a truncated read
+                // is visible where the watermark cannot see it.
+                if !row_failed {
+                    out.warnings.push(Warning::Unreadable {
+                        path: path.to_path_buf(),
+                        reason: format!("reading rows stopped: {e}"),
+                    });
+                    row_failed = true;
+                }
+                continue;
+            }
+        };
         let input = row.input.unwrap_or(0).max(0) as u64;
         let output = row.output.unwrap_or(0).max(0) as u64;
         let cache_read = row.cache_read.unwrap_or(0).max(0) as u64;
-        let cache_creation = row.cache_creation.unwrap_or(0).max(0) as u64;
+        // A JSON null, a missing key or a non-numeric value all read back as
+        // `None`: the vendor did not state the figure, so the counter stays
+        // unknown rather than becoming a zero it never measured.
+        let cache_creation = row.cache_creation.map(|v| v.max(0.0) as u64);
         // A turn that was interrupted before the model answered writes zeroes.
         if input == 0 && output == 0 && cache_read == 0 {
             continue;
@@ -237,7 +283,7 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             let kept = &mut out.events[idx].counters;
             kept.input_fresh = kept.input_fresh.max(Some(input));
             kept.cache_read = kept.cache_read.max(Some(cache_read));
-            kept.cache_write_5m = kept.cache_write_5m.max(Some(cache_creation));
+            kept.cache_write_5m = kept.cache_write_5m.max(cache_creation);
             kept.output = kept.output.max(Some(output));
             // Timestamp and model are stable across the pair; keep first.
             continue;
@@ -262,7 +308,7 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
                 // vendor's own arithmetic that says so.
                 input_fresh: Some(input),
                 cache_read: Some(cache_read),
-                cache_write_5m: Some(cache_creation),
+                cache_write_5m: cache_creation,
                 // One cache tier, so the hour bucket is genuinely zero rather
                 // than unreported.
                 cache_write_1h: Some(0),
@@ -399,7 +445,11 @@ mod tests {
         assert_eq!(first.counters.cache_read, Some(1344));
         // Beside the input, so the prompt is the sum of the two.
         assert_eq!(first.counters.input_total(), 16810 + 1344);
-        assert!(!first.counters.has_unknown());
+        // `cache_creation_tokens` is a JSON null in the fixture. Null is the
+        // vendor saying it has no figure, not a measured zero, so the counter
+        // stays unknown and the event total is a lower bound.
+        assert_eq!(first.counters.cache_write_5m, None);
+        assert!(first.counters.has_unknown());
     }
 
     /// The forest stores each turn twice. Two rows, one event.

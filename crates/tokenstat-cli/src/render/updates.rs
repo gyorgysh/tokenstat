@@ -1,6 +1,7 @@
 use anstream::println;
 use anyhow::{Context, Result};
 
+use super::json_string;
 use crate::ui::{DIM, accent, good};
 
 pub fn self_update(check_only: bool, _yes: bool, json: bool) -> Result<()> {
@@ -8,12 +9,12 @@ pub fn self_update(check_only: bool, _yes: bool, json: bool) -> Result<()> {
         let c = tokenstat_sync::check_latest().map_err(|e| anyhow::anyhow!("{e}"))?;
         if json {
             println!(
-                r#"{{"current":"{}","latest":"{}","newer":{},"target":"{}","url":"{}"}}"#,
-                c.current,
-                c.latest,
+                r#"{{"current":{},"latest":{},"newer":{},"target":{},"url":{}}}"#,
+                json_string(&c.current),
+                json_string(&c.latest),
                 c.newer,
-                tokenstat_sync::current_target(),
-                c.html_url
+                json_string(tokenstat_sync::current_target()),
+                json_string(&c.html_url)
             );
             return Ok(());
         }
@@ -87,7 +88,7 @@ pub fn self_update_scheduled(json: bool) -> Result<()> {
         }
         Ok(tokenstat_sync::ScheduledUpdate::UpToDate(v)) => {
             if json {
-                println!(r#"{{"up_to_date":"{v}"}}"#);
+                println!(r#"{{"up_to_date":{}}}"#, json_string(&v));
             } else {
                 println!("up to date ({v})");
             }
@@ -98,8 +99,9 @@ pub fn self_update_scheduled(json: bool) -> Result<()> {
             // once a day in a log is more useful than failing.
             if json {
                 println!(
-                    r#"{{"skipped":"not_ours","latest":"{latest}","path":"{}"}}"#,
-                    path.display()
+                    r#"{{"skipped":"not_ours","latest":{},"path":{}}}"#,
+                    json_string(&latest),
+                    json_string(&path.display().to_string())
                 );
             } else {
                 println!(
@@ -126,12 +128,7 @@ pub fn self_update_scheduled(json: bool) -> Result<()> {
             // treat the unit as broken, and the previous binary is still in place
             // either way.
             if json {
-                let msg = err
-                    .to_string()
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\n', " ");
-                println!(r#"{{"error":"{msg}"}}"#);
+                println!(r#"{{"error":{}}}"#, json_string(&err.to_string()));
             } else {
                 eprintln!("update check failed: {err}");
             }

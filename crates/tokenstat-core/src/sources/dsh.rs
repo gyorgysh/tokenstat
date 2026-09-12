@@ -133,6 +133,30 @@ struct Usage {
     reasoning: Option<u64>,
 }
 
+/// Cap on the decompressed size of one session transcript.
+///
+/// The file is untrusted input: a small compressed frame can expand to
+/// gigabytes, and `zstd::decode_all` would allocate all of it. The decoder is
+/// wrapped in a read limit instead. 64 MiB is far above any real session (the
+/// one this reader was built against is a few hundred kilobytes).
+const MAX_DECOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Decode a whole zstd stream, refusing output past [`MAX_DECOMPRESSED_BYTES`].
+fn decode_zstd_bounded(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    zstd::Decoder::new(bytes)?
+        .take(MAX_DECOMPRESSED_BYTES + 1)
+        .read_to_end(&mut out)?;
+    if out.len() as u64 > MAX_DECOMPRESSED_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "decompressed session exceeds the 64 MiB cap",
+        ));
+    }
+    Ok(out)
+}
+
 /// Read one session file, decompressing it first.
 ///
 /// The file is opened here rather than handed over as text, because it is zstd
@@ -149,7 +173,7 @@ pub fn parse_file(path: &Path, sessions_root: &Path) -> ParseOutput {
             return out;
         }
     };
-    let text = match zstd::decode_all(&bytes[..]) {
+    let text = match decode_zstd_bounded(&bytes) {
         Ok(t) => t,
         Err(e) => {
             out.warnings.push(Warning::Unreadable {

@@ -39,7 +39,9 @@ pub(crate) fn now() -> String {
 pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     Some(match method {
         "machine.identity" => identity(),
-        "machine.peers" => peers(),
+        // The peer list carries every machine's address. Local only, the same
+        // as the trust settings whose screen displays it.
+        "machine.peers" => local_trust(peers),
         "machine.rename" => local_trust(|| rename(params)),
         "machine.pair" => local_trust(|| pair(params)),
         "machine.approve" => local_trust(|| set_trust(params, Trust::Approved)),
@@ -267,6 +269,7 @@ mod tests {
     fn a_remote_peer_cannot_change_who_is_trusted() {
         crate::request_context::with_remote_peer("phone", || {
             for method in [
+                "machine.peers",
                 "machine.approve",
                 "machine.pair",
                 "machine.revoke",

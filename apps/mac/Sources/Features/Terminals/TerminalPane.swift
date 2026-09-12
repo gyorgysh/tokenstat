@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 #if os(macOS)
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -144,7 +145,11 @@ struct TerminalPane: View {
             if folder.exists {
                 strip
                 ThemeRule()
+                // Must expand. A GeometryReader with no flexible frame can keep a
+                // zero size after a terminal↔launcher flip; the launch tiles then
+                // paint at their ideal width over the sidebar until a resize.
                 surface
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if showsTerminal {
                     hostLines
                 }
@@ -152,6 +157,7 @@ struct TerminalPane: View {
                 missingFolder
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Only the session actually on screen polls at keystroke speed. The
         // rest keep draining the host's buffer, just slower, which is the
         // difference between a few round trips a second and a few hundred when
@@ -230,14 +236,22 @@ struct TerminalPane: View {
     /// size means switching changes nothing about the terminal at all: no
     /// relayout, no resize, no repaint.
     private var surface: some View {
-        // The size comes from the reader, and every child is given exactly it.
-        // Letting a stack work the size out from its children does not survive
-        // a second child being added: a terminal view has no useful intrinsic
-        // width, so the stack settles on something tiny and the terminal
-        // renders one character per line.
-        GeometryReader { proxy in
-            let size = proxy.size
-            ZStack {
+        // Two layers, not one GeometryReader ZStack:
+        //
+        // 1. Terminal stack is sized by a reader (AppKit needs explicit frames).
+        // 2. Launch/Files/… covers are *siblings* of that reader and expand with
+        //    the pane. Putting them inside the reader made a stuck 0-width
+        //    measurement clip the launch tiles to gear icons on the left edge
+        //    after terminal → Launch. The cover must not depend on that size.
+        //
+        // The stack view is also `isHidden` while a cover is up: SwiftUI opacity
+        // does not hide NSViewRepresentable, so the black terminal otherwise
+        // paints over the cover.
+        ZStack {
+            Theme.background
+
+            GeometryReader { proxy in
+                let size = proxy.size
                 TerminalStack(
                     sessions: sessions,
                     // Nothing is shown while a file or a commit is open, so the
@@ -255,6 +269,7 @@ struct TerminalPane: View {
                     splitAxis: showsTerminal ? splitLayout.axis : nil,
                     fraction: CGFloat(terminals.fraction(for: folder.id)),
                     claimsFocus: isSurfaceActive && showsTerminal,
+                    isSurfaceVisible: showsTerminal,
                     onActivate: { terminals.select($0) }
                 )
                 .frame(width: size.width, height: size.height)
@@ -279,100 +294,108 @@ struct TerminalPane: View {
                         .frame(width: size.width, height: size.height)
                 }
 
-                // The launcher wins over every other surface when toggled on:
-                // that is its whole point, to put a new launch in front even
-                // while sessions are running underneath. Any real navigation
-                // (opening a file, browser, terminal) clears the flag.
-                if front == .launcher {
-                    LaunchSurface(
-                        folder: folder,
-                        terminals: terminals,
-                        workspaces: workspaces,
-                        chat: chat,
-                        onOpenSection: onOpenSection,
-                        grid: spawnGrid,
-                        profiles: launcherCatalog,
-                        modelPeer: peer
-                    )
-                        .frame(width: size.width, height: size.height)
-                } else if front == .changes {
-                    WorkingTreeReviewView(folder: folder, model: workspaces)
-                        .frame(width: size.width, height: size.height)
-                } else if case let .commit(id) = front {
-                    Group {
-                        if let detail = workspaces.commit(id, in: folder.id) {
-                            CommitView(detail: detail)
-                                .task(id: detail) {
-                                    await WorkViewedChange.save(owner: WorkViewedChange.owner(folderID: folder.id), commit: detail)
-                                }
-                        } else if let message = workspaces.commitError(id, in: folder.id) {
-                            failedRead(message)
-                        } else {
-                            reading("commit")
+                // Notices float over the terminal instead of standing under it.
+                // A view under the emulator changes the emulator's height, which
+                // resizes the pty, which raises SIGWINCH, which makes a full
+                // screen program repaint from scratch and lose where it was
+                // scrolled to. "Output paused" arrives and leaves with the
+                // reader's backlog, so in the flow it did that every time the
+                // process printed hard, which is exactly when it hurts.
+                Color.clear
+                    .frame(width: size.width, height: size.height)
+                    .overlay(alignment: .bottomTrailing) {
+                        if showsTerminal {
+                            TerminalNotices(sessions: visibleSessions)
+                                .padding(Theme.Space.s)
                         }
                     }
-                    .frame(width: size.width, height: size.height)
-                    .id(id)
-                } else if case let .file(path) = front {
-                    fileSurface(path)
-                    .frame(width: size.width, height: size.height)
-                } else if front == .files {
-                    WorkspaceFilesView(model: workspaces, folder: folder, surface: .content)
-                        .frame(width: size.width, height: size.height)
-                } else if case let .browser(id) = front,
-                          let browser = workspaces.browserTabs(in: folder.id).first(where: { $0.id == id }) {
-                    BrowserView(
-                        url: browser.url,
-                        onURLChange: { workspaces.setBrowserURL($0, in: folder.id, tabID: browser.id) }
-                    )
-                    .frame(width: size.width, height: size.height)
-                } else if sessions.isEmpty {
-                    LaunchSurface(
-                        folder: folder,
-                        terminals: terminals,
-                        workspaces: workspaces,
-                        chat: chat,
-                        onOpenSection: onOpenSection,
-                        grid: spawnGrid,
-                        profiles: launcherCatalog,
-                        modelPeer: peer
-                    )
-                        .frame(width: size.width, height: size.height)
-                }
+                    .allowsHitTesting(false)
+
+                // Also the size a new session is spawned at, so it never opens at
+                // 24x80 and jumps.
+                // Quantised to the cell grid's order of magnitude. This only feeds
+                // the spawn size, so sub-pixel precision buys nothing, and writing
+                // it every frame of a drag rebuilds this whole pane for a value no
+                // terminal can use.
+                Color.clear
+                    .onAppear { paneSize = size }
+                    .onChange(of: CGSize(width: quantised(size.width, step: 8),
+                                         height: quantised(size.height, step: 8))) { _, new in
+                        paneSize = new
+                    }
             }
-            .frame(width: size.width, height: size.height)
-            // Notices float over the terminal instead of standing under it.
-            // A view under the emulator changes the emulator's height, which
-            // resizes the pty, which raises SIGWINCH, which makes a full
-            // screen program repaint from scratch and lose where it was
-            // scrolled to. "Output paused" arrives and leaves with the
-            // reader's backlog, so in the flow it did that every time the
-            // process printed hard, which is exactly when it hurts.
-            .overlay(alignment: .bottomTrailing) {
-                if showsTerminal {
-                    TerminalNotices(sessions: visibleSessions)
-                        .padding(Theme.Space.s)
-                }
-            }
-            // Only the explicit launcher toggle animates. Animating
-            // `sessions.isEmpty` made every spawn fade the whole pane in and
-            // out (and re-layout the terminal under it), which read as the
-            // tty blinking before it settled.
-            .animation(
-                .easeOut(duration: 0.15),
-                value: front == .launcher
+            .allowsHitTesting(showsTerminal)
+
+            // Cover fills the pane on its own. Never sized from the terminal
+            // GeometryReader (that is what left gear icons on a black void).
+            coverFill
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    /// Document / launcher layer above the terminal stack.
+    @ViewBuilder
+    private var coverFill: some View {
+        // The launcher wins over every other surface when toggled on: that is
+        // its whole point, to put a new launch in front even while sessions
+        // are running underneath. Any real navigation (opening a file,
+        // browser, terminal) clears the flag.
+        if front == .launcher {
+            LaunchSurface(
+                folder: folder,
+                terminals: terminals,
+                workspaces: workspaces,
+                chat: chat,
+                onOpenSection: onOpenSection,
+                grid: spawnGrid,
+                profiles: launcherCatalog,
+                modelPeer: peer
             )
-            // Also the size a new session is spawned at, so it never opens at
-            // 24x80 and jumps.
-            // Quantised to the cell grid's order of magnitude. This only feeds
-            // the spawn size, so sub-pixel precision buys nothing, and writing
-            // it every frame of a drag rebuilds this whole pane for a value no
-            // terminal can use.
-            .onAppear { paneSize = size }
-            .onChange(of: CGSize(width: quantised(size.width, step: 8),
-                                 height: quantised(size.height, step: 8))) { _, new in
-                paneSize = new
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if front == .changes {
+            WorkingTreeReviewView(folder: folder, model: workspaces)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if case let .commit(id) = front {
+            Group {
+                if let detail = workspaces.commit(id, in: folder.id) {
+                    CommitView(detail: detail)
+                        .task(id: detail) {
+                            await WorkViewedChange.save(owner: WorkViewedChange.owner(folderID: folder.id), commit: detail)
+                        }
+                } else if let message = workspaces.commitError(id, in: folder.id) {
+                    failedRead(message)
+                } else {
+                    reading("commit")
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .id(id)
+        } else if case let .file(path) = front {
+            fileSurface(path)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if front == .files {
+            WorkspaceFilesView(model: workspaces, folder: folder, surface: .content)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if case let .browser(id) = front,
+                  let browser = workspaces.browserTabs(in: folder.id).first(where: { $0.id == id }) {
+            BrowserView(
+                url: browser.url,
+                onURLChange: { workspaces.setBrowserURL($0, in: folder.id, tabID: browser.id) }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if sessions.isEmpty {
+            LaunchSurface(
+                folder: folder,
+                terminals: terminals,
+                workspaces: workspaces,
+                chat: chat,
+                onOpenSection: onOpenSection,
+                grid: spawnGrid,
+                profiles: launcherCatalog,
+                modelPeer: peer
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -553,7 +576,10 @@ struct TerminalPane: View {
             BypassPermissionsControl(folder: folder, workspaces: workspaces)
         }
         .padding(.horizontal, Theme.Space.m)
-        .padding(.vertical, 4)
+        // Fixed chrome height, same baseline as every other destination row.
+        // A flexible strip under a GeometryReader was what left the New
+        // session / Split / model menus at zero height until a resize.
+        .chromeBarMetrics()
         .background(Theme.background)
         .popover(isPresented: $showingPort, arrowEdge: .bottom) {
             RemotePortForm(folder: folder, workspaces: workspaces) {
@@ -683,10 +709,11 @@ struct TerminalPane: View {
         // file out of the way.
         workspaces.showTerminal(in: folder.id)
         let grid = spawnGrid
-        // Bypass is a shell-terminal switch. An agent harness launched with
-        // its bypass flags stops asking for permission, which a remembered
-        // toggle must never do on its own.
-        let args = workspaces.bypassPermissions(for: folder.id) && profile.harnessID == nil
+        // Bypass applies to every launch from this folder, including agent
+        // harnesses. Skipping it for harnessID left Codex/Claude/Muse asking
+        // while the chrome said Bypass on; the remembered toggle is the
+        // person's choice for the next session, not shells alone.
+        let args = workspaces.bypassPermissions(for: folder.id)
             ? profile.args + profile.bypassArgs
             : profile.args
         // The strip's own menu honours the model selection too. It used to
@@ -1588,7 +1615,7 @@ private struct LaunchSurface: View {
             onBegin: {
                 guard launching == nil else { return }
                 launching = profile.id
-                let args = workspaces.bypassPermissions(for: folder.id) && profile.harnessID == nil
+                let args = workspaces.bypassPermissions(for: folder.id)
                     ? profile.args + profile.bypassArgs
                     : profile.args
                 let session = terminals.begin(

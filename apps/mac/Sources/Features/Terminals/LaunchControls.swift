@@ -59,6 +59,9 @@ struct LocalModelControl: View {
     @State private var providers: [LocalProvider] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    /// Bumped on every load. A slower answer for a previous folder or peer
+    /// must not overwrite the list for the one on screen now.
+    @State private var loadGeneration = 0
 
     private var selectedKey: String {
         workspaces.localModel(for: folder.id) ?? ""
@@ -203,16 +206,23 @@ struct LocalModelControl: View {
     }
 
     private func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if generation == loadGeneration { isLoading = false }
+        }
         do {
-            providers = if let peer {
+            let loaded = if let peer {
                 try await Bridge.localModels(onPeer: peer)
             } else {
                 try await Bridge.localModels()
             }
+            guard generation == loadGeneration else { return }
+            providers = loaded
             errorMessage = nil
         } catch {
+            guard generation == loadGeneration else { return }
             // Kept and shown. Swallowing this is what made a decoding failure
             // read as "no local models discovered" while both servers were up.
             providers = []
@@ -247,8 +257,8 @@ struct BypassPermissionsControl: View {
         .buttonStyle(.plain)
         .help(
             isOn
-                ? "Shell terminals launched here run without asking for permission. Agents still ask. Remembered for this workspace."
-                : "Launches here ask before acting. Turn on to skip permission prompts on shell terminals."
+                ? "Launches here skip permission prompts: shells and agents (Codex, Claude, Muse, …). Remembered for this workspace."
+                : "Launches here ask before acting. Turn on to skip permission prompts for shells and agents."
         )
     }
 }

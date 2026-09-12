@@ -524,6 +524,7 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
                 guard.active = false;
                 guard.writer = None;
                 guard.buffer.clear();
+                guard.space.notify_all();
             }
             if let Ok(mut map) = pty_subscriptions().lock()
                 && map.get(&key).is_some_and(|entry| Arc::ptr_eq(entry, cache))
@@ -571,7 +572,10 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
             };
             while guard.buffer.len() >= PTY_CACHE_CAP && guard.active {
                 let space = Arc::clone(&guard.space);
-                guard = space.wait(guard).unwrap_or_else(PoisonError::into_inner);
+                let (next, _) = space
+                    .wait_timeout(guard, Duration::from_millis(250))
+                    .unwrap_or_else(PoisonError::into_inner);
+                guard = next;
             }
             drop(guard);
             match reader.read(1 << 20) {
@@ -675,6 +679,8 @@ pub(crate) fn write_pty_input(peer: &str, session: &str, bytes: &[u8]) -> Result
 /// a new channel every few seconds. Sessions do not appear and vanish that
 /// fast, so a short cache absorbs the polling.
 const PTY_LIST_TTL: Duration = Duration::from_secs(30);
+
+const MAX_REMOTE_PTY_ITEMS: usize = 512;
 
 /// Per-peer cached pty lists. `Instant` does not advance while a Mac sleeps,
 /// so an empty list fetched just before the lid closed stayed "fresh" after
@@ -827,7 +833,10 @@ fn refresh_remote_pty_list(peer: &str) {
         .unwrap_or(0);
     let fetched =
         match crate::remote::call_peer_result(peer, "pty.list", r#"{"includeRemote":false}"#) {
-            Ok(Value::Array(items)) => Some(items),
+            Ok(Value::Array(mut items)) => {
+                items.truncate(MAX_REMOTE_PTY_ITEMS);
+                Some(items)
+            }
             Ok(_) => Some(Vec::new()),
             Err(_) => None,
         };

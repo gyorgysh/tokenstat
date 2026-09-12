@@ -189,20 +189,26 @@ pub struct Counters {
 
 impl Counters {
     /// Total billable tokens. Sound only because the fields are disjoint.
+    ///
+    /// Saturating: the fields can come from a file the archive's owner edited
+    /// or a source that reported a value near `u64::MAX`, and a total that
+    /// wraps is worse than one that stops at the ceiling.
     pub fn total(&self) -> u64 {
-        self.input_fresh.unwrap_or(0)
-            + self.cache_read.unwrap_or(0)
-            + self.cache_write_5m.unwrap_or(0)
-            + self.cache_write_1h.unwrap_or(0)
-            + self.output.unwrap_or(0)
+        self.input_fresh
+            .unwrap_or(0)
+            .saturating_add(self.cache_read.unwrap_or(0))
+            .saturating_add(self.cache_write_5m.unwrap_or(0))
+            .saturating_add(self.cache_write_1h.unwrap_or(0))
+            .saturating_add(self.output.unwrap_or(0))
     }
 
     /// Every prompt-side token, whatever bucket it landed in.
     pub fn input_total(&self) -> u64 {
-        self.input_fresh.unwrap_or(0)
-            + self.cache_read.unwrap_or(0)
-            + self.cache_write_5m.unwrap_or(0)
-            + self.cache_write_1h.unwrap_or(0)
+        self.input_fresh
+            .unwrap_or(0)
+            .saturating_add(self.cache_read.unwrap_or(0))
+            .saturating_add(self.cache_write_5m.unwrap_or(0))
+            .saturating_add(self.cache_write_1h.unwrap_or(0))
     }
 
     /// True when at least one field is unreported, so a sum over this event is
@@ -216,11 +222,12 @@ impl Counters {
     }
 
     /// Add `other` into `self`, treating an unreported field as zero but
-    /// remembering that the result is now partial.
+    /// remembering that the result is now partial. Saturating, for the same
+    /// reason as [`Self::total`].
     pub fn accumulate(&mut self, other: &Counters) {
         fn add(slot: &mut Option<u64>, v: Option<u64>) {
             if let Some(v) = v {
-                *slot = Some(slot.unwrap_or(0) + v);
+                *slot = Some(slot.unwrap_or(0).saturating_add(v));
             }
         }
         add(&mut self.input_fresh, other.input_fresh);
@@ -343,13 +350,26 @@ pub struct EventId(pub [u8; 16]);
 impl EventId {
     /// Hash an identity tuple. Callers pass the parts that make a request
     /// unique, so the same request seen in two files produces the same id.
+    ///
+    /// Parts are framed with a `0x1f` separator when none of them contains
+    /// that byte, which is byte-for-byte the encoding every archived id was
+    /// derived with. A part that does contain the separator makes that framing
+    /// ambiguous (`("a\x1f", "b")` and `("a", "\x1fb")` would hash the same
+    /// bytes), so that tuple gets a length-prefixed encoding instead. Only an
+    /// input carrying the separator changes its id, which keeps every existing
+    /// archive row derived from ordinary ids on its existing id.
     pub fn derive(parts: &[&str]) -> Self {
         let mut hasher = blake3::Hasher::new();
-        for p in parts {
-            hasher.update(p.as_bytes());
-            // Length-prefix free separator: a byte that cannot appear in the
-            // ids we hash, so ("ab","c") and ("a","bc") do not collide.
-            hasher.update(&[0x1f]);
+        if parts.iter().any(|p| p.as_bytes().contains(&0x1f)) {
+            for p in parts {
+                hasher.update(&(p.len() as u64).to_le_bytes());
+                hasher.update(p.as_bytes());
+            }
+        } else {
+            for p in parts {
+                hasher.update(p.as_bytes());
+                hasher.update(&[0x1f]);
+            }
         }
         let mut out = [0u8; 16];
         out.copy_from_slice(&hasher.finalize().as_bytes()[..16]);
@@ -455,6 +475,36 @@ mod tests {
         assert_eq!(a, b);
         // Without a separator these two would hash identically.
         assert_ne!(EventId::derive(&["ab", "c"]), EventId::derive(&["a", "bc"]));
+    }
+
+    #[test]
+    fn a_separator_byte_inside_a_part_cannot_forge_a_boundary() {
+        // Under the separator-only framing both tuples hashed the same bytes,
+        // so a request id that happened to contain 0x1f could collide with a
+        // different request. The length-prefixed encoding keeps them apart.
+        assert_ne!(
+            EventId::derive(&["a\u{1f}", "b"]),
+            EventId::derive(&["a", "\u{1f}b"])
+        );
+    }
+
+    #[test]
+    fn counter_totals_saturate_rather_than_wrap() {
+        let c = Counters {
+            input_fresh: Some(u64::MAX),
+            output: Some(10),
+            ..Default::default()
+        };
+        assert_eq!(c.total(), u64::MAX);
+        let mut a = Counters {
+            input_fresh: Some(u64::MAX),
+            ..Default::default()
+        };
+        a.accumulate(&Counters {
+            input_fresh: Some(5),
+            ..Default::default()
+        });
+        assert_eq!(a.input_fresh, Some(u64::MAX));
     }
 
     #[test]

@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 #[cfg(unix)]
 use std::path::PathBuf;
 
@@ -25,18 +26,34 @@ use serde_json::{Value, json};
 use tokenstat_core::{Engine, GroupBy, Query, VERSION};
 
 /// Serve MCP on stdin/stdout until EOF.
-pub fn serve() -> Result<()> {
-    let mut engine = Engine::open(None, None).context("opening tokenstat archive")?;
+///
+/// `db_path` is the archive to read, or None for the default location. A
+/// malformed line is answered with a JSON-RPC parse error and does not end the
+/// loop; only EOF does.
+pub fn serve(db_path: Option<&Path>) -> Result<()> {
+    let mut engine = Engine::open(db_path, None).context("opening tokenstat archive")?;
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut reader = stdin.lock();
 
     loop {
-        let Some(msg) = read_message(&mut reader)? else {
-            break;
-        };
-        let response = handle(&mut engine, msg);
-        write_message(&mut stdout, &response)?;
+        match read_message(&mut reader)? {
+            Incoming::Eof => break,
+            Incoming::Malformed => {
+                write_message(
+                    &mut stdout,
+                    &json!({
+                        "jsonrpc": "2.0",
+                        "id": Value::Null,
+                        "error": { "code": -32700, "message": "Parse error" }
+                    }),
+                )?;
+            }
+            Incoming::Message(msg) => {
+                let response = handle(&mut engine, msg);
+                write_message(&mut stdout, &response)?;
+            }
+        }
     }
     Ok(())
 }
@@ -825,23 +842,44 @@ fn host_call(engine: &Engine, method: &str, params: Value) -> Result<Value, Stri
     }
     #[cfg(unix)]
     {
-        use std::io::BufReader;
+        use std::io::{BufReader, Read};
         use std::os::unix::net::UnixStream;
+        use std::time::Duration;
+
+        // Mirrors host_rpc::exchange: a wedged helper must not park the MCP
+        // loop forever, and a broken one must not make this allocate without a
+        // bound before the check.
+        const HOST_TIMEOUT: Duration = Duration::from_secs(30);
+        const HOST_MAX_RESPONSE: u64 = 4 * 1024 * 1024;
 
         let path = host_socket(engine);
         let mut stream = UnixStream::connect(&path).map_err(|e| {
             format!("host helper is not running ({e}). Start tokenstat or tokenstat-hostd.")
         })?;
+        stream
+            .set_read_timeout(Some(HOST_TIMEOUT))
+            .and_then(|_| stream.set_write_timeout(Some(HOST_TIMEOUT)))
+            .map_err(|e| e.to_string())?;
         let req = json!({"id": 1, "method": method, "params": params});
         let line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
         stream
             .write_all(line.as_bytes())
             .and_then(|_| stream.write_all(b"\n"))
             .map_err(|e| e.to_string())?;
-        let mut reader = BufReader::new(stream);
-        let mut reply = String::new();
-        reader.read_line(&mut reply).map_err(|e| e.to_string())?;
-        let value: Value = serde_json::from_str(&reply).map_err(|e| e.to_string())?;
+        let mut reply = Vec::new();
+        BufReader::new(stream)
+            .take(HOST_MAX_RESPONSE + 1)
+            .read_until(b'\n', &mut reply)
+            .map_err(|e| e.to_string())?;
+        if reply.len() as u64 > HOST_MAX_RESPONSE {
+            return Err(format!("the host response to {method} was too large"));
+        }
+        if reply.last() != Some(&b'\n') {
+            return Err(format!(
+                "the host helper closed the connection before answering {method}"
+            ));
+        }
+        let value: Value = serde_json::from_slice(&reply).map_err(|e| e.to_string())?;
         if value.get("ok").and_then(Value::as_bool) == Some(true) {
             Ok(value.get("result").cloned().unwrap_or(Value::Null))
         } else {
@@ -901,14 +939,31 @@ fn query_from_args(args: &Value) -> Query {
     }
 }
 
-fn read_message(reader: &mut impl BufRead) -> Result<Option<Value>> {
+/// One line from the MCP transport.
+enum Incoming {
+    /// A parsed JSON-RPC message.
+    Message(Value),
+    /// One line that was not valid JSON or not valid UTF-8. The loop answers a
+    /// parse error and keeps reading: a client dropping garbage on the pipe
+    /// must not take the server down with it.
+    Malformed,
+    /// End of input: stdin closed, or the writer went away.
+    Eof,
+}
+
+fn read_message(reader: &mut impl BufRead) -> Result<Incoming> {
     let mut line = String::new();
-    if reader.read_line(&mut line)? == 0 {
-        return Ok(None);
+    match reader.read_line(&mut line) {
+        Ok(0) => Ok(Incoming::Eof),
+        Ok(_) => Ok(match serde_json::from_str(&line) {
+            Ok(value) => Incoming::Message(value),
+            Err(_) => Incoming::Malformed,
+        }),
+        // `read_line` reports invalid UTF-8 as InvalidData and has already
+        // consumed the offending line, so the next call starts clean.
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => Ok(Incoming::Malformed),
+        Err(error) => Err(error).context("reading newline-delimited JSON-RPC"),
     }
-    Ok(Some(
-        serde_json::from_str(&line).context("parsing newline-delimited JSON-RPC")?,
-    ))
 }
 
 fn write_message(out: &mut impl Write, msg: &Value) -> Result<()> {
@@ -978,9 +1033,36 @@ mod tests {
         write_message(&mut bytes, &json!({"id":2,"result":{}})).unwrap();
         assert_eq!(bytes.iter().filter(|&&b| b == b'\n').count(), 2);
         let mut reader = io::Cursor::new(bytes);
-        assert_eq!(read_message(&mut reader).unwrap().unwrap()["id"], 1);
-        assert_eq!(read_message(&mut reader).unwrap().unwrap()["id"], 2);
-        assert!(read_message(&mut reader).unwrap().is_none());
+        assert_eq!(message_id(&mut reader), 1);
+        assert_eq!(message_id(&mut reader), 2);
+        assert!(matches!(read_message(&mut reader).unwrap(), Incoming::Eof));
+    }
+
+    fn message_id(reader: &mut impl BufRead) -> u64 {
+        match read_message(reader).unwrap() {
+            Incoming::Message(value) => value["id"].as_u64().unwrap(),
+            _ => panic!("expected a message"),
+        }
+    }
+
+    #[test]
+    fn a_malformed_line_is_a_parse_error_not_a_shutdown() {
+        // Garbage, then a good line, then invalid UTF-8: each bad line is
+        // reported and the loop can still read what follows.
+        let mut reader = io::Cursor::new(b"not json\n{\"id\":4}\n\xff\xfe\n".to_vec());
+        assert!(matches!(
+            read_message(&mut reader).unwrap(),
+            Incoming::Malformed
+        ));
+        assert!(matches!(
+            read_message(&mut reader).unwrap(),
+            Incoming::Message(_)
+        ));
+        assert!(matches!(
+            read_message(&mut reader).unwrap(),
+            Incoming::Malformed
+        ));
+        assert!(matches!(read_message(&mut reader).unwrap(), Incoming::Eof));
     }
 
     #[test]

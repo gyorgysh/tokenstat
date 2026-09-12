@@ -512,13 +512,11 @@ private struct RemoteFolderBrowser: View {
             Button("Create") { Task { await create() } }
         }
         .task(id: path) {
-            // Seed the initial path once without retriggering: assigning `path`
-            // from inside this task restarts it and browses twice on appear.
-            if path == nil {
-                await load(initial: true)
-            } else {
-                await load()
-            }
+            // Seeding the initial path from the first answer restarts this
+            // task. The listing already belongs to that path, so the repeat
+            // is skipped rather than browsing the same directory twice.
+            if let path, let listing, listing.path == path { return }
+            await load(initial: path == nil)
         }
     }
 

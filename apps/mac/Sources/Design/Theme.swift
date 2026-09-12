@@ -924,6 +924,7 @@ struct TabStrip<Tab: Hashable>: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(active ? [.isSelected] : [])
             }
         }
         .frame(maxWidth: .infinity)
@@ -2058,6 +2059,7 @@ private struct SegmentButton: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .onHover { isHovering = $0 }
     }
 }

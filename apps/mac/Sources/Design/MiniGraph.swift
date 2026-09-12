@@ -224,7 +224,10 @@ struct MiniGraph: View {
 
     var body: some View {
         let all = columns
-        let shown = Array(all.prefix(all.count > maxColumns ? maxColumns - 1 : maxColumns))
+        // A caller can hand this a zero or negative column cap; `prefix` of a
+        // negative length traps, so the limit is clamped first.
+        let cap = max(0, maxColumns)
+        let shown = Array(all.prefix(max(0, all.count > cap ? cap - 1 : cap)))
         let hidden = all.dropFirst(shown.count).reduce(0) { $0 + $1.count }
 
         HStack(spacing: 0) {

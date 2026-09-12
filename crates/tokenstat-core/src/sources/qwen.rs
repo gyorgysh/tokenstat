@@ -276,8 +276,16 @@ pub fn parse_file(path: &Path, contents: &str, sessions: &HashMap<String, String
         // reading. If the vendor ever stops emitting totalTokens while still
         // reporting thoughts beside the output, this line will systematically
         // undercount, and a warning there would be worth adding.
-        let separate = row.total_tokens == Some(input + output + thoughts) && thoughts > 0;
-        let generated = if separate { output + thoughts } else { output };
+        //
+        // Saturating: the values come from the ledger, and a checked sum would
+        // panic on a line whose counters are near the type ceiling.
+        let counted = input.saturating_add(output).saturating_add(thoughts);
+        let separate = row.total_tokens == Some(counted) && thoughts > 0;
+        let generated = if separate {
+            output.saturating_add(thoughts)
+        } else {
+            output
+        };
 
         let session = row.session_id.unwrap_or_default();
         let ts = row

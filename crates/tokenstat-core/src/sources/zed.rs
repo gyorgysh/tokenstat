@@ -276,13 +276,35 @@ fn event_from_usage(
     }
 }
 
+/// Cap on the decompressed size of one thread blob.
+///
+/// Blobs come from a local database, but a small compressed row can expand to
+/// gigabytes and `zstd::decode_all` would allocate all of it. The decoder is
+/// wrapped in a read limit instead. 64 MiB is far above any real thread.
+const MAX_DECOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Decode a whole zstd blob, refusing output past [`MAX_DECOMPRESSED_BYTES`].
+fn decode_zstd_bounded(data: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    zstd::Decoder::new(data)
+        .map_err(|e| e.to_string())?
+        .take(MAX_DECOMPRESSED_BYTES + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| e.to_string())?;
+    if out.len() as u64 > MAX_DECOMPRESSED_BYTES {
+        return Err("decompressed thread exceeds the 64 MiB cap".to_string());
+    }
+    Ok(out)
+}
+
 fn decode_thread_blob(data_type: &str, data: &[u8]) -> Result<Vec<u8>, String> {
     match data_type {
-        "zstd" | "" => zstd::decode_all(data).map_err(|e| e.to_string()),
+        "zstd" | "" => decode_zstd_bounded(data),
         "json" => Ok(data.to_vec()),
         other => {
             // Try zstd first (common), then raw JSON.
-            zstd::decode_all(data).or_else(|_| {
+            decode_zstd_bounded(data).or_else(|_| {
                 if data.starts_with(b"{") {
                     Ok(data.to_vec())
                 } else {

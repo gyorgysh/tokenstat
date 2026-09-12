@@ -123,19 +123,29 @@ struct CodeTextView: NSViewRepresentable {
 
         func load(_ document: EditorDocument, into textView: NSTextView) {
             self.document = document
-            isApplyingEdit = true
-            textView.string = document.text
-            isApplyingEdit = false
-            syncedText = document.text
-            textChangedSinceCount = true
-            // A freshly opened file has no undo history worth keeping, and
-            // leaving the previous document's would let Cmd+Z type another
-            // file's text into this one.
-            textView.undoManager?.removeAllActions()
+            replaceText(document.text, in: textView)
             appliedSpans = -1
             applyBaseAttributes(to: textView)
             applySpans(to: textView)
             refreshRuler(textView)
+        }
+
+        /// Replace the whole buffer and drop the undo history that belonged to
+        /// what was there.
+        ///
+        /// Both whole-buffer replacements go through here. Skipping the clear
+        /// after an external reload leaves Cmd+Z replaying an edit against a
+        /// buffer that no longer matches it, which raises an out-of-range
+        /// exception inside AppKit. A freshly opened file has no undo history
+        /// worth keeping either, and leaving the previous document's would let
+        /// Cmd+Z type another file's text into this one.
+        private func replaceText(_ text: String, in textView: NSTextView) {
+            isApplyingEdit = true
+            textView.string = text
+            isApplyingEdit = false
+            syncedText = text
+            textChangedSinceCount = true
+            textView.undoManager?.removeAllActions()
         }
 
         /// Reconcile the view with the model, on every SwiftUI update.
@@ -145,6 +155,12 @@ struct CodeTextView: NSViewRepresentable {
                 return
             }
             document = next
+            // Not while an input method is composing. Marked text is a live
+            // editing session the text view owns, and replacing the buffer or
+            // rewriting its attributes underneath it destroys the composition
+            // mid-word. The reload and the colours can wait for the commit, and
+            // the next sync applies them.
+            guard !textView.hasMarkedText() else { return }
             // The model's text and the view's disagree only when something
             // other than typing changed it: a save, or a re-read after the file
             // changed on disk. Typing is already in both.
@@ -156,11 +172,7 @@ struct CodeTextView: NSViewRepresentable {
             // file for the common case of nothing having changed at all.
             if next.text != syncedText {
                 let selection = textView.selectedRange()
-                isApplyingEdit = true
-                textView.string = next.text
-                isApplyingEdit = false
-                syncedText = next.text
-                textChangedSinceCount = true
+                replaceText(next.text, in: textView)
                 textView.setSelectedRange(
                     NSRange(
                         location: min(selection.location, (next.text as NSString).length), length: 0

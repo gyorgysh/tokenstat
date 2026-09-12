@@ -5,6 +5,7 @@ use tokenstat_core::{
 };
 
 use super::*;
+use crate::render::sanitize_label;
 use crate::ui::{self, HeatRender};
 
 pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
@@ -200,8 +201,9 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 let t = ui::tokens(c.total());
                 if c.has_unknown() { format!("{t}+") } else { t }
             };
+            let shown = sanitize_label(&lookup);
             lines.push(Line::from(vec![
-                Span::styled(ui::pad_right(&lookup, w), Style::default().fg(accent())),
+                Span::styled(ui::pad_right(&shown, w), Style::default().fg(accent())),
                 Span::raw(format!(
                     "  {:>8}  {:>8}  {:>8}  {:>9}  {:>8}  ",
                     opt_cell(c.input_fresh),
@@ -389,6 +391,7 @@ pub(super) fn table_lines(
         } else {
             r.key.clone()
         };
+        let shown_key = sanitize_label(&key_label);
         let value = if price_as_model {
             EquivalentValue::price(prices, &key_label, c)
                 .map(|v| {
@@ -409,7 +412,7 @@ pub(super) fn table_lines(
             Style::default()
         };
         let mut row = vec![
-            Span::styled(ui::pad_right(&key_label, key_w), key_style),
+            Span::styled(ui::pad_right(&shown_key, key_w), key_style),
             Span::raw(format!(
                 "  {:>8}  {:>8}  {:>8}  {:>9}  {:>8}  ",
                 opt_cell(c.input_fresh),
@@ -863,8 +866,18 @@ pub(super) fn wrapped_detail_lines(
             "list value",
             format!("{}  (not billed)", ui::usd(value.dollars())),
         ),
-        ("top model", top_model.unwrap_or_else(|| "-".into())),
-        ("top project", top_project.unwrap_or_else(|| "-".into())),
+        (
+            "top model",
+            top_model
+                .map(|m| sanitize_label(&m))
+                .unwrap_or_else(|| "-".into()),
+        ),
+        (
+            "top project",
+            top_project
+                .map(|p| sanitize_label(&p))
+                .unwrap_or_else(|| "-".into()),
+        ),
         (
             "busiest day",
             busiest

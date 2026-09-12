@@ -223,7 +223,10 @@ final class WorkspacesModel {
     /// list. A `git log` is a subprocess, the folder list runs on a file-change
     /// timer, and most of the time nobody is looking at the history.
     private(set) var history: [String: [Commit]] = [:]
-    var historyError: String?
+    /// Why a history read failed, keyed by workspace id. One shared slot put
+    /// a failure for whichever folder was read last over whatever folder was
+    /// selected next.
+    private(set) var historyErrors: [String: String] = [:]
 
     /// Children of each expanded directory, keyed by `workspaceID:relativePath`.
     ///
@@ -243,12 +246,14 @@ final class WorkspacesModel {
     /// Last Auto commit backend / model picked per folder.
     var autoCommitBackend: [String: String] = [:]
     var autoCommitModel: [String: String] = [:]
-    /// Result of the last write, for the banner. Cleared on the next attempt.
-    var gitOutcome: GitOutcome?
-    /// What produced `gitOutcome`, so the panel can lead with a sentence
-    /// rather than with git's plumbing. "To github.com:owner/repo.git" is a
-    /// true thing to print and not an answer to "did it push".
-    var gitOutcomeAction: GitOutcomeAction?
+    /// Result of the last write, for the banner, keyed by workspace id so one
+    /// folder's banner cannot appear over another folder's panel.
+    private(set) var gitOutcome: [String: GitOutcome] = [:]
+    /// What produced `gitOutcome`, keyed the same way, so the panel can lead
+    /// with a sentence rather than with git's plumbing. "To
+    /// github.com:owner/repo.git" is a true thing to print and not an answer
+    /// to "did it push".
+    private(set) var gitOutcomeAction: [String: GitOutcomeAction] = [:]
     var isCommitting = false
 
     /// What each workspace has open beside its terminals, in the order opened.
@@ -384,6 +389,18 @@ final class WorkspacesModel {
 
     func commitError(_ id: String, in workspaceID: String) -> String? {
         commitErrors[Self.treeKey(workspaceID, id)]
+    }
+
+    func gitOutcome(for workspaceID: String) -> GitOutcome? {
+        gitOutcome[workspaceID]
+    }
+
+    func gitOutcomeAction(for workspaceID: String) -> GitOutcomeAction? {
+        gitOutcomeAction[workspaceID]
+    }
+
+    func historyError(for workspaceID: String) -> String? {
+        historyErrors[workspaceID]
     }
 
     /// Read a commit and show it. The tab appears at once and fills in.
@@ -663,6 +680,11 @@ final class WorkspacesModel {
         documents.values.contains(where: \.isDirty)
     }
 
+    /// True when any open file in this workspace has unsaved changes.
+    func hasUnsavedWork(in workspaceID: String) -> Bool {
+        documents.values.contains { $0.workspaceID == workspaceID && $0.isDirty }
+    }
+
     /// Read a file and open a document for it.
     ///
     /// An already open document is left alone unless it is clean. Re-reading a
@@ -674,6 +696,9 @@ final class WorkspacesModel {
         do {
             let file = try await Bridge.workspaceRead(id: workspaceID, path: path)
             if let existing = documents[key] {
+                // The read was in flight while edits were typed. Adopting
+                // then would overwrite them, so the buffer stays alone.
+                guard !existing.isDirty else { return }
                 existing.adopt(saved: file.content)
             } else {
                 let document = EditorDocument(
@@ -694,19 +719,50 @@ final class WorkspacesModel {
     func saveText(_ path: String, in workspaceID: String) async {
         let key = Self.treeKey(workspaceID, path)
         guard let document = documents[key], document.isDirty else { return }
+        let sent = document.text
         do {
             let outcome = try await Bridge.workspaceWrite(
-                id: workspaceID, path: path, content: document.text
+                id: workspaceID, path: path, content: sent
             )
             guard outcome.ok else {
                 editorError = outcome.message
                 return
             }
-            document.markSaved()
+            // Acknowledge what was sent, not what the buffer holds now: edits
+            // typed while the write was in flight must stay dirty.
+            document.markSaved(content: sent)
             editorError = nil
             await loadDiff(path, in: workspaceID)
         } catch {
             editorError = error.localizedDescription
+        }
+    }
+
+    /// Write every dirty buffer in a workspace. False when one failed, so an
+    /// action that invalidates the buffers can stop instead of discarding
+    /// work the user asked to keep.
+    @discardableResult
+    func saveAllDirty(in workspaceID: String) async -> Bool {
+        let dirty = documents.values.filter { $0.workspaceID == workspaceID && $0.isDirty }
+        var savedAll = true
+        for document in dirty {
+            await saveText(document.path, in: workspaceID)
+            if document.isDirty { savedAll = false }
+        }
+        return savedAll
+    }
+
+    /// Throw away a workspace's unsaved edits, then read the files back.
+    ///
+    /// Only for a user who explicitly chose to discard. Reading back is what
+    /// stops a later save from writing the old branch's text over the file
+    /// the new branch just put on disk.
+    func discardUnsavedBuffers(in workspaceID: String) async {
+        let dirty = documents.values.filter { $0.workspaceID == workspaceID && $0.isDirty }
+        for document in dirty {
+            let path = document.path
+            document.adopt(saved: document.savedText)
+            await loadText(path, in: workspaceID)
         }
     }
 
@@ -844,6 +900,11 @@ final class WorkspacesModel {
         }
     }
 
+    /// In-flight sweeps are numbered. The peer tick, an explicit reconnect and
+    /// `load()` can all start one, and a sweep that started earlier must not
+    /// publish its answer over one that started later.
+    private var nextRemoteLoad: UInt64 = 0
+
     /// Folders on other machines, read through the local daemon.
     ///
     /// Deliberately not part of the file-watcher path. Every peer here is a TCP
@@ -857,6 +918,8 @@ final class WorkspacesModel {
     /// failure is remembered rather than raised, and its last known folders
     /// stay listed.
     func loadRemote() async {
+        nextRemoteLoad &+= 1
+        let generation = nextRemoteLoad
         do {
             // A peer without an address is dialled through the tunnel, which is
             // how same-account machines behind NAT are reached. The sweep must
@@ -866,6 +929,7 @@ final class WorkspacesModel {
             let peers = try await Bridge.peers().filter {
                 $0.trust == .approved && ($0.address?.isEmpty == false || tunnelOn)
             }
+            guard generation == nextRemoteLoad else { return }
             let liveKeys = Set(peers.map(\.key))
             for key in remoteFolders.keys where !liveKeys.contains(key) {
                 remoteFolders.removeValue(forKey: key)
@@ -893,6 +957,7 @@ final class WorkspacesModel {
                 if let nextDial = remotePeerNextDial[peer.key], Date() < nextDial { continue }
                 do {
                     let fetched = try await Bridge.remoteWorkspaces(peer: peer)
+                    guard generation == nextRemoteLoad else { return }
                     // Disconnect lands while a dial is in flight. Taking the
                     // answer anyway restored the folders and re-posted
                     // didConnect, which unsuppressed the peer: Disconnect
@@ -908,6 +973,7 @@ final class WorkspacesModel {
                     // has. Best effort: a host too old to answer leaves the
                     // badges off, which is what they were before this existed.
                     if let counts = try? await Bridge.remoteWorkspaceSummaries(peer: peer) {
+                        guard generation == nextRemoteLoad else { return }
                         for summary in counts { summaries[summary.id] = summary }
                     }
                     remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
@@ -917,6 +983,7 @@ final class WorkspacesModel {
                         NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
                     }
                 } catch {
+                    guard generation == nextRemoteLoad else { return }
                     let text = error.localizedDescription
                     if Self.isWorkspaceRefusal(text) {
                         // Reached a host that has not let this device in. The
@@ -969,6 +1036,7 @@ final class WorkspacesModel {
                     }
                 }
             }
+            guard generation == nextRemoteLoad else { return }
             publishFolders()
         } catch {
             // Not surfaced. The peer list failing is not a reason to put an
@@ -1165,16 +1233,27 @@ final class WorkspacesModel {
         await refreshOpenDocuments()
     }
 
+    /// In-flight reads are numbered per workspace: a refresh and a commit can
+    /// both ask, and an older answer must not land after a newer one.
+    private var historyLoads: [String: UInt64] = [:]
+    private var nextHistoryLoad: UInt64 = 0
+
     /// Read the recent commits for a workspace.
     ///
     /// Keeps whatever was already loaded when the read fails, so a transient
     /// error empties the panel's error line rather than the panel.
     func loadHistory(for id: String) async {
+        nextHistoryLoad &+= 1
+        let request = nextHistoryLoad
+        historyLoads[id] = request
         do {
-            history[id] = try await Bridge.workspaceLog(id: id)
-            historyError = nil
+            let commits = try await Bridge.workspaceLog(id: id)
+            guard historyLoads[id] == request else { return }
+            history[id] = commits
+            historyErrors[id] = nil
         } catch {
-            historyError = error.localizedDescription
+            guard historyLoads[id] == request else { return }
+            historyErrors[id] = error.localizedDescription
         }
     }
 
@@ -1253,11 +1332,11 @@ final class WorkspacesModel {
         let description = (commitDescription[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let message = description.isEmpty ? title : "\(title)\n\n\(description)"
         guard !paths.isEmpty else {
-            report(.commit, GitOutcome(ok: false, message: "Tick at least one file to commit."))
+            report(folder.id, .commit, GitOutcome(ok: false, message: "Tick at least one file to commit."))
             return
         }
         guard !title.isEmpty else {
-            report(.commit, GitOutcome(ok: false, message: "A commit needs a title."))
+            report(folder.id, .commit, GitOutcome(ok: false, message: "A commit needs a title."))
             return
         }
 
@@ -1266,19 +1345,33 @@ final class WorkspacesModel {
         do {
             let staged = try await Bridge.stage(id: folder.id, paths: paths)
             guard staged.ok else {
-                report(.commit, staged)
+                report(folder.id, .commit, staged)
+                // Best effort: a failed stage may have landed part of the
+                // selection. Clearing it keeps a retry with new ticks from
+                // committing a mix of old and new paths.
+                _ = try? await Bridge.unstage(id: folder.id, paths: paths)
                 return
             }
             let committed = try await Bridge.commit(id: folder.id, message: message)
-            report(.commit, committed)
-            guard committed.ok else { return }
+            report(folder.id, .commit, committed)
+            guard committed.ok else {
+                // The host commits the whole index, not a pathspec (the
+                // bridge has no paths parameter), so a failure must not leave
+                // what this attempt staged behind: unticking a file and
+                // retrying would otherwise commit a stale selection.
+                _ = try? await Bridge.unstage(id: folder.id, paths: paths)
+                return
+            }
             stagedSelection[folder.id] = []
             commitMessage[folder.id] = ""
             commitDescription[folder.id] = ""
             await refresh()
             await loadHistory(for: folder.id)
         } catch {
-            report(.commit, GitOutcome(ok: false, message: error.localizedDescription))
+            report(folder.id, .commit, GitOutcome(ok: false, message: error.localizedDescription))
+            // The stage step may have run even though the commit answer did
+            // not come back, so leave no stale entries for the next attempt.
+            _ = try? await Bridge.unstage(id: folder.id, paths: paths)
         }
     }
 
@@ -1286,17 +1379,17 @@ final class WorkspacesModel {
         isCommitting = true
         defer { isCommitting = false }
         do {
-            report(.push, try await Bridge.push(id: folder.id))
+            report(folder.id, .push, try await Bridge.push(id: folder.id))
             await refresh()
             await loadHistory(for: folder.id)
         } catch {
-            report(.push, GitOutcome(ok: false, message: error.localizedDescription))
+            report(folder.id, .push, GitOutcome(ok: false, message: error.localizedDescription))
         }
     }
 
-    private func report(_ action: GitOutcomeAction, _ outcome: GitOutcome) {
-        gitOutcomeAction = action
-        gitOutcome = outcome
+    private func report(_ workspaceID: String, _ action: GitOutcomeAction, _ outcome: GitOutcome) {
+        gitOutcomeAction[workspaceID] = action
+        gitOutcome[workspaceID] = outcome
     }
 
     #if os(macOS)
@@ -1360,7 +1453,19 @@ final class WorkspacesModel {
     #endif
 
     /// Forget a folder. The folder itself is never touched.
+    ///
+    /// Removal would drop the open buffers with the folder, so unsaved files
+    /// block it. The prompt is the same close prompt the tab strip uses, and
+    /// the removal is not resumed after an answer: that flow ends in a close,
+    /// and a second Remove press is an explicit act rather than something the
+    /// app guessed at.
     func remove(_ folder: WorkspaceFolder) async {
+        if let dirty = documents.values.first(where: {
+            $0.workspaceID == folder.id && $0.isDirty
+        }) {
+            requestClose(dirty.path, in: folder.id)
+            return
+        }
         do {
             // A remote folder is registered on the machine that owns it, so
             // the prefixed id this side uses means nothing to the local

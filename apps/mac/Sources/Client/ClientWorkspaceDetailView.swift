@@ -50,8 +50,12 @@ struct ClientWorkspaceSessionsView: View {
     @State private var bypassOn = false
     /// How many launch tiles this host had last time, so the grid opens at the
     /// size it will end up. Without it the row painted one Shell tile and then
-    /// jumped to eight when the catalog answered.
-    @AppStorage("client.launchTileCount") private var rememberedTileCount = 6
+    /// jumped to eight when the catalog answered. Per host: two machines with
+    /// different catalogs must not set each other's placeholder count.
+    private var launchTileCountKey: String { "client.launchTileCount.\(peer)" }
+    private var rememberedTileCount: Int {
+        UserDefaults.standard.object(forKey: launchTileCountKey) as? Int ?? 6
+    }
     @Environment(\.scenePhase) private var scenePhase
 
     private var workspaceID: String {
@@ -253,8 +257,8 @@ struct ClientWorkspaceSessionsView: View {
         .accessibilityValue(bypassOn ? "On" : "Off")
         .accessibilityHint(
             bypassOn
-                ? "Shell terminals launched here run without asking for permission. Agents still ask. Remembered for this folder."
-                : "Launches here ask before acting. Turn on to skip permission prompts on shell terminals."
+                ? "Launches here skip permission prompts: shells and agents. Remembered for this folder."
+                : "Launches here ask before acting. Turn on to skip permission prompts for shells and agents."
         )
     }
 
@@ -514,7 +518,9 @@ struct ClientWorkspaceSessionsView: View {
             visibility.show(profile.id, scope: visibilityScope)
             catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
             adoptHostHidden()
-            if !visibleCatalog.isEmpty { rememberedTileCount = visibleCatalog.count }
+            if !visibleCatalog.isEmpty {
+                UserDefaults.standard.set(visibleCatalog.count, forKey: launchTileCountKey)
+            }
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
@@ -655,10 +661,9 @@ struct ClientWorkspaceSessionsView: View {
         )
         openSession = pending
         do {
-            // Bypass is a shell-terminal switch. An agent harness launched
-            // with its bypass flags stops asking for permission, which a
-            // remembered toggle must never do on its own.
-            let args = (bypassOn && profile.harnessId == nil)
+            // Bypass applies to every launch, including agent harnesses. The
+            // chrome switch is the person's choice for the next session.
+            let args = bypassOn
                 ? profile.args + profile.bypassArgs
                 : profile.args
             let info = try await ClientRemote.ptySpawn(

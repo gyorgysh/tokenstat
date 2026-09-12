@@ -45,9 +45,18 @@ final class ChatModel {
     /// landing until the next layout.
     private(set) var outgoing: [ChatDisplayItem] = []
     var approvals: [ChatApproval] = []
+    /// Whether the live approval list has answered for the current selection.
+    /// Until it has, the transcript's own records are the only evidence of a
+    /// question still waiting, and one with time left must not read as
+    /// expired.
+    private(set) var approvalsLoaded = false
     /// What this conversation says to its agent ahead of the person's
     /// words. Read so the inspector can show it rather than describe it.
     var instructions: ChatInstructions?
+    /// Whether the instructions read has finished for the current selection.
+    /// Once it has, a nil `instructions` means the host could not answer
+    /// rather than a load still in flight.
+    private(set) var instructionsLoaded = false
     var offset: UInt64 = 0
     @ObservationIgnored private var tailCursor: String?
     /// Asks the host for the page before the oldest one held. Nil once the
@@ -734,7 +743,9 @@ final class ChatModel {
                 outgoing = []
                 outgoingWatermark = [:]
                 approvals = []
+                approvalsLoaded = false
                 instructions = nil
+                instructionsLoaded = false
                 responseAttachmentData = [:]
                 attemptedResponseAttachments = []
                 loadingResponseAttachments = []
@@ -751,6 +762,7 @@ final class ChatModel {
                 outgoing = []
                 outgoingWatermark = [:]
                 approvals = []
+                approvalsLoaded = false
                 forgetWindow()
                 loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
@@ -916,7 +928,9 @@ final class ChatModel {
         loadingResponseAttachments = []
         responseAttachmentErrors = [:]
         approvals = []
+        approvalsLoaded = false
         instructions = nil
+        instructionsLoaded = false
         events = []
         outgoing = []
         outgoingWatermark = [:]
@@ -999,6 +1013,18 @@ final class ChatModel {
     /// held: no reset, so no row that is already drawn is drawn again.
     private func refreshOpen(id: String) async {
         let generation = selectionGeneration
+        let wasSavedCopy = savedCopy != nil
+        if wasSavedCopy {
+            // Live data arriving under a snapshot is a reopen, never a tail:
+            // the copy's byte offset belongs to an archive that may have
+            // compacted since it was kept, and only a reset open clears the
+            // read-only state that refuses sending, approvals and draining.
+            savedCopy = nil
+            events = []
+            outgoing = []
+            outgoingWatermark = [:]
+            forgetWindow()
+        }
         if events.isEmpty {
             // No rows held, so this is an opening whatever it is called from,
             // and the transcript has to know: revealing an empty transcript
@@ -1008,14 +1034,12 @@ final class ChatModel {
             defer {
                 if selectionGeneration == generation { openingConversation = false }
             }
-            let openedLive = await openEvents(id: id, generation: generation)
+            let openedLive = await openEvents(id: id, generation: generation, quiet: wasSavedCopy)
             if !openedLive, events.isEmpty, selectionMatches(id: id, generation: generation) {
                 await openSavedCopy(id: id, generation: generation)
             }
         } else {
-            // A failed recheck while a saved copy is on screen stays silent:
-            // the banner already says what is true.
-            await loadEvents(id: id, reset: false, generation: generation, quiet: savedCopy != nil)
+            await loadEvents(id: id, reset: false, generation: generation)
         }
         guard selectionMatches(id: id, generation: generation) else { return }
         if savedCopy == nil {
@@ -1063,12 +1087,15 @@ final class ChatModel {
         // shared task does not inherit waiter cancellation, so check here
         // where the waiter's flag is visible.
         guard !Task.isCancelled else { return nil }
+        isCreating = true
+        defer { isCreating = false }
         return await createSingleflight.run { await self.performCreate() }
     }
 
     /// True while a creation is reaching the backend. New-chat buttons read
-    /// this so the tap shows as busy instead of dead.
-    var isCreating: Bool { createSingleflight.isRunning }
+    /// this so the tap shows as busy instead of dead. Stored rather than
+    /// read off the singleflight, which nothing observes.
+    private(set) var isCreating = false
 
     private func performCreate() async -> ChatConversation? {
         guard !Task.isCancelled, let workspaceID, let scope = continuityScope,
@@ -1367,11 +1394,15 @@ final class ChatModel {
                 guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item,
                       items[index].canEdit else { throw ChatOutboxStore.Failure.conflict }
                 guard items[index].text != text else { return }
+                // The row keeps its id while it is edited: re-identifying it
+                // rebuilds the field and drops the caret on the first
+                // keystroke. An edit after an attempt still goes out under a
+                // fresh delivery id, so `attemptedAt` stays as the mark the
+                // send path rotates; the stale authorization goes with it.
                 if items[index].attemptedAt != nil {
-                    items[index].id = UUID().uuidString
-                    items[index].attemptedAt = nil
                     items[index].firstAttemptAt = nil
                     items[index].delivery = .waiting
+                    authorizedQueueItems.remove(item.id)
                 }
                 items[index].text = text
                 items[index].expectedRevision = contextRevision
@@ -1545,11 +1576,21 @@ final class ChatModel {
                 if current() { busyTurnError() }
                 return false
             }
-            let firstAttemptAt = item.firstAttemptAt ?? item.attemptedAt ?? Date()
+            // An edit after an attempt marks its row by leaving `attemptedAt`
+            // in place. The words changed, so the delivery id does too: the
+            // old one may already have a receipt on the host. It is minted
+            // here, at the send, never while the field is being typed into.
+            let rotatesDelivery = item.attemptedAt != nil && item.delivery == .waiting
+            var deliveryItem = item
+            if rotatesDelivery { deliveryItem.id = UUID().uuidString }
+            let firstAttemptAt = rotatesDelivery
+                ? Date()
+                : (item.firstAttemptAt ?? item.attemptedAt ?? Date())
             publish(try ChatOutboxStore.shared.update(reference) { items in
                 guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item else {
                     throw ChatOutboxStore.Failure.conflict
                 }
+                items[index].id = deliveryItem.id
                 items[index].delivery = .sending
                 items[index].firstAttemptAt = firstAttemptAt
                 items[index].attemptedAt = Date()
@@ -1558,13 +1599,13 @@ final class ChatModel {
             var accepted = false
             do {
                 let updated = try await Bridge.sendChat(id: conversationID, text: item.text,
-                    attachmentIDs: resolved.map(\.id), clientMessageID: item.id,
+                    attachmentIDs: resolved.map(\.id), clientMessageID: deliveryItem.id,
                     clientMessageCreatedAt: firstAttemptAt, expectedRevision: item.expectedRevision, peer: targetPeer)
                 accepted = true
-                let remaining = try ChatOutboxStore.shared.accept(item, revision: updated.sendRevision, for: reference)
+                let remaining = try ChatOutboxStore.shared.accept(deliveryItem, revision: updated.sendRevision, for: reference)
                 publish(remaining)
-                clearSubmittedDraft(item, reference: reference)
-                authorizedQueueItems.remove(item.id)
+                clearSubmittedDraft(deliveryItem, reference: reference)
+                authorizedQueueItems.remove(deliveryItem.id)
                 if current() {
                     replace(updated)
                     contextRevision = updated.sendRevision
@@ -1573,9 +1614,9 @@ final class ChatModel {
                 return true
             } catch {
                 if current() { dropOutgoing(staged) }
-                authorizedQueueItems.remove(item.id)
+                authorizedQueueItems.remove(deliveryItem.id)
                 publish(try ChatOutboxStore.shared.update(reference) { items in
-                    if let index = items.firstIndex(where: { $0.id == item.id }) {
+                    if let index = items.firstIndex(where: { $0.id == deliveryItem.id }) {
                         if case BridgeError.core(code: "conversation_changed", message: _) = error {
                             items[index].delivery = .needsReview
                         } else {
@@ -1752,8 +1793,8 @@ final class ChatModel {
         guard !Task.isCancelled, savedCopy == nil, let owner,
               owner.scope == WorkSessionContext.shared.scope,
               currentReference == owner, owner.itemID == approval.conversationID,
-              selected?.id == approval.conversationID, approval.decision == nil,
-              approvals.contains(approval) else { return }
+              selected?.id == approval.conversationID,
+              approvalIsPending(approval) else { return }
         let generation = selectionGeneration
         do {
             _ = try await Bridge.resolveChatApproval(id: approval.id, choice: choice, peer: peer)
@@ -1768,6 +1809,20 @@ final class ChatModel {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    /// Whether an approval record is still a question waiting for an answer.
+    ///
+    /// The live list is authoritative once it has answered. Until then — an
+    /// open still in flight, or a read that has only ever failed — the
+    /// record's own deadline is the evidence, so a question with time left
+    /// is not reported as one nobody answered. A saved copy is a snapshot:
+    /// its rows stay text, never live controls.
+    func approvalIsPending(_ approval: ChatApproval) -> Bool {
+        guard savedCopy == nil, approval.decision == nil else { return false }
+        if approvals.contains(where: { $0.id == approval.id }) { return true }
+        return !approvalsLoaded
+            || Double(approval.expiresAtMs) / 1000 > Date().timeIntervalSince1970
     }
 
     /// Workspace ownership does not require a selected conversation: personas
@@ -1832,7 +1887,7 @@ final class ChatModel {
         let generation = selectionGeneration
         await loadEvents(id: selected.id, reset: false, generation: generation, quiet: true)
         guard selectionMatches(id: selected.id, generation: generation) else { return }
-        await loadApprovals(id: selected.id, generation: generation)
+        await loadApprovals(id: selected.id, generation: generation, quiet: true)
         guard selectionMatches(id: selected.id, generation: generation) else { return }
         do {
             let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
@@ -2174,10 +2229,10 @@ final class ChatModel {
     /// One latest page on ordinary open. Older pages are requested only by
     /// scrolling back or following an explicit reading/search destination.
     @discardableResult
-    private func openEvents(id: String, generation: UInt64) async -> Bool {
+    private func openEvents(id: String, generation: UInt64, quiet: Bool = false) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
         guard !pagingUnavailable else {
-            return await loadEvents(id: id, reset: true, generation: generation)
+            return await loadEvents(id: id, reset: true, generation: generation, quiet: quiet)
         }
         let requestedRevision = selected?.sendRevision
         do {
@@ -2212,7 +2267,7 @@ final class ChatModel {
             if isUnknownMethod(error) { pagingUnavailable = true }
             // Whatever went wrong, the conversation still has to appear. The
             // whole-timeline read is the behaviour every host has had.
-            return await loadEvents(id: id, reset: true, generation: generation)
+            return await loadEvents(id: id, reset: true, generation: generation, quiet: quiet)
         }
     }
 
@@ -2338,7 +2393,7 @@ final class ChatModel {
             guard selectionMatches(id: id, generation: generation) else { return false }
             guard reset || (requestedOffset == offset && requestedCursor == tailCursor) else { return false }
             if chunk.reset {
-                let opened = await openEvents(id: id, generation: generation)
+                let opened = await openEvents(id: id, generation: generation, quiet: quiet)
                 if opened, selectionMatches(id: id, generation: generation) {
                     // A replacement can move the current row or leave it in
                     // an older page. Restore the reader after the new window
@@ -2437,6 +2492,10 @@ final class ChatModel {
         error = nil
         savedCopy = SavedCopyInfo(title: copy.title, savedAt: copy.savedAt,
                                   hasEarlier: copy.page.hasEarlier, revision: copy.revision)
+        // A snapshot never reads instructions: the read is already settled,
+        // and the disclosure says so instead of waiting on a host that is
+        // not answering.
+        instructionsLoaded = true
         warmMarkdown()
         settleNotifications()
         if let id = selected?.id {
@@ -2633,6 +2692,7 @@ final class ChatModel {
     private func loadInstructions(id: String, generation: UInt64) async {
         guard !Task.isCancelled, savedCopy == nil,
               selectionMatches(id: id, generation: generation) else { return }
+        instructionsLoaded = false
         do {
             let loaded = try await Bridge.chatInstructions(id: id, peer: peer)
             guard selectionMatches(id: id, generation: generation) else { return }
@@ -2642,9 +2702,12 @@ final class ChatModel {
             // than interrupting a conversation over a disclosure nobody opened.
             if selectionMatches(id: id, generation: generation) { instructions = nil }
         }
+        // Settled either way: a nil answer after this is "not available",
+        // not a read still in flight.
+        if selectionMatches(id: id, generation: generation) { instructionsLoaded = true }
     }
 
-    private func loadApprovals(id: String, generation: UInt64) async {
+    private func loadApprovals(id: String, generation: UInt64, quiet: Bool = false) async {
         guard !Task.isCancelled, savedCopy == nil,
               selectionMatches(id: id, generation: generation) else { return }
         do {
@@ -2653,9 +2716,12 @@ final class ChatModel {
             // Unchanged approvals must not write back: the write redraws the
             // transcript, and this runs on every poll of a running turn.
             if approvals != loaded { approvals = loaded }
+            approvalsLoaded = true
             settleNotifications()
         } catch {
-            if selectionMatches(id: id, generation: generation) {
+            // A background poll must not pop an alert over an idle screen;
+            // the rows keep the answers they already had.
+            if !quiet, selectionMatches(id: id, generation: generation) {
                 self.error = error.localizedDescription
             }
         }
@@ -2977,7 +3043,11 @@ struct ChatDisplayItem: Identifiable, Equatable {
 
     static func coalesce(_ events: [ChatTimelineEvent], defaultBackend: String? = nil, running: Bool = true) -> [ChatDisplayItem] {
         var items: [ChatDisplayItem] = []
-        var toolIndex: [String: Int] = [:]
+        // Every row a call id has started, oldest first. A call id is not
+        // unique on every backend (Antigravity sends `call_id: "tool"` for
+        // all of them), so an End has to close the oldest row still running
+        // under that name rather than keep overwriting the newest start.
+        var toolIndexes: [String: [Int]] = [:]
         // How many times each call id has already started a tool in this
         // conversation. An agent is supposed to name every call something of
         // its own, and most do, but Antigravity sends `call_id: "tool"` for
@@ -3056,16 +3126,18 @@ struct ChatDisplayItem: Identifiable, Equatable {
         }
 
         func matchingEditIndex(callId: String, path: String) -> Int? {
-            if !callId.isEmpty, let index = toolIndex[callId], items.indices.contains(index) {
-                switch items[index].kind {
-                case let .edit(state) where path.isEmpty || state.path == path || state.path == "File":
-                    return index
-                case let .tool(state)
-                    where ChatToolState.isFileEditVerb(state.verb)
-                        && (path.isEmpty || state.target == path || state.target.isEmpty):
-                    return index
-                default:
-                    break
+            if !callId.isEmpty, let indexes = toolIndexes[callId] {
+                for index in indexes.reversed() where items.indices.contains(index) {
+                    switch items[index].kind {
+                    case let .edit(state) where path.isEmpty || state.path == path || state.path == "File":
+                        return index
+                    case let .tool(state)
+                        where ChatToolState.isFileEditVerb(state.verb)
+                            && (path.isEmpty || state.target == path || state.target.isEmpty):
+                        return index
+                    default:
+                        continue
+                    }
                 }
             }
             for index in items.indices.reversed() {
@@ -3082,6 +3154,32 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 }
             }
             return nil
+        }
+
+        /// Remember a row as the newest one this call id names. An id that
+        /// already named the row is moved to the back rather than repeated.
+        func noteToolIndex(_ index: Int, callId: String) {
+            guard !callId.isEmpty else { return }
+            var indexes = toolIndexes[callId] ?? []
+            indexes.removeAll { $0 == index }
+            indexes.append(index)
+            toolIndexes[callId] = indexes
+        }
+
+        /// The row an End closes: the oldest one still running under this
+        /// call id, or, for a repeat End with nothing left running, the
+        /// newest row the id named.
+        func toolEndIndex(callId: String) -> Int? {
+            guard !callId.isEmpty, let indexes = toolIndexes[callId] else { return nil }
+            let running = indexes.first { index in
+                guard items.indices.contains(index) else { return false }
+                switch items[index].kind {
+                case let .tool(state): return state.running
+                case let .edit(state): return state.running
+                default: return false
+                }
+            }
+            return running ?? indexes.last { items.indices.contains($0) }
         }
 
         for event in events {
@@ -3170,7 +3268,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     : (occurrence == 1 ? "tool-\(callId)" : "tool-\(callId)#\(occurrence)")
                 let verb = agent.verb ?? "Tool"
                 let target = ChatToolState.clip(agent.target ?? "")
-                toolIndex[callId] = items.count
+                noteToolIndex(items.count, callId: callId)
                 if ChatToolState.isFileEditVerb(verb) {
                     items.append(
                         ChatDisplayItem(
@@ -3218,7 +3316,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 flushText()
                 flushThinking()
                 let callId = agent.callId ?? ""
-                if let index = toolIndex[callId] {
+                if let index = toolEndIndex(callId: callId) {
                     switch items[index].kind {
                     case .tool(var state):
                         state.running = false
@@ -3312,7 +3410,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     default:
                         break
                     }
-                    if !callId.isEmpty { toolIndex[callId] = index }
+                    if !callId.isEmpty { noteToolIndex(index, callId: callId) }
                 } else {
                     var state = ChatEditState(
                         path: path,
@@ -3332,7 +3430,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                         editStarts[callId] = occurrence
                         return occurrence == 1 ? "edit-\(callId)" : "edit-\(callId)#\(occurrence)"
                     }()
-                    if !callId.isEmpty { toolIndex[callId] = items.count }
+                    if !callId.isEmpty { noteToolIndex(items.count, callId: callId) }
                     items.append(ChatDisplayItem(id: rowID, kind: .edit(state)))
                 }
             case "attachment":

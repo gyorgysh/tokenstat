@@ -161,11 +161,12 @@ const KIMI_ALLOW: &[&str] = &[
     "time",
     "agentId",
     "model",
-    "usage",
-    "inputOther",
-    "output",
-    "inputCacheRead",
-    "inputCacheCreation",
+    // The counters live under `usage`; each path has to name the container,
+    // or `filter_object` descends into `usage` and drops every leaf.
+    "usage.inputOther",
+    "usage.output",
+    "usage.inputCacheRead",
+    "usage.inputCacheCreation",
     "usageScope",
 ];
 

@@ -35,15 +35,19 @@ pub struct ModelTotals {
 impl ModelTotals {
     /// Input plus output, excluding cache. This is the definition Claude Code
     /// uses for the headline figure in its own usage view, so comparing like
-    /// for like requires excluding cache here too.
+    /// for like requires excluding cache here too. Saturating: the figures
+    /// come from a JSON file and a wrap here would flip a bound.
     pub fn in_out(&self) -> u64 {
-        self.input + self.output
+        self.input.saturating_add(self.output)
     }
 
     /// Every billable token, cache included. Not the vendor's headline figure,
     /// but the basis its per-day `dailyModelTokens` numbers are stated on.
     pub fn total(&self) -> u64 {
-        self.input + self.output + self.cache_read + self.cache_creation
+        self.input
+            .saturating_add(self.output)
+            .saturating_add(self.cache_read)
+            .saturating_add(self.cache_creation)
     }
 }
 
@@ -59,7 +63,9 @@ pub struct StatsCache {
 
 impl StatsCache {
     pub fn in_out_total(&self) -> u64 {
-        self.by_model.values().map(|m| m.in_out()).sum()
+        self.by_model
+            .values()
+            .fold(0u64, |acc, m| acc.saturating_add(m.in_out()))
     }
 }
 
@@ -90,7 +96,7 @@ pub fn detect_basis(stats: &StatsCache, daily: &[(String, BTreeMap<String, u64>)
     let daily_sum: u64 = daily
         .iter()
         .flat_map(|(_, by_model)| by_model.values())
-        .sum();
+        .fold(0u64, |acc, v| acc.saturating_add(*v));
     if daily_sum > stats.in_out_total() {
         DailyBasis::Total
     } else {
@@ -245,7 +251,7 @@ pub fn backfill_events(
             };
             // Output takes the remainder so rounding can never lose or invent a
             // token against the figure the vendor stated.
-            let counted = input + cache_read + cache_write;
+            let counted = input.saturating_add(cache_read).saturating_add(cache_write);
             let output = tokens.saturating_sub(counted);
 
             // Midday local time, so the event cannot drift across a date
@@ -322,9 +328,9 @@ fn keep_plausible(stats: &StatsCache, events: Vec<UsageEvent>) -> Recovery {
     let mut derived: BTreeMap<String, (u64, u64, u64)> = BTreeMap::new();
     for e in &events {
         let slot = derived.entry(e.model.clone()).or_default();
-        slot.0 += e.counters.output.unwrap_or(0);
-        slot.1 += e.counters.cache_read.unwrap_or(0);
-        slot.2 += e.counters.input_fresh.unwrap_or(0);
+        slot.0 = slot.0.saturating_add(e.counters.output.unwrap_or(0));
+        slot.1 = slot.1.saturating_add(e.counters.cache_read.unwrap_or(0));
+        slot.2 = slot.2.saturating_add(e.counters.input_fresh.unwrap_or(0));
     }
     let mut refused: Vec<String> = Vec::new();
     let mut warnings = Vec::new();

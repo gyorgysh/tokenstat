@@ -16,6 +16,17 @@ struct WorkingTreeReviewView: View {
 
     private var files: [FileChange] { folder.git?.files ?? [] }
 
+    /// Identity of the work to review: the folder and the change set. A save,
+    /// an agent edit, or a commit changes it and reloads the diffs.
+    private struct ReviewKey: Equatable {
+        let folderID: String
+        let files: [FileChange]
+    }
+
+    private var reviewKey: ReviewKey {
+        ReviewKey(folderID: folder.id, files: files)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -45,7 +56,7 @@ struct WorkingTreeReviewView: View {
             }
         }
         .background(Theme.background)
-        .task(id: folder.id) { await load() }
+        .task(id: reviewKey) { await load() }
     }
 
     private var header: some View {

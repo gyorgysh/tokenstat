@@ -283,7 +283,7 @@ fn discover(host: &str) -> Option<Credential> {
             .expires_at
             .is_some_and(|expires_at| expires_at <= now_secs().saturating_add(30));
         if expired {
-            if let Ok(refreshed) = refresh(&host, &grant) {
+            if let Ok(refreshed) = refresh_behind_lock(&host, &grant.access_token) {
                 return Some(Credential {
                     source: refreshed.source,
                     token: refreshed.access_token,
@@ -302,16 +302,24 @@ fn discover(host: &str) -> Option<Credential> {
             token,
         });
     }
-    ["GH_TOKEN", "GITHUB_TOKEN"]
-        .into_iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .map(|token| token.trim().to_string())
-        .filter(|token| !token.is_empty())
-        .find(|token| borrowed_token_usable(&host, token))
-        .map(|token| Credential {
-            source: CredentialSource::Environment,
-            token,
-        })
+    // GH_TOKEN/GITHUB_TOKEN are GitHub credentials. Offering one to whatever
+    // host a workspace's git remote names would hand the person's GitHub token
+    // to that host, so the environment rung exists only for github.com.
+    // Elsewhere the search falls through to stored credentials or reports
+    // not-signed-in.
+    if host == GITHUB_HOST {
+        return ["GH_TOKEN", "GITHUB_TOKEN"]
+            .into_iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .map(|token| token.trim().to_string())
+            .filter(|token| !token.is_empty())
+            .find(|token| borrowed_token_usable(&host, token))
+            .map(|token| Credential {
+                source: CredentialSource::Environment,
+                token,
+            });
+    }
+    None
 }
 
 /// What a probe of a borrowed token found.
@@ -527,10 +535,36 @@ fn refresh(host: &str, old: &StoredGrant) -> Result<StoredGrant, ForgeError> {
     Ok(grant)
 }
 
-pub(super) fn refresh_stored(host: &str) -> Result<Credential, ForgeError> {
+/// Serializes refreshes so a single-use refresh token is spent only once.
+fn refresh_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// Refresh under the lock, unless `stale_access_token` has already been
+/// replaced.
+///
+/// Concurrent forge calls can meet a 401 together, each holding the same
+/// grant. The refresh token behind it is single use: without this, the second
+/// spends a token the first already rotated away and the person is signed out.
+/// The loser reloads whatever the winner stored and returns that instead.
+fn refresh_behind_lock(host: &str, stale_access_token: &str) -> Result<StoredGrant, ForgeError> {
+    let _guard = refresh_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let current = load_grant(host)?.ok_or(ForgeError::NotSignedIn)?;
+    if current.access_token != stale_access_token {
+        return Ok(current);
+    }
+    refresh(host, &current)
+}
+
+pub(super) fn refresh_stored(
+    host: &str,
+    stale_access_token: &str,
+) -> Result<Credential, ForgeError> {
     let host = normalized_host(host).ok_or_else(|| ForgeError::Api("invalid host".into()))?;
-    let old = load_grant(&host)?.ok_or(ForgeError::NotSignedIn)?;
-    let refreshed = refresh(&host, &old)?;
+    let refreshed = refresh_behind_lock(&host, stale_access_token)?;
     Ok(Credential {
         source: refreshed.source,
         token: refreshed.access_token,

@@ -187,11 +187,11 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
     if json {
         let conf: Vec<String> = confidence
             .iter()
-            .map(|(k, v)| format!(r#"{{"level":"{k}","events":{v}}}"#))
+            .map(|(k, v)| format!(r#"{{"level":{},"events":{v}}}"#, json_string(k)))
             .collect();
         println!(
-            r#"{{"db":"{}","events":{},"confidence":[{}]}}"#,
-            db_path.display(),
+            r#"{{"db":{},"events":{},"confidence":[{}]}}"#,
+            json_string(&db_path.display().to_string()),
             totals.events,
             conf.join(",")
         );
@@ -326,9 +326,10 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
                     "model", "out has", "out said", "cache has", "cache said"
                 );
                 for (model, ao, vo, ac, vc) in rows.iter().take(8) {
+                    let model = sanitize_label(model);
                     println!(
                         "  {:<28}{:>10}{:>10}{:>12}{:>12}",
-                        ui::truncate(model, 27),
+                        ui::truncate(&model, 27),
                         ui::tokens(*ao),
                         ui::tokens(*vo),
                         ui::tokens(*ac),
