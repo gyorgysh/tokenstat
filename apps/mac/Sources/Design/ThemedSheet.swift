@@ -65,7 +65,20 @@ struct ThemedSheet<Content: View, Actions: View>: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Theme.sidebar)
                 } else {
+                    #if os(macOS)
                     ModalFooter(actions: actions)
+                    #else
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Theme.Space.s) { actions() }
+                        VStack(alignment: .leading, spacing: Theme.Space.s) { actions() }
+                    }
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.vertical, Theme.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background {
+                        Theme.sidebar.ignoresSafeArea(edges: .bottom)
+                    }
+                    #endif
                 }
             }
         }

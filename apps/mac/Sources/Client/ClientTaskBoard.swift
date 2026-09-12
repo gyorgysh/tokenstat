@@ -145,7 +145,11 @@ struct ClientTaskBoard: View {
         .fullScreenCover(item: $presentedRun) { run in
             ClientTaskResultView(
                 peer: peer, hostName: hostName, folderName: run.folderName,
-                workspaceID: run.workspaceID, runID: run.runID
+                workspaceID: run.workspaceID, runID: run.runID,
+                onOpenTerminal: { info in
+                    presentedRun = nil
+                    openTerminal(info)
+                }
             )
         }
         .fullScreenCover(item: $presentedTerminal) { terminal in

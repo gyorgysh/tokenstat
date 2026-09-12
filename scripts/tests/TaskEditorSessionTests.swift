@@ -15,6 +15,11 @@ struct TodoCard: Codable, Sendable, Equatable {
     var effort: String?
     var budgetSeconds: UInt64 = 121
     var delegate: TodoDelegate?
+    var promptForRun: String {
+        let body = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty { return body }
+        return title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 struct TodoDelegate: Codable, Sendable, Equatable {
     var runId: String
@@ -42,17 +47,20 @@ protocol TaskRunService: Sendable {
     func runTask(id: String, revision: UInt64, operationID: String, placement: TaskRunPlacement) async throws -> TaskRunOutcome
     func taskRunReceipt(operationID: String) async throws -> TaskRunOutcome?
     func stopTask(id: String, revision: UInt64, runID: String) async throws -> TodoCard
-    func taskTerminal(run: RunRecord) async throws -> PtySessionInfo
+    func taskTerminal(ptyID: String) async throws -> PtySessionInfo
 }
 extension TaskEditorTarget: TaskRunService {
     func supportsTaskExecution() async -> Bool { false }
     func runTask(id: String, revision: UInt64, operationID: String, placement: TaskRunPlacement) async throws -> TaskRunOutcome { throw FixtureError.unexpectedTransport }
     func taskRunReceipt(operationID: String) async throws -> TaskRunOutcome? { throw FixtureError.unexpectedTransport }
     func stopTask(id: String, revision: UInt64, runID: String) async throws -> TodoCard { throw FixtureError.unexpectedTransport }
-    func taskTerminal(run: RunRecord) async throws -> PtySessionInfo { throw FixtureError.unexpectedTransport }
+    func taskTerminal(ptyID: String) async throws -> PtySessionInfo { throw FixtureError.unexpectedTransport }
 }
 struct AgentBackend: Codable, Sendable {}
-struct WorkspaceFolder: Codable, Sendable {}
+struct WorkspaceFolder: Codable, Sendable {
+    var id = ""
+    var exists = true
+}
 enum FixtureError: Error { case disconnected, conflict, unexpectedTransport }
 enum Bridge {
     static func onPeer<T: Decodable & Sendable>(_ peer: String, _ method: String, _ params: [String: Any], as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
@@ -91,6 +99,13 @@ actor FixtureTasks: TaskEditorService, TaskRunService {
     }
     func finishRun() { card?.delegate?.status = "ok" }
     func delete() { card = nil }
+    func uncategorizedCard() -> TodoCard {
+        var next = card ?? TodoCard()
+        next.workspaceID = ""
+        next.backend = ""
+        card = next
+        return next
+    }
     func edit(id: String, revision: UInt64, draft: TaskEditorDraft) async throws -> TodoCard {
         guard var next = card, next.revision == revision else { throw FixtureError.conflict }
         edits += 1
@@ -131,7 +146,10 @@ actor FixtureTasks: TaskEditorService, TaskRunService {
         card = next
         return next
     }
-    func taskTerminal(run: RunRecord) async throws -> PtySessionInfo { PtySessionInfo() }
+    func taskTerminal(ptyID: String) async throws -> PtySessionInfo {
+        guard !ptyID.isEmpty else { throw FixtureError.disconnected }
+        return PtySessionInfo()
+    }
 }
 
 @main struct TaskEditorSessionTests {
@@ -192,6 +210,10 @@ actor FixtureTasks: TaskEditorService, TaskRunService {
         assert(!recovered.canRun, "An active linked run must disable another launch")
         let recoveredRunCount = await service.runAttempts.count
         assert(recoveredRunCount == 1, "Receipt recovery must not submit a second run")
+        recovered.fields.prompt = "Editing while it runs"
+        assert(recovered.canStop, "A dirty draft must not disable Stop")
+        assert(recovered.saved.liveTerminal == nil, "A background run has no terminal to reopen")
+        recovered.fields.prompt = "My longer draft"
         await recovered.stop()
         assert(recovered.saved.baseline.delegate?.status == "stopping" && !recovered.canStop)
 
@@ -212,6 +234,16 @@ actor FixtureTasks: TaskEditorService, TaskRunService {
         _ = await retryReopened.retryRun()
         let attempts = await service.runAttempts
         assert(attempts.suffix(2).allSatisfy { $0 == retrySubmission }, "Explicit retry keeps the original operation and placement")
+        await retryReopened.reconcileRun()
+        assert(retryReopened.saved.liveTerminal?.ptyID == "pty")
+        let reopenedTerminal = await retryReopened.attachedTerminal()
+        assert(reopenedTerminal != nil, "A live foreground run must reopen its terminal")
+        let restored = session(host: "run-retry")
+        await restored.load()
+        assert(restored.lastRun == nil, "A relaunched editor has no in-memory run")
+        assert(restored.saved.liveTerminal?.ptyID == "pty")
+        let restoredTerminal = await restored.attachedTerminal()
+        assert(restoredTerminal != nil, "A relaunched editor must reopen the same live terminal")
         first.fields.prompt = "Older window writing"
         await first.flush()
         assert(first.otherDraft != nil && first.fields.prompt == "Older window writing")
@@ -237,6 +269,18 @@ actor FixtureTasks: TaskEditorService, TaskRunService {
         let blockedCount = await blockedService.edits
         assert(blockedCount == 0 && blocked.errorMessage != nil)
         assert(blocked.fields.prompt == "Keep this writing when storage fails")
+        let gapDir = directory.appendingPathComponent("uncategorized")
+        try FileManager.default.createDirectory(at: gapDir, withIntermediateDirectories: true)
+        let gapService = FixtureTasks()
+        let gapCard = await gapService.uncategorizedCard()
+        let gap = TaskEditorSession(
+            target: TaskEditorTarget(peer: "gap"), card: gapCard,
+            scope: .local(installationID: "fixture"), hostIdentity: "gap",
+            service: gapService, runService: gapService, draftDirectory: gapDir
+        )
+        await gap.load()
+        assert(!gap.canRun)
+        assert(gap.runReadiness?.contains("folder") == true, "An uncategorized task must not pretend it can run")
         print("Task editing: exact budgets, durable drafts, host conflicts, lost-reply recovery, stale-window comparison and deletion preservation passed")
     }
 }

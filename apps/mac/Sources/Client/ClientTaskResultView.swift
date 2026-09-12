@@ -16,12 +16,14 @@ struct ClientTaskResultView: View {
     let runID: String
     var seedFolder: WorkspaceFolder? = nil
     var gitSession: GitCommitSession? = nil
+    var onOpenTerminal: ((PtySessionInfo) -> Void)? = nil
 
     @State private var session: ClientAutomationSession
     @State private var liveFolder: WorkspaceFolder?
     @State private var folderMissing = false
     @State private var inspectorSurface: TaskResultWorkspaceSurface = .changes
     @State private var pushedSurface: TaskResultWorkspaceSurface?
+    @State private var attachError: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -33,6 +35,7 @@ struct ClientTaskResultView: View {
         runID: String,
         seedFolder: WorkspaceFolder? = nil,
         gitSession: GitCommitSession? = nil,
+        onOpenTerminal: ((PtySessionInfo) -> Void)? = nil,
         service: any ClientJobService = ClientRemoteJobService()
     ) {
         self.peer = peer
@@ -42,6 +45,7 @@ struct ClientTaskResultView: View {
         self.runID = runID
         self.seedFolder = seedFolder
         self.gitSession = gitSession
+        self.onOpenTerminal = onOpenTerminal
         _session = State(initialValue: ClientAutomationSession(
             peer: peer, workspaceID: workspaceID, hostName: hostName, folderName: folderName,
             runID: runID, service: service
@@ -127,17 +131,32 @@ struct ClientTaskResultView: View {
                         Task { await session.load() }
                     }
                 }
+                if let attachError {
+                    Text(attachError)
+                        .font(ClientType.caption)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let run {
                     header(run)
                     if session.liveRun?.id == runID {
-                        ClientAutomationActions(session: session, pinnedRunID: runID)
-                            .padding(Theme.Space.m)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .cardSurface()
+                        HStack(spacing: Theme.Space.s) {
+                            ClientAutomationActions(session: session, pinnedRunID: runID)
+                            if onOpenTerminal != nil, let ptyID = run.ptyID, !ptyID.isEmpty {
+                                Button("Open terminal", .reopen) {
+                                    Task { await attachTerminal(ptyID) }
+                                }
+                                .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(Theme.Space.m)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .cardSurface()
                     }
                     TranscriptView(
                         text: session.transcriptText,
-                        empty: run.isRunning ? "Waiting for output…" : "No readable output."
+                        empty: transcriptEmpty(run)
                     )
                     .padding(Theme.Space.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -284,6 +303,27 @@ struct ClientTaskResultView: View {
             inspectorSurface = surface
         } else {
             pushedSurface = surface
+        }
+    }
+
+    private func transcriptEmpty(_ run: RunRecord) -> String {
+        if run.isRunning {
+            if let ptyID = run.ptyID, !ptyID.isEmpty {
+                return "Output is in the terminal on \(hostName)."
+            }
+            return "Waiting for output…"
+        }
+        return "No readable output."
+    }
+
+    private func attachTerminal(_ ptyID: String) async {
+        guard let onOpenTerminal else { return }
+        do {
+            let info = try await ClientRemote.ptyInfo(peer: peer, id: ptyID)
+            attachError = nil
+            onOpenTerminal(info)
+        } catch {
+            attachError = "The terminal is not ready yet. Try again in a moment."
         }
     }
 

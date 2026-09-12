@@ -132,35 +132,20 @@ struct TaskEditorView: View {
                 Button("Check saved task", .refresh) { Task { await session.refresh(); await onSaved() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
             } else if session.saved.pendingRun != nil {
-                Button("Check run", .refresh) { Task { await session.reconcileRun(); await openLastRun() } }
-                    .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(session.working)
-                Button("Retry same request", .run) { Task { await open(session.retryRun()) } }
-                    .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
-            } else {
-                if let delegate = session.saved.baseline.delegate, delegate.isRunning {
-                    Button(delegate.status == "stopping" ? "Stopping…" : "Stop", .stop) {
-                        Task { await session.stop(); await onSaved() }
-                    }
-                        .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(!session.canStop)
-                    Button("View run", .preview) { onViewRun?(delegate.runId, session.saved.baseline.workspaceID) }
-                        .buttonStyle(AccentButtonStyle(comfortable: true))
-                } else if session.supportsExecution {
-                    if let delegate = session.saved.baseline.delegate {
-                        Button("View last result", .preview) {
-                            onViewRun?(delegate.runId, session.saved.baseline.workspaceID)
-                        }
-                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
-                    }
-                    TaskRunBar(canRun: session.canRun, running: session.working) { placement in
-                        if placement == .chat {
-                            chatTask = session.saved.baseline
-                        } else {
-                            Task { await open(session.run(placement == .foreground ? .foreground : .background)) }
-                        }
-                    }
+                wrappingFooter {
+                    Button("Check run", .refresh) { Task { await session.reconcileRun(); await openLastRun() } }
+                        .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(session.working)
+                    Button("Retry same request", .run) { Task { await open(session.retryRun()) } }
+                        .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
                 }
-                Button("Save task", .save) { Task { await session.save(); await onSaved() } }
-                    .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(!session.canSave)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Theme.Space.s) {
+                        runButtons
+                        saveTaskButton
+                    }
+                    compactRunFooter
+                }
             }
         }
         .modifier(TaskEditorPresentation(embedded: onClose != nil))
@@ -172,13 +157,103 @@ struct TaskEditorView: View {
         .onDisappear { Task { await session.flush() } }
     }
 
+    @ViewBuilder private var runButtons: some View {
+        if let delegate = session.saved.baseline.delegate, delegate.isRunning {
+            stopButton(delegate)
+            viewRunButton
+        } else if session.supportsExecution {
+            if session.saved.baseline.delegate != nil { viewLastResultButton }
+            taskRunBar
+        }
+    }
+
+    private var compactRunFooter: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if let delegate = session.saved.baseline.delegate, delegate.isRunning {
+                HStack(spacing: Theme.Space.s) {
+                    stopButton(delegate)
+                    viewRunButton
+                    saveTaskButton
+                }
+            } else if session.supportsExecution, session.saved.baseline.delegate != nil {
+                HStack(spacing: Theme.Space.s) {
+                    viewLastResultButton
+                    Spacer(minLength: 0)
+                    saveTaskButton
+                }
+                taskRunBar
+            } else if session.supportsExecution {
+                HStack(spacing: Theme.Space.s) {
+                    taskRunBar
+                    saveTaskButton
+                }
+            } else {
+                saveTaskButton
+            }
+        }
+    }
+
+    private var saveTaskButton: some View {
+        Button("Save task", .save) { Task { await session.save(); await onSaved() } }
+            .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(!session.canSave)
+    }
+
+    private var viewLastResultButton: some View {
+        Button("View last result", .preview) {
+            if let delegate = session.saved.baseline.delegate {
+                onViewRun?(delegate.runId, session.saved.baseline.workspaceID)
+            }
+        }
+        .buttonStyle(SecondaryButtonStyle(comfortable: true))
+    }
+
+    private var viewRunButton: some View {
+        Button("View run", .preview) { Task { await openLiveRun() } }
+            .buttonStyle(AccentButtonStyle(comfortable: true))
+    }
+
+    private var taskRunBar: some View {
+        TaskRunBar(canRun: session.canRun, running: session.working) { placement in
+            if placement == .chat {
+                chatTask = session.saved.baseline
+            } else {
+                Task { await open(session.run(placement == .foreground ? .foreground : .background)) }
+            }
+        }
+    }
+
+    private func stopButton(_ delegate: TodoDelegate) -> some View {
+        Button(delegate.status == "stopping" ? "Stopping…" : "Stop", .stop) {
+            Task { await session.stop(); await onSaved() }
+        }
+        .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(!session.canStop)
+    }
+
+    /// Keep related actions on one row when they fit, then stack them.
+    private func wrappingFooter<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) { content() }
+            VStack(alignment: .leading, spacing: Theme.Space.s) { content() }
+        }
+    }
+
     private func openLastRun() async { await open(session.lastRun) }
+
+    private func openLiveRun() async {
+        if let onOpenTerminal, let terminal = await session.attachedTerminal() {
+            await onSaved()
+            onOpenTerminal(terminal)
+            return
+        }
+        guard let delegate = session.saved.baseline.delegate else { return }
+        onViewRun?(delegate.runId, session.saved.baseline.workspaceID)
+    }
 
     private func open(_ outcome: TaskRunOutcome?) async {
         guard let outcome else { return }
         await onSaved()
-        if outcome.placement == .foreground, let terminal = await session.terminal(for: outcome) {
-            onOpenTerminal?(terminal)
+        if let onOpenTerminal, outcome.placement == .foreground, let terminal = await session.terminal(for: outcome) {
+            onOpenTerminal(terminal)
         } else {
             onViewRun?(outcome.runID, outcome.run?.workspaceID ?? session.saved.baseline.workspaceID)
         }
@@ -196,6 +271,10 @@ struct TaskEditorView: View {
         if session.loaded && !session.supportsExecution {
             Text("Update \(hostName)'s tokenstat to run and stop tasks from here.")
                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+        }
+        if session.supportsExecution, !session.dirty, session.saved.baseline.delegate?.isRunning != true,
+           let reason = session.runReadiness {
+            Text(reason).font(Theme.caption).foregroundStyle(Theme.controlGlyph)
         }
         if session.conflict, let current = session.current {
             comparison(title: "Changed on the computer", draft: TaskEditorDraft(current))

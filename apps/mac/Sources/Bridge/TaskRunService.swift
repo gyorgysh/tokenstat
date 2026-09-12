@@ -7,7 +7,7 @@ protocol TaskRunService: Sendable {
     func runTask(id: String, revision: UInt64, operationID: String, placement: TaskRunPlacement) async throws -> TaskRunOutcome
     func taskRunReceipt(operationID: String) async throws -> TaskRunOutcome?
     func stopTask(id: String, revision: UInt64, runID: String) async throws -> TodoCard
-    func taskTerminal(run: RunRecord) async throws -> PtySessionInfo
+    func taskTerminal(ptyID: String) async throws -> PtySessionInfo
 }
 
 extension TaskEditorTarget: TaskRunService {
@@ -42,8 +42,8 @@ extension TaskEditorTarget: TaskRunService {
         )
     }
 
-    func taskTerminal(run: RunRecord) async throws -> PtySessionInfo {
-        guard let ptyID = run.ptyID, !ptyID.isEmpty else {
+    func taskTerminal(ptyID: String) async throws -> PtySessionInfo {
+        guard !ptyID.isEmpty else {
             throw TaskEditorDraft.Invalid.fields("The interactive terminal is not ready yet. Try again in a moment.")
         }
         #if os(macOS)

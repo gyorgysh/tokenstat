@@ -15,11 +15,18 @@ struct TaskRunSubmission: Codable, Equatable, Sendable {
     let placement: TaskRunPlacement
 }
 
+/// Enough to reopen the same host terminal after the editor is dismissed.
+struct TaskLiveTerminal: Codable, Equatable, Sendable {
+    var runID: String
+    var ptyID: String
+}
+
 struct SavedTaskDraft: Codable, Equatable, Sendable {
     var baseline: TodoCard
     var fields: TaskEditorDraft
     var pending: TaskEditSubmission?
     var pendingRun: TaskRunSubmission? = nil
+    var liveTerminal: TaskLiveTerminal? = nil
 }
 
 /// One owner per account, computer and task. A folder move keeps this identity.
@@ -63,13 +70,36 @@ final class TaskEditorSession {
 
     var dirty: Bool { !fields.matches(saved.baseline) }
     var canSave: Bool { loaded && !working && !conflict && !missing && saved.baseline.revision != nil && otherDraft == nil && saved.pending == nil && fields.validation == nil && dirty }
+    /// Why this saved card cannot start. Nil means the host-side launch checks
+    /// that we can see from here are satisfied. Save still happens first.
+    var runReadiness: String? {
+        guard loaded else { return nil }
+        let card = saved.baseline
+        if card.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Assign a folder before running this task."
+        }
+        if let folder = folders.first(where: { $0.id == card.workspaceID }), folder.exists == false {
+            return "This folder is no longer available on the computer."
+        }
+        if !folders.isEmpty && !folders.contains(where: { $0.id == card.workspaceID }) {
+            return "This folder is no longer available on the computer."
+        }
+        if card.backend.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Choose an agent before running this task."
+        }
+        if card.promptForRun.isEmpty {
+            return "Write a prompt before running this task."
+        }
+        return nil
+    }
     var canRun: Bool {
         supportsExecution && loaded && !working && !dirty && !conflict && !missing
             && saved.baseline.revision != nil && saved.pending == nil && saved.pendingRun == nil
             && otherDraft == nil && saved.baseline.delegate?.isRunning != true
+            && runReadiness == nil
     }
     var canStop: Bool {
-        supportsExecution && !working && !dirty && saved.pending == nil && saved.pendingRun == nil
+        supportsExecution && !working && saved.pending == nil && saved.pendingRun == nil
             && saved.baseline.delegate.map { ["starting", "queued", "running"].contains($0.status) } == true
     }
 
@@ -158,7 +188,8 @@ final class TaskEditorSession {
                         baseline: current,
                         fields: TaskEditorDraft(current),
                         pending: nil,
-                        pendingRun: saved.pendingRun
+                        pendingRun: saved.pendingRun,
+                        liveTerminal: matchingLiveTerminal(current)
                     ))
                     conflict = false
                     _ = await persist()
@@ -269,6 +300,11 @@ final class TaskEditorSession {
         }
         saved.pendingRun = nil
         lastRun = outcome
+        if outcome.placement == .foreground, let ptyID = outcome.run?.ptyID, !ptyID.isEmpty {
+            saved.liveTerminal = TaskLiveTerminal(runID: outcome.runID, ptyID: ptyID)
+        } else {
+            saved.liveTerminal = nil
+        }
         errorMessage = nil
         _ = await persist()
         NotificationCenter.default.post(name: Self.didChange, object: target)
@@ -293,8 +329,23 @@ final class TaskEditorSession {
     }
 
     func terminal(for outcome: TaskRunOutcome) async -> PtySessionInfo? {
-        guard outcome.placement == .foreground, let run = outcome.run else { return nil }
-        do { return try await runService.taskTerminal(run: run) }
+        guard outcome.placement == .foreground, let ptyID = outcome.run?.ptyID, !ptyID.isEmpty else { return nil }
+        return await attachTerminal(ptyID: ptyID)
+    }
+
+    /// Reopen the same host terminal for a live foreground run, including after
+    /// the editor was dismissed. A background run has no terminal.
+    func attachedTerminal() async -> PtySessionInfo? {
+        guard let delegate = saved.baseline.delegate, delegate.isRunning else { return nil }
+        if let outcome = lastRun, outcome.runID == delegate.runId {
+            return await terminal(for: outcome)
+        }
+        guard let live = saved.liveTerminal, live.runID == delegate.runId else { return nil }
+        return await attachTerminal(ptyID: live.ptyID)
+    }
+
+    private func attachTerminal(ptyID: String) async -> PtySessionInfo? {
+        do { return try await runService.taskTerminal(ptyID: ptyID) }
         catch { errorMessage = error.localizedDescription; return nil }
     }
 
@@ -320,6 +371,15 @@ final class TaskEditorSession {
     }
 
     func flush() async { writeTask?.cancel(); _ = await persist() }
+
+    /// Keep the terminal identity only while the same foreground run is live.
+    private func matchingLiveTerminal(_ card: TodoCard) -> TaskLiveTerminal? {
+        guard let live = saved.liveTerminal,
+              let delegate = card.delegate,
+              delegate.isRunning,
+              delegate.runId == live.runID else { return nil }
+        return live
+    }
 
     private func restore(_ value: SavedTaskDraft) {
         restoring = true

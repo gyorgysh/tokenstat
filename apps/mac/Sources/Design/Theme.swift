@@ -1576,6 +1576,7 @@ struct AccentButtonStyle: ButtonStyle {
     var comfortable = false
     /// Stadium ends. Follow sits as a chip on the transcript, not a slab.
     var capsule = false
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         let height: CGFloat = comfortable
@@ -1603,7 +1604,7 @@ struct AccentButtonStyle: ButtonStyle {
                     .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
             )
             .contentShape(.rect)
-            .opacity(configuration.isPressed ? 0.85 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.42)
     }
 }
 
@@ -1647,6 +1648,7 @@ struct SecondaryButtonStyle: ButtonStyle {
     /// Dense variant for rows and card accessories.
     var small = false
     var comfortable = false
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -1667,7 +1669,7 @@ struct SecondaryButtonStyle: ButtonStyle {
                     )
             )
             .contentShape(.rect)
-            .opacity(configuration.isPressed ? 0.85 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.42)
     }
 }
 
