@@ -108,7 +108,10 @@ struct WorkspaceInspector: View {
     /// selection in view state it was reset on the next build, so the tabs
     /// simply did not switch while a build was running in one of the folders.
     private var tab: Binding<InspectorTab> {
-        Binding(get: { model.inspectorTab }, set: { model.inspectorTab = $0; showingChatSettings = false })
+        Binding(get: { model.inspectorTab }, set: {
+            model.inspectorTab = $0
+            if chat != nil { showingChatSettings = false }
+        })
     }
 
     private var folder: WorkspaceFolder? { chat == nil ? model.selected : workspace }

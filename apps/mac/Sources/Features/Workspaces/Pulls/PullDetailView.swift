@@ -124,7 +124,7 @@ struct PullDetailView: View {
                 PullStateMark(detail: detail)
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text(detail.title)
-                        .font(Theme.title2.weight(.semibold))
+                        .font(Theme.title3.weight(.semibold))
                         .textSelection(.enabled)
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: Theme.Space.s) {
@@ -141,6 +141,9 @@ struct PullDetailView: View {
                 }
             }
             HStack(spacing: Theme.Space.s) {
+                Text(detail.draft ? "Draft" : detail.state.capitalized)
+                    .font(Theme.caption.weight(.semibold))
+                    .foregroundStyle(detail.state == "closed" ? Theme.danger : detail.state == "merged" ? Theme.secondary : Theme.accent)
                 branch(detail.headRef)
                 Image(systemName: "arrow.right").font(Theme.caption2).foregroundStyle(.tertiary)
                 branch(detail.baseRef)
@@ -151,10 +154,7 @@ struct PullDetailView: View {
             }
         }
         .padding(Theme.cardPadding)
-        .background(
-            LinearGradient(colors: [Theme.accentSoft, Theme.panel], startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
-        )
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.accent.opacity(0.18)))
     }
 
@@ -363,8 +363,13 @@ struct PullDetailView: View {
                         .fill(Theme.border)
                         .frame(width: 38, height: 38)
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        flexibleBar(maxWidth: 520, height: 18)
-                        flexibleBar(maxWidth: 210)
+                        Text(summary.title).font(Theme.title3.weight(.semibold))
+                        Text("#\(summary.number) · \(summary.author)")
+                            .font(Theme.callout).foregroundStyle(.secondary)
+                        HStack(spacing: Theme.Space.s) {
+                            ProgressView().controlSize(.small)
+                            Text("Loading conversation…").font(Theme.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 HStack(spacing: Theme.Space.s) {
@@ -544,9 +549,9 @@ private struct PullInspector: View {
             }
             if !detail.assignees.isEmpty { section("ASSIGNEES", icon: "person.2") { ForEach(detail.assignees) { actor in actorRow(actor, note: nil) } } }
             if !detail.labels.isEmpty { section("LABELS", icon: "tag") { FlowLabels(labels: detail.labels) } }
-            section("MERGE", icon: "arrow.triangle.merge") {
+            if detail.state == "open" { section("MERGE", icon: "arrow.triangle.merge") {
                 inspectorValue(detail.mergeable == "mergeable" ? "Ready to merge" : detail.mergeState.replacingOccurrences(of: "_", with: " ").capitalized, tint: detail.mergeable == "mergeable" ? Theme.success : Theme.warning)
-            }
+            } }
         }
         .padding(Theme.cardPadding).frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -565,7 +570,10 @@ private struct PullInspector: View {
         }
     }
     private func inspectorValue(_ text: String, tint: Color) -> some View { Label(text, systemImage: "circle.fill").font(Theme.caption.weight(.medium)).foregroundStyle(tint) }
-    private var reviewText: String { switch detail.reviewDecision { case "approved": "Approved"; case "changes_requested": "Changes requested"; default: "Review pending" } }
+    private var reviewText: String {
+        if detail.state != "open" { return detail.state.capitalized }
+        switch detail.reviewDecision { case "approved": return "Approved"; case "changes_requested": return "Changes requested"; default: return detail.draft ? "Draft" : "Review pending" }
+    }
     private var reviewTint: Color { switch detail.reviewDecision { case "approved": Theme.success; case "changes_requested": Theme.danger; default: Theme.warning } }
 }
 

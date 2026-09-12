@@ -139,6 +139,21 @@ struct SSHSectionView: View {
                     .buttonStyle(SecondaryButtonStyle())
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if section == .snippets {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
+                    HStack {
+                        Text("Saved commands").font(Theme.headline)
+                        Spacer()
+                        Text("\(model.visibleSnippets.count) snippets").font(Theme.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.bottom, Theme.Space.s)
+                    ForEach(model.visibleSnippets) { snippet in snippetRow(snippet) }
+                }
+                .padding(Theme.Space.l)
+                .frame(maxWidth: ReadingRoom.listWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
         } else {
             list
         }
@@ -338,17 +353,47 @@ struct SSHSectionView: View {
     }
 
     private func snippetRow(_ snippet: SSHSnippet) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(snippet.title)
-            Text(snippet.command)
-                .font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(1)
+        Button { model.selection = .snippet(snippet.id) } label: {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                Image(systemName: "terminal")
+                    .font(Theme.font(15))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    HStack {
+                        Text(snippet.title).font(Theme.body.weight(.medium)).foregroundStyle(.primary)
+                        Spacer(minLength: Theme.Space.s)
+                        if snippet.runOnConnect {
+                            Label("On connect", systemImage: "bolt")
+                                .font(Theme.caption2).foregroundStyle(Theme.warning)
+                        }
+                    }
+                    Text(snippet.command)
+                        .font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !snippet.tags.isEmpty {
+                        Text(snippet.tags.prefix(4).joined(separator: " · "))
+                            .font(Theme.caption2).foregroundStyle(Theme.accent).lineLimit(1)
+                    }
+                }
+                Image(systemName: "chevron.right").font(Theme.caption).foregroundStyle(.tertiary)
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(model.selection == .snippet(snippet.id) ? Theme.rowSelected : Theme.panel,
+                        in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(model.selection == .snippet(snippet.id) ? Theme.accent.opacity(0.5) : Theme.border))
+            .contentShape(.rect)
         }
-        .frame(minHeight: 48)
-        .listRowBackground(rowBackground(selected: model.selection == .snippet(snippet.id)))
-        .contentShape(.rect)
-        .onTapGesture { model.selection = .snippet(snippet.id) }
-        .accessibilityAction(named: "Open details") { model.selection = .snippet(snippet.id) }
+        .buttonStyle(.plain)
+        .accessibilityHint("Open this saved command for editing. Does not run it.")
         .contextMenu {
+            Button("Copy command", .copy) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(snippet.command, forType: .string)
+            }
             Button("Delete", role: .destructive) { Task { await model.delete(snippet: snippet) } }
         }
     }

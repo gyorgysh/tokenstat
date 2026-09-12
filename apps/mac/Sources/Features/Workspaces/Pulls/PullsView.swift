@@ -65,7 +65,10 @@ struct PullsView: View {
                     peer: peer,
                     summary: selectedPull,
                     scope: scopeChip,
-                    onBack: { self.selectedPull = nil }
+                    onBack: {
+                        self.selectedPull = nil
+                        Task { await model.loadList(workspaceID: workspaceID, peer: peer, refresh: true) }
+                    }
                 )
             } else {
                 VStack(spacing: 0) {
@@ -238,7 +241,9 @@ struct PullsView: View {
                     message: "Refresh after updating tokenstat on the computer that owns this workspace."
                 )
             }
-        } else if !model.isLoading {
+        } else if model.isLoading {
+            PullListSkeleton()
+        } else {
             empty(
                 title: "Pull requests are unavailable",
                 message: "Refresh to ask the workspace's computer again."
@@ -366,6 +371,20 @@ struct PullsView: View {
 
             PullFilters(scope: $model.scope, state: $model.state)
 
+            HStack(spacing: Theme.Space.s) {
+                Text("\(model.state.label) · \(model.scope.label)")
+                Spacer()
+                if model.isLoadingList {
+                    ProgressView().controlSize(.mini)
+                    Text(model.rows.isEmpty ? "Loading…" : "Updating…")
+                } else {
+                    Text("\(model.rows.count) results")
+                }
+            }
+            .font(Theme.caption)
+            .foregroundStyle(.secondary)
+            .frame(height: 20)
+
             if let error = model.listError {
                 errorCard(error)
             } else if model.isLoadingList && model.rows.isEmpty {
@@ -385,8 +404,6 @@ struct PullsView: View {
                     }
                 }
                 .transition(.smoothIn(reduceMotion: reduceMotion))
-                .opacity(model.isLoadingList ? 0.62 : 1)
-                .animation(.easeOut(duration: 0.16), value: model.isLoadingList)
             }
         }
     }
@@ -521,47 +538,13 @@ struct PullsView: View {
 private struct PullFilters: View {
     @Binding var scope: PullScope
     @Binding var state: PullStateFilter
-    @Namespace private var scopeSlide
-    @Namespace private var stateSlide
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text("SCOPE")
-                    .font(Theme.caption2.weight(.semibold))
-                    .tracking(0.7)
-                    .foregroundStyle(.tertiary)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 3) {
-                        ForEach(PullScope.allCases) { option in
-                            filterButton(
-                                title: option.label,
-                                selected: scope == option,
-                                tint: Theme.accent,
-                                namespace: scopeSlide
-                            ) {
-                                withAnimation(.snappy(duration: 0.22)) { scope = option }
-                            }
-                        }
-                    }
-                    .padding(2)
-                }
-                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
-            }
-
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text("STATE")
-                    .font(Theme.caption2.weight(.semibold))
-                    .tracking(0.7)
-                    .foregroundStyle(.tertiary)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Theme.Space.xs) {
-                        ForEach(PullStateFilter.allCases) { option in
-                            stateButton(option)
-                        }
-                    }
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.l) { states; Spacer(minLength: 0); scopePicker }
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                scopePicker
+                ScrollView(.horizontal, showsIndicators: false) { states }
             }
         }
         .padding(Theme.Space.m)
@@ -569,30 +552,21 @@ private struct PullFilters: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
-    private func filterButton(
-        title: String,
-        selected: Bool,
-        tint: Color,
-        namespace: Namespace.ID,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(Theme.caption.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? tint : Color.secondary)
-                .padding(.horizontal, Theme.Space.m)
-                .frame(height: Theme.Control.height)
-                .background {
-                    if selected {
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(tint.opacity(0.12))
-                            .matchedGeometryEffect(id: "selection", in: namespace)
-                    }
-                }
-                .contentShape(.rect)
+    private var states: some View {
+        HStack(spacing: Theme.Space.xs) {
+            ForEach(PullStateFilter.allCases) { stateButton($0) }
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .fixedSize()
+        .accessibilityLabel("Pull request state")
+    }
+
+    private var scopePicker: some View {
+        HStack(spacing: Theme.Space.s) {
+            Text("Show").font(Theme.caption).foregroundStyle(.secondary)
+            AppMenuPicker(options: PullScope.allCases.map { (value: $0, label: $0.label) }, selection: $scope)
+        }
+        .fixedSize()
+        .accessibilityLabel("Pull request scope")
     }
 
     private func stateButton(_ option: PullStateFilter) -> some View {
@@ -600,7 +574,7 @@ private struct PullFilters: View {
         let tint = tint(for: option)
         return Button {
             guard !selected else { return }
-            withAnimation(.snappy(duration: 0.22)) { state = option }
+            state = option
         } label: {
             HStack(spacing: 6) {
                 Circle().fill(tint).frame(width: 7, height: 7)
@@ -614,7 +588,6 @@ private struct PullFilters: View {
                 if selected {
                     Capsule()
                         .fill(tint.opacity(0.13))
-                        .matchedGeometryEffect(id: "state", in: stateSlide)
                 }
             }
             .overlay(Capsule().strokeBorder(selected ? tint.opacity(0.34) : Theme.border))
@@ -824,19 +797,50 @@ private final class PullsModel {
     var scope: PullScope = .all
     var state: PullStateFilter = .open
     private var listGeneration = 0
+    private var availabilityGeneration = 0
+    private struct Query: Hashable {
+        let workspace: String
+        let peer: String?
+        let scope: PullScope
+        let state: PullStateFilter
+    }
+    private var cachedLists: [Query: (rows: [PullSummary], date: Date)] = [:]
+    private var owner: String?
+    private var ownerPeer: String?
 
     func load(workspaceID: String, peer: String?, refresh: Bool = false) async {
+        availabilityGeneration += 1
+        let generation = availabilityGeneration
+        if owner != workspaceID || ownerPeer != peer {
+            listGeneration += 1
+            rows = []
+            availability = nil
+            cachedLists = [:]
+            owner = workspaceID
+            ownerPeer = peer
+        }
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer { if generation == availabilityGeneration { isLoading = false } }
         do {
-            availability = try await Bridge.pullAvailability(workspaceID: workspaceID, peer: peer)
+            let loaded = try await Bridge.pullAvailability(workspaceID: workspaceID, peer: peer)
+            guard generation == availabilityGeneration, !Task.isCancelled else { return }
+            if availability?.login != loaded.login || availability?.repositoryName != loaded.repositoryName {
+                listGeneration += 1
+                cachedLists = [:]
+                rows = []
+            }
+            availability = loaded
             if availability?.state == "ready" {
                 await loadList(workspaceID: workspaceID, peer: peer, refresh: refresh)
             } else {
+                listGeneration += 1
+                cachedLists = [:]
                 rows = []
+                isLoadingList = false
             }
         } catch {
+            guard generation == availabilityGeneration, !Task.isCancelled else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -847,6 +851,14 @@ private final class PullsModel {
         let generation = listGeneration
         let requestedScope = scope
         let requestedState = state
+        let query = Query(workspace: workspaceID, peer: peer, scope: requestedScope, state: requestedState)
+        // Never show one filter's results under another filter's heading.
+        rows = cachedLists[query]?.rows ?? []
+        if !refresh, let cached = cachedLists[query], Date().timeIntervalSince(cached.date) < 30 {
+            isLoadingList = false
+            listError = nil
+            return
+        }
         isLoadingList = true
         listError = nil
         do {
@@ -859,6 +871,10 @@ private final class PullsModel {
             )
             guard generation == listGeneration else { return }
             rows = loaded
+            cachedLists[query] = (loaded, Date())
+            if cachedLists.count > 8, let oldest = cachedLists.min(by: { $0.value.date < $1.value.date })?.key {
+                cachedLists.removeValue(forKey: oldest)
+            }
             if requestedScope == .all, requestedState == .open {
                 PullCountStore.shared.set(loaded.count, workspaceID: workspaceID, peer: peer)
             }
