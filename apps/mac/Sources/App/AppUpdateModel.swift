@@ -105,18 +105,13 @@ final class AppUpdateModel {
     /// swallowed: the card offers the manual download instead, so an update
     /// that cannot be automated still reaches the user.
     func checkAndInstall() async {
-        // A version the person skipped is not checked again by the automatic
-        // passes at launch and after reconnection; the card's skip button is
-        // how they asked to stop hearing about it. A manual check clears the
-        // skip before it gets here.
-        guard !isSkipped else { return }
         guard stage == .idle || failure != nil else { return }
         stage = .checking
         do {
             let found = try await Bridge.appUpdateCheck()
             release = found
-            // A fresh launch has no release to compare the stored skip
-            // against until the check answers, so it is applied here too.
+            // Compare the skip against the fresh release, so skipping one
+            // version still lets automatic checks discover later versions.
             guard found.isAvailable, !isSkipped else {
                 stage = .idle
                 return

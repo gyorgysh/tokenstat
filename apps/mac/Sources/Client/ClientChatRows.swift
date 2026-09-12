@@ -24,6 +24,8 @@ struct ClientChatEventRow: View {
     /// The row still being written. Selectable chains are held back until
     /// the turn ends; copy buttons stay live throughout.
     var isLive = false
+    /// Stable per rendered row, independent of other chats and windows.
+    @State private var markdownCacheID = UUID().uuidString
     /// Whether this row may run the transcript's spinner. See
     /// `TranscriptFollow.spinningRow`.
     var animatesRunning = true
@@ -60,7 +62,8 @@ struct ClientChatEventRow: View {
                     bodyFont: Theme.chatBody,
                     codeFont: Theme.chatCode,
                     selectable: !isLive,
-                    live: isLive
+                    live: isLive,
+                    liveID: "\(markdownCacheID):\(item.id)"
                 )
             }
             .padding(Theme.Space.m)
@@ -95,7 +98,8 @@ struct ClientChatEventRow: View {
                 style: .aside,
                 selectable: !isLive,
                 cacheScope: "client-thinking",
-                live: isLive
+                live: isLive,
+                liveID: "\(markdownCacheID):\(item.id)"
             )
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)

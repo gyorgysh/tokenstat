@@ -93,11 +93,13 @@ fn pump_one_http(
     // An interim response (100 Continue, 103 Early Hints) is not the answer.
     // It carries no body, and the real response follows on the same
     // connection, so forward it and read on; treating it as final would close
-    // the connection the client is still waiting on.
+    // the connection the client is still waiting on. A 101 switches protocols
+    // instead: hand it to the upgrade pump without reading another HTTP head.
     let mut interim: Vec<u8> = Vec::new();
     let mut interim_hops = 0;
     while interim_hops < 8
-        && response_status(&resp_text).is_some_and(|status| (100..200).contains(&status))
+        && response_status(&resp_text)
+            .is_some_and(|status| (100..200).contains(&status) && status != 101)
     {
         let (rewritten_interim, _) =
             rewrite_response_headers(&resp_text, target_port, listen_port).ok_or(())?;

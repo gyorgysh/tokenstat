@@ -211,7 +211,7 @@ private enum MarkdownCache {
 /// One revision per streaming row, and one clock across all of them.
 ///
 /// A turn can stream its prose and its reasoning at the same time, so the
-/// cache cannot be a single slot: each caller's scope and style is the slot,
+/// cache cannot be a single slot: each row's identity, scope and style name it,
 /// and a row that finds another row's revision there would draw the wrong
 /// text. Slots hold each row's own last revision, and the shared clock bounds
 /// the total reparses whether one row is streaming or two.
@@ -576,7 +576,8 @@ struct MessageMarkdown: View {
         style: MarkdownStyle = .document,
         selectable: Bool = true,
         cacheScope: String = "chat",
-        live: Bool = false
+        live: Bool = false,
+        liveID: String? = nil
     ) {
         self.bodyFont = bodyFont
         self.codeFont = codeFont
@@ -584,7 +585,7 @@ struct MessageMarkdown: View {
         self.selectable = selectable
         self.source = markdown
         self.isLive = live
-        if live {
+        if live, let liveID {
             // A row still being written keeps one revision in its own slot
             // rather than joining the conversation's: its text is a new
             // string on every token, and storing revisions there evicts the
@@ -593,7 +594,7 @@ struct MessageMarkdown: View {
             // replaced at most once per `LiveMarkdown.cadence`; a token that
             // arrives sooner keeps the revision on screen and is picked up by
             // the body's task.
-            let slot = "\(cacheScope):\(style == .aside ? "a" : "d")"
+            let slot = "\(liveID.utf8.count):\(liveID):\(cacheScope):\(style == .aside ? "a" : "d")"
             self.liveSlot = slot
             let cache = MarkdownCache.live
             if let shown = cache.take(slot: slot, text: markdown) {
