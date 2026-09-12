@@ -13,6 +13,62 @@ at the end.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-09-12
+
+Chat opens with cached previews, iPad layouts make better use of available
+space, and the Mac gains a browser beside chat and clearer workspace tools.
+
+### Added
+
+- A resizable browser beside chat on Mac, with Back, Forward, Reload and an
+  option to open the page in your default browser. Web links in chat open
+  beside the conversation by default; change this in settings if you prefer
+  your usual browser. Local development links open on the Mac running the app.
+- Files, Changes and History alongside Chat settings in the chat inspector.
+- ECDSA P-256 SSH key generation, alongside the default Ed25519 option.
+  On devices with Touch ID, an optional P-256 software key can require
+  biometric access. These keys stay on that device and do not sync to the
+  vault. This is Keychain access protection, not Secure Enclave signing.
+- Dismiss update errors without disabling updates. When GitHub limits
+  update checks, the app shows a retry time and pauses requests until the
+  waiting period ends, including after restarting the app.
+
+### Changed
+
+- Recent chats prepare small, bounded previews when a project opens and
+  when you navigate between conversations. Preloading does not fetch entire
+  conversations or start an agent.
+- Plan-limit and workspace cards on iPad adapt to the available width,
+  returning to a single column in narrower windows. Device rows keep their
+  spend value without the extra bar underneath.
+- Tapping the connected computer in the iPad sidebar opens its device page.
+  Disconnect is an explicit action there; choosing another computer switches
+  the connection.
+- The Mac Changes inspector puts Review all beside the change summary and
+  Select all immediately above the files. Commit help explains selection,
+  publishing and Auto commit. Large inline diffs show a bounded preview with
+  a full-review action.
+- Pull-request lists retain matching cached results while refreshing, with
+  clearer filters and loading states. Detail pages and saved commands use
+  more consistent typography and spacing.
+- Mac devices are ordered by current device, online state and recent activity.
+  Side-by-side connection and permission cards share a height.
+
+### Fixed
+
+- Scrolling near the start of a conversation no longer keeps fetching older
+  pages while previously loaded messages remain hidden behind Show earlier.
+- Inline diffs no longer use a lazy layout that can snap horizontal scrolling
+  back. Browser resizing uses stable drag coordinates and avoids saving each
+  mouse movement to preferences.
+- Opening Chat from the project launcher shows the conversation overview,
+  rather than reopening the last chat.
+- Switching projects clears the previous pull-request detail. Account changes
+  clear browser URLs and pull-request state, and the chat overview no longer
+  exposes settings from the last conversation.
+- SSH key creation rejects overlapping operations, preserves the chosen
+  protection, and cleans up newly stored secrets if saving the key fails.
+
 ## [1.0.3] - 2026-09-12
 
 Devices and Workspaces on the phone got a clearer layout, plan limits keep
