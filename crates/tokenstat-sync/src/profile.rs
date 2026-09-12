@@ -1695,6 +1695,13 @@ pub fn sync_scheduled_now(
         return Ok(ScheduledOutcome::NotLoggedIn);
     }
 
+    // Read pacing under the shared lock. Another scheduler may have finished
+    // an upload since this process last checked the cursor.
+    let Some(_lock) = try_sync_lock()? else {
+        return Ok(ScheduledOutcome::Deferred {
+            reason: "another sync is already running".into(),
+        });
+    };
     if let Some(cursor) = config::cursor_for(&host)? {
         if let Some(next) = cursor.next_allowed_at.as_deref() {
             if let Ok(next_ts) = next.parse::<jiff::Timestamp>() {
@@ -1708,11 +1715,6 @@ pub fn sync_scheduled_now(
         }
     }
 
-    let Some(_lock) = try_sync_lock()? else {
-        return Ok(ScheduledOutcome::Deferred {
-            reason: "another sync is already running".into(),
-        });
-    };
     if !crate::scheduled_network_allowed() {
         return Ok(ScheduledOutcome::Asleep);
     }
@@ -1781,11 +1783,10 @@ pub fn scheduling_info(host_flag: Option<&str>) -> Result<SchedulingInfo, Profil
     })
 }
 
-/// Whether the CLI's platform scheduler has an active sync entry.
+/// Whether the CLI's platform scheduler has a sync configuration file.
 ///
-/// The desktop host uses this to avoid taking ownership of sync when the CLI
-/// already has it configured. The executable itself is not enough evidence:
-/// many users install the CLI but never enable its scheduler.
+/// This does not prove the scheduler is loaded or keeping up. Background
+/// hosts coordinate through the sync cursor and lock, not this indicator.
 pub fn cli_sync_schedule_active() -> bool {
     #[cfg(target_os = "macos")]
     {

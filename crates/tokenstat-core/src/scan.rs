@@ -161,6 +161,7 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
 
     let marks = store.watermarks()?;
     let mut all_events = Vec::new();
+    let mut codex_replacements = Vec::new();
     let mut marks_to_store = Vec::new();
     // A recovery pass is applied after the ordinary inserts, in its own
     // transaction, so the old derived rows are only dropped once their
@@ -295,14 +296,42 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
     // file. An append-only reparse of the tail would lose that context and
     // reset ordinals, so any change re-reads the whole rollout.
     if let Some(sessions) = codex::discover(&home) {
-        let files = codex::shards(&sessions);
-        report.files_found += files.len() as u64;
-        let outcomes: Vec<_> = files
-            .par_iter()
-            .map(|path| {
-                read_document_shard(path, &marks, |p, text| codex::parse_file(p, text).into())
+        // Version the watermark so existing logs are repaired once, including
+        // sessions that have stopped growing. Failed reads remain retryable.
+        let codex_marks = marks
+            .iter()
+            .filter_map(|(key, mark)| {
+                key.strip_prefix("codex-v2:")
+                    .map(|path| (path.to_string(), mark.clone()))
             })
             .collect();
+        let files = codex::shards(&sessions);
+        report.files_found += files.len() as u64;
+        let mut outcomes: Vec<_> = files
+            .par_iter()
+            .map(|path| {
+                read_document_shard(path, &codex_marks, |p, text| {
+                    codex::parse_file(p, text).into()
+                })
+            })
+            .collect();
+        for outcome in &mut outcomes {
+            if outcome
+                .parsed
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::MalformedLine { .. }))
+            {
+                // A partial write is not a complete replacement of history.
+                outcome.parsed.events.clear();
+                outcome.mark = None;
+                continue;
+            }
+            codex_replacements.append(&mut outcome.parsed.events);
+            if let Some((key, _)) = &mut outcome.mark {
+                *key = format!("codex-v2:{key}");
+            }
+        }
         absorb(&mut report, &mut all_events, &mut marks_to_store, outcomes);
     }
 
@@ -569,6 +598,7 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
 
     const INSERT_CHUNK: usize = 4_096;
     let mut inserted = 0u64;
+    inserted += store.replace_codex_sessions(&codex_replacements, tz)?;
     for chunk in all_events.chunks(INSERT_CHUNK) {
         inserted += store.insert_events(chunk, tz)?;
     }

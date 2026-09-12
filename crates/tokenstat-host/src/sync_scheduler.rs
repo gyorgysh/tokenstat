@@ -3,7 +3,7 @@
 // Source-available for review, NOT open source. See LICENSE: no rights to
 // redistribute, publish, or ship a build are granted.
 
-//! Desktop-owned background sync when the CLI has no active schedule.
+//! Background sync coordinated with the CLI through the shared cursor and lock.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,30 +11,33 @@ use std::time::Duration;
 use crate::session::Session;
 
 const UNLINKED_CHECK_INTERVAL: Duration = Duration::from_secs(60);
-const DEFAULT_SYNC_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const SYNC_CHECK_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Keep aggregate sync alive while the desktop helper is running.
 ///
-/// The CLI remains the owner when its platform scheduler entry exists. Both
-/// paths also share the sync lock in `tokenstat-sync`, so a manually triggered
-/// sync cannot overlap either scheduler.
+/// Check the shared deadline even when a CLI timer is installed: a schedule
+/// file does not establish that the timer ran. The shared sync lock and cursor
+/// serialize uploads across the app, host daemon, and CLI.
 pub fn start(session: Arc<Mutex<Session>>) {
+    let maintenance_session = Arc::clone(&session);
+    // Slow pricing/vendor requests must not postpone an upload deadline.
     std::thread::spawn(move || {
-        // Fresh installs have no CLI and no price book, and the Home screen
-        // would otherwise read as all-zero values until the first hourly pass.
-        // Refresh once up front; a machine offline right now keeps its last
-        // known book and retries with the schedule.
-        if tokenstat_sync::scheduled_network_allowed() {
-            refresh_pricing(&session);
-            post_limits();
+        let mut last_maintenance: Option<std::time::Instant> = None;
+        loop {
+            if tokenstat_sync::scheduled_network_allowed()
+                && last_maintenance.is_none_or(|at| at.elapsed() >= LIMITS_REFRESH_INTERVAL)
+            {
+                refresh_pricing(&maintenance_session);
+                post_limits();
+                last_maintenance = Some(std::time::Instant::now());
+            }
+            std::thread::sleep(UNLINKED_CHECK_INTERVAL);
         }
+    });
+    std::thread::spawn(move || {
         loop {
             if tokenstat_sync::scheduled_network_allowed() {
-                if !tokenstat_sync::cli_sync_schedule_active() {
-                    run_once(&session);
-                }
-                refresh_pricing(&session);
-                post_limits();
+                run_once(&session);
             }
             std::thread::sleep(sync_interval());
         }
@@ -146,14 +149,19 @@ fn sync_interval() -> Duration {
     if !info.logged_in {
         return UNLINKED_CHECK_INTERVAL;
     }
-    info.min_interval
-        .map(Duration::from_secs)
-        .unwrap_or(DEFAULT_SYNC_INTERVAL)
-        .max(UNLINKED_CHECK_INTERVAL)
+    // The upload path enforces the server's deadline. Polling that deadline
+    // avoids sleeping another full interval after a held or failed attempt.
+    SYNC_CHECK_INTERVAL
 }
 
 fn run_once(session: &Mutex<Session>) {
     if !tokenstat_sync::scheduled_network_allowed() {
+        return;
+    }
+    let Ok(info) = tokenstat_sync::scheduling_info(None) else {
+        return;
+    };
+    if !info.logged_in || !sync_due(info.next_allowed_at.as_deref(), jiff::Timestamp::now()) {
         return;
     }
     // Snapshot path and timezone under the lock, then open a separate Store for
@@ -205,5 +213,25 @@ fn run_once(session: &Mutex<Session>) {
             eprintln!("sync: deferred: {reason}");
         }
         Err(error) => eprintln!("sync: scheduled run failed: {error}"),
+    }
+}
+
+fn sync_due(next: Option<&str>, now: jiff::Timestamp) -> bool {
+    next.and_then(|s| s.parse::<jiff::Timestamp>().ok())
+        .is_none_or(|next| now >= next)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_deadline_controls_sync_instead_of_cli_installation() {
+        let now = "2026-09-12T12:05:00Z".parse().unwrap();
+        assert!(!sync_due(Some("2026-09-12T12:05:01Z"), now));
+        assert!(sync_due(Some("2026-09-12T12:05:00Z"), now));
+        assert!(sync_due(Some("2026-09-12T12:00:00Z"), now));
+        assert!(sync_due(None, now));
+        assert!(sync_due(Some("invalid"), now));
     }
 }

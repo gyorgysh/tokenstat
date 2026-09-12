@@ -86,7 +86,7 @@ struct Info {
     last_token_usage: Option<Usage>,
 }
 
-#[derive(Deserialize, Clone, Copy, Default)]
+#[derive(Deserialize, Clone, Copy, Default, PartialEq, Eq)]
 struct Usage {
     input_tokens: Option<u64>,
     cached_input_tokens: Option<u64>,
@@ -170,6 +170,7 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
     // its own running total would mean a regression in either one goes unseen.
     let mut summed_deltas = Delta(Counters::default());
     let mut final_total: Option<Cumulative> = None;
+    let mut previous_total: Option<Usage> = None;
     let mut first_index = out.events.len();
 
     for (i, line) in contents.lines().enumerate() {
@@ -223,6 +224,13 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
         }
 
         if let Some(total) = info.total_token_usage {
+            // Rate-limit updates can repeat the previous request's nonzero
+            // last_token_usage. An unchanged cumulative total is no new work,
+            // including when a turn_context has switched models in between.
+            if previous_total == Some(total) {
+                continue;
+            }
+            previous_total = Some(total);
             final_total = Some(Cumulative(total.counters()));
         }
 
@@ -406,6 +414,30 @@ mod tests {
         let out = parse_file(&p(), &input);
         assert_eq!(out.events[0].model, "gpt-5.5");
         assert_eq!(out.events[1].model, "gpt-5.5-mini");
+    }
+
+    #[test]
+    fn repeated_usage_across_model_switches_preserves_each_models_turns() {
+        let astra = CTX.replace("gpt-5.5", "gpt-6-astra");
+        let sol = CTX.replace("gpt-5.5", "gpt-5.6-sol");
+        let input = format!(
+            "{META}\n{astra}\n{}\n{sol}\n{}\n{}\n{astra}\n{}\n{}\n",
+            tc(10, 2, 5, 10, 2, 5),
+            tc(10, 2, 5, 10, 2, 5),
+            tc(20, 4, 6, 30, 6, 11),
+            tc(20, 4, 6, 30, 6, 11),
+            tc(30, 6, 7, 60, 12, 18),
+        );
+        let out = parse_file(&p(), &input);
+        assert!(out.warnings.is_empty());
+        assert_eq!(out.events.len(), 3);
+        assert_eq!(out.events[0].model, "gpt-6-astra");
+        assert_eq!(out.events[1].model, "gpt-5.6-sol");
+        assert_eq!(out.events[2].model, "gpt-6-astra");
+        assert_eq!(
+            out.events.iter().map(|e| e.counters.total()).sum::<u64>(),
+            78
+        );
     }
 
     #[test]

@@ -1250,6 +1250,34 @@ impl Store {
         Ok(touched)
     }
 
+    /// Replace complete Codex sessions atomically. Corrected parsing can change
+    /// both ordinals and attribution, which the normal max-on-conflict upsert
+    /// cannot repair. Sessions with no replacement stay archived.
+    pub fn replace_codex_sessions(
+        &mut self,
+        events: &[UsageEvent],
+        tz: &jiff::tz::TimeZone,
+    ) -> Result<u64, CoreError> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.transaction()?;
+        let sessions: HashSet<_> = events
+            .iter()
+            .filter(|e| e.source == crate::model::SourceId::Codex)
+            .map(|e| e.session.as_str())
+            .collect();
+        for session in sessions {
+            tx.execute(
+                "DELETE FROM event WHERE source = 'codex' AND session = ?1",
+                [session],
+            )?;
+        }
+        let touched = Self::insert_events_in_tx(&tx, events, tz)?;
+        tx.commit()?;
+        Ok(touched)
+    }
+
     /// Drop OpenClaw session-rollup rows once turn-level events exist for that
     /// session. Scan used to keep the rollup from an earlier pass, so totals
     /// became session plus turns.
@@ -1518,6 +1546,44 @@ mod tests {
             billing: BillingMode::Plan,
             confidence: Confidence::Exact,
         }
+    }
+
+    #[test]
+    fn codex_reparse_replaces_old_attribution_without_doubling_history() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut legacy = ev("legacy", 1_700_000_000_000, "sol", 100);
+        legacy.source = SourceId::Codex;
+        legacy.session = "switched".into();
+        let mut archived = legacy.clone();
+        archived.id = EventId::derive(&["archived"]);
+        archived.session = "no-longer-on-disk".into();
+        s.insert_events(&[legacy.clone(), archived], &tz).unwrap();
+        let mut astra = legacy.clone();
+        astra.id = EventId::derive(&["turn-0"]);
+        astra.model = "astra".into();
+        astra.counters.output = Some(30);
+        let mut sol = legacy;
+        sol.id = EventId::derive(&["turn-1"]);
+        sol.counters.output = Some(20);
+        for _ in 0..2 {
+            s.replace_codex_sessions(&[astra.clone(), sol.clone()], &tz)
+                .unwrap();
+            let totals = s.totals(&Query::default()).unwrap();
+            assert_eq!(totals.events, 3);
+            assert_eq!(totals.counters.output, Some(150));
+            let models: Vec<String> = s
+                .conn
+                .prepare("SELECT model FROM event WHERE session = 'switched' ORDER BY model")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(models, ["astra", "sol"]);
+        }
+        s.replace_codex_sessions(&[], &tz).unwrap();
+        assert_eq!(s.totals(&Query::default()).unwrap().events, 3);
     }
 
     #[test]
