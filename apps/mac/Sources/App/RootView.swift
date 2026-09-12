@@ -935,18 +935,10 @@ struct RootView: View {
                 notesInspector
             case .workspace(_, .chat):
                 #if os(macOS)
-                if showingChatOverview {
-                    VStack(spacing: 0) {
-                        InspectorChromeBar(onClose: { closeInspector() }) {
-                            InspectorTitle(title: "Chat", symbol: "bubble.left.and.bubble.right")
-                            Spacer(minLength: 0)
-                        }
-                        InspectorEmptyState(systemImage: "bubble.left.and.bubble.right", title: "Pick a conversation", subtitle: "Open a chat to see its agent, settings, and context here.", tint: Theme.accent)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }.background(Theme.background)
-                } else {
-                    ChatInspector(model: chat, folder: workspaces.folders.first { $0.id == route.workspaceID }, onClose: { closeInspector() })
-                }
+                WorkspaceInspector(model: workspaces, automations: automations,
+                    account: account.account, onClose: { closeInspector() },
+                    chat: chat, workspace: workspaces.folders.first { $0.id == route.workspaceID },
+                    onOpenAutomation: { jobID, runID in openAutomation(jobID: jobID, runID: runID) })
                 #else
                 ChatInspector(
                     model: chat,
@@ -3113,6 +3105,12 @@ struct RootView: View {
     private func syncRouteToFront(_ front: WorkspaceSurface) {
         guard let id = route.workspaceID, let section = route.workspaceSection else { return }
         switch section {
+        case .chat:
+            switch front {
+            case .file, .commit, .changes:
+                navigate(to: .workspace(id: id, section: .sessions))
+            default: break
+            }
         case .files, .changes, .browser:
             if front == .sessions || front == .launcher {
                 lastSection[id] = .sessions

@@ -146,6 +146,11 @@ private struct TreeRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.Space.xs) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(Theme.font(8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 9)
+                    .opacity(entry.isDir ? 1 : 0)
                 Image(systemName: symbol)
                     .font(Theme.font(11))
                     .foregroundStyle(entry.isDir ? Theme.accent : Color.secondary)
@@ -161,12 +166,13 @@ private struct TreeRow: View {
             .opacity(entry.ignored ? 0.45 : 1)
             .padding(.leading, CGFloat(depth) * 12 + Theme.Space.m)
             .padding(.trailing, Theme.Space.m)
-            .padding(.vertical, 3)
+            .padding(.vertical, 5)
             .background(background)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+        .accessibilityAddTraits(isOpen ? [.isSelected] : [])
         .help(entry.ignored ? "\(entry.path) (git ignores this)" : entry.path)
     }
 

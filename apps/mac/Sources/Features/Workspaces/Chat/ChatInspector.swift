@@ -10,6 +10,7 @@ struct ChatInspector: View {
     @Bindable var model: ChatModel
     var folder: WorkspaceFolder?
     var onClose: () -> Void
+    var showsHeader = true
     @State private var showingPersonas = false
     @State private var pendingDelete = false
     @State private var deletionTarget: DeletionTarget?
@@ -23,14 +24,16 @@ struct ChatInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if showsHeader {
             InspectorChromeBar(onClose: onClose) {
                 InspectorTitle(title: "Chat", symbol: "bubble.left.and.bubble.right")
                 Spacer(minLength: 0)
             }
+            }
             Group {
                 if let chat = model.selected {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: Theme.Space.l) {
+                        VStack(alignment: .leading, spacing: Theme.Space.m) {
                             identity(chat)
                             ChatSetupHeader(model: model, chat: chat, collapsed: false, showsIntro: false)
                             ChatInstructionsCard(model: model, chat: chat)

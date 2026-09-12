@@ -390,10 +390,7 @@ struct WorkspaceChangesView: View {
 
     private func diffControls(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
         HStack(spacing: Theme.Space.s) {
-            Text("Review")
-                .font(Theme.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Spacer()
+            Menu {
             Button("Expand all", .more) {
                 expandedDiffs.formUnion(git.files.map { diffKey($0, in: folder) })
                 Task {
@@ -407,6 +404,12 @@ struct WorkspaceChangesView: View {
                 expandedDiffs.subtract(git.files.map { diffKey($0, in: folder) })
             }
             .buttonStyle(.borderless)
+            } label: {
+                Label("Diff options", systemImage: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            Spacer(minLength: Theme.Space.s)
             Button("Review", .preview) {
                 model.reviewWorkingTree(in: folder.id)
             }

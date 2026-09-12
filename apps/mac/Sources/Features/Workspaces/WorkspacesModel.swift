@@ -197,6 +197,8 @@ final class WorkspacesModel {
     /// times a second. As view state the tab was reset on the next build and
     /// the picker looked like it did nothing at all.
     var inspectorTab: InspectorTab = .files
+    /// Kept when the browser temporarily occupies the inspector pane.
+    var chatInspectorShowsSettings = false
 
     /// Label for an inspector tab, with the count that is the reason to look at
     /// it.

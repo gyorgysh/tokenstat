@@ -90,6 +90,12 @@ struct WorkspaceInspector: View {
     /// Dismisses the pane. Owned by the root view, which is the only place the
     /// inspector's presence is decided.
     var onClose: () -> Void
+    var chat: ChatModel? = nil
+    var workspace: WorkspaceFolder? = nil
+    private var showingChatSettings: Bool {
+        get { chat != nil && model.chatInspectorShowsSettings }
+        nonmutating set { model.chatInspectorShowsSettings = newValue }
+    }
     #if os(macOS)
     /// After Auto commit starts, open that job on the Automations screen.
     var onOpenAutomation: ((String, String?) -> Void)? = nil
@@ -102,24 +108,41 @@ struct WorkspaceInspector: View {
     /// selection in view state it was reset on the next build, so the tabs
     /// simply did not switch while a build was running in one of the folders.
     private var tab: Binding<InspectorTab> {
-        Binding(get: { model.inspectorTab }, set: { model.inspectorTab = $0 })
+        Binding(get: { model.inspectorTab }, set: { model.inspectorTab = $0; showingChatSettings = false })
     }
 
-    private var folder: WorkspaceFolder? { model.selected }
+    private var folder: WorkspaceFolder? { chat == nil ? model.selected : workspace }
 
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                TabStrip(
-                    // No icons: the inspector is 280pt at its narrowest and three
-                    // labels plus three glyphs truncate before they fit.
-                    tabs: InspectorTab.allCases.map { ($0, model.inspectorTabTitle($0), "") },
-                    selection: tab,
-                    // The chrome bar owns the fill and the hairline, so the
-                    // strip does not paint a second band that stops short of
-                    // the close button.
-                    showsChrome: false
-                )
+                HStack(spacing: 3) {
+                    ForEach(InspectorTab.allCases) { item in
+                        inspectorTab(item.rawValue, selected: !showingChatSettings && tab.wrappedValue == item) {
+                            tab.wrappedValue = item
+                        }
+                    }
+                    if chat != nil {
+                        inspectorTab("Chat", selected: showingChatSettings) { showingChatSettings = true }
+                    }
+                }
+                .padding(.horizontal, Theme.Space.s)
+            }
+            if let folder {
+                HStack(spacing: Theme.Space.xs) {
+                    Image(systemName: "folder").foregroundStyle(Theme.accent)
+                    Text(folder.name).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    if let branch = folder.git?.branch {
+                        Image(systemName: "arrow.triangle.branch")
+                        Text(branch).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                .font(Theme.font(11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
+                ThemeRule()
             }
             // Give every tab the same measured rectangle.  Using an unbounded
             // max-height here lets a tab's internal VStack negotiate a
@@ -135,11 +158,34 @@ struct WorkspaceInspector: View {
         .background(Theme.background)
     }
 
+    private func inspectorTab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.font(12, weight: selected ? .semibold : .medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .foregroundStyle(selected ? Theme.accent : Theme.controlGlyph)
+                .background(selected ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .help(title == "Chat" ? "Chat settings" : title)
+    }
+
     // The band above this panel is the window titlebar. AppKit owns the
     // mouse there, so the tabs stay in the panel they switch.
 
     @ViewBuilder
     private var content: some View {
+        if showingChatSettings, let chat {
+            if chat.folderID == folder?.id {
+                ChatInspector(model: chat, folder: folder, onClose: onClose, showsHeader: false)
+            } else {
+                InspectorEmptyState(title: "Open a conversation", subtitle: "Chat settings appear here when a conversation is open.")
+            }
+        } else {
         switch tab.wrappedValue {
         case .changes:
             #if os(macOS)
@@ -156,6 +202,7 @@ struct WorkspaceInspector: View {
             WorkspaceFilesView(model: model, folder: folder)
         case .history:
             WorkspaceHistoryView(model: model, folder: folder, account: account)
+        }
         }
     }
 }
@@ -205,7 +252,7 @@ struct WorkspaceHistoryView: View {
                     )
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 4) {
                             ForEach(commits) { commit in
                                 CommitRow(
                                     commit: commit,
@@ -309,7 +356,7 @@ private struct CommitRow: View {
                 HStack(spacing: Theme.Space.xs) {
                     Text(commit.author)
                         .font(Theme.font(11))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Text("·")
                         .font(Theme.font(11))
@@ -327,6 +374,8 @@ private struct CommitRow: View {
                     Text(commit.shortID)
                         .font(Theme.mono(11))
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
             }
             Spacer(minLength: Theme.Space.xs)
