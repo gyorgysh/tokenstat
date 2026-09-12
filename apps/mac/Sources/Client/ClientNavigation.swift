@@ -125,9 +125,14 @@ final class ClientNavigationModel {
     }
 
 
+    /// Expansion is independent of the detail destination. Visiting Home or
+    /// Devices must not fold the workspace tree, including after a split reset.
+    private(set) var sidebarFolderID: String?
+
     /// The folder open in the workspace plane, as `remote:<peer>:<id>`.
     var folderID: String? {
         didSet {
+            if let folderID { sidebarFolderID = folderID }
             if folderID != oldValue {
                 restoredRoute = nil
                 routeLaunch.navigationChanged()
@@ -183,6 +188,7 @@ final class ClientNavigationModel {
         WorkMobileRouteStore.shared.clear()
         destination = .home
         folderID = nil
+        sidebarFolderID = nil
         section = .sessions
         requestedChat = nil
         visibleChat = nil

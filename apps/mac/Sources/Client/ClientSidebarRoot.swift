@@ -289,11 +289,9 @@ struct ClientSidebarRoot: View {
                     if workspaces.connectedKey == host.peerKey {
                         ForEach(workspaces.folders) { folder in
                             folderRow(folder)
-                            // Only the open folder shows its sections, the way
-                            // the Mac's sidebar opens one at a time. Four
-                            // folders each spelling out eight rows is a list
-                            // nobody can find anything in.
-                            if navigation.folderID == folder.id {
+                            // Keep the last opened folder expanded when the
+                            // detail column moves to a different destination.
+                            if navigation.sidebarFolderID == folder.id {
                                 ForEach(WorkspaceSection.allCases) { item in
                                     sectionRow(item, in: folder)
                                     if item == .sessions {
