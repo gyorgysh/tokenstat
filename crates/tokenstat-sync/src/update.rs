@@ -14,7 +14,7 @@
 //! since the schedule is the cadence. Opt out with `update --auto off`.
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
@@ -26,6 +26,8 @@ use thiserror::Error;
 const REPO: &str = "gyorgysh/tokenstat";
 const CHECK_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const USER_AGENT: &str = concat!("tokenstat/", env!("CARGO_PKG_VERSION"));
+const RELEASE_MANIFEST_URL: &str = "https://tokenstat.ai/api/v1/releases/latest.json";
+const RELEASE_MANIFEST_MAX_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
@@ -88,6 +90,8 @@ struct GhRelease {
     html_url: String,
     #[serde(default)]
     prerelease: bool,
+    #[serde(default)]
+    draft: bool,
     assets: Vec<GhAsset>,
 }
 
@@ -243,6 +247,11 @@ pub fn oldest_installed<'a>(installed: &[&'a str]) -> &'a str {
 /// machine that rebuilt hostd from tip still gets offered the update when the
 /// app bundle lags the release, and the reverse is true too.
 pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateError> {
+    // The public edge snapshot needs no account or GitHub credential. A GitHub
+    // cooldown must not prevent reading it, only the direct fallback below.
+    if let Some(release) = cached_site_release() {
+        return release_check(oldest_installed(installed).to_owned(), release);
+    }
     // Serialize release lookups so another caller cannot slip past a newly
     // received cooldown. Persist it so restarting the app does not bypass it.
     static CHECK_LOCK: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
@@ -328,9 +337,14 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
             status
         )));
     }
-    let release: GhRelease = resp.json()?;
-    if release.prerelease {
-        // /releases/latest already skips prereleases, but be defensive.
+    release_check(current, resp.json()?)
+}
+
+fn release_check(current: String, release: GhRelease) -> Result<UpdateCheck, UpdateError> {
+    if release.prerelease || release.draft {
+        return Err(UpdateError::Message(
+            "No stable GitHub Release found.".into(),
+        ));
     }
     let latest = release.tag_name.trim_start_matches('v').to_string();
     let newer = version_cmp(&latest, &current) == std::cmp::Ordering::Greater;
@@ -376,6 +390,103 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
             .map(|a| a.url.clone())
             .filter(|u: &String| !u.is_empty()),
     })
+}
+
+#[derive(Deserialize)]
+struct ReleaseManifest {
+    schema: u32,
+    checked_at: u64,
+    release: GhRelease,
+}
+
+fn cached_site_release() -> Option<GhRelease> {
+    // No redirects, cookies, credentials or identifying query parameters.
+    // Keep fallback latency bounded when the website is unavailable.
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(3))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(USER_AGENT)
+        .build()
+        .ok()?;
+    let response = client.get(RELEASE_MANIFEST_URL).send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    response
+        .take(RELEASE_MANIFEST_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > RELEASE_MANIFEST_MAX_BYTES {
+        return None;
+    }
+    validated_manifest(&bytes, unix_now())
+}
+
+fn validated_manifest(bytes: &[u8], now: u64) -> Option<GhRelease> {
+    let manifest: ReleaseManifest = serde_json::from_slice(bytes).ok()?;
+    if manifest.schema != 1
+        || manifest.checked_at == 0
+        || manifest.checked_at > now.saturating_add(300)
+        || now.saturating_sub(manifest.checked_at) > 24 * 60 * 60
+    {
+        return None;
+    }
+    let release = manifest.release;
+    let version = release
+        .tag_name
+        .strip_prefix('v')
+        .unwrap_or(&release.tag_name);
+    let parts: Vec<_> = version.split('.').collect();
+    if release.prerelease
+        || release.draft
+        || parts.len() != 3
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || !part.bytes().all(|c| c.is_ascii_digit())
+                || part.parse::<u64>().is_err()
+        })
+        || release.html_url
+            != format!(
+                "https://github.com/{REPO}/releases/tag/{}",
+                release.tag_name
+            )
+        || release.assets.is_empty()
+        || release.assets.len() > 128
+    {
+        return None;
+    }
+    let mut names = std::collections::HashSet::new();
+    for asset in &release.assets {
+        let api_prefix = format!("https://api.github.com/repos/{REPO}/releases/assets/");
+        let api_id = asset.url.strip_prefix(&api_prefix)?;
+        if asset.name.is_empty()
+            || !asset
+                .name
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+            || !names.insert(&asset.name)
+            || asset.browser_download_url
+                != format!(
+                    "https://github.com/{REPO}/releases/download/{}/{}",
+                    release.tag_name, asset.name
+                )
+            || api_id.is_empty()
+            || !api_id.bytes().all(|c| c.is_ascii_digit())
+        {
+            return None;
+        }
+    }
+    // An incomplete publish must not advertise an update with no integrity file.
+    if !release
+        .assets
+        .iter()
+        .any(|asset| asset.name == "SHA256SUMS")
+    {
+        return None;
+    }
+    Some(release)
 }
 
 fn unix_now() -> u64 {
@@ -1548,6 +1659,48 @@ fn touch_check_stamp() -> Result<(), UpdateError> {
 
 #[cfg(test)]
 mod tests {
+    fn manifest_fixture() -> serde_json::Value {
+        serde_json::json!({ "schema": 1, "checked_at": 1000, "release": {
+            "tag_name": "v1.0.4", "html_url": format!("https://github.com/{}/releases/tag/v1.0.4", super::REPO),
+            "assets": [{ "name": "SHA256SUMS",
+                "browser_download_url": format!("https://github.com/{}/releases/download/v1.0.4/SHA256SUMS", super::REPO),
+                "url": format!("https://api.github.com/repos/{}/releases/assets/1", super::REPO)
+            }] } })
+    }
+
+    #[test]
+    fn site_manifest_requires_fresh_stable_allowlisted_release() {
+        let valid = manifest_fixture();
+        let decode = |value: &serde_json::Value, now| {
+            super::validated_manifest(&serde_json::to_vec(value).unwrap(), now)
+        };
+        assert!(decode(&valid, 1001).is_some());
+        assert!(decode(&valid, 1000 + 86_401).is_none());
+        assert!(decode(&valid, 699).is_none());
+        for (pointer, bad) in [
+            ("/schema", serde_json::json!(2)),
+            ("/release/prerelease", serde_json::json!(true)),
+            ("/release/draft", serde_json::json!(true)),
+            ("/release/tag_name", serde_json::json!("v1.0.4-rc.1")),
+            (
+                "/release/assets/0/browser_download_url",
+                serde_json::json!("https://example.org/SHA256SUMS"),
+            ),
+            (
+                "/release/assets/0/url",
+                serde_json::json!("https://api.github.com.evil.test/repos/assets/1"),
+            ),
+            ("/release/assets", serde_json::json!([])),
+        ] {
+            let mut value = valid.clone();
+            // Add optional booleans before addressing them by JSON pointer.
+            value["release"]["draft"] = serde_json::json!(false);
+            value["release"]["prerelease"] = serde_json::json!(false);
+            *value.pointer_mut(pointer).unwrap() = bad;
+            assert!(decode(&value, 1001).is_none(), "{pointer}");
+        }
+    }
+
     #[test]
     fn release_auth_is_optional_and_targets_only_github_api() {
         let client = super::client().unwrap();
