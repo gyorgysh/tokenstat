@@ -946,7 +946,7 @@ struct SSHConnectForm: View {
             if let jumpID = host.jumpHostID,
                let jumpHost = model.hosts.first(where: { $0.id == jumpID })
             {
-                jump = try Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
+                jump = try await Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
             }
             let probed = try await Bridge.probeSSHHost(host, jump: jump).fingerprint
             // The call carries on after a cancel, so its answer can arrive
@@ -985,7 +985,7 @@ struct SSHConnectForm: View {
             if let jumpID = host.jumpHostID,
                let jumpHost = model.hosts.first(where: { $0.id == jumpID })
             {
-                jump = try Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
+                jump = try await Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
             }
             let handle: SSHSessionHandle
             let authPayload: [String: Any]
@@ -995,7 +995,7 @@ struct SSHConnectForm: View {
                     authPayload = ["kind": "agent", "fingerprint": fingerprint]
                     handle = try await Bridge.openSSHWithResolvedAuth(host, auth: authPayload, rows: 24, cols: 80, jump: jump)
                 } else {
-                    let pem = try SSHSecretStore.load(reference: key.secretRef)
+                    let pem = try await SSHSecretStore.loadForUse(reference: key.secretRef)
                     // Same encoding for open and probe: nil passphrase is
                     // NSNull, not missing, so the two calls cannot disagree.
                     authPayload = ["kind": "privateKey", "pem": pem, "passphrase": NSNull()]

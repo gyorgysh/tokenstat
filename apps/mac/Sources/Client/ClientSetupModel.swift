@@ -279,7 +279,7 @@ final class ClientSetupModel {
     /// password is used for the connection and never written anywhere: that is
     /// what "used once and not stored" means, and it is the whole difference
     /// between this and saving a credential.
-    func authPayload(library: SSHLibraryModel) throws -> [String: Any] {
+    func authPayload(library: SSHLibraryModel) async throws -> [String: Any] {
         switch credential {
         case .none:
             throw BridgeError.core(
@@ -309,7 +309,7 @@ final class ClientSetupModel {
             }
             return [
                 "kind": "privateKey",
-                "pem": try SSHSecretStore.load(reference: key.secretRef),
+                "pem": try await SSHSecretStore.loadForUse(reference: key.secretRef),
                 "passphrase": nil as Any? as Any,
             ]
         }
@@ -397,7 +397,7 @@ final class ClientSetupModel {
     func inspect(library: SSHLibraryModel) async {
         await run {
             let host = self.resolvedHost(library: library)
-            let auth = try self.authPayload(library: library)
+            let auth = try await self.authPayload(library: library)
             let check = try await Bridge.probeServerForSetup(host, auth: auth)
             try Task.checkCancellation()
             self.check = check
@@ -418,7 +418,7 @@ final class ClientSetupModel {
     func install(library: SSHLibraryModel) async {
         await run {
             let host = self.resolvedHost(library: library)
-            let auth = try self.authPayload(library: library)
+            let auth = try await self.authPayload(library: library)
             guard let myKey = self.myKey else {
                 throw BridgeError.core(code: "identity_unavailable",
                     message: "This device’s identity could not be loaded. Close setup and try again.")
@@ -477,7 +477,7 @@ final class ClientSetupModel {
                     self.expectedPeer = key
                 } else {
                     let host = self.resolvedHost(library: library)
-                    let auth = try self.authPayload(library: library)
+                    let auth = try await self.authPayload(library: library)
                     let key = try await Bridge.setupServerIdentity(host, auth: auth)
                     try Task.checkCancellation()
                     self.expectedPeer = key

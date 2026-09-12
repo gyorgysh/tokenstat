@@ -484,6 +484,11 @@ struct SSHKeyEditor: View {
                             Label("Protected by a passphrase", systemImage: "lock")
                                 .font(Theme.caption).foregroundStyle(.secondary)
                         }
+                        if SSHSecretStore.requiresBiometrics(record.secretRef) {
+                            Label("Touch ID · This device only", systemImage: "touchid")
+                                .font(Theme.caption).foregroundStyle(Theme.accent)
+                            SSHEditorNote(text: "Not synced to vault. Touch ID protects access to this software key. Keep another way to access your servers in case this device or its enrolled fingerprints change.")
+                        }
                     }
                 }
 
@@ -503,9 +508,16 @@ struct SSHKeyEditor: View {
                 } else {
                     SSHEditorSection(title: "Add") {
                         SSHEditorField(label: "New key type") {
-                            AppMenuPicker(options: SSHKeyAlgorithm.allCases.map { (value: $0, label: $0.label) }, selection: $algorithm)
+                            AppMenuPicker(options: SSHKeyAlgorithm.allCases.filter {
+                                $0 != .ecdsaP256TouchID || SSHVaultBiometrics.name == "Touch ID"
+                            }.map { (value: $0, label: $0.label) }, selection: $algorithm)
                         }
                         SSHEditorNote(text: algorithm.explanation)
+                        #if os(macOS)
+                        if SSHVaultBiometrics.name != "Touch ID" {
+                            SSHEditorNote(text: "Touch ID key protection is available when Touch ID is set up and available on this Mac.")
+                        }
+                        #endif
                         Button("Generate key", .create) { Task { await generate() } }
                             .buttonStyle(AccentButtonStyle())
                         SSHEditorNote(text: "Or import an existing private key below. The private half goes into this device's vault, never into the connection list.")
@@ -559,11 +571,11 @@ struct SSHKeyEditor: View {
             switch algorithm {
             case .ed25519:
                 material = try await Bridge.generateSSHKey()
-            case .ecdsaP256:
+            case .ecdsaP256, .ecdsaP256TouchID:
                 let pem = await Task.detached { SSHKeyAlgorithm.makeP256PEM() }.value
                 material = try await Bridge.inspectSSHKey(pem: pem, passphrase: nil)
             }
-            await keep(material, protected: false)
+            await keep(material, protected: false, biometric: algorithm == .ecdsaP256TouchID)
         }
         catch { self.error = error.localizedDescription }
     }
@@ -579,10 +591,12 @@ struct SSHKeyEditor: View {
         } catch { self.error = error.localizedDescription }
     }
 
-    private func keep(_ material: SSHKeyMaterial, protected: Bool) async {
+    private func keep(_ material: SSHKeyMaterial, protected: Bool, biometric: Bool = false) async {
         do {
             let id = "key_\(UUID().uuidString)"
-            let reference = try SSHSecretStore.store(material.privateKey, id: id)
+            let reference = try await Task.detached {
+                try SSHSecretStore.store(material.privateKey, id: id, biometric: biometric)
+            }.value
             let key = SSHKeyRecord(
                 id: id, label: label, algorithm: material.algorithm,
                 publicKey: material.publicKey, secretRef: reference,
@@ -595,6 +609,7 @@ struct SSHKeyEditor: View {
                 pem = ""
                 passphrase = ""
             } else {
+                SSHSecretStore.delete(reference: reference)
                 error = model.error
                 model.error = nil
             }

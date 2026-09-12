@@ -181,7 +181,7 @@ final class SSHLibraryModel {
     func save(key: SSHKeyRecord, privateKey: String?) async -> SSHKeyRecord? {
         do {
             let saved = try await Bridge.saveSSHKey(key)
-            if vaultTier != nil {
+            if vaultTier != nil && !SSHSecretStore.requiresBiometrics(saved.secretRef) {
                 // An edit that carries no key material is still an edit the
                 // other devices need. Renaming used to skip the vault, which
                 // left them holding the old name and pushing it back over the
@@ -228,7 +228,10 @@ final class SSHLibraryModel {
     /// Named before a vault is deleted, because these are the ones nothing can
     /// bring back: the row is here, the material was only in the vault.
     var keysOnlyInTheVault: [SSHKeyRecord] {
-        keys.filter { (try? SSHSecretStore.load(reference: $0.secretRef)) == nil }
+        keys.filter {
+            !$0.secretRef.hasPrefix("agent:") && !SSHSecretStore.requiresBiometrics($0.secretRef)
+                && !SSHSecretStore.contains(reference: $0.secretRef)
+        }
     }
 
     func delete(host: SSHHost) async {
@@ -244,6 +247,14 @@ final class SSHLibraryModel {
     }
 
     func delete(key: SSHKeyRecord) async {
+        if SSHSecretStore.requiresBiometrics(key.secretRef) {
+            do {
+                try await Bridge.deleteSSHKey(id: key.id)
+                SSHSecretStore.delete(reference: key.secretRef)
+                await reload()
+            } catch { self.error = error.localizedDescription }
+            return
+        }
         await remove(vaultID: "key:\(key.id)") {
             try await Bridge.deleteSSHKey(id: key.id)
             SSHSecretStore.delete(reference: key.secretRef)
@@ -384,6 +395,7 @@ final class SSHLibraryModel {
             await mirror(id: "snippet:\(snippet.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: snippet))
         }
         for key in keys where !known.contains("key:\(key.id)") {
+            guard !SSHSecretStore.requiresBiometrics(key.secretRef) else { continue }
             guard let material = try? SSHSecretStore.load(reference: key.secretRef) else { continue }
             await mirror(id: "key:\(key.id)", envelope: SSHVaultEnvelope(
                 kind: "key",
@@ -496,6 +508,8 @@ final class SSHLibraryModel {
     /// enrolled device looks like.
     private func applyKey(_ key: SSHVaultSyncedKey) async -> Bool {
         let local = keys.first { $0.id == key.id }
+        // A synced record must never replace this device's access control.
+        if let local, SSHSecretStore.requiresBiometrics(local.secretRef) { return false }
         let havePrivate = local.map { (try? SSHSecretStore.load(reference: $0.secretRef)) != nil } ?? false
         let take = verdict(remote: key.updatedMs, local: local?.updatedMs)
         if take == .takeRemote || (take == .same && !havePrivate) {

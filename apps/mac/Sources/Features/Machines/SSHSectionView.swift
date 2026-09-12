@@ -337,6 +337,10 @@ struct SSHSectionView: View {
                 Text(key.label)
                 Text(key.fingerprint.isEmpty ? key.algorithm : key.fingerprint)
                     .font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(1)
+                if SSHSecretStore.requiresBiometrics(key.secretRef) {
+                    Text("Touch ID · This device only · Not synced")
+                        .font(Theme.caption2).foregroundStyle(Theme.accent)
+                }
             }
         } icon: {
             Image(systemName: key.hardwareBacked ? "key.radiowaves.forward" : "key.fill")

@@ -3368,7 +3368,7 @@ extension Bridge {
     /// used: there is nobody to ask for a password at that point in the chain,
     /// and prompting for two passwords before a terminal appears is worse than
     /// saying so.
-    static func sshJumpPayload(_ host: SSHHost, key: SSHKeyRecord?) throws -> [String: Any] {
+    static func sshJumpPayload(_ host: SSHHost, key: SSHKeyRecord?) async throws -> [String: Any] {
         guard let key else {
             throw BridgeError.core(
                 code: "jump_needs_key",
@@ -3379,7 +3379,7 @@ extension Bridge {
         if key.secretRef.hasPrefix("agent:") {
             auth = ["kind": "agent", "fingerprint": String(key.secretRef.dropFirst("agent:".count))]
         } else {
-            auth = ["kind": "privateKey", "pem": try SSHSecretStore.load(reference: key.secretRef), "passphrase": nil as Any?  as Any]
+            auth = ["kind": "privateKey", "pem": try await SSHSecretStore.loadForUse(reference: key.secretRef), "passphrase": NSNull()]
         }
         return [
             "hostname": host.hostname, "port": host.port, "username": host.username,
