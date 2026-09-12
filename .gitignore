@@ -77,6 +77,9 @@ ExportOptions.plist
 # source of truth, and the xcframework comes from
 # `scripts/build-ffi-xcframework.sh`.
 /apps/mac/Tokenstat.xcodeproj/
+/apps/mac/WorkbenchQA.xcodeproj/
+/apps/mac/WorkbenchQA.yml
+/apps/mac/Tests/Workbench/
 /apps/mac/Vendor/
 /apps/mac/Resources/THIRD_PARTY_NOTICES.md
 # The price book an app bundle ships with. Downloaded at build time by

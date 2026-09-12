@@ -39,24 +39,11 @@ struct ClientFolderSplit: View {
         return merged
     }
 
-    /// Below this, the detail side is too narrow to hold a second split.
-    ///
-    /// The sections column already spends 280 points. A workflow workspace
-    /// inside what is left adds its own list, board and run columns, and on
-    /// an iPad in portrait that list came out around 170 points wide with
-    /// cards that will not go below 180: the card spilled over the divider.
-    /// Narrow detail gets the stacked screen the phone uses instead, which is
-    /// a list that pushes, and nothing overflows because nothing is nested.
-    private static let splitInsideSplit: CGFloat = 900
-
-    /// The sections column. Named once, because the detail width is what is
-    /// left after it and two numbers that must agree will not.
+    /// Job views measure what remains after this column themselves.
     private static let sectionsColumn: CGFloat = 280
 
     var body: some View {
-        GeometryReader { geo in
-            split(detailWidth: geo.size.width - Self.sectionsColumn)
-        }
+        split
         .background(Theme.background)
         .navigationTitle(current.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -79,7 +66,7 @@ struct ClientFolderSplit: View {
         }
     }
 
-    private func split(detailWidth: CGFloat) -> some View {
+    private var split: some View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -112,19 +99,18 @@ struct ClientFolderSplit: View {
             .frame(width: Self.sectionsColumn)
             .background(Theme.background)
             ThemeRule.vertical
-            detail(width: detailWidth)
+            detail
         }
     }
 
     @ViewBuilder
-    private func detail(width: CGFloat) -> some View {
+    private var detail: some View {
         ClientWorkspaceSectionDetail(
             peer: peer,
             hostName: hostName,
             folder: folder,
             current: current,
-            section: section,
-            width: width
+            section: section
         )
     }
 
@@ -251,15 +237,6 @@ struct ClientWorkspaceSectionDetail: View {
     let folder: WorkspaceFolder
     var current: WorkspaceFolder?
     let section: WorkspaceSection
-    /// How much room the content has. Below `splitInsideSplit` the workflow
-    /// and automation workspaces give their stacked screen instead of nesting
-    /// a split inside a split.
-    var width: CGFloat = 10_000
-
-    /// Below this, a workspace inside the detail column is a squeeze. The
-    /// number lives here now, with the only code that reads it.
-    static let splitInsideSplit: CGFloat = 900
-
     private var workspaceID: String {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
     }
@@ -308,41 +285,21 @@ struct ClientWorkspaceSectionDetail: View {
                 folderName: folderNow.name
             )
         case .workflows:
-            if width >= Self.splitInsideSplit {
-                ClientWorkflowWorkspace(
-                    peer: peer,
-                    workspaceID: workspaceID,
-                    hostName: hostName,
-                    folderName: folderNow.name
-                )
-            } else {
-                NavigationStack {
-                    ClientWorkspaceWorkflowsView(
-                        peer: peer,
-                        workspaceID: workspaceID,
-                        hostName: hostName,
-                        folderName: folderNow.name
-                    )
-                }
-            }
+            ClientWorkflowWorkspace(
+                peer: peer,
+                workspaceID: workspaceID,
+                hostName: hostName,
+                folderName: folderNow.name
+            )
+            .id(ClientJobWorkspaceID(peer: peer, workspace: workspaceID))
         case .automations:
-            if width >= Self.splitInsideSplit {
-                ClientAutomationWorkspace(
-                    peer: peer,
-                    workspaceID: workspaceID,
-                    hostName: hostName,
-                    folderName: folderNow.name
-                )
-            } else {
-                NavigationStack {
-                    ClientWorkspaceAutomationsView(
-                        peer: peer,
-                        workspaceID: workspaceID,
-                        hostName: hostName,
-                        folderName: folderNow.name
-                    )
-                }
-            }
+            ClientAutomationWorkspace(
+                peer: peer,
+                workspaceID: workspaceID,
+                hostName: hostName,
+                folderName: folderNow.name
+            )
+            .id(ClientJobWorkspaceID(peer: peer, workspace: workspaceID))
         case .notes:
             ClientWorkspaceNotesView(
                 peer: peer,

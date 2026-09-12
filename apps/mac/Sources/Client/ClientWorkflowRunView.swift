@@ -14,7 +14,7 @@ struct ClientWorkflowRunView: View {
     let runID: String
 
     private var run: WorkflowRunRecord? {
-        session.runs.first { $0.id == runID } ?? session.selectedRun
+        session.runs.first { $0.id == runID }
     }
 
     var body: some View {
@@ -33,6 +33,8 @@ struct ClientWorkflowRunView: View {
                         .cardSurface()
                     steps(run)
                     transcript(run)
+                } else if session.loaded {
+                    ClientSectionEmpty(text: "This run is unavailable", message: "It is no longer in this folder's run history.")
                 }
             }
             .padding(.horizontal, Theme.Space.m)

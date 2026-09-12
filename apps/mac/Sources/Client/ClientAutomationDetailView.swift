@@ -35,6 +35,15 @@ struct ClientAutomationDetailView: View {
         )
     }
 
+    init(session: ClientAutomationSession) {
+        peer = session.peer
+        workspaceID = session.workspaceID
+        hostName = session.hostName
+        folderName = session.folderName
+        jobID = session.selectedJobID ?? ""
+        _session = State(initialValue: session)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {

@@ -22,12 +22,17 @@ final class ClientWorkflowSession {
     let workspaceID: String
     let hostName: String
     let folderName: String
+    private let service: any ClientJobService
 
     private(set) var graphs: [WorkflowGraph] = []
     private(set) var runs: [WorkflowRunRecord] = []
     private(set) var loaded = false
     var errorMessage: String?
-    var input = ""
+    private var inputs = ClientWorkflowInputs()
+    var input: String {
+        get { inputs[selectedGraphID] }
+        set { inputs[selectedGraphID] = newValue }
+    }
     var working = false
 
     var selectedGraphID: String?
@@ -39,17 +44,19 @@ final class ClientWorkflowSession {
     private var pollTask: Task<Void, Never>?
     private var catchUpTask: Task<Void, Never>?
     private var pollingKey: String?
+    private var loadGeneration = 0
     private var isVisible = false
     private var visibility = 0
     /// Set when this session is a detail page for one graph. A missing id
     /// then stays missing instead of becoming some other graph.
     private let pinnedGraphID: String?
 
-    init(peer: String, workspaceID: String, hostName: String, folderName: String, graphID: String? = nil) {
+    init(peer: String, workspaceID: String, hostName: String, folderName: String, graphID: String? = nil, service: any ClientJobService = ClientRemoteJobService()) {
         self.peer = peer
         self.workspaceID = workspaceID
         self.hostName = hostName
         self.folderName = folderName
+        self.service = service
         self.pinnedGraphID = graphID
         self.selectedGraphID = graphID
     }
@@ -64,8 +71,8 @@ final class ClientWorkflowSession {
     }
 
     var selectedRun: WorkflowRunRecord? {
-        if let selectedRunID, let run = runs.first(where: { $0.id == selectedRunID }) {
-            return run
+        if let selectedRunID {
+            return runs.first { $0.id == selectedRunID && $0.workflowID == selectedGraph?.id }
         }
         return liveRun ?? lastRun(for: selectedGraph)
     }
@@ -105,19 +112,24 @@ final class ClientWorkflowSession {
     }
 
     func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         do {
-            async let all = ClientRemote.workflows(peer: peer)
-            async let history = ClientRemote.workflowRuns(peer: peer)
-            graphs = try await all.filter { $0.workspaceID == workspaceID }
-            runs = try await history.filter { $0.workspaceID == workspaceID }
+            async let all = service.workflows(peer: peer)
+            async let history = service.workflowRuns(peer: peer)
+            let (freshItems, freshRuns) = try await (all, history)
+            guard generation == loadGeneration, !Task.isCancelled else { return }
+            graphs = freshItems.filter { $0.workspaceID == workspaceID }
+            runs = freshRuns.filter { $0.workspaceID == workspaceID }
             errorMessage = nil
-            if selectedGraphID == nil || graphs.first(where: { $0.id == selectedGraphID }) == nil {
+            if selectedGraphID == nil {
                 selectedGraphID = pinnedGraphID ?? graphs.first?.id
             }
             if selectedRunID == nil, let graph = selectedGraph {
                 selectedRunID = lastRun(for: graph)?.id
             }
         } catch {
+            guard generation == loadGeneration, !Task.isCancelled else { return }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
         loaded = true
@@ -125,6 +137,7 @@ final class ClientWorkflowSession {
     }
 
     func selectGraph(_ id: String) {
+        guard graphs.contains(where: { $0.id == id }), selectedGraphID != id else { return }
         selectedGraphID = id
         selectedNodeID = nil
         selectedRunID = lastRun(for: graphs.first { $0.id == id })?.id
@@ -134,6 +147,9 @@ final class ClientWorkflowSession {
     }
 
     func selectRun(_ run: WorkflowRunRecord) {
+        guard run.workspaceID == workspaceID,
+              graphs.contains(where: { $0.id == run.workflowID }) else { return }
+        guard selectedRunID != run.id else { return }
         selectedRunID = run.id
         selectedGraphID = run.workflowID
         selectedNodeID = run.currentNodeID ?? run.steps.last?.nodeID
@@ -154,7 +170,7 @@ final class ClientWorkflowSession {
         working = true
         defer { working = false }
         do {
-            let run = try await ClientRemote.runWorkflow(
+            let run = try await service.runWorkflow(
                 peer: peer,
                 id: graph.id,
                 input: input,
@@ -173,7 +189,7 @@ final class ClientWorkflowSession {
         working = true
         defer { working = false }
         do {
-            try await ClientRemote.killWorkflow(peer: peer, runID: run.id)
+            try await service.killWorkflow(peer: peer, runID: run.id)
             errorMessage = nil
             await load()
         } catch {
@@ -186,7 +202,7 @@ final class ClientWorkflowSession {
         working = true
         defer { working = false }
         do {
-            let next = try await ClientRemote.continueWorkflow(peer: peer, runID: run.id)
+            let next = try await service.continueWorkflow(peer: peer, runID: run.id)
             errorMessage = nil
             await load()
             selectRun(next)
@@ -207,7 +223,7 @@ final class ClientWorkflowSession {
         guard errorMessage == nil, var graph = selectedGraph, graph.schedule.repeats else { return }
         graph.enabled.toggle()
         do {
-            let updated = try await ClientRemote.updateWorkflow(peer: peer, graph: graph)
+            let updated = try await service.updateWorkflow(peer: peer, graph: graph)
             errorMessage = nil
             if let index = graphs.firstIndex(where: { $0.id == updated.id }) {
                 graphs[index] = updated
@@ -275,7 +291,7 @@ final class ClientWorkflowSession {
 
     private func refreshRuns() async {
         do {
-            let latest = try await ClientRemote.workflowRuns(peer: peer)
+            let latest = try await service.workflowRuns(peer: peer)
             runs = latest.filter { $0.workspaceID == workspaceID }
             if let run = selectedRun, !run.isLive {
                 stopPolling()
@@ -307,7 +323,7 @@ final class ClientWorkflowSession {
 
     private func fetchTranscript(runID: String, nodeID: String) async {
         do {
-            let chunk = try await ClientRemote.workflowTranscript(
+            let chunk = try await service.workflowTranscript(
                 peer: peer,
                 runID: runID,
                 nodeID: nodeID,
@@ -317,7 +333,7 @@ final class ClientWorkflowSession {
             if chunk.nextOffset < transcriptOffset {
                 transcriptText = ""
                 transcriptOffset = 0
-                let again = try await ClientRemote.workflowTranscript(
+                let again = try await service.workflowTranscript(
                     peer: peer,
                     runID: runID,
                     nodeID: nodeID,

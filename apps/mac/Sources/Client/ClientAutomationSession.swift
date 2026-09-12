@@ -19,6 +19,7 @@ final class ClientAutomationSession {
     let workspaceID: String
     let hostName: String
     let folderName: String
+    private let service: any ClientJobService
 
     private(set) var jobs: [Automation] = []
     private(set) var runs: [RunRecord] = []
@@ -34,17 +35,19 @@ final class ClientAutomationSession {
     private var pollTask: Task<Void, Never>?
     private var catchUpTask: Task<Void, Never>?
     private var pollingID: String?
+    private var loadGeneration = 0
     private var isVisible = false
     private var visibility = 0
     /// Set when this session is a detail page for one job. A missing id
     /// then stays missing instead of becoming some other job.
     private let pinnedJobID: String?
 
-    init(peer: String, workspaceID: String, hostName: String, folderName: String, jobID: String? = nil) {
+    init(peer: String, workspaceID: String, hostName: String, folderName: String, jobID: String? = nil, service: any ClientJobService = ClientRemoteJobService()) {
         self.peer = peer
         self.workspaceID = workspaceID
         self.hostName = hostName
         self.folderName = folderName
+        self.service = service
         self.pinnedJobID = jobID
         self.selectedJobID = jobID
     }
@@ -59,8 +62,8 @@ final class ClientAutomationSession {
     }
 
     var selectedRun: RunRecord? {
-        if let selectedRunID, let run = runs.first(where: { $0.id == selectedRunID }) {
-            return run
+        if let selectedRunID {
+            return runs.first { $0.id == selectedRunID && $0.jobId == selectedJob?.id }
         }
         return liveRun ?? lastRun(for: selectedJob)
     }
@@ -100,19 +103,24 @@ final class ClientAutomationSession {
     }
 
     func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         do {
-            async let all = ClientRemote.automations(peer: peer)
-            async let history = ClientRemote.automationRuns(peer: peer)
-            jobs = try await all.filter { $0.workspaceID == workspaceID }
-            runs = try await history.filter { $0.workspaceID == workspaceID }
+            async let all = service.automations(peer: peer)
+            async let history = service.automationRuns(peer: peer)
+            let (freshItems, freshRuns) = try await (all, history)
+            guard generation == loadGeneration, !Task.isCancelled else { return }
+            jobs = freshItems.filter { $0.workspaceID == workspaceID }
+            runs = freshRuns.filter { $0.workspaceID == workspaceID }
             errorMessage = nil
-            if selectedJobID == nil || jobs.first(where: { $0.id == selectedJobID }) == nil {
+            if selectedJobID == nil {
                 selectedJobID = pinnedJobID ?? jobs.first?.id
             }
             if selectedRunID == nil, let job = selectedJob {
                 selectedRunID = lastRun(for: job)?.id
             }
         } catch {
+            guard generation == loadGeneration, !Task.isCancelled else { return }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
         loaded = true
@@ -120,6 +128,7 @@ final class ClientAutomationSession {
     }
 
     func selectJob(_ id: String) {
+        guard jobs.contains(where: { $0.id == id }), selectedJobID != id else { return }
         selectedJobID = id
         selectedRunID = lastRun(for: jobs.first { $0.id == id })?.id
         transcriptText = ""
@@ -128,6 +137,9 @@ final class ClientAutomationSession {
     }
 
     func selectRun(_ run: RunRecord) {
+        guard run.workspaceID == workspaceID,
+              jobs.contains(where: { $0.id == run.jobId }) else { return }
+        guard selectedRunID != run.id else { return }
         selectedRunID = run.id
         selectedJobID = run.jobId
         transcriptText = ""
@@ -140,7 +152,7 @@ final class ClientAutomationSession {
         working = true
         defer { working = false }
         do {
-            let updated = try await ClientRemote.runAutomation(peer: peer, id: job.id)
+            let updated = try await service.runAutomation(peer: peer, id: job.id)
             errorMessage = nil
             await load()
             if let id = updated.lastRunID, let run = runs.first(where: { $0.id == id }) {
@@ -158,7 +170,7 @@ final class ClientAutomationSession {
         working = true
         defer { working = false }
         do {
-            try await ClientRemote.killAutomation(peer: peer, runID: run.id)
+            try await service.killAutomation(peer: peer, runID: run.id)
             errorMessage = nil
             await load()
         } catch {
@@ -171,7 +183,7 @@ final class ClientAutomationSession {
         working = true
         defer { working = false }
         do {
-            let updated = try await ClientRemote.setAutomation(
+            let updated = try await service.setAutomation(
                 peer: peer,
                 id: job.id,
                 enabled: !job.enabled
@@ -233,7 +245,7 @@ final class ClientAutomationSession {
 
     private func refreshRuns() async {
         do {
-            let latest = try await ClientRemote.automationRuns(peer: peer)
+            let latest = try await service.automationRuns(peer: peer)
             runs = latest.filter { $0.workspaceID == workspaceID }
             if let run = selectedRun, !run.isRunning {
                 stopPolling()
@@ -262,7 +274,7 @@ final class ClientAutomationSession {
 
     private func fetchTranscript(id: String) async {
         do {
-            let chunk = try await ClientRemote.automationTranscript(
+            let chunk = try await service.automationTranscript(
                 peer: peer,
                 id: id,
                 offset: transcriptOffset
@@ -271,7 +283,7 @@ final class ClientAutomationSession {
             if chunk.nextOffset < transcriptOffset {
                 transcriptText = ""
                 transcriptOffset = 0
-                let again = try await ClientRemote.automationTranscript(
+                let again = try await service.automationTranscript(
                     peer: peer,
                     id: id,
                     offset: 0

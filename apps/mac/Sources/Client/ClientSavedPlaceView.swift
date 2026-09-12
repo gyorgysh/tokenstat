@@ -118,10 +118,8 @@ struct ClientSavedPlaceView: View {
             ClientHostWorkspacesView(peerKey: place.id.peer, hostName: hostName)
         } else if let folder {
             if let restoredSection {
-                GeometryReader { geometry in
-                    ClientWorkspaceSectionDetail(peer: place.id.peer, hostName: hostName,
-                        folder: folder, section: restoredSection, width: geometry.size.width)
-                }
+                ClientWorkspaceSectionDetail(peer: place.id.peer, hostName: hostName,
+                    folder: folder, section: restoredSection)
             } else {
                 ClientWorkspaceDetailView(peer: place.id.peer, hostName: hostName, folder: folder)
             }

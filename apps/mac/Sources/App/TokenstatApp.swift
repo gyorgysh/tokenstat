@@ -106,7 +106,9 @@ extension Notification.Name {
     static let hostBecameUnreachable = Notification.Name("ai.tokenstat.hostBecameUnreachable")
 }
 
+#if !WORKBENCH_QA
 @main
+#endif
 struct TokenstatApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate

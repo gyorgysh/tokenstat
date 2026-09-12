@@ -14,7 +14,7 @@ struct ClientAutomationRunView: View {
     let runID: String
 
     private var run: RunRecord? {
-        session.runs.first { $0.id == runID } ?? session.selectedRun
+        session.runs.first { $0.id == runID }
     }
 
     var body: some View {
@@ -38,6 +38,8 @@ struct ClientAutomationRunView: View {
                     .padding(Theme.Space.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .cardSurface()
+                } else if session.loaded {
+                    ClientSectionEmpty(text: "This run is unavailable", message: "It is no longer in this folder's run history.")
                 }
             }
             .padding(.horizontal, Theme.Space.m)

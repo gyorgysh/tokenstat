@@ -701,8 +701,7 @@ struct ClientSidebarRoot: View {
                 peer: peer,
                 hostName: workspaces.hosts.first { $0.peerKey == peer }?.name ?? "",
                 folder: folder,
-                section: navigation.section,
-                width: width
+                section: navigation.section
             )
         } else {
             switch navigation.destination {

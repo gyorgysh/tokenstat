@@ -16,6 +16,7 @@ struct ClientWorkflowBoard: View {
     let graph: WorkflowGraph
     var run: WorkflowRunRecord?
     var selectedNodeID: String?
+    var fitsContent = false
     var onSelect: (String) -> Void
 
     private var columns: [[WorkflowNode]] {
@@ -23,32 +24,41 @@ struct ClientWorkflowBoard: View {
     }
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            HStack(alignment: .top, spacing: Theme.Space.m) {
-                ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                    if index > 0 {
-                        Image(systemName: "arrow.right")
-                            .font(Theme.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, 22)
-                    }
-                    VStack(spacing: Theme.Space.s) {
-                        ForEach(column) { node in
-                            ClientWorkflowBoardCard(
-                                node: node,
-                                step: run?.steps.first { $0.nodeID == node.id },
-                                isCurrent: run?.currentNodeID == node.id,
-                                isSelected: selectedNodeID == node.id
-                            )
-                            .onTapGesture { onSelect(node.id) }
-                        }
+        Group {
+            if fitsContent {
+                ScrollView(.horizontal) { columnsContent }
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView([.horizontal, .vertical]) { columnsContent }
+            }
+        }
+    }
+
+    private var columnsContent: some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
+                if index > 0 {
+                    Image(systemName: "arrow.right")
+                        .font(Theme.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 22)
+                }
+                VStack(spacing: Theme.Space.s) {
+                    ForEach(column) { node in
+                        ClientWorkflowBoardCard(
+                            node: node,
+                            step: run?.steps.first { $0.nodeID == node.id },
+                            isCurrent: run?.currentNodeID == node.id,
+                            isSelected: selectedNodeID == node.id
+                        )
+                        .onTapGesture { onSelect(node.id) }
                     }
                 }
             }
-            .padding(Theme.Space.m)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(WorkflowLayering.sentence(nodes: graph.nodes, edges: graph.edges))
         }
+        .padding(Theme.Space.m)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(WorkflowLayering.sentence(nodes: graph.nodes, edges: graph.edges))
     }
 }
 

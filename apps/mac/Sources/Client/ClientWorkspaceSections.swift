@@ -887,155 +887,37 @@ struct ClientTaskComposer: View {
     }
 }
 
-// MARK: - Workflows
+// MARK: - Jobs
 
-/// This folder's graphs, and whether one is running right now.
+/// Both phone navigation and iPad sections mount the same session owner.
+/// Window width only changes its presentation.
 struct ClientWorkspaceWorkflowsView: View {
     let peer: String
     let workspaceID: String
     let hostName: String
     let folderName: String
 
-    @State private var graphs: [WorkflowGraph] = []
-    @State private var runs: [WorkflowRunRecord] = []
-    @State private var errorMessage: String?
-    @State private var loaded = false
-    @State private var search = ""
-
     var body: some View {
-        ClientSectionList(
-            title: "Workflows",
-            errorMessage: errorMessage,
-            isLoaded: loaded,
-            isEmpty: graphs.isEmpty && runs.isEmpty,
-            emptyText: "No workflows here",
-            emptyArt: .workflows,
-            emptyMessage: "Graphs are drawn on the Mac. Bind one to this folder and its runs show up here.",
-            refreshKey: "workspace-workflows-\(workspaceID)",
-            reload: { await load() }
-        ) {
-            ClientStatPanels(panels: [
-                ("Workflows", "\(graphs.count)", "mark_workflow"),
-                ("Running", "\(runs.filter(\.isLive).count)", "mark_running"),
-            ])
-            ClientSectionTitle(title: "Graphs", mark: "mark_workflow")
-            if !search.isEmpty && !graphs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) }) {
-                Text("No matching workflows").foregroundStyle(.secondary)
-            }
-            ForEach(graphs.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }) { graph in
-                NavigationLink {
-                    ClientWorkflowDetailView(
-                        peer: peer,
-                        workspaceID: workspaceID,
-                        hostName: hostName,
-                        folderName: folderName,
-                        graphID: graph.id
-                    )
-                } label: {
-                    ClientJobRow(
-                        title: graph.name,
-                        subtitle: ClientJobCopy.lastRunPhrase(
-                            runs.first { $0.workflowID == graph.id }?.startedAt ?? graph.lastRun
-                        ),
-                        isLive: runs.contains { $0.workflowID == graph.id && $0.isLive },
-                        isEnabled: graph.enabled,
-                        graph: graph,
-                        liveRun: runs.first { $0.workflowID == graph.id && $0.isLive }
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .searchable(text: $search, prompt: "Search workflows")
-        .task { await load() }
-    }
-
-    private func load() async {
-        do {
-            async let all = ClientRemote.workflows(peer: peer)
-            async let history = ClientRemote.workflowRuns(peer: peer)
-            graphs = try await all.filter { $0.workspaceID == workspaceID }
-            runs = try await history.filter { $0.workspaceID == workspaceID }
-            errorMessage = nil
-        } catch {
-            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
-        }
-        loaded = true
+        ClientWorkflowWorkspace(
+            peer: peer, workspaceID: workspaceID,
+            hostName: hostName, folderName: folderName
+        )
+        .id(ClientJobWorkspaceID(peer: peer, workspace: workspaceID))
     }
 }
 
-// MARK: - Automations
-
-/// This folder's scheduled jobs, and whether one is running right now.
 struct ClientWorkspaceAutomationsView: View {
     let peer: String
     let workspaceID: String
     let hostName: String
     let folderName: String
 
-    @State private var jobs: [Automation] = []
-    @State private var runs: [RunRecord] = []
-    @State private var errorMessage: String?
-    @State private var loaded = false
-    @State private var search = ""
-
     var body: some View {
-        ClientSectionList(
-            title: "Automations",
-            errorMessage: errorMessage,
-            isLoaded: loaded,
-            isEmpty: jobs.isEmpty,
-            emptyText: "Nothing scheduled here",
-            emptyArt: .automations,
-            emptyMessage: "Jobs are set up on the Mac. This folder's runs and their output land here.",
-            refreshKey: "workspace-automations-\(workspaceID)",
-            reload: { await load() }
-        ) {
-            ClientStatPanels(panels: [
-                ("Enabled", "\(jobs.filter(\.enabled).count)", "mark_automation"),
-                ("Running", "\(runs.filter(\.isRunning).count)", "mark_running"),
-                ("Paused", "\(jobs.filter { !$0.enabled }.count)", "mark_paused"),
-            ])
-            ClientSectionTitle(title: "Jobs", mark: "mark_automation")
-            if !search.isEmpty && !jobs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) || $0.prompt.localizedCaseInsensitiveContains(search) }) {
-                Text("No matching automations").foregroundStyle(.secondary)
-            }
-            ForEach(jobs.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.prompt.localizedCaseInsensitiveContains(search) }) { job in
-                NavigationLink {
-                    ClientAutomationDetailView(
-                        peer: peer,
-                        workspaceID: workspaceID,
-                        hostName: hostName,
-                        folderName: folderName,
-                        jobID: job.id
-                    )
-                } label: {
-                    ClientJobRow(
-                        title: job.name,
-                        subtitle: job.schedule.summary,
-                        isLive: runs.contains { $0.jobId == job.id && $0.isRunning },
-                        isEnabled: job.enabled,
-                        cadence: job.schedule
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .searchable(text: $search, prompt: "Search automations")
-        .task { await load() }
-    }
-
-    private func load() async {
-        do {
-            async let all = ClientRemote.automations(peer: peer)
-            async let history = ClientRemote.automationRuns(peer: peer)
-            jobs = try await all.filter { $0.workspaceID == workspaceID }
-            runs = try await history.filter { $0.workspaceID == workspaceID }
-            errorMessage = nil
-        } catch {
-            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
-        }
-        loaded = true
+        ClientAutomationWorkspace(
+            peer: peer, workspaceID: workspaceID,
+            hostName: hostName, folderName: folderName
+        )
+        .id(ClientJobWorkspaceID(peer: peer, workspace: workspaceID))
     }
 }
 
@@ -1053,6 +935,10 @@ struct ClientJobRow: View {
     var showsChevron: Bool = true
     var isSelected: Bool = false
 
+    private var isPaused: Bool {
+        !isEnabled && (cadence?.repeats ?? graph?.schedule.repeats ?? false)
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Space.s) {
             if let cadence {
@@ -1068,7 +954,7 @@ struct ClientJobRow: View {
                 Text(title)
                     .font(ClientType.label.weight(.medium))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    .lineLimit(2)
                 Text(subtitle)
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
@@ -1096,7 +982,7 @@ struct ClientJobRow: View {
                             .font(ClientType.caption)
                             .foregroundStyle(Theme.stateWorking)
                     }
-                } else if !isEnabled {
+                } else if isPaused {
                     Text("Paused")
                         .font(ClientType.caption)
                         .foregroundStyle(.tertiary)
@@ -1119,7 +1005,6 @@ struct ClientJobRow: View {
                 .strokeBorder(isSelected ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1)
         }
         .contentShape(.rect)
-        .opacity(isEnabled || isLive ? 1 : 0.7)
     }
 }
 

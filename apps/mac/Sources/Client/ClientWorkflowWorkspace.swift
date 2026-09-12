@@ -7,10 +7,9 @@
 
 #if !os(macOS)
 import SwiftUI
+import UIKit
 
-/// iPad workspace for a folder's graphs: list, board, run column.
-///
-/// Regular width only. Compact uses the stacked phone screens.
+/// One session, presented as a phone list or an iPad workbench.
 struct ClientWorkflowWorkspace: View {
     let peer: String
     let workspaceID: String
@@ -19,6 +18,8 @@ struct ClientWorkflowWorkspace: View {
 
     @State private var session: ClientWorkflowSession
     @State private var search = ""
+    @State private var navigation = ClientJobNavigation()
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String) {
         self.peer = peer
@@ -35,40 +36,69 @@ struct ClientWorkflowWorkspace: View {
         )
     }
 
+    init(session: ClientWorkflowSession, opensDetail: Bool = false) {
+        peer = session.peer
+        workspaceID = session.workspaceID
+        hostName = session.hostName
+        folderName = session.folderName
+        _session = State(initialValue: session)
+        var initialNavigation = ClientJobNavigation()
+        if opensDetail { initialNavigation.openDetail() }
+        _navigation = State(initialValue: initialNavigation)
+    }
+
     var body: some View {
         GeometryReader { geo in
-            let stackRun = geo.size.width < 800
-            HStack(spacing: 0) {
-                list
-                    .frame(width: min(280, geo.size.width * 0.32))
-                ThemeRule.vertical
-                if stackRun {
-                    VStack(spacing: 0) {
-                        board
-                        ThemeRule()
-                        runColumn
-                            .frame(minHeight: 220)
-                    }
-                } else {
-                    board
-                    ThemeRule.vertical
-                    runColumn
-                        .frame(width: min(320, geo.size.width * 0.34))
+            let layout = ClientJobLayout.resolve(
+                width: geo.size.width,
+                prefersStack: UIDevice.current.userInterfaceIdiom != .pad || typeSize.isAccessibilitySize
+            )
+            workspace(layout)
+                .navigationDestination(isPresented: Binding(
+                    get: { navigation.presentsDetail(in: layout) },
+                    set: { navigation.presentedDetailChanged($0, in: layout) }
+                )) {
+                    ClientWorkflowDetailView(session: session)
                 }
-            }
         }
         .background(Theme.background)
         .navigationTitle("Workflows")
         .navigationBarTitleDisplayMode(.inline)
         .task { await session.appeared() }
         .onDisappear { session.disappeared() }
+        .onChange(of: session.input) { _, _ in navigation.openDetail() }
     }
 
-    private var list: some View {
+    @ViewBuilder
+    private func workspace(_ layout: ClientJobLayout) -> some View {
+        if layout.arrangement == .compact {
+            list(layout)
+        } else {
+            HStack(spacing: 0) {
+                list(layout).frame(width: layout.listWidth)
+                ThemeRule.vertical
+                if layout.arrangement == .twoColumns {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            board(fitsContent: true)
+                            ThemeRule()
+                            runContent
+                        }
+                    }
+                } else {
+                    board(fitsContent: false)
+                    ThemeRule.vertical
+                    ScrollView { runContent }.frame(width: layout.runWidth)
+                }
+            }
+        }
+    }
+
+    private func list(_ layout: ClientJobLayout) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Workflows").font(ClientType.sectionTitle)
+            LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField("Search workflows", text: $search).textFieldStyle(.themed)
+                    .accessibilityLabel("Search workflows")
                 if session.loaded {
                     Text("\(session.graphs.count) workflows · \(session.runs.filter(\.isLive).count) running")
                         .font(ClientType.caption).foregroundStyle(.secondary)
@@ -92,6 +122,7 @@ struct ClientWorkflowWorkspace: View {
                     ForEach(session.graphs.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }) { graph in
                         Button {
                             session.selectGraph(graph.id)
+                            navigation.openDetail()
                         } label: {
                             ClientJobRow(
                                 title: graph.name,
@@ -102,16 +133,24 @@ struct ClientWorkflowWorkspace: View {
                                 isEnabled: graph.enabled,
                                 graph: graph,
                                 liveRun: session.runs.first { $0.workflowID == graph.id && $0.isLive },
-                                showsChevron: false,
-                                isSelected: session.selectedGraphID == graph.id
+                                showsChevron: layout.arrangement == .compact,
+                                isSelected: layout.arrangement != .compact && session.selectedGraphID == graph.id
                             )
                         }
                         .buttonStyle(.plain)
+                    }
+                    if !search.isEmpty && !session.graphs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) }) {
+                        Text("No matching workflows")
+                            .font(ClientType.body)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, Theme.Space.l)
                     }
                 }
             }
             .padding(Theme.Space.m)
         }
+        .scrollBounceBehavior(.always)
         .refreshable {
             await ClientRefresh.pull("workspace-workflows-\(workspaceID)") {
                 await session.load()
@@ -120,13 +159,17 @@ struct ClientWorkflowWorkspace: View {
     }
 
     @ViewBuilder
-    private var board: some View {
+    private func board(fitsContent: Bool) -> some View {
         if let graph = session.selectedGraph {
             ClientWorkflowBoard(
                 graph: graph,
-                run: session.liveRun ?? session.selectedRun,
+                run: session.selectedRun,
                 selectedNodeID: session.selectedNodeID,
-                onSelect: { session.selectNode($0) }
+                fitsContent: fitsContent,
+                onSelect: {
+                    session.selectNode($0)
+                    navigation.openDetail()
+                }
             )
         } else {
             ClientSectionEmpty(text: "Pick a workflow", message: "Its graph and its last runs open here.")
@@ -134,49 +177,47 @@ struct ClientWorkflowWorkspace: View {
         }
     }
 
-    private var runColumn: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Label("Run details", systemImage: "play.circle").font(ClientType.sectionTitle).foregroundStyle(Theme.accent)
-                ThemeRule()
-                if let graph = session.selectedGraph {
-                    Text(graph.name)
-                        .font(ClientType.sectionTitle)
-                    Text(graph.schedule.summary)
-                        .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                    ClientWorkflowActions(session: session)
-                    if let run = session.selectedRun {
-                        StatusPill(status: run.status, text: run.endedLabel)
-                        TranscriptView(
-                            text: session.transcriptText,
-                            empty: run.isLive ? "Waiting for output…" : "No readable output."
-                        )
-                    }
-                    let history = session.runs(of: graph).prefix(5)
-                    if !history.isEmpty {
-                        Text("Recent runs")
-                            .font(ClientType.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, Theme.Space.xs)
-                        ForEach(Array(history)) { run in
-                            Button {
-                                session.selectRun(run)
-                            } label: {
-                                ClientPastRunRow(
-                                    title: run.name,
-                                    status: run.status,
-                                    label: run.endedLabel,
-                                    started: run.startedAt
-                                )
-                            }
-                            .buttonStyle(.plain)
+    private var runContent: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Run details").font(ClientType.sectionTitle)
+            if let graph = session.selectedGraph {
+                Text(graph.name)
+                    .font(ClientType.sectionTitle)
+                Text(graph.schedule.summary)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                ClientWorkflowActions(session: session)
+                if let run = session.selectedRun {
+                    StatusPill(status: run.status, text: run.endedLabel)
+                    TranscriptView(
+                        text: session.transcriptText,
+                        empty: run.isLive ? "Waiting for output…" : "No readable output."
+                    )
+                }
+                let history = session.runs(of: graph).prefix(5)
+                if !history.isEmpty {
+                    Text("Recent runs")
+                        .font(ClientType.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, Theme.Space.xs)
+                    ForEach(Array(history)) { run in
+                        Button {
+                            session.selectRun(run)
+                            navigation.openDetail()
+                        } label: {
+                            ClientPastRunRow(
+                                title: run.name,
+                                status: run.status,
+                                label: run.endedLabel,
+                                started: run.startedAt
+                            )
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
-            .padding(Theme.Space.m)
         }
+        .padding(Theme.Space.m)
         .background(Theme.background)
     }
 }
