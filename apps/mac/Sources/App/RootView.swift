@@ -75,6 +75,7 @@ struct RootView: View {
     @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
     @State private var browserResizeStart: Double?
     @State private var browserLiveWidth: Double?
+    @State private var browserCursorPushed = false
     @State private var browserWorkspaceID: String?
     @State private var chatBrowserURLs: [String: String] = [:]
     /// Explicit sidebar preference, preserved when a narrow window uses a peek.
@@ -390,6 +391,8 @@ struct RootView: View {
             HeatmapPopoverOverlay(model: home, hover: heatmapHover, windowSize: windowSize)
         }
         .task(id: WorkSessionContext.shared.scope) {
+            chatBrowserURLs = [:]
+            browserWorkspaceID = nil
             await BridgeLaunch.wait()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
         }
@@ -967,6 +970,7 @@ struct RootView: View {
                 WorkspaceInspector(model: workspaces, automations: automations,
                     account: account.account, onClose: { closeInspector() },
                     chat: chat, workspace: workspaces.folders.first { $0.id == route.workspaceID },
+                    showsChatOverview: showingChatOverview,
                     onOpenAutomation: { jobID, runID in openAutomation(jobID: jobID, runID: runID) })
                 #else
                 ChatInspector(
@@ -1213,7 +1217,13 @@ struct RootView: View {
             .frame(width: 5)
             .contentShape(.rect)
             .onHover { hovering in
-                if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                if hovering && !browserCursorPushed {
+                    NSCursor.resizeLeftRight.push()
+                    browserCursorPushed = true
+                } else if !hovering && browserCursorPushed {
+                    NSCursor.pop()
+                    browserCursorPushed = false
+                }
             }
             .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { value in
                 if browserResizeStart == nil { browserResizeStart = fittedBrowserWidth }
@@ -1226,6 +1236,7 @@ struct RootView: View {
                 browserResizeStart = nil
             })
             .onDisappear {
+                if browserCursorPushed { NSCursor.pop(); browserCursorPushed = false }
                 browserLiveWidth = nil
                 browserResizeStart = nil
             }

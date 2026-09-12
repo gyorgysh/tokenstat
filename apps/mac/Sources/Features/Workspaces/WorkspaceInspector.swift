@@ -92,6 +92,7 @@ struct WorkspaceInspector: View {
     var onClose: () -> Void
     var chat: ChatModel? = nil
     var workspace: WorkspaceFolder? = nil
+    var showsChatOverview = false
     private var showingChatSettings: Bool {
         get { chat != nil && model.chatInspectorShowsSettings }
         nonmutating set { model.chatInspectorShowsSettings = newValue }
@@ -183,7 +184,7 @@ struct WorkspaceInspector: View {
     @ViewBuilder
     private var content: some View {
         if showingChatSettings, let chat {
-            if chat.folderID == folder?.id {
+            if !showsChatOverview, chat.selected != nil, chat.folderID == folder?.id {
                 ChatInspector(model: chat, folder: folder, onClose: onClose, showsHeader: false)
             } else {
                 InspectorEmptyState(title: "Open a conversation", subtitle: "Chat settings appear here when a conversation is open.")

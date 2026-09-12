@@ -51,6 +51,7 @@ struct BrowserView: View {
                 emptyState
             } else {
                 WebBrowser(
+                    allowsExternalNavigation: allowsExternalNavigation,
                     url: normalizedURL(loadedURL),
                     command: command,
                     commandID: commandID,
@@ -229,6 +230,7 @@ private enum BrowserCommand {
 }
 
 private struct WebBrowser: NSViewRepresentable {
+    var allowsExternalNavigation: Bool
     var url: URL?
     var command: BrowserCommand
     var commandID: Int
@@ -240,6 +242,7 @@ private struct WebBrowser: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
+            allowsExternalNavigation: allowsExternalNavigation,
             onURLChange: onURLChange,
             onRemoteNavigation: onRemoteNavigation,
             onLoadingChange: onLoadingChange,
@@ -279,10 +282,17 @@ private struct WebBrowser: NSViewRepresentable {
             view.reload()
         case .stop:
             view.stopLoading()
-            onLoadingChange(false)
+            DispatchQueue.main.async { onLoadingChange(false) }
         case .none:
             break
         }
+    }
+
+    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+        view.navigationDelegate = nil
+        view.uiDelegate = nil
+        view.stopLoading()
+        coordinator.webView = nil
     }
 
     /// Matches the current macOS Safari so the site negotiates with a browser
@@ -291,6 +301,7 @@ private struct WebBrowser: NSViewRepresentable {
         + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        let allowsExternalNavigation: Bool
         weak var webView: WKWebView?
         var lastCommandID: Int = 0
         let onURLChange: (String) -> Void
@@ -300,12 +311,14 @@ private struct WebBrowser: NSViewRepresentable {
         let onError: (String) -> Void
 
         init(
+            allowsExternalNavigation: Bool,
             onURLChange: @escaping (String) -> Void,
             onRemoteNavigation: @escaping (URL) -> Void,
             onLoadingChange: @escaping (Bool) -> Void,
             onHistoryChange: @escaping (Bool, Bool) -> Void,
             onError: @escaping (String) -> Void
         ) {
+            self.allowsExternalNavigation = allowsExternalNavigation
             self.onURLChange = onURLChange
             self.onRemoteNavigation = onRemoteNavigation
             self.onLoadingChange = onLoadingChange
@@ -320,7 +333,7 @@ private struct WebBrowser: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             onLoadingChange(false)
-            onError(error.localizedDescription)
+            if (error as NSError).code != NSURLErrorCancelled { onError(error.localizedDescription) }
         }
 
         func webView(
@@ -329,7 +342,7 @@ private struct WebBrowser: NSViewRepresentable {
             withError error: Error
         ) {
             onLoadingChange(false)
-            onError(error.localizedDescription)
+            if (error as NSError).code != NSURLErrorCancelled { onError(error.localizedDescription) }
         }
 
         /// Links inside a page can leave localhost; ask before letting them,
@@ -347,7 +360,7 @@ private struct WebBrowser: NSViewRepresentable {
                 decisionHandler(.cancel)
                 return
             }
-            if navigationAction.navigationType == .linkActivated,
+            if !allowsExternalNavigation, navigationAction.navigationType == .linkActivated,
                let url = navigationAction.request.url,
                !isLoopbackHost(url)
             {
@@ -362,7 +375,11 @@ private struct WebBrowser: NSViewRepresentable {
                      for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if navigationAction.targetFrame == nil, let url = navigationAction.request.url,
                ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-                onRemoteNavigation(url)
+                if allowsExternalNavigation || isLoopbackHost(url) {
+                    webView.load(navigationAction.request)
+                } else {
+                    onRemoteNavigation(url)
+                }
             }
             return nil
         }
@@ -373,6 +390,11 @@ private struct WebBrowser: NSViewRepresentable {
             if let url = webView.url?.absoluteString {
                 onURLChange(url)
             }
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            onLoadingChange(false)
+            onError("The page stopped responding. Reload to try again.")
         }
     }
 }

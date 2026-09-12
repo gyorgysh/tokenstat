@@ -335,8 +335,8 @@ struct WorkspaceChangesView: View {
             } else {
                 summary(git)
                 diffControls(git, in: folder)
-                changeSection("Staged", files: git.files.filter { model.isStaged($0.path, in: folder.id) }, in: folder)
-                changeSection("Unstaged", files: git.files.filter { !model.isStaged($0.path, in: folder.id) }, in: folder)
+                changeSection("Selected for commit", files: git.files.filter { model.isStaged($0.path, in: folder.id) }, in: folder)
+                changeSection("Not selected", files: git.files.filter { !model.isStaged($0.path, in: folder.id) }, in: folder)
             }
         } else {
             InspectorEmptyState(
@@ -351,7 +351,7 @@ struct WorkspaceChangesView: View {
     /// Tick or clear everything at once. The label says which way it will go,
     /// rather than being a tri-state box that makes you guess.
     private func selectAll(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
-        let selected = model.stagedSelection[folder.id]?.count ?? 0
+        let selected = (model.stagedSelection[folder.id] ?? []).intersection(git.files.map(\.path)).count
         let all = selected == git.files.count
         return HStack(spacing: Theme.Space.s) {
             Toggle("Select all", isOn: Binding(
@@ -728,7 +728,7 @@ private struct CommitBox: View {
             .popover(isPresented: $showingCommitHelp) {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     Text("Commit actions").font(Theme.headline)
-                    Text("Commit saves the selected files using your title and description. Selection alone does not change the Git index.")
+                    Text("Commit stages the selected files and commits the Git index using your title and description. Files already staged outside tokenstat may also be included. Selection alone does not change the Git index.")
                     Text("Push publishes existing local commits to the branch's remote. It does not commit your working changes.")
                     Text("Auto commit runs the chosen agent once in this folder to inspect changes and create commits. It uses the automation's instructions, not the file checkboxes above. You can follow the run in Automations.")
                 }

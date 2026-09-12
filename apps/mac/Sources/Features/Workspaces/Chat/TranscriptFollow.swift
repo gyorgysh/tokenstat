@@ -1405,8 +1405,9 @@ extension View {
             window.requestEarlier = request
             window.restore = restore
         }
-        .onChange(of: model.selected?.id) { _, _ in
+        .onChange(of: model.selectionGeneration) { _, _ in
             window.fetching = false
+            window.hasHiddenEarlierRows = hiddenEarlierRows > 0
             window.requestEarlier = request
             window.restore = restore
         }

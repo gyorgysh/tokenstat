@@ -112,7 +112,7 @@ struct PullsView: View {
             .navigationTitle("Pull requests")
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .task(id: "\(workspaceID)-\(isActive)") {
+            .task(id: "\(workspaceID)-\(peer ?? "")-\(isActive)") {
                 guard isActive else { return }
                 await model.load(workspaceID: workspaceID, peer: peer)
             }
@@ -124,6 +124,11 @@ struct PullsView: View {
                 Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
             }
             .sheet(isPresented: loginPresented) { loginSheet }
+            .onChange(of: WorkSessionContext.shared.scope) { _, _ in
+                selectedPull = nil
+                model = PullsModel()
+                Task { if isActive { await model.load(workspaceID: workspaceID, peer: peer) } }
+            }
         }
         }
         }
@@ -387,12 +392,15 @@ struct PullsView: View {
 
             if let error = model.listError {
                 errorCard(error)
-            } else if model.isLoadingList && model.rows.isEmpty {
+            }
+            if model.isLoadingList && model.rows.isEmpty {
                 PullListSkeleton()
                     .transition(.smoothIn(reduceMotion: reduceMotion))
             } else if model.rows.isEmpty {
-                filteredEmpty
-                    .transition(.smoothIn(reduceMotion: reduceMotion))
+                if model.listError == nil {
+                    filteredEmpty
+                        .transition(.smoothIn(reduceMotion: reduceMotion))
+                }
             } else {
                 LazyVStack(spacing: Theme.Space.s) {
                     ForEach(model.rows) { pull in

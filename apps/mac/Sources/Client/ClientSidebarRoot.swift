@@ -387,11 +387,15 @@ struct ClientSidebarRoot: View {
             // landed nowhere and nothing on screen said why.
             navigation.restoredRoute = nil
             navigation.folderID = nil
-            if workspaces.connectedKey == host.peerKey,
-               let machine = account.account?.machines.first(where: { $0.publicIdentity == host.peerKey }) {
-                navigation.deviceMachineID = machine.id
-                navigation.destination = .machines
+            if workspaces.connectedKey == host.peerKey {
+                if let machine = account.account?.machines.first(where: { $0.publicIdentity == host.peerKey }) {
+                    navigation.deviceMachineID = machine.id
+                    navigation.destination = .machines
+                } else {
+                    navigation.destination = .workspaces
+                }
             } else {
+                navigation.deviceMachineID = nil
                 navigation.destination = .workspaces
                 Task { await workspaces.connect(host) }
             }

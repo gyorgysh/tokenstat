@@ -1361,7 +1361,8 @@ final class WorkspacesModel {
     /// would be a state the user never asked for and cannot see. A failure at
     /// either step stops and reports git's own words.
     func commit(_ folder: WorkspaceFolder) async {
-        let paths = Array(stagedSelection[folder.id] ?? [])
+        let changed = Set((folder.git?.files ?? []).map(\.path))
+        let paths = Array((stagedSelection[folder.id] ?? []).intersection(changed))
         let title = (commitMessage[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let description = (commitDescription[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let message = description.isEmpty ? title : "\(title)\n\n\(description)"
