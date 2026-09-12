@@ -1333,11 +1333,8 @@ struct Money: Sendable, Hashable {
         return amount
     }
 
-    /// Why the figure carries a qualifier, for a tooltip. Nil when it does not.
+    /// Additional context for estimated figures, for a tooltip.
     var caveat: String? {
-        if !complete {
-            return "At least one model here has no published rate, so the real figure is higher."
-        }
         if estimated {
             return "Estimated from the model catalog, because the price book has no rate for this model."
         }
