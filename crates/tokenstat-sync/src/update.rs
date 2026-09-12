@@ -588,13 +588,10 @@ pub fn is_windows_app_zip(name: &str, arch: &str) -> bool {
 /// not prove the release is ours, which is what the app's `codesign` and
 /// `spctl` checks are for. Neither check replaces the other.
 pub fn download_app_image() -> Result<PathBuf, UpdateError> {
+    // The caller already compared the installed bundle and host versions.
+    // This process may be current while the app is older, so check.newer
+    // (which only describes this process) must not veto the bundle download.
     let check = check_latest()?;
-    if !check.newer {
-        return Err(UpdateError::Message(format!(
-            "already up to date ({})",
-            check.current
-        )));
-    }
     let url = check.app_dmg_url.as_deref().ok_or_else(|| {
         UpdateError::Message(format!(
             "release v{} has no macOS app download",
@@ -631,13 +628,8 @@ pub fn download_app_image() -> Result<PathBuf, UpdateError> {
 /// files. Preview builds are unsigned, so the app skips Authenticode there
 /// the way a local Mac build skips Developer ID.
 pub fn download_windows_app_archive() -> Result<PathBuf, UpdateError> {
+    // As on macOS, a current host can be downloading for an older app.
     let check = check_latest()?;
-    if !check.newer {
-        return Err(UpdateError::Message(format!(
-            "already up to date ({})",
-            check.current
-        )));
-    }
     let url = check.app_win_url.as_deref().ok_or_else(|| {
         UpdateError::Message(format!(
             "release v{} has no Windows app download",
