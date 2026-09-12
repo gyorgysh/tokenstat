@@ -31,6 +31,7 @@ struct WorkflowCanvas: View {
     @State private var draggingID: String?
     @State private var addingAfter: String?
     @State private var canvasSize: CGSize = .zero
+    @Namespace private var viewport
 
     var body: some View {
         GeometryReader { geo in
@@ -74,6 +75,7 @@ struct WorkflowCanvas: View {
             }
         }
         .clipped()
+        .coordinateSpace(name: viewport)
         .background(Theme.background)
         .overlay(alignment: .topLeading) { emptyHint }
         .overlay(alignment: .bottomTrailing) { zoomChrome }
@@ -301,7 +303,7 @@ struct WorkflowCanvas: View {
     }
 
     private func nodeDrag(_ node: WorkflowNode) -> some Gesture {
-        DragGesture(minimumDistance: 3)
+        DragGesture(minimumDistance: 3, coordinateSpace: .named(viewport))
             .onChanged { value in
                 if draggingID != node.id {
                     model.beginNodeMove()
@@ -311,19 +313,17 @@ struct WorkflowCanvas: View {
                     armed = nil
                 }
                 guard let origin = dragOrigin else { return }
-                model.moveNode(
-                    id: node.id,
-                    x: origin.x + value.translation.width,
-                    y: origin.y + value.translation.height
-                )
+                let point = WorkflowCanvasCoordinates.moved(from: origin, translation: value.translation, zoom: zoom)
+                model.moveNode(id: node.id, x: point.x, y: point.y)
             }
-            .onEnded { _ in
-                if let id = draggingID, let node = model.working?.nodes.first(where: { $0.id == id }) {
+            .onEnded { value in
+                if let id = draggingID, let origin = dragOrigin {
+                    let point = WorkflowCanvasCoordinates.moved(from: origin, translation: value.translation, zoom: zoom)
                     let snap = 8.0
                     model.moveNode(
                         id: id,
-                        x: (node.x / snap).rounded() * snap,
-                        y: (node.y / snap).rounded() * snap
+                        x: (point.x / snap).rounded() * snap,
+                        y: (point.y / snap).rounded() * snap
                     )
                 }
                 draggingID = nil
@@ -332,22 +332,16 @@ struct WorkflowCanvas: View {
     }
 
     private func linkGesture(from node: WorkflowNode, when: WorkflowEdgeWhen) -> some Gesture {
-        DragGesture(minimumDistance: 4)
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(viewport))
             .onChanged { value in
                 let start = outPort(node, when: when)
-                let current = CGPoint(
-                    x: start.x + value.translation.width,
-                    y: start.y + value.translation.height
-                )
+                let current = WorkflowCanvasCoordinates.moved(from: start, translation: value.translation, zoom: zoom)
                 linking = PortDrag(from: node.id, start: start, current: current, when: when)
                 armed = nil
             }
             .onEnded { value in
                 let start = outPort(node, when: when)
-                let current = CGPoint(
-                    x: start.x + value.translation.width,
-                    y: start.y + value.translation.height
-                )
+                let current = WorkflowCanvasCoordinates.moved(from: start, translation: value.translation, zoom: zoom)
                 if hypot(value.translation.width, value.translation.height) < 4 {
                     arm(from: node.id, when: when)
                 } else if let target = hitInPort(current), target != node.id {
@@ -358,7 +352,7 @@ struct WorkflowCanvas: View {
     }
 
     private var panGesture: some Gesture {
-        DragGesture(minimumDistance: 4)
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(viewport))
             .onChanged { value in
                 guard linking == nil, draggingID == nil else { return }
                 if !panning {
@@ -378,6 +372,7 @@ struct WorkflowCanvas: View {
     private var zoomGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
+                guard draggingID == nil, linking == nil, !panning else { return }
                 if !magnifying {
                     zoomOrigin = zoom
                     magnifying = true
@@ -451,6 +446,7 @@ struct WorkflowCanvas: View {
     }
 
     private func fit() {
+        guard draggingID == nil, linking == nil, !panning else { return }
         guard let graph = model.working, !graph.nodes.isEmpty, canvasSize.width > 1, canvasSize.height > 1 else {
             zoom = 1
             pan = .zero
