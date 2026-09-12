@@ -334,9 +334,6 @@ struct WorkspaceChangesView: View {
                 )
             } else {
                 summary(git)
-                #if os(macOS)
-                selectAll(git, in: folder)
-                #endif
                 diffControls(git, in: folder)
                 changeSection("Staged", files: git.files.filter { model.isStaged($0.path, in: folder.id) }, in: folder)
                 changeSection("Unstaged", files: git.files.filter { !model.isStaged($0.path, in: folder.id) }, in: folder)
@@ -356,12 +353,18 @@ struct WorkspaceChangesView: View {
     private func selectAll(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
         let selected = model.stagedSelection[folder.id]?.count ?? 0
         let all = selected == git.files.count
-        return Button(all ? "Clear all" : "Select all") {
-            model.setAllStaged(!all, in: folder)
+        return HStack(spacing: Theme.Space.s) {
+            Toggle("Select all", isOn: Binding(
+                get: { all },
+                set: { model.setAllStaged($0, in: folder) }
+            ))
+            .toggleStyle(.brandCheckbox)
+            Spacer(minLength: 0)
+            Text("\(selected) of \(git.files.count) selected")
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
         .font(Theme.caption)
-        .foregroundStyle(Theme.accent)
+        .help("Choose which files the Commit button includes. This does not change the Git index yet.")
     }
     #endif
 
@@ -389,7 +392,15 @@ struct WorkspaceChangesView: View {
     }
 
     private func diffControls(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
-        HStack(spacing: Theme.Space.s) {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Button("Review all changes", .preview) {
+                model.reviewWorkingTree(in: folder.id)
+            }
+            .buttonStyle(AccentButtonStyle())
+            .help("Open the full working-tree diff, including files not selected for commit.")
+            #if os(macOS)
+            selectAll(git, in: folder)
+            #endif
             Menu {
             Button("Expand all", .more) {
                 expandedDiffs.formUnion(git.files.map { diffKey($0, in: folder) })
@@ -405,19 +416,10 @@ struct WorkspaceChangesView: View {
             }
             .buttonStyle(.borderless)
             } label: {
-                Label("Diff options", systemImage: "ellipsis.circle")
+                Label("Inline previews", systemImage: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            Spacer(minLength: Theme.Space.s)
-            Button("Review", .preview) {
-                model.reviewWorkingTree(in: folder.id)
-            }
-            // The app's own primary action, not the system blue pill: this
-            // button sits in content, beside accent capsules, and a platform
-            // control there reads as a different design language on the row.
-            .buttonStyle(AccentButtonStyle(small: true))
-            .layoutPriority(1)
         }
         .font(Theme.caption)
         .padding(.top, Theme.Space.s)
@@ -501,6 +503,7 @@ private struct CommitBox: View {
     @Bindable var automations: AutomationsModel
     let folder: WorkspaceFolder
     var onOpenAutomation: ((String, String?) -> Void)? = nil
+    @State private var showingCommitHelp = false
 
     private var title: Binding<String> {
         Binding(
@@ -699,7 +702,8 @@ private struct CommitBox: View {
     }
 
     private var autoCommitRow: some View {
-        HStack(spacing: Theme.Space.s) {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+          HStack(spacing: Theme.Space.s) {
             Button {
                 Task { await runAutoCommit() }
             } label: {
@@ -713,7 +717,27 @@ private struct CommitBox: View {
                     : "One-time automation: the chosen agent commits in this folder"
             )
             .fixedSize()
-
+            Spacer(minLength: 0)
+            Button { showingCommitHelp = true } label: {
+                Image(systemName: ActionIcon.help.symbol)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.accent)
+            .accessibilityLabel("About commit actions")
+            .help("About commit actions")
+            .popover(isPresented: $showingCommitHelp) {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    Text("Commit actions").font(Theme.headline)
+                    Text("Commit saves the selected files using your title and description. Selection alone does not change the Git index.")
+                    Text("Push publishes existing local commits to the branch's remote. It does not commit your working changes.")
+                    Text("Auto commit runs the chosen agent once in this folder to inspect changes and create commits. It uses the automation's instructions, not the file checkboxes above. You can follow the run in Automations.")
+                }
+                .font(Theme.callout)
+                .padding(Theme.Space.l)
+                .frame(width: 320)
+            }
+          }
+          HStack(spacing: Theme.Space.s) {
             AppMenuPicker(
                 options: commitBackends.map { (value: $0.id, label: $0.label) },
                 selection: backendBinding
@@ -724,6 +748,7 @@ private struct CommitBox: View {
                     selection: modelBinding
                 )
             }
+          }
         }
         .padding(Theme.Space.s)
     }
