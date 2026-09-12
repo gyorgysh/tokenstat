@@ -551,7 +551,7 @@ impl CodexLimitScan {
         }
     }
 
-    /// Every limit still in force, shortest remaining first.
+    /// Every limit still in force, general allowance before model allowances.
     fn finish(self, now_ms: i64) -> Option<(Vec<UsageWindow>, i64, Option<String>)> {
         let mut readings: Vec<(i64, UsageWindow)> = self.windows.into_values().collect();
         // Newest first, so the duplicate check below keeps the fresher of two
@@ -601,8 +601,14 @@ impl CodexLimitScan {
 
         let observed_at_ms = kept.iter().map(|(at, _)| *at).max().unwrap_or(0);
         let mut windows: Vec<UsageWindow> = kept.into_iter().map(|(_, w)| w).collect();
-        // Shortest window first: the one about to bite is the one to read.
-        windows.sort_by_key(|w| w.resets_at_ms.unwrap_or(i64::MAX));
+        // General usage is the first thing to read. Preserve reset ordering
+        // within each group without letting a secondary window lead the card.
+        windows.sort_by_key(|w| {
+            (
+                w.scope.as_deref() != Some(CODEX_ACCOUNT_SCOPE),
+                w.resets_at_ms.unwrap_or(i64::MAX),
+            )
+        });
         Some((windows, observed_at_ms, self.plan.map(|(_, plan)| plan)))
     }
 }
@@ -954,15 +960,15 @@ mod tests {
         assert_eq!(
             labels,
             vec![
-                "5-hour (current model)",
                 "weekly (general)",
+                "5-hour (current model)",
                 "weekly (current model)",
             ],
-            "shortest remaining first, and each window says whose it is"
+            "general first, then model windows by reset time"
         );
-        assert_eq!(found.windows[0].percent, 88.0);
-        assert_eq!(found.windows[1].percent, 100.0);
-        assert_eq!(found.windows[1].severity, LimitSeverity::Critical);
+        assert_eq!(found.windows[0].percent, 100.0);
+        assert_eq!(found.windows[0].severity, LimitSeverity::Critical);
+        assert_eq!(found.windows[1].percent, 88.0);
         // The named block's week is the same week as the plain one's, seen
         // under the older id, so it appears once at its newer reading.
         assert_eq!(found.windows[2].percent, 84.0);
