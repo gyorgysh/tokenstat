@@ -74,6 +74,7 @@ struct RootView: View {
     @AppStorage(ChatBrowserPreferences.opensLinksKey) private var opensChatLinksInBrowser = true
     @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
     @State private var browserResizeStart: Double?
+    @State private var browserLiveWidth: Double?
     @State private var browserWorkspaceID: String?
     @State private var chatBrowserURLs: [String: String] = [:]
     /// Explicit sidebar preference, preserved when a narrow window uses a peek.
@@ -1204,7 +1205,7 @@ struct RootView: View {
 
     private var fittedBrowserWidth: CGFloat {
         let available = windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0)
-        return min(max(320, browserPaneWidth), max(320, available - Self.detailMinimumWidth - 6))
+        return min(max(320, browserLiveWidth ?? browserPaneWidth), max(320, available - Self.detailMinimumWidth - 6))
     }
 
     private var browserResizeHandle: some View {
@@ -1214,10 +1215,20 @@ struct RootView: View {
             .onHover { hovering in
                 if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { value in
                 if browserResizeStart == nil { browserResizeStart = fittedBrowserWidth }
-                browserPaneWidth = max(320, min(1000, (browserResizeStart ?? 520) - value.translation.width))
-            }.onEnded { _ in browserResizeStart = nil })
+                let available = windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0)
+                browserLiveWidth = max(320, min(available - Self.detailMinimumWidth - 6,
+                    (browserResizeStart ?? fittedBrowserWidth) - value.translation.width))
+            }.onEnded { _ in
+                browserPaneWidth = fittedBrowserWidth
+                browserLiveWidth = nil
+                browserResizeStart = nil
+            })
+            .onDisappear {
+                browserLiveWidth = nil
+                browserResizeStart = nil
+            }
             .accessibilityLabel("Browser width")
             .accessibilityAdjustableAction { direction in
                 browserPaneWidth = max(320, min(1000, fittedBrowserWidth + (direction == .increment ? 40 : -40)))

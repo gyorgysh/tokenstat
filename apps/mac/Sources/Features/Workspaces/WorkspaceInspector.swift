@@ -117,13 +117,13 @@ struct WorkspaceInspector: View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
                 HStack(spacing: 3) {
+                    if chat != nil {
+                        inspectorTab("Chat", selected: showingChatSettings) { showingChatSettings = true }
+                    }
                     ForEach(InspectorTab.allCases) { item in
                         inspectorTab(item.rawValue, selected: !showingChatSettings && tab.wrappedValue == item) {
                             tab.wrappedValue = item
                         }
-                    }
-                    if chat != nil {
-                        inspectorTab("Chat", selected: showingChatSettings) { showingChatSettings = true }
                     }
                 }
                 .padding(.horizontal, Theme.Space.s)

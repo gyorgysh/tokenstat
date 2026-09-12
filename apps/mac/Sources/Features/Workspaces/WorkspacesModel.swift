@@ -198,7 +198,7 @@ final class WorkspacesModel {
     /// the picker looked like it did nothing at all.
     var inspectorTab: InspectorTab = .files
     /// Kept when the browser temporarily occupies the inspector pane.
-    var chatInspectorShowsSettings = false
+    var chatInspectorShowsSettings = true
 
     /// Label for an inspector tab, with the count that is the reason to look at
     /// it.

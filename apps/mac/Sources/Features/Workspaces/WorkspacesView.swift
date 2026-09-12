@@ -457,13 +457,24 @@ struct WorkspaceChangesView: View {
                     )
                     if expandedDiffs.contains(key) {
                         if let diff = model.diff(for: file.path, in: folder.id) {
+                            let preview = diff.clipped(toLines: 200)
                             ScrollView([.vertical, .horizontal]) {
-                                DiffBody(diff: diff)
+                                // A bounded eager stack keeps the horizontal extent stable
+                                // as rows enter and leave this nested viewport.
+                                DiffBody(diff: preview.diff, lazy: false)
+                                    .fixedSize(horizontal: true, vertical: false)
                             }
                             .frame(maxHeight: 260)
                                 .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
                                 .padding(.leading, Theme.Space.l)
+                            if preview.cut > 0 {
+                                Button("Review full diff (\(preview.cut) more lines)", .preview) {
+                                    model.reviewWorkingTree(in: folder.id)
+                                }
+                                .buttonStyle(SecondaryButtonStyle(small: true))
+                                .padding(.leading, Theme.Space.l)
+                            }
                         } else {
                             ProgressView().controlSize(.small).padding(.leading, Theme.Space.l)
                         }
