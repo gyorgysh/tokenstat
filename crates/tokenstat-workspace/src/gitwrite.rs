@@ -14,6 +14,8 @@ use std::process::Command;
 
 use serde::Serialize;
 
+pub mod selected;
+
 /// What a mutating command reported.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -2207,6 +2207,19 @@ extension Bridge {
         return try await background("workspace.commit", ["id": id, "message": message], as: GitOutcome.self)
     }
 
+    static func localReviewedGit<T: Decodable & Sendable>(
+        _ method: String, _ params: [String: Any], as type: T.Type
+    ) async throws -> T {
+        try await background(method, params, as: type)
+    }
+
+    static func reviewedGitTarget(id: String) -> GitCommitTarget {
+        if let remote = remoteWorkspace(id) {
+            return GitCommitTarget(peer: remote.peer, workspaceID: remote.workspace)
+        }
+        return GitCommitTarget(peer: nil, workspaceID: id)
+    }
+
     static func workspaceWrite(id: String, path: String, content: String) async throws -> GitOutcome {
         if let target = remoteWorkspace(id) {
             return try await onPeer(

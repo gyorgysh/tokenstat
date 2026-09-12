@@ -510,23 +510,41 @@ private struct CommitBox: View {
     let folder: WorkspaceFolder
     var onOpenAutomation: ((String, String?) -> Void)? = nil
     @State private var showingCommitHelp = false
+    @State private var commitSession: GitCommitSession?
+    @State private var savedCommitSession: GitCommitSession?
 
     private var title: Binding<String> {
         Binding(
             get: { model.commitMessage[folder.id] ?? "" },
-            set: { model.commitMessage[folder.id] = $0 }
+            set: {
+                model.commitMessage[folder.id] = $0
+                saveInlineDraft()
+            }
         )
     }
 
     private var description: Binding<String> {
         Binding(
             get: { model.commitDescription[folder.id] ?? "" },
-            set: { model.commitDescription[folder.id] = $0 }
+            set: {
+                model.commitDescription[folder.id] = $0
+                saveInlineDraft()
+            }
         )
     }
 
     private var selectedCount: Int {
         model.stagedSelection[folder.id]?.count ?? 0
+    }
+
+    private func saveInlineDraft() {
+        guard let session = savedCommitSession, session.loaded,
+              session.target == Bridge.reviewedGitTarget(id: folder.id),
+              !session.working, session.draft.submitted == nil, commitSession == nil else { return }
+        session.draft.title = model.commitMessage[folder.id, default: ""]
+        session.draft.details = model.commitDescription[folder.id, default: ""]
+        session.setSelection(model.stagedSelection[folder.id] ?? [])
+        Task { await session.persist() }
     }
 
     /// Agent backends only. Shell cannot write commit messages from a diff.
@@ -562,19 +580,48 @@ private struct CommitBox: View {
 
     var body: some View {
         Group {
-            if hasChanges || isAhead || model.gitOutcome(for: folder.id) != nil {
+            if hasChanges || isAhead || model.gitOutcome(for: folder.id) != nil || savedCommitSession?.draft.submitted != nil {
                 box
             }
         }
-        .task {
+        .task(id: folder.id) {
+            savedCommitSession = nil
+            let target = Bridge.reviewedGitTarget(id: folder.id)
+            if target.peer == nil { await WorkSessionContext.shared.resolveLocalHostIdentity() }
+            guard !Task.isCancelled else { return }
+            let saved = GitCommitSessions.session(target: target)
+            await saved.load()
+            guard !Task.isCancelled else { return }
+            savedCommitSession = saved
+            if model.commitMessage[folder.id, default: ""].isEmpty {
+                model.commitMessage[folder.id] = saved.draft.title
+                model.commitDescription[folder.id] = saved.draft.details
+            }
+            if model.stagedSelection[folder.id] == nil {
+                model.stagedSelection[folder.id] = saved.draft.paths.intersection(Set((folder.git?.files ?? []).map(\.path)))
+            }
             if automations.backends.isEmpty {
                 await automations.load()
+            }
+        }
+        .onChange(of: model.stagedSelection[folder.id]) { _, _ in saveInlineDraft() }
+        .sheet(item: $commitSession) { session in
+            GitCommitComposer(session: session, folderName: folder.name, hostName: "", onCommitted: {
+                await model.commitCompleted(folder)
+            })
+            .onDisappear {
+                model.commitMessage[folder.id] = session.draft.title
+                model.commitDescription[folder.id] = session.draft.details
             }
         }
     }
 
     private var box: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if let saved = savedCommitSession, saved.draft.submitted != nil {
+                Button("Check submitted commit", .refresh) { commitSession = saved }
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
+            }
             if let outcome = model.gitOutcome(for: folder.id) {
                 let action = model.gitOutcomeAction(for: folder.id)
                 Banner(
@@ -601,6 +648,7 @@ private struct CommitBox: View {
             if hasChanges {
                 VStack(spacing: 0) {
                     messageFields
+                        .disabled(savedCommitSession?.loaded != true || savedCommitSession?.working == true || savedCommitSession?.draft.submitted != nil)
                     hairline
                     actions
                     if !commitBackends.isEmpty {
@@ -679,7 +727,7 @@ private struct CommitBox: View {
                 .help("Push the current branch")
             }
             Button {
-                Task { await model.commit(folder) }
+                Task { commitSession = await model.prepareCommit(folder) }
             } label: {
                 ActionIcon.commit.label(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
                     .frame(maxWidth: .infinity)

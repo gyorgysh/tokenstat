@@ -262,6 +262,7 @@ struct ClientWorkspaceSectionDetail: View {
                 folder: folderNow,
                 hostName: hostName
             )
+            .id(GitCommitTarget(peer: peer, workspaceID: workspaceID))
         case .history:
             ClientWorkspaceHistoryView(
                 peer: peer,

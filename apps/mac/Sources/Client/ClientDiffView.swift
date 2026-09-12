@@ -10,10 +10,8 @@ import SwiftUI
 
 /// One file's changes, read from the machine that owns the folder.
 ///
-/// The thing this app is for on a phone: an agent worked while you were away,
-/// and this is what it did. Read-only, deliberately. Staging, editing and
-/// committing are decisions that want the diff and the repository in front of
-/// you, and `docs/mobile-workflow.md` sequences them after this.
+/// This reads the current working copy. Changes owns file selection and the
+/// commit composer shows the immutable content reviewed for that submission.
 ///
 /// Not `DiffView`, which compiles here but is built for a Mac pane: its two
 /// 44pt gutters and marker spend 102 points of chrome before a character of

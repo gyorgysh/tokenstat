@@ -264,6 +264,19 @@ struct WorkspaceIdParams {
 }
 
 #[cfg(feature = "local-host")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectedCommitParams {
+    id: String,
+    path: Option<String>,
+    #[serde(default)]
+    paths: Vec<String>,
+    review: Option<tokenstat_workspace::gitwrite::selected::Review>,
+    operation_id: Option<String>,
+    message: Option<String>,
+}
+
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PtySpawnParams {
@@ -2429,6 +2442,11 @@ fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
         | "workspace.stage"
         | "workspace.unstage"
         | "workspace.commit"
+        | "workspace.commitReview"
+        | "workspace.commitReviewDiff"
+        | "workspace.commitSelected"
+        | "workspace.commitReceipt"
+        | "workspace.commitRecover"
         | "workspace.write"
         | "workspace.push"
         | "pty.spawn" => {}
@@ -2764,6 +2782,58 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             };
             invalidate_workspace_status(Some(&p.id));
             serde_json::to_value(outcome).map_err(|e| e.to_string())
+        }
+
+        "workspace.commitReview"
+        | "workspace.commitReviewDiff"
+        | "workspace.commitSelected"
+        | "workspace.commitReceipt"
+        | "workspace.commitRecover" => {
+            use tokenstat_workspace::gitwrite::selected;
+            let p: SelectedCommitParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let result = match method {
+                "workspace.commitReview" => {
+                    serde_json::to_value(selected::review(&ws.path, &p.paths)?)
+                }
+                "workspace.commitReviewDiff" => serde_json::to_value(selected::review_diff(
+                    &ws.path,
+                    p.review
+                        .as_ref()
+                        .ok_or("A diff needs a reviewed selection")?,
+                    p.path.as_deref().ok_or("A diff needs a selected path")?,
+                )?),
+                "workspace.commitSelected" => serde_json::to_value(selected::commit(
+                    &ws.path,
+                    p.operation_id
+                        .as_deref()
+                        .ok_or("A commit needs an operation identifier")?,
+                    p.review
+                        .as_ref()
+                        .ok_or("A commit needs a reviewed selection")?,
+                    p.message.as_deref().ok_or("A commit needs a message")?,
+                )?),
+                "workspace.commitReceipt" => serde_json::to_value(selected::receipt(
+                    &ws.path,
+                    p.operation_id
+                        .as_deref()
+                        .ok_or("An outcome needs an operation identifier")?,
+                )?),
+                _ => serde_json::to_value(selected::recover(
+                    &ws.path,
+                    p.operation_id
+                        .as_deref()
+                        .ok_or("Recovery needs an operation identifier")?,
+                )?),
+            };
+            if matches!(
+                method,
+                "workspace.commitSelected" | "workspace.commitRecover"
+            ) {
+                invalidate_workspace_status(Some(&p.id));
+            }
+            result.map_err(|e| e.to_string())
         }
 
         "workspace.commit" => {
@@ -4961,6 +5031,35 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(log["result"][0]["subject"], "feat: work");
+
+        // The newer operation commits the reviewed content once, leaving an
+        // unrelated staged path intact and excluding it from the new tree.
+        std::fs::write(dir.join("unrelated.txt"), "staged separately\n").unwrap();
+        run(&["add", "unrelated.txt"]);
+        std::fs::write(dir.join("src/main.rs"), "fn main() { reviewed(); }\n").unwrap();
+        let review: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.commitReview",
+            &json!({"id": id, "paths": ["src/main.rs"]}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(review["ok"], true, "{review}");
+        let request = json!({"id": id, "review": review["result"], "operationId": "fixture-selected-commit-0001", "message": "Reviewed selection"}).to_string();
+        let selected: Value =
+            serde_json::from_str(&call(&mut s, "workspace.commitSelected", &request)).unwrap();
+        assert_eq!(selected["result"]["state"], "succeeded", "{selected}");
+        let replay: Value =
+            serde_json::from_str(&call(&mut s, "workspace.commitSelected", &request)).unwrap();
+        assert_eq!(selected["result"]["commit"], replay["result"]["commit"]);
+        let receipt: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.commitReceipt",
+            &json!({"id": id, "operationId": "fixture-selected-commit-0001"}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(receipt["result"]["state"], "succeeded");
+        let staged = tokenstat_workspace::git::status(&dir);
+        assert!(staged.files.iter().any(|file| file.path == "unrelated.txt"));
 
         // A failure comes back as a readable outcome, not as a broken envelope.
         let empty: Value = serde_json::from_str(&call(

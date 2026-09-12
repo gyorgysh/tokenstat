@@ -313,6 +313,7 @@ struct ClientWorkspaceSessionsView: View {
                         folder: folder,
                         hostName: hostName
                     )
+                    .id(GitCommitTarget(peer: peer, workspaceID: workspaceID))
                 } label: {
                     ClientLauncherDestinationTile(section: .changes)
                 }

@@ -20,3 +20,8 @@ serde_json.workspace = true
 directories.workspace = true
 tokenstat-paths.workspace = true
 thiserror.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

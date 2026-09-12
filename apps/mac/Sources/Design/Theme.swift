@@ -1819,6 +1819,7 @@ struct ThemedEditor: View {
 /// these screens wearing somebody else's palette. A tick in an accent box says
 /// the same thing and belongs to this app.
 struct BrandCheckboxStyle: ToggleStyle {
+    var iconOnly = false
     /// Same treatment as `ThemedFieldBox.defaultFont`: the Mac has one text
     /// size and fixed rows, the phone takes a style that grows with Larger
     /// Text.
@@ -1849,12 +1850,15 @@ struct BrandCheckboxStyle: ToggleStyle {
                                 .foregroundStyle(.white)
                         }
                     }
-                configuration.label
-                    .font(Self.labelFont)
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
+                if !iconOnly {
+                    configuration.label
+                        .font(Self.labelFont)
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
             }
+            .frame(minWidth: iconOnly ? 44 : nil, minHeight: iconOnly ? 44 : nil)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

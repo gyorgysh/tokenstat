@@ -282,7 +282,7 @@ pub fn diff(dir: &Path, path: &str) -> FileDiff {
 }
 
 /// Parse unified diff output into hunks with both gutters filled in.
-fn parse_diff(raw: &str) -> Vec<DiffHunk> {
+pub(crate) fn parse_diff(raw: &str) -> Vec<DiffHunk> {
     let mut hunks: Vec<DiffHunk> = Vec::new();
     let (mut old_no, mut new_no) = (0u32, 0u32);
 

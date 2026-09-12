@@ -208,4 +208,6 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 14 adds `sendRevision` to conversations and requires
 /// `expectedRevision` for unseen message IDs. Stale context is refused before
 /// launch while existing receipts remain available for reconciliation.
-pub const PROTOCOL_VERSION: &str = "14";
+/// Version 15 adds immutable selected-file commit reviews, outcome receipts
+/// and explicit recovery while preserving unrelated staged entries.
+pub const PROTOCOL_VERSION: &str = "15";

@@ -171,6 +171,7 @@ struct ClientWorkspaceDetailView: View {
                     folder: current,
                     hostName: hostName
                 )
+                .id(GitCommitTarget(peer: peer, workspaceID: workspaceID))
                 .rememberWorkspace(peer: peer, folder: folder, section: .changes)
             } label: {
                 ClientSectionRow(section: .changes, count: counts.changes)
@@ -426,8 +427,8 @@ struct ClientSectionRow: View {
 
 /// What is uncommitted in this folder, as the host last reported it.
 ///
-/// The list is cheap to open. Tapping a file pushes its diff. No staging
-/// and no commit: those stay on the Mac.
+/// Tapping a file opens its diff. Selection stays local until the person
+/// submits the reviewed content to the computer that owns the repository.
 struct ClientWorkspaceChangesView: View {
     let peer: String
     let workspaceID: String
@@ -439,6 +440,16 @@ struct ClientWorkspaceChangesView: View {
 
     @State private var live: WorkspaceFolder?
     @State private var errorMessage: String?
+    @State private var session: GitCommitSession
+    @State private var showingComposer = false
+
+    init(peer: String, workspaceID: String, folder: WorkspaceFolder, hostName: String, session: GitCommitSession? = nil) {
+        self.peer = peer
+        self.workspaceID = workspaceID
+        self.folder = folder
+        self.hostName = hostName
+        _session = State(initialValue: session ?? GitCommitSessions.session(target: GitCommitTarget(peer: peer, workspaceID: workspaceID)))
+    }
 
     private var current: WorkspaceFolder { live ?? folder }
     private var files: [FileChange] { current.git?.files ?? [] }
@@ -446,6 +457,18 @@ struct ClientWorkspaceChangesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HStack {
+                    Text(current.git?.branch ?? "Changes")
+                        .font(ClientType.label.weight(.semibold))
+                    Spacer()
+                    if !files.isEmpty {
+                        Button(session.draft.paths == Set(files.map(\.path)) ? "Deselect all" : "Select all", .done) {
+                            session.selectAll(Set(files.map(\.path)))
+                        }
+                        .buttonStyle(.plain).foregroundStyle(Theme.accent)
+                        .disabled(!session.loaded || session.working || session.draft.submitted != nil)
+                    }
+                }.frame(minHeight: 44)
                 if let errorMessage {
                     ClientErrorCard(message: errorMessage) {
                         Task { await load() }
@@ -459,17 +482,20 @@ struct ClientWorkspaceChangesView: View {
                     )
                 } else {
                     ForEach(files) { file in
-                        NavigationLink {
-                            ClientDiffView(
-                                peer: peer,
-                                workspaceID: workspaceID,
-                                hostName: hostName,
-                                file: file
-                            )
-                        } label: {
-                            ClientChangedFileRow(file: file)
+                        HStack(spacing: Theme.Space.xs) {
+                            Toggle("Select \(file.path)", isOn: Binding(
+                                get: { session.draft.paths.contains(file.path) },
+                                set: { _ in session.select(file.path) }
+                            ))
+                            .toggleStyle(BrandCheckboxStyle(iconOnly: true))
+                            .accessibilityLabel("Select \(file.path)")
+                            .frame(width: 44, height: 44)
+                            .disabled(!session.loaded || session.working || session.draft.submitted != nil)
+                            NavigationLink {
+                                ClientDiffView(peer: peer, workspaceID: workspaceID, hostName: hostName, file: file)
+                            } label: { ClientChangedFileRow(file: file) }
+                                .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -480,13 +506,33 @@ struct ClientWorkspaceChangesView: View {
         .background(Theme.background)
         .navigationTitle("Changes")
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: Theme.Space.s) {
+                ThemeRule()
+                HStack(spacing: Theme.Space.m) {
+                    Text("\(session.draft.paths.count) of \(files.count) selected")
+                        .font(ClientType.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button(session.draft.submitted == nil ? "Review and commit" : "Check commit", .commit) {
+                        showingComposer = true
+                    }
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
+                    .disabled(!session.loaded || (session.draft.paths.isEmpty && session.draft.submitted == nil))
+                }.padding(.horizontal, Theme.Space.m).padding(.bottom, Theme.Space.s)
+            }.background(Theme.background)
+        }
+        .fullScreenCover(isPresented: $showingComposer) {
+            GitCommitComposer(session: session, folderName: current.name, hostName: hostName, onCommitted: { await load() })
+        }
         .refreshable { await ClientRefresh.pull("workspace-changes-\(workspaceID)") { await load() } }
-        .task { await load() }
+        .task { await session.load(); await load() }
+        .onChange(of: session.draft) { _, _ in Task { await session.persist() } }
     }
 
     private func load() async {
         do {
-            live = try await ClientRemote.status(peer: peer, workspace: workspaceID)
+            live = try await session.service.status()
+            session.reconcileAvailablePaths(Set((live?.git?.files ?? []).map(\.path)))
             errorMessage = nil
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)

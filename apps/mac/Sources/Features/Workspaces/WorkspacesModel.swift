@@ -1354,60 +1354,38 @@ final class WorkspacesModel {
             : []
     }
 
-    /// Stage the ticked paths and commit them.
-    ///
-    /// Stage and commit in one action rather than two buttons: the index is not
-    /// a thing this panel exposes, so leaving a half-staged repository behind
-    /// would be a state the user never asked for and cannot see. A failure at
-    /// either step stops and reports git's own words.
-    func commit(_ folder: WorkspaceFolder) async {
-        let changed = Set((folder.git?.files ?? []).map(\.path))
-        let paths = Array((stagedSelection[folder.id] ?? []).intersection(changed))
-        let title = (commitMessage[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let description = (commitDescription[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let message = description.isEmpty ? title : "\(title)\n\n\(description)"
-        guard !paths.isEmpty else {
-            report(folder.id, .commit, GitOutcome(ok: false, message: "Tick at least one file to commit."))
-            return
-        }
-        guard !title.isEmpty else {
-            report(folder.id, .commit, GitOutcome(ok: false, message: "A commit needs a title."))
-            return
-        }
-
+    /// Prepare an immutable review. The shared composer submits the reviewed
+    /// snapshot, so unrelated staging never enters this selection.
+    func prepareCommit(_ folder: WorkspaceFolder) async -> GitCommitSession? {
+        guard !isCommitting else { return nil }
         isCommitting = true
         defer { isCommitting = false }
-        do {
-            let staged = try await Bridge.stage(id: folder.id, paths: paths)
-            guard staged.ok else {
-                report(folder.id, .commit, staged)
-                // Best effort: a failed stage may have landed part of the
-                // selection. Clearing it keeps a retry with new ticks from
-                // committing a mix of old and new paths.
-                _ = try? await Bridge.unstage(id: folder.id, paths: paths)
-                return
+        let changed = Set((folder.git?.files ?? []).map(\.path))
+        let paths = (stagedSelection[folder.id] ?? []).intersection(changed)
+        let title = (commitMessage[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let target = Bridge.reviewedGitTarget(id: folder.id)
+        if target.peer == nil { await WorkSessionContext.shared.resolveLocalHostIdentity() }
+        let session = GitCommitSessions.session(target: target)
+        await session.load()
+        if session.draft.submitted == nil {
+            if !paths.isEmpty { session.draft.paths = paths }
+            if !title.isEmpty {
+                session.draft.title = title
+                session.draft.details = commitDescription[folder.id] ?? ""
             }
-            let committed = try await Bridge.commit(id: folder.id, message: message)
-            report(folder.id, .commit, committed)
-            guard committed.ok else {
-                // The host commits the whole index, not a pathspec (the
-                // bridge has no paths parameter), so a failure must not leave
-                // what this attempt staged behind: unticking a file and
-                // retrying would otherwise commit a stale selection.
-                _ = try? await Bridge.unstage(id: folder.id, paths: paths)
-                return
-            }
-            stagedSelection[folder.id] = []
-            commitMessage[folder.id] = ""
-            commitDescription[folder.id] = ""
-            await refresh()
-            await loadHistory(for: folder.id)
-        } catch {
-            report(folder.id, .commit, GitOutcome(ok: false, message: error.localizedDescription))
-            // The stage step may have run even though the commit answer did
-            // not come back, so leave no stale entries for the next attempt.
-            _ = try? await Bridge.unstage(id: folder.id, paths: paths)
+            await session.persist()
+            await session.prepareReview()
         }
+        return session
+    }
+
+    func commitCompleted(_ folder: WorkspaceFolder) async {
+        stagedSelection[folder.id] = []
+        commitMessage[folder.id] = ""
+        commitDescription[folder.id] = ""
+        report(folder.id, .commit, GitOutcome(ok: true, message: "Committed the reviewed selection."))
+        await refresh()
+        await loadHistory(for: folder.id)
     }
 
     func push(_ folder: WorkspaceFolder) async {
