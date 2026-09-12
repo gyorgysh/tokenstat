@@ -275,7 +275,7 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
     if let Some(retry_at) = release_retry_at(resp.status().as_u16(), resp.headers(), unix_now()) {
         *cooldown = retry_at;
         if let Some(path) = &cooldown_path {
-            let _ = fs::write(path, retry_at.to_string());
+            save_cooldown(path, retry_at);
         }
         return Err(UpdateError::RateLimited { retry_at });
     }
@@ -320,7 +320,7 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
             let retry_at = unix_now().saturating_add(60);
             *cooldown = retry_at;
             if let Some(path) = &cooldown_path {
-                let _ = fs::write(path, retry_at.to_string());
+                save_cooldown(path, retry_at);
             }
             return Err(UpdateError::RateLimited { retry_at });
         }
@@ -399,6 +399,13 @@ fn read_cooldown(path: &Path, now: u64) -> Option<u64> {
         .parse::<u64>()
         .ok()
         .filter(|until| *until > now)
+}
+
+fn save_cooldown(path: &Path, retry_at: u64) {
+    // A reader in another process must never see a truncated deadline.
+    // The in-memory deadline still protects this process if disk is unwritable.
+    let _ = atomicwrites::AtomicFile::new(path, atomicwrites::AllowOverwrite)
+        .write(|file| file.write_all(retry_at.to_string().as_bytes()));
 }
 
 fn release_retry_at(status: u16, headers: &reqwest::header::HeaderMap, now: u64) -> Option<u64> {
@@ -1558,9 +1565,11 @@ mod tests {
             std::env::temp_dir().join(format!("tokenstat-update-cooldown-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("retry.stamp");
-        std::fs::write(&path, "500").unwrap();
+        super::save_cooldown(&path, 500);
         assert_eq!(super::read_cooldown(&path, 100), Some(500));
         assert_eq!(super::read_cooldown(&path, 500), None);
+        super::save_cooldown(&path, 600);
+        assert_eq!(super::read_cooldown(&path, 500), Some(600));
         std::fs::write(&path, "invalid").unwrap();
         assert_eq!(super::read_cooldown(&path, 100), None);
         std::fs::remove_dir_all(&dir).unwrap();

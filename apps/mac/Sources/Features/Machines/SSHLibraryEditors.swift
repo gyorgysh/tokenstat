@@ -564,30 +564,34 @@ struct SSHKeyEditor: View {
     }
 
     private func generate() async {
+        guard !working else { return }
+        let requestedAlgorithm = algorithm
         working = true
         defer { working = false }
         do {
             let material: SSHKeyMaterial
-            switch algorithm {
+            switch requestedAlgorithm {
             case .ed25519:
                 material = try await Bridge.generateSSHKey()
             case .ecdsaP256, .ecdsaP256TouchID:
                 let pem = await Task.detached { SSHKeyAlgorithm.makeP256PEM() }.value
                 material = try await Bridge.inspectSSHKey(pem: pem, passphrase: nil)
             }
-            await keep(material, protected: false, biometric: algorithm == .ecdsaP256TouchID)
+            await keep(material, protected: false, biometric: requestedAlgorithm == .ecdsaP256TouchID)
         }
         catch { self.error = error.localizedDescription }
     }
 
     private func importPasted() async {
+        guard !working else { return }
+        let requestedPassphrase = passphrase
         working = true
         defer { working = false }
         do {
             let material = try await Bridge.inspectSSHKey(
-                pem: pem, passphrase: passphrase.isEmpty ? nil : passphrase
+                pem: pem, passphrase: requestedPassphrase.isEmpty ? nil : requestedPassphrase
             )
-            await keep(material, protected: !passphrase.isEmpty)
+            await keep(material, protected: !requestedPassphrase.isEmpty)
         } catch { self.error = error.localizedDescription }
     }
 

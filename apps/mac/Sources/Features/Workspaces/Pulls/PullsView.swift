@@ -124,6 +124,8 @@ struct PullsView: View {
                 Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
             }
             .sheet(isPresented: loginPresented) { loginSheet }
+            .onChange(of: workspaceID) { _, _ in selectedPull = nil }
+            .onChange(of: peer) { _, _ in selectedPull = nil }
             .onChange(of: WorkSessionContext.shared.scope) { _, _ in
                 selectedPull = nil
                 model = PullsModel()

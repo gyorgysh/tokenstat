@@ -2366,6 +2366,9 @@ struct RootView: View {
                     workspaceIsRemote: folder?.isRemote == true,
                     isActive: showsPulls
                 )
+                // A PR number is only unique inside its repository. Do not
+                // carry selected detail or pending actions into another folder.
+                .id(id)
                 .opacity(showsPulls ? 1 : 0)
                 .allowsHitTesting(showsPulls)
                 .accessibilityHidden(!showsPulls)
