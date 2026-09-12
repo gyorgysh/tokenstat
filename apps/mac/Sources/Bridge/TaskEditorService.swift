@@ -22,7 +22,7 @@ struct TaskEditorTarget: Hashable, Sendable, TaskEditorService {
         try await call("todo.edit", draft.parameters(id: id, revision: revision), as: TodoCard.self)
     }
 
-    private func call<T: Decodable & Sendable>(_ method: String, _ params: [String: Any], as type: T.Type) async throws -> T {
+    func call<T: Decodable & Sendable>(_ method: String, _ params: [String: Any], as type: T.Type) async throws -> T {
         if let peer { return try await Bridge.onPeer(peer, method, params, as: type) }
         #if os(macOS)
         return try await Bridge.localTaskEditor(method, params, as: type)

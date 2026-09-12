@@ -153,6 +153,8 @@ struct ClientWorkspacesView: View {
                     if model.connectedKey != nil {
                         if let peer = model.connectedKey,
                            let host = model.hosts.first(where: { $0.peerKey == peer }) {
+                            ClientAllTasksLink(peer: peer, hostName: host.name)
+                                .padding(Theme.Space.m).cardSurface()
                             ForEach(layout.sections) { section in
                                 workSection(section, peer: peer, host: host)
                             }

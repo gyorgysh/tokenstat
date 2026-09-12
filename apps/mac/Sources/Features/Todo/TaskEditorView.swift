@@ -13,16 +13,24 @@ struct TaskEditorDestination: View {
 
     var body: some View {
         Group {
-            if let session { TaskEditorView(session: session, hostName: hostName, onSaved: onSaved, onClose: onClose, onRun: onRun) }
+            if let session, session.target == target, session.saved.baseline.id == card.id {
+                TaskEditorView(session: session, hostName: hostName, onSaved: onSaved, onClose: onClose, onRun: onRun)
+            }
             else { ProgressView("Opening task").font(Theme.callout) }
         }
-        .task(id: card.id) {
+        .task(id: TaskEditorDestinationID(target: target, cardID: card.id)) {
+            session = nil
             if target.peer == nil { await WorkSessionContext.shared.resolveLocalHostIdentity() }
             guard !Task.isCancelled else { return }
             session = TaskEditorSessions.session(target: target, card: card)
         }
         .onChange(of: card.revision) { _, _ in Task { await session?.refresh() } }
     }
+}
+
+private struct TaskEditorDestinationID: Hashable {
+    let target: TaskEditorTarget
+    let cardID: String
 }
 
 struct TaskEditorView: View {

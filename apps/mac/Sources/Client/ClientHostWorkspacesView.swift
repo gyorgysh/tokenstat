@@ -205,6 +205,9 @@ struct ClientHostWorkspacesView: View {
                     }
                 }
 
+                if model.isAllowed == true && !model.isConnecting {
+                    ClientAllTasksLink(peer: peerKey, hostName: hostName).padding(Theme.Space.m).cardSurface()
+                }
                 if !model.folders.isEmpty || !model.sessions.isEmpty || !model.recentChats.isEmpty {
                     ForEach(layout.sections) { section in
                         hostWorkSection(section)

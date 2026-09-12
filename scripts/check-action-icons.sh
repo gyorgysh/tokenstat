@@ -168,7 +168,8 @@ ALLOWED = [
     # sidebar group heading on the Mac, where the label is the button.
     ("Client/ClientWorkspaceSections.swift", "showPort = true"),
     # The whole task card opens its editor; a trailing chevron marks navigation.
-    ("Client/ClientWorkspaceSections.swift", "Button { editingTask = card } label:"),
+    ("Client/ClientTaskBoard.swift", "Button { session.editingTask = card } label:"),
+    ("Client/ClientTaskBoard.swift", "Button { navigation.presentedTaskBoard = PresentedTaskBoard"),
     ("Client/ClientFolderSplit.swift", "section = item"),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectGraph"),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectRun"),

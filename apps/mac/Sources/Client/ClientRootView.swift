@@ -310,6 +310,19 @@ struct ClientRootView: View {
                 }
             }
         }
+        .fullScreenCover(item: Binding(
+            get: { navigation.presentedTaskBoard },
+            set: { navigation.presentedTaskBoard = $0 }
+        )) { target in
+            NavigationStack {
+                ClientTaskBoardDestination(peer: target.peer, hostName: target.hostName)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { navigation.presentedTaskBoard = nil }
+                        }
+                    }
+            }
+        }
         // **Last in the chain, after every presentation.** A sheet or a cover
         // inherits the environment as it stood where its modifier is written,
         // not as it stands inside the view it is attached to, so an

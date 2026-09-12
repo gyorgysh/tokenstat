@@ -159,6 +159,7 @@ final class ClientNavigationModel {
     /// A chat opened from a notification on the tab layout, where there is
     /// no sidebar to land the folder in. Dismissing it returns where you were.
     var presentedChat: PresentedChat? { didSet { if presentedChat != oldValue { routeLaunch.navigationChanged() } } }
+    var presentedTaskBoard: PresentedTaskBoard?
 
     /// True when this conversation is already on screen, so a tap should not
     /// open it again.
@@ -193,6 +194,7 @@ final class ClientNavigationModel {
         requestedChat = nil
         visibleChat = nil
         presentedChat = nil
+        presentedTaskBoard = nil
         suggestedPrompt = nil
         deviceMachineID = nil
         workspacesPath = []
@@ -324,6 +326,13 @@ struct ClientFolderPush: Hashable {
             ClientWorkspaceDetailView(peer: peerKey, hostName: hostName, folder: folder)
         }
     }
+}
+
+/// Kept above tab/sidebar layouts so the host-wide board stays open on resize.
+struct PresentedTaskBoard: Identifiable, Equatable {
+    var id: String { peer }
+    let peer: String
+    let hostName: String
 }
 
 /// Enough to open one thread from a notification without keeping a folder

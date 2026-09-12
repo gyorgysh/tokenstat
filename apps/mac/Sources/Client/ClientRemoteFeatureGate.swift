@@ -25,6 +25,7 @@ enum RemoteHostFeature {
     case selectedCommit
     case reviewedPush
     case taskEditing
+    case taskDeletion
 
     var title: String {
         switch self {
@@ -43,6 +44,7 @@ enum RemoteHostFeature {
         case .selectedCommit: "Committing selected files"
         case .reviewedPush: "Pushing a branch"
         case .taskEditing: "Editing tasks"
+        case .taskDeletion: "Deleting tasks"
         }
     }
 
@@ -85,6 +87,7 @@ enum RemoteHostFeature {
         case .selectedCommit: 15
         case .reviewedPush: 16
         case .taskEditing: 17
+        case .taskDeletion: 18
         }
     }
 
@@ -105,6 +108,7 @@ enum RemoteHostFeature {
         case .selectedCommit: "checkmark.circle"
         case .reviewedPush: "arrow.up.circle"
         case .taskEditing: "pencil"
+        case .taskDeletion: "trash"
         }
     }
 

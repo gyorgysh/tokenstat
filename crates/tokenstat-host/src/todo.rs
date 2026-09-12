@@ -483,6 +483,30 @@ impl Board {
         Ok(changed)
     }
 
+    /// Delete the reviewed task, preserving newer edits and active runs.
+    pub fn delete(&self, id: &str, expected_revision: u64) -> Result<bool, String> {
+        self.reconcile();
+        let mut live = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(card) = live.iter().find(|card| card.id == id) else {
+            return Ok(false);
+        };
+        if card.revision != expected_revision {
+            return Err("This task changed. Reload it before deleting it.".into());
+        }
+        if card
+            .delegate
+            .as_ref()
+            .is_some_and(|run| matches!(run.status.as_str(), "running" | "queued" | "starting"))
+        {
+            return Err("Stop this task's run before deleting it.".into());
+        }
+        let mut next = live.clone();
+        next.retain(|card| card.id != id);
+        self.save_cards(&next)?;
+        *live = next;
+        Ok(true)
+    }
+
     /// Hand a card to an agent. The run is a one-shot automation whose
     /// transcript lands in the runs history.
     pub fn delegate(self: &std::sync::Arc<Board>, id: &str) -> Result<Card, String> {
@@ -635,6 +659,50 @@ mod tests {
         let saved = reopened.get("a").unwrap();
         assert_eq!(saved.title, "Updated task");
         assert_eq!(saved.revision, updated.revision);
+    }
+
+    #[test]
+    fn checked_deletion_preserves_newer_edits_and_active_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = Board::at(dir.path().join("todo.json"));
+        let original = board.create(card("delete-me")).unwrap();
+        let updated = board
+            .edit(
+                &original.id,
+                &CardUpdate {
+                    notes: Some("New writing".into()),
+                    ..Default::default()
+                },
+                original.revision,
+            )
+            .unwrap();
+        assert!(board.delete(&original.id, original.revision).is_err());
+        assert_eq!(board.get(&original.id).unwrap().notes, "New writing");
+        assert!(board.delete(&original.id, updated.revision).unwrap());
+        assert!(!board.delete(&original.id, updated.revision).unwrap());
+        let mut running = card("running");
+        running.delegate = Some(Delegate {
+            run_id: "fixture-run".into(),
+            status: "running".into(),
+            started_at_ms: 0,
+            ended_at_ms: None,
+            error: None,
+        });
+        let created = board.create(running).unwrap();
+        assert!(board.delete(&created.id, created.revision).is_err());
+        assert!(board.get(&created.id).is_some());
+    }
+
+    #[test]
+    fn failed_delete_persistence_keeps_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("todo.json");
+        let board = Board::at(path.clone());
+        let created = board.create(card("a")).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(board.delete(&created.id, created.revision).is_err());
+        assert!(board.get(&created.id).is_some());
     }
 
     #[test]

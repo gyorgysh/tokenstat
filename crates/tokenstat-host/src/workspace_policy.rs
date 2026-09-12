@@ -1213,6 +1213,7 @@ mod tests {
             "automation.run",
             "todo.create",
             "todo.edit",
+            "todo.delete",
             "todo.get",
             "launcher.install",
             "harness.config.set",

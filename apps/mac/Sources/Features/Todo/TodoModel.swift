@@ -487,7 +487,8 @@ final class TodoModel {
 
     func remove(_ card: TodoCard) async {
         do {
-            try await Bridge.todoRemove(id: card.id)
+            if card.isNote { try await Bridge.todoRemove(id: card.id) }
+            else { try await TaskEditorTarget(peer: nil).deleteTask(card) }
             await load()
         } catch {
             errorMessage = error.localizedDescription

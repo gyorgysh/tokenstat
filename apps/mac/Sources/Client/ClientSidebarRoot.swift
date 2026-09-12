@@ -287,6 +287,7 @@ struct ClientSidebarRoot: View {
                 ForEach(workspaces.hosts) { host in
                     hostRow(host)
                     if workspaces.connectedKey == host.peerKey {
+                        ClientAllTasksLink(peer: host.peerKey, hostName: host.name)
                         ForEach(workspaces.folders) { folder in
                             folderRow(folder)
                             // Keep the last opened folder expanded when the

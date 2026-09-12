@@ -2289,6 +2289,13 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             };
             serde_json::to_value(card).envelope()
         }
+        "todo.delete" => {
+            let p: TodoParams = parse(params)?;
+            Ok(json!({"removed": crate::todo::shared().delete(
+                &p.id.ok_or("A task deletion needs an id")?,
+                p.expected_revision.ok_or("A task deletion needs its saved revision")?,
+            )?}))
+        }
         "todo.remove" => {
             let p: TodoParams = parse(params)?;
             Ok(

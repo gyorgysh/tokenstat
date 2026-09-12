@@ -40,6 +40,16 @@ fn task_edits_require_the_reviewed_revision_over_the_shared_dispatch() {
     assert_eq!(read["result"]["budgetSeconds"], 121);
     assert_eq!(read["result"]["priority"], "high");
     assert_eq!(read["result"]["revision"], edited["result"]["revision"]);
-    assert_eq!(call("todo.remove", json!({"id":id}))["ok"], true);
+    assert_eq!(
+        call("todo.delete", json!({"id":id,"expectedRevision":revision}))["ok"],
+        false
+    );
+    assert_eq!(
+        call(
+            "todo.delete",
+            json!({"id":id,"expectedRevision":edited["result"]["revision"]})
+        )["ok"],
+        true
+    );
     assert_eq!(call("todo.get", json!({"id":id}))["result"], Value::Null);
 }
