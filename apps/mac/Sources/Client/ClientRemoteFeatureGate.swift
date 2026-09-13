@@ -29,6 +29,7 @@ enum RemoteHostFeature {
     case taskCreation
     case taskExecution
     case automationReceipts
+    case workflowEditing
 
     var title: String {
         switch self {
@@ -51,6 +52,7 @@ enum RemoteHostFeature {
         case .taskCreation: "Creating tasks"
         case .taskExecution: "Running tasks"
         case .automationReceipts: "Saving automations"
+        case .workflowEditing: "Saving workflows"
         }
     }
 
@@ -76,6 +78,7 @@ enum RemoteHostFeature {
     /// Version 18 adds checked task deletion. Version 19 adds create-once tasks.
     /// Version 20 adds checked task runs, exact-run stops and launch receipts.
     /// Version 21 adds revision-checked automation edits and create/run receipts.
+    /// Version 22 adds revision-checked workflow edits.
     var minimumProtocol: Int {
         switch self {
         case .chat: 4
@@ -100,6 +103,7 @@ enum RemoteHostFeature {
         case .taskCreation: 19
         case .taskExecution: 20
         case .automationReceipts: 21
+        case .workflowEditing: 22
         }
     }
 
@@ -124,6 +128,7 @@ enum RemoteHostFeature {
         case .taskCreation: "plus"
         case .taskExecution: "play.fill"
         case .automationReceipts: "bolt.fill"
+        case .workflowEditing: "square.and.arrow.down"
         }
     }
 

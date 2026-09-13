@@ -33,6 +33,8 @@ protocol ClientJobService: Sendable {
     func runWorkflow(peer: String, id: String, input: String, workspaceID: String) async throws -> WorkflowRunRecord
     func createWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph
     func updateWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph
+    func supportsWorkflowEdits(peer: String) async -> Bool
+    func editWorkflow(peer: String, graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph
     func removeWorkflow(peer: String, id: String) async throws
     func killWorkflow(peer: String, runID: String) async throws
     func continueWorkflow(peer: String, runID: String) async throws -> WorkflowRunRecord
@@ -41,6 +43,10 @@ protocol ClientJobService: Sendable {
 
 extension ClientJobService {
     func supportsAutomationReceipts(peer: String) async -> Bool { false }
+    func supportsWorkflowEdits(peer: String) async -> Bool { false }
+    func editWorkflow(peer: String, graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph {
+        try await updateWorkflow(peer: peer, graph: graph)
+    }
     func editAutomation(peer: String, job: Automation, revision: UInt64) async throws -> Automation {
         try await updateAutomation(peer: peer, job: job)
     }
@@ -140,6 +146,12 @@ struct ClientRemoteJobService: ClientJobService {
     }
     func updateWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph {
         try await ClientRemote.updateWorkflow(peer: peer, graph: graph)
+    }
+    func supportsWorkflowEdits(peer: String) async -> Bool {
+        await RemoteHostFeature.workflowEditing.isSupported(peer: peer)
+    }
+    func editWorkflow(peer: String, graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph {
+        try await ClientRemote.editWorkflow(peer: peer, graph: graph, revision: revision)
     }
     func removeWorkflow(peer: String, id: String) async throws {
         try await ClientRemote.removeWorkflow(peer: peer, id: id)

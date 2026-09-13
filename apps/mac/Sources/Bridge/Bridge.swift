@@ -2590,6 +2590,14 @@ extension Bridge {
         try await background("workflow.update", ["workflow": graph.jsonObject()], as: WorkflowGraph.self)
     }
 
+    static func editWorkflow(_ graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph {
+        try await background(
+            "workflow.edit",
+            ["workflow": graph.jsonObject(), "expectedRevision": revision],
+            as: WorkflowGraph.self
+        )
+    }
+
     static func removeWorkflow(_ id: String) async throws {
         _ = try await background("workflow.remove", ["id": id], as: Removed.self)
     }

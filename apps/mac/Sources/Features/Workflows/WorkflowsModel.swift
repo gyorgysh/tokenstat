@@ -526,7 +526,15 @@ final class WorkflowsModel {
             if graph.id.isEmpty {
                 saved = try await Bridge.createWorkflow(graph)
             } else {
-                saved = try await Bridge.updateWorkflow(graph)
+                do {
+                    saved = try await Bridge.editWorkflow(graph, revision: graph.revision)
+                } catch {
+                    // A stale working copy must not overwrite the computer.
+                    // Show the refusal and re-read what is actually saved.
+                    errorMessage = error.localizedDescription
+                    await load()
+                    return
+                }
             }
             draft = nil
             designTranscript = ""

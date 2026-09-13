@@ -83,6 +83,7 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     var lastRunAtMs: Int64? = nil
     var nextRunAtMs: Int64? = nil
     var lastRunID: String? = nil
+    var revision: UInt64 = 0
     mutating func layoutIfNeeded() {}
 }
 
@@ -136,12 +137,13 @@ struct AutomationQueue: Codable, Sendable {
 }
 
 enum FixtureError: LocalizedError {
-    case disconnected, unexpectedTransport, alreadyExists
+    case disconnected, unexpectedTransport, alreadyExists, stale
     var errorDescription: String? {
         switch self {
         case .disconnected: "disconnected"
         case .unexpectedTransport: "unexpected transport"
         case .alreadyExists: "a workflow with id already exists"
+        case .stale: "This workflow changed since you opened it. Compare the saved graph before replacing it."
         }
     }
 }
@@ -166,6 +168,14 @@ enum Bridge {
         prompt: String, workspaceID: String?, backend: String?,
         model: String? = nil, effort: String? = nil
     ) async throws -> WorkflowDesignResult { throw FixtureError.unexpectedTransport }
+    static func editWorkflow(_ graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph {
+        throw FixtureError.unexpectedTransport
+    }
+}
+
+enum RemoteHostFeature {
+    case workflowEditing
+    func isSupported(peer: String?) async -> Bool { true }
 }
 
 @MainActor final class WorkSessionContext {
@@ -183,6 +193,7 @@ actor FixtureWorkflows: WorkflowEditorService {
     var loseCreateBefore = false
     var loseCreateReply = false
     var running: [String] = []
+    var failUpdate = false
     var designResult: WorkflowDesignResult? = nil
     var designError: FixtureError? = nil
     var designs = 0
@@ -202,10 +213,42 @@ actor FixtureWorkflows: WorkflowEditorService {
 
     func updateWorkflow(_ graph: WorkflowGraph) async throws -> WorkflowGraph {
         updates += 1
+        if failUpdate { throw FixtureError.disconnected }
         if let index = graphs.firstIndex(where: { $0.id == graph.id }) {
-            graphs[index] = graph
+            var applied = graph
+            applied.revision = graphs[index].revision + 1
+            graphs[index] = applied
+            return applied
         }
         return graph
+    }
+
+    var supportsEdits = true
+    var edits = 0
+    var failSaveAfterApply = false
+
+    func supportsWorkflowEdits() async -> Bool { supportsEdits }
+
+    func editWorkflow(_ graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph {
+        edits += 1
+        guard let index = graphs.firstIndex(where: { $0.id == graph.id }) else {
+            throw FixtureError.disconnected
+        }
+        if revision != graphs[index].revision {
+            throw FixtureError.stale
+        }
+        var applied = graph
+        applied.revision = graphs[index].revision + 1
+        graphs[index] = applied
+        if failSaveAfterApply { throw FixtureError.disconnected }
+        return applied
+    }
+
+    func bumpRevision(id: String, name: String) {
+        if let index = graphs.firstIndex(where: { $0.id == id }) {
+            graphs[index].revision += 1
+            graphs[index].name = name
+        }
     }
 
     func removeWorkflow(id: String) async throws {
@@ -225,6 +268,9 @@ actor FixtureWorkflows: WorkflowEditorService {
         loseCreateReply = after
     }
     func setDesignError(_ error: FixtureError?) { designError = error }
+    func setSupportsEdits(_ value: Bool) { supportsEdits = value }
+    func setFailUpdate(_ value: Bool) { failUpdate = value }
+    func setFailSaveAfterApply(_ value: Bool) { failSaveAfterApply = value }
     func seed(_ graph: WorkflowGraph) { graphs.append(graph) }
 
     func designWorkflow(prompt: String, backend: String?, model: String?, effort: String?) async throws -> WorkflowDesignResult {
@@ -416,13 +462,113 @@ actor FixtureWorkflows: WorkflowEditorService {
             await service.seed(existing)
             let editor = createSession(existing: existing)
             await editor.load()
+            check(editor.supportsEdits, "checked host")
             check(!editor.canSave, "unchanged is not dirty")
             editor.fields.name = "Review the diff"
             check(editor.canSave, "rename is dirty")
             await editor.save()
-            check(await service.updates == 1, "update called")
+            check(await service.edits == 1, "checked edit called")
+            check(await service.updates == 0, "no legacy write on a checked host")
             check(editor.saved.baseline?.name == "Review the diff", "saved name")
+            check(editor.saved.baseline?.revision == 1, "baseline adopts the new revision")
             check(editor.fields.nodes.count == 2, "edit keeps steps")
+        }
+
+        do {
+            let existing = WorkflowGraph(
+                id: "conflict",
+                name: "Computer copy",
+                workspaceID: "folder",
+                budgetSeconds: 1800,
+                schedule: AutomationSchedule(kind: .once),
+                enabled: false,
+                nodes: [WorkflowNode(id: "in", kind: .input, title: "Start")]
+            )
+            await service.seed(existing)
+            let editor = createSession(existing: existing)
+            await editor.load()
+            editor.fields.name = "My draft"
+            await service.bumpRevision(id: "conflict", name: "Computer copy")
+            await editor.refresh()
+            check(editor.conflict, "moved computer copy blocks the save")
+            check(!editor.canSave, "no save while conflicted")
+            await editor.save()
+            check(await service.edits == 1, "conflicted save never writes")
+            await editor.resolveConflict(keepMine: false)
+            check(!editor.conflict, "computer version resolves")
+            check(editor.fields.name == "Computer copy", "draft follows the computer")
+            check(!editor.canSave, "adopted copy is clean")
+        }
+
+        do {
+            let existing = WorkflowGraph(
+                id: "keep",
+                name: "Computer copy",
+                workspaceID: "folder",
+                budgetSeconds: 1800,
+                schedule: AutomationSchedule(kind: .once),
+                enabled: false,
+                nodes: [WorkflowNode(id: "in", kind: .input, title: "Start")]
+            )
+            await service.seed(existing)
+            let editor = createSession(existing: existing)
+            await editor.load()
+            editor.fields.name = "My draft"
+            await service.bumpRevision(id: "keep", name: "Computer copy")
+            await editor.refresh()
+            check(editor.conflict, "conflict before keep")
+            await editor.resolveConflict(keepMine: true)
+            check(!editor.conflict, "keeping mine resolves")
+            check(editor.canSave, "my draft saves at the new revision")
+            await editor.save()
+            check(editor.saved.baseline?.name == "My draft", "kept draft saved")
+            check(editor.saved.baseline?.revision == 2, "save advances from the computer revision")
+        }
+
+        do {
+            let existing = WorkflowGraph(
+                id: "lostsave",
+                name: "Saved name",
+                workspaceID: "folder",
+                budgetSeconds: 1800,
+                schedule: AutomationSchedule(kind: .once),
+                enabled: false,
+                nodes: [WorkflowNode(id: "in", kind: .input, title: "Start")]
+            )
+            await service.seed(existing)
+            let editor = createSession(existing: existing)
+            await editor.load()
+            editor.fields.name = "Applied but unconfirmed"
+            await service.setFailSaveAfterApply(true)
+            await editor.save()
+            await service.setFailSaveAfterApply(false)
+            check(editor.errorMessage == nil, "lost reply with applied content is not an error")
+            check(!editor.conflict, "recovered save is not a conflict")
+            check(editor.saved.baseline?.name == "Applied but unconfirmed", "applied save adopted")
+            check(editor.saved.baseline?.revision == 1, "adopted revision")
+        }
+
+        do {
+            let existing = WorkflowGraph(
+                id: "legacy",
+                name: "Old host copy",
+                workspaceID: "folder",
+                budgetSeconds: 1800,
+                schedule: AutomationSchedule(kind: .once),
+                enabled: false,
+                nodes: [WorkflowNode(id: "in", kind: .input, title: "Start")]
+            )
+            await service.seed(existing)
+            await service.setSupportsEdits(false)
+            let editor = createSession(existing: existing)
+            await editor.load()
+            check(!editor.supportsEdits, "old host stays legacy")
+            editor.fields.name = "Legacy save"
+            let updatesBefore = await service.updates
+            await editor.save()
+            check(await service.updates == updatesBefore + 1, "legacy host uses update")
+            check(editor.saved.baseline?.name == "Legacy save", "legacy save lands")
+            await service.setSupportsEdits(true)
         }
 
         do {

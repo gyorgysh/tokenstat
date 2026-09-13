@@ -105,8 +105,14 @@ final class WorkflowEditorSession {
             || !fields.enabled
     }
     var creating: Bool { saved.pendingCreate || saved.pendingID != nil }
+    /// The computer copy moved under an unsaved draft. Saving stays off
+    /// until the person chooses which copy continues.
+    private(set) var conflict = false
+    /// Whether the host speaks revision-checked `workflow.edit`.
+    /// Below protocol 22 every save is last-write-wins with an honest caption.
+    private(set) var supportsEdits = false
     var canSave: Bool {
-        loaded && !working && !missing && otherDraft == nil && !creating
+        loaded && !working && !missing && !conflict && otherDraft == nil && !creating
             && saved.created == nil && fields.validation == nil && dirty && !isCreate
     }
     var canCreate: Bool {
@@ -168,7 +174,7 @@ final class WorkflowEditorSession {
         working = true
         defer { working = false }
         lockFolderIfNeeded()
-        let graph: WorkflowGraph
+        var graph: WorkflowGraph
         do {
             graph = try fields.makeGraph(
                 id: baseline.id,
@@ -179,13 +185,61 @@ final class WorkflowEditorSession {
             errorMessage = Self.display(error)
             return
         }
+        graph.revision = baseline.revision
         errorMessage = nil
         do {
-            let updated = try await service.updateWorkflow(graph)
-            await applySaved(updated)
+            if supportsEdits {
+                let updated = try await service.editWorkflow(graph, revision: baseline.revision)
+                await applySaved(updated)
+            } else {
+                let updated = try await service.updateWorkflow(graph)
+                await applySaved(updated)
+            }
+        } catch {
+            await recoverSave(graph: graph, baseline: baseline, error: error)
+        }
+    }
+
+    /// A failed save is never retried blindly: the host may have applied it
+    /// while the reply was lost. Re-read and compare. If the computer copy
+    /// is our submitted graph, adopt it. If it moved elsewhere, surface the
+    /// conflict instead of overwriting. Otherwise the save can go again.
+    private func recoverSave(graph: WorkflowGraph, baseline: WorkflowGraph, error: Error) async {
+        let current: WorkflowGraph?
+        do {
+            current = try await service.workflow(id: baseline.id)
         } catch {
             errorMessage = Self.display(error)
+            return
         }
+        guard let current else {
+            errorMessage = "This workflow was deleted on the computer. Your draft is still here."
+            missing = true
+            return
+        }
+        self.current = current
+        if current.revision != baseline.revision, graphMatches(graph, current) {
+            await applySaved(current)
+            return
+        }
+        if current.revision != baseline.revision {
+            conflict = true
+            errorMessage = nil
+            _ = await persist()
+            return
+        }
+        errorMessage = Self.display(error)
+    }
+
+    /// Same content, ignoring run metadata the host owns.
+    private func graphMatches(_ left: WorkflowGraph, _ right: WorkflowGraph) -> Bool {
+        left.name == right.name
+            && left.workspaceID == right.workspaceID
+            && left.schedule == right.schedule
+            && left.budgetSeconds == right.budgetSeconds
+            && left.enabled == right.enabled
+            && left.nodes == right.nodes
+            && left.edges == right.edges
     }
 
     func create() async {
@@ -249,6 +303,7 @@ final class WorkflowEditorSession {
         noticeMessage = nil
         errorMessage = nil
         missing = false
+        conflict = false
         canRetryCreate = false
         current = nil
         _ = await persist()
@@ -465,6 +520,7 @@ final class WorkflowEditorSession {
     }
 
     private func loadOptions() async {
+        supportsEdits = await service.supportsWorkflowEdits()
         do {
             backends = try await service.automationBackends()
             if designBackend.isEmpty {
@@ -519,18 +575,64 @@ final class WorkflowEditorSession {
             missing = current == nil
             if missing {
                 errorMessage = "This workflow was deleted on the computer. Your draft is still here."
+                conflict = false
                 return
             }
             guard let current else { return }
             if errorMessage?.hasPrefix("This workflow was deleted") == true {
                 errorMessage = nil
             }
-            if let baseline = saved.baseline, !fields.matches(baseline), !fields.matches(current) {
-                noticeMessage = "This workflow also changed on the computer. Saving overwrites that copy."
+            if let baseline = saved.baseline {
+                reconcileComputerCopy(current: current, baseline: baseline)
             }
         } catch {
             errorMessage = Self.display(error)
         }
+    }
+
+    /// The computer copy moved. With a checked host the save refuses, so the
+    /// person chooses a copy here. Without it the save overwrites, and the
+    /// notice says exactly that. A clean draft simply follows the computer.
+    private func reconcileComputerCopy(current: WorkflowGraph, baseline: WorkflowGraph) {
+        guard supportsEdits else {
+            if !fields.matches(baseline), !fields.matches(current) {
+                noticeMessage = "This workflow also changed on the computer. Saving overwrites that copy."
+            }
+            return
+        }
+        if current.revision == baseline.revision {
+            conflict = false
+            return
+        }
+        if fields.matches(current) {
+            saved.baseline = current
+            conflict = false
+        } else if dirty {
+            conflict = true
+        } else {
+            restoring = true
+            fields = WorkflowEditorDraft(current)
+            restoring = false
+            saved.baseline = current
+            adoptDocument()
+            conflict = false
+        }
+    }
+
+    /// Choose which copy continues after a conflict. The computer version
+    /// reloads the draft; keeping mine re-enables saving at its revision.
+    func resolveConflict(keepMine: Bool) async {
+        guard !working, conflict, let current else { return }
+        saved.baseline = current
+        if !keepMine {
+            restoring = true
+            fields = WorkflowEditorDraft(current)
+            restoring = false
+            adoptDocument()
+        }
+        conflict = false
+        errorMessage = nil
+        _ = await persist()
     }
 
     private func submitCreation(_ graph: WorkflowGraph, pendingID: String) async {
@@ -616,6 +718,8 @@ final class WorkflowEditorSession {
         fields = WorkflowEditorDraft(updated)
         restoring = false
         adoptDocument()
+        conflict = false
+        errorMessage = nil
         noticeMessage = "Saved \(updated.name)."
         _ = await persist()
         NotificationCenter.default.post(name: Self.didChange, object: target)

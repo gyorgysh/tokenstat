@@ -3677,11 +3677,13 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     var lastRunAtMs: Int64?
     var nextRunAtMs: Int64?
     var lastRunID: String?
+    /// Missing on hosts before protocol 22, and on cached copies from then.
+    var revision: UInt64 = 0
 
     enum CodingKeys: String, CodingKey {
         case id, name, scope, workspaceID = "workspaceId"
         case budgetSeconds, schedule, enabled, nodes, edges
-        case lastRunAtMs, nextRunAtMs, lastRunID = "lastRunId"
+        case lastRunAtMs, nextRunAtMs, lastRunID = "lastRunId", revision
     }
 
     init(
@@ -3696,7 +3698,8 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
         edges: [WorkflowEdge] = [],
         lastRunAtMs: Int64? = nil,
         nextRunAtMs: Int64? = nil,
-        lastRunID: String? = nil
+        lastRunID: String? = nil,
+        revision: UInt64 = 0
     ) {
         self.id = id
         self.name = name
@@ -3710,6 +3713,7 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
         self.lastRunAtMs = lastRunAtMs
         self.nextRunAtMs = nextRunAtMs
         self.lastRunID = lastRunID
+        self.revision = revision
     }
 
     init(from decoder: Decoder) throws {
@@ -3726,6 +3730,7 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
         lastRunAtMs = try c.decodeIfPresent(Int64.self, forKey: .lastRunAtMs)
         nextRunAtMs = try c.decodeIfPresent(Int64.self, forKey: .nextRunAtMs)
         lastRunID = try c.decodeIfPresent(String.self, forKey: .lastRunID)
+        revision = try c.decodeIfPresent(UInt64.self, forKey: .revision) ?? 0
     }
 
     func encode(to encoder: Encoder) throws {
@@ -3742,6 +3747,7 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
         try c.encodeIfPresent(lastRunAtMs, forKey: .lastRunAtMs)
         try c.encodeIfPresent(nextRunAtMs, forKey: .nextRunAtMs)
         try c.encodeIfPresent(lastRunID, forKey: .lastRunID)
+        try c.encode(revision, forKey: .revision)
     }
 
     var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }

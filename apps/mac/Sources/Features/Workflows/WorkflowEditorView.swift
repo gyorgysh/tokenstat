@@ -339,7 +339,7 @@ struct WorkflowEditorView: View {
                 .font(Theme.callout)
                 .foregroundStyle(Theme.controlGlyph)
         }
-        if session.loaded, session.saved.created == nil, !session.isCreate {
+        if session.loaded, session.saved.created == nil, !session.isCreate, !session.supportsEdits {
             Text("This computer cannot protect concurrent edits yet. Saving overwrites the workflow as it is now.")
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
@@ -378,6 +378,12 @@ struct WorkflowEditorView: View {
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     .disabled(session.working)
             }
+        }
+        if session.conflict, let computer = session.current {
+            comparison(title: "Computer version", draft: WorkflowEditorDraft(computer))
+            Text("This workflow changed on the computer. Choose which copy continues. Saving is off until you choose.")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
         }
     }
 
@@ -435,6 +441,13 @@ struct WorkflowEditorView: View {
             }
             .buttonStyle(AccentButtonStyle(comfortable: true))
             .disabled(session.working)
+        } else if session.conflict {
+            Button("Use computer version", .restore) { Task { await session.resolveConflict(keepMine: false) } }
+                .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                .disabled(session.working)
+            Button("Keep my draft", .edit) { Task { await session.resolveConflict(keepMine: true) } }
+                .buttonStyle(AccentButtonStyle(comfortable: true))
+                .disabled(session.working)
         } else if session.creating {
             Button("Check creation", .refresh) { Task { await session.checkCreated() } }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))

@@ -176,6 +176,11 @@ final class ClientWorkflowSession {
 
     func run() async {
         guard !working, let graph = selectedGraph else { return }
+        // The host would refuse an invalid graph. Say so before starting.
+        if let issue = graph.stepsIssue {
+            errorMessage = "\(issue) Fix it in the editor before running."
+            return
+        }
         working = true
         defer { working = false }
         do {
@@ -249,7 +254,12 @@ final class ClientWorkflowSession {
         guard errorMessage == nil, var graph = selectedGraph, graph.schedule.repeats else { return }
         graph.enabled.toggle()
         do {
-            let updated = try await service.updateWorkflow(peer: peer, graph: graph)
+            let updated: WorkflowGraph
+            if await service.supportsWorkflowEdits(peer: peer) {
+                updated = try await service.editWorkflow(peer: peer, graph: graph, revision: graph.revision)
+            } else {
+                updated = try await service.updateWorkflow(peer: peer, graph: graph)
+            }
             errorMessage = nil
             if let index = graphs.firstIndex(where: { $0.id == updated.id }) {
                 graphs[index] = updated

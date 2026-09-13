@@ -479,6 +479,7 @@ struct WorkflowParams {
     prompt: Option<String>,
     node_id: Option<String>,
     offset: Option<u64>,
+    expected_revision: Option<u64>,
 }
 
 #[cfg(feature = "local-host")]
@@ -2497,6 +2498,18 @@ fn workflow_call(method: &str, params: &str) -> Result<Value, String> {
             serde_json::to_value(
                 crate::workflows::shared()
                     .update(p.workflow.ok_or("workflow.update needs workflow")?)?,
+            )
+            .map_err(|e| e.to_string())
+        }
+        "workflow.edit" => {
+            let p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            serde_json::to_value(
+                crate::workflows::shared().edit(
+                    p.workflow.ok_or("workflow.edit needs workflow")?,
+                    p.expected_revision
+                        .ok_or("A workflow edit needs its saved revision")?,
+                )?,
             )
             .map_err(|e| e.to_string())
         }

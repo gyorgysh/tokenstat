@@ -176,6 +176,11 @@ pub struct Workflow {
     pub next_run_at_ms: Option<i64>,
     #[serde(default)]
     pub last_run_id: Option<String>,
+    /// Monotonic within this graph. User-facing mutations advance it. Run
+    /// metadata (`last_run_*`) does not, so a live run cannot collide with
+    /// an editor that did not change the graph.
+    #[serde(default)]
+    pub revision: u64,
 }
 
 fn default_budget() -> u64 {
@@ -241,6 +246,14 @@ struct RunsFile {
 }
 
 // MARK: - Store
+
+fn advance_revision(workflow: &mut Workflow) -> Result<(), String> {
+    if workflow.revision == u64::MAX {
+        return Err("This workflow's revision cannot be advanced.".into());
+    }
+    workflow.revision += 1;
+    Ok(())
+}
 
 pub struct Store {
     path: PathBuf,
@@ -371,12 +384,14 @@ impl Store {
         if workflow.enabled {
             workflow.next_run_at_ms = workflow.schedule.next_run_ms(now_ms());
         }
+        workflow.revision = 1;
         all.push(workflow.clone());
         drop(all);
         self.save()?;
         Ok(workflow)
     }
 
+    /// Legacy unchecked replacement. Prefer `edit`.
     pub fn update(&self, mut workflow: Workflow) -> Result<Workflow, String> {
         validate(&workflow)?;
         let mut all = self
@@ -388,11 +403,45 @@ impl Store {
         };
         workflow.last_run_at_ms = all[idx].last_run_at_ms;
         workflow.last_run_id = all[idx].last_run_id.clone();
+        workflow.revision = all[idx].revision;
         if workflow.enabled {
             workflow.next_run_at_ms = workflow.schedule.next_run_ms(now_ms());
         } else {
             workflow.next_run_at_ms = None;
         }
+        advance_revision(&mut workflow)?;
+        all[idx] = workflow.clone();
+        drop(all);
+        self.save()?;
+        Ok(workflow)
+    }
+
+    /// Checked replacement. A stale editor cannot overwrite a newer graph.
+    /// The live run already holds its own snapshot.
+    pub fn edit(&self, mut workflow: Workflow, expected_revision: u64) -> Result<Workflow, String> {
+        validate(&workflow)?;
+        let mut all = self
+            .workflows
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(idx) = all.iter().position(|existing| existing.id == workflow.id) else {
+            return Err(format!("no workflow with id {}", workflow.id));
+        };
+        if expected_revision != all[idx].revision {
+            return Err(
+                "This workflow changed since you opened it. Compare the saved graph before replacing it."
+                    .into(),
+            );
+        }
+        workflow.last_run_at_ms = all[idx].last_run_at_ms;
+        workflow.last_run_id = all[idx].last_run_id.clone();
+        workflow.revision = all[idx].revision;
+        if workflow.enabled {
+            workflow.next_run_at_ms = workflow.schedule.next_run_ms(now_ms());
+        } else {
+            workflow.next_run_at_ms = None;
+        }
+        advance_revision(&mut workflow)?;
         all[idx] = workflow.clone();
         drop(all);
         self.save()?;
@@ -2367,6 +2416,7 @@ mod tests {
             last_run_at_ms: None,
             next_run_at_ms: None,
             last_run_id: None,
+            revision: 0,
         }
     }
 
@@ -2545,6 +2595,42 @@ mod tests {
         let got = loaded.get(&created.id).unwrap();
         assert_eq!(got.name, "Test");
         assert_eq!(got.nodes.len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn checked_edit_refuses_a_stale_graph() {
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-wf-edit-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let store = Store::at(dir.join("workflows.json"));
+        let created = store
+            .create(graph(
+                vec![node("in", NodeKind::Input), node("sh", NodeKind::Command)],
+                vec![edge("in", "sh", EdgeWhen::Ok)],
+            ))
+            .unwrap();
+        assert_eq!(created.revision, 1);
+
+        let mut stale = created.clone();
+        stale.name = "Stale".into();
+        let err = store.edit(stale, 0).unwrap_err();
+        assert!(err.contains("changed since you opened it"), "{err}");
+
+        let mut fresh = created.clone();
+        fresh.name = "Edited".into();
+        let edited = store.edit(fresh, 1).unwrap();
+        assert_eq!(edited.revision, 2);
+        assert_eq!(edited.name, "Edited");
+
+        let err = store.edit(created.clone(), 1).unwrap_err();
+        assert!(err.contains("changed since you opened it"), "{err}");
+
+        let updated = store.update(created.clone()).unwrap();
+        assert_eq!(updated.revision, 3);
         let _ = std::fs::remove_dir_all(dir);
     }
 

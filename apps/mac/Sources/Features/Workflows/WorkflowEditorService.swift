@@ -15,6 +15,15 @@ protocol WorkflowEditorService: Sendable {
     /// Draft a graph from a prompt. Side-effect-free: it saves nothing and
     /// runs nothing, so a lost response is safely retried with the same prompt.
     func designWorkflow(prompt: String, backend: String?, model: String?, effort: String?) async throws -> WorkflowDesignResult
+    func supportsWorkflowEdits() async -> Bool
+    func editWorkflow(_ graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph
+}
+
+extension WorkflowEditorService {
+    func supportsWorkflowEdits() async -> Bool { false }
+    func editWorkflow(_ graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph {
+        try await updateWorkflow(graph)
+    }
 }
 
 extension WorkflowEditorService {
@@ -57,6 +66,33 @@ struct WorkflowEditorTarget: Hashable, Sendable, WorkflowEditorService {
         }
         #if os(macOS)
         return try await Bridge.updateWorkflow(graph)
+        #else
+        throw CocoaError(.fileReadNoSuchFile)
+        #endif
+    }
+
+    func supportsWorkflowEdits() async -> Bool {
+        guard let peer else {
+            #if os(macOS)
+            return true
+            #else
+            return false
+            #endif
+        }
+        return await RemoteHostFeature.workflowEditing.isSupported(peer: peer)
+    }
+
+    func editWorkflow(_ graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph {
+        if let peer {
+            return try await Bridge.onPeer(
+                peer,
+                "workflow.edit",
+                ["workflow": try encode(graph), "expectedRevision": revision],
+                as: WorkflowGraph.self
+            )
+        }
+        #if os(macOS)
+        return try await Bridge.editWorkflow(graph, revision: revision)
         #else
         throw CocoaError(.fileReadNoSuchFile)
         #endif
