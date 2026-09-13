@@ -83,6 +83,7 @@ struct WorkflowStepListView: View {
                 Button("Settings", .settings) {
                     session.endGroupedStepEdit()
                     session.selectStep(nil)
+                    session.selectConnection(nil)
                     path = []
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))

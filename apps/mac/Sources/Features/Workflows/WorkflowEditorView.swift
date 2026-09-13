@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct WorkflowEditorRoute: Identifiable, Hashable {
     let workspaceID: String
@@ -65,6 +68,7 @@ struct WorkflowEditorView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var surface: WorkflowEditorSurface = .graph
     @State private var stepPath: [String] = []
+    @State private var canvasMode: WorkflowCanvasMode = .canvas
 
     var body: some View {
         ThemedSheet(
@@ -102,6 +106,9 @@ struct WorkflowEditorView: View {
             if ProcessInfo.processInfo.environment["WORKBENCH_SURFACE"] == "settings" {
                 surface = .settings
             }
+            if ProcessInfo.processInfo.environment["WORKBENCH_CANVAS"] == "list" {
+                canvasMode = .list
+            }
             if let step = ProcessInfo.processInfo.environment["WORKBENCH_STEP"], !step.isEmpty {
                 session.selectStep(step)
                 stepPath = [step]
@@ -129,7 +136,16 @@ struct WorkflowEditorView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(alignment: .top, spacing: Theme.Space.l) {
-                    graphList(selectsInPlace: true)
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        if allowsCanvas {
+                            SegmentedTabs(
+                                options: WorkflowCanvasMode.allCases,
+                                selection: $canvasMode,
+                                comfortable: false
+                            )
+                        }
+                        graphColumn
+                    }
                     ThemeRule.vertical
                     inspector
                         .frame(width: 340)
@@ -211,9 +227,33 @@ struct WorkflowEditorView: View {
         .disabled(!session.loaded || session.working || session.creating)
     }
 
+    private var allowsCanvas: Bool {
+#if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad
+#else
+        true
+#endif
+    }
+
+    /// Wide iPad: the touch canvas, or the step list as the accessible
+    /// alternate. Both edit the same document and inspector.
+    @ViewBuilder
+    private var graphColumn: some View {
+        if canvasMode == .canvas, allowsCanvas {
+            WorkflowTouchCanvas(session: session, stepPath: $stepPath)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            graphList(selectsInPlace: true)
+        }
+    }
+
     private var inspector: some View {
         ScrollView {
-            if let id = stepPath.last, session.fields.nodes.contains(where: { $0.id == id }) {
+            if let edgeID = session.selectedConnectionID,
+               session.fields.edges.contains(where: { $0.id == edgeID }) {
+                WorkflowConnectionInspector(session: session, stepPath: $stepPath)
+                    .padding(.bottom, Theme.Space.xl)
+            } else if let id = stepPath.last, session.fields.nodes.contains(where: { $0.id == id }) {
                 WorkflowStepDetailView(
                     session: session,
                     nodeID: id,

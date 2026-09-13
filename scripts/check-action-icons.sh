@@ -86,6 +86,8 @@ ALLOWED = [
     ("Features/Workflows/WorkflowStepListView.swift", "path.append(node.id)"),
     # Kind tiles in the add-step picker, same class as the Mac palette.
     ("Features/Workflows/WorkflowStepListView.swift", "add(choice)"),
+    # Kind tiles in the touch canvas add sheet, same class as the list above.
+    ("Features/Workflows/WorkflowTouchCanvas.swift", "add(choice.kind)"),
     ("Features/Automations/AutomationsView.swift", "Text(dayShort[bit])"),
     ("Features/Automations/AutomationsView.swift", "scheduleKind = kind"),
     ("Features/Automations/AutomationsView.swift", "intervalMinutes = String(minutes)"),

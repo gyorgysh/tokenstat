@@ -426,6 +426,39 @@ actor FixtureWorkflows: WorkflowEditorService {
             check(editor.fields.nodes.first { $0.id == "n3" }?.title == "gate", "one undo for the title")
         }
 
+        do {
+            let editor = createSession()
+            await editor.load()
+            editor.fields.name = "Drag"
+            editor.addStep(kind: .command)
+            let id = editor.fields.nodes.last?.id ?? ""
+            check(id == "n2", "drag target")
+            let before = editor.fields.nodes.first { $0.id == id }
+            check(before != nil, "drag target exists")
+            editor.beginStepMove()
+            editor.moveStep(id: id, x: (before?.x ?? 0) + 40, y: (before?.y ?? 0) + 20)
+            let moved = editor.fields.nodes.first { $0.id == id }
+            check(moved?.x == (before?.x ?? 0) + 40, "touch drag moves x")
+            check(moved?.y == (before?.y ?? 0) + 20, "touch drag moves y")
+            check(editor.fields.nodes.first?.id == "in", "drag keeps the other step")
+            editor.undoGraph()
+            let restored = editor.fields.nodes.first { $0.id == id }
+            check(restored?.x == before?.x && restored?.y == before?.y, "one undo for the drag")
+        }
+
+        do {
+            let editor = createSession()
+            await editor.load()
+            editor.fields.name = "Retarget"
+            editor.addStep(kind: .command)
+            editor.selectConnection("in>n2:ok")
+            editor.updateSelectedConnection(when: .error)
+            check(editor.fields.edges.first?.when == .error, "canvas retargets when")
+            check(editor.selectedConnectionID == "in>n2:error", "edge id follows when")
+            editor.undoGraph()
+            check(editor.fields.edges.first?.when == .ok, "one undo for the retarget")
+        }
+
         print("WorkflowEditorSessionTests passed")
     }
 }

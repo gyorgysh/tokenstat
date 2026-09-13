@@ -311,6 +311,24 @@ final class WorkflowEditorSession {
         document.selectEdge(id)
     }
 
+    func beginStepMove() {
+        guard !creating, otherDraft == nil else { return }
+        document.beginNodeMove()
+    }
+
+    /// Live touch drag. Undo was captured at `beginStepMove`.
+    func moveStep(id: String, x: Double, y: Double) {
+        guard !creating, otherDraft == nil else { return }
+        document.moveNode(id: id, x: x, y: y)
+        writeStepsFromDocument()
+    }
+
+    func updateSelectedConnection(when: WorkflowEdgeWhen) {
+        guard !creating, otherDraft == nil else { return }
+        document.updateSelectedEdge(when: when)
+        writeStepsFromDocument()
+    }
+
     func updateSelectedStep(_ body: (inout WorkflowNode) -> Void) {
         guard !creating, otherDraft == nil else { return }
         document.updateSelectedNode(body)
