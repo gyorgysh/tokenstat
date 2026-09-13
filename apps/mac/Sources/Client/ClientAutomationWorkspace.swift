@@ -20,6 +20,7 @@ struct ClientAutomationWorkspace: View {
     @State private var search = ""
     @State private var navigation = ClientJobNavigation()
     @State private var editor: AutomationEditorRoute?
+    @State private var showingQueue = false
     @State private var pendingDelete: Automation?
     @Environment(\.dynamicTypeSize) private var typeSize
     private let opensDetailWhenReady: Bool
@@ -89,6 +90,17 @@ struct ClientAutomationWorkspace: View {
                 if let created { session.selectJob(created.id) }
             }
         }
+        .sheet(isPresented: $showingQueue) {
+            AutomationQueueDestination(
+                peer: peer,
+                hostName: hostName,
+                folderName: folderName,
+                service: session.queueService()
+            ) {
+                await session.load()
+            }
+            .modifier(QueueSheetPresentation())
+        }
         .confirmationDialog(
             "Delete \(pendingDelete?.name ?? "this job")?",
             isPresented: Binding(
@@ -110,9 +122,17 @@ struct ClientAutomationWorkspace: View {
         .onReceive(NotificationCenter.default.publisher(for: AutomationEditorSession.didChange)) { _ in
             Task { await session.load() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: AutomationQueueSession.didChange)) { _ in
+            Task { await session.load() }
+        }
         .task {
             await session.appeared()
             if opensDetailWhenReady { navigation.openDetail() }
+            #if WORKBENCH_QA
+            if ProcessInfo.processInfo.environment["WORKBENCH_QUEUE"] == "1" {
+                showingQueue = true
+            }
+            #endif
         }
         .onDisappear { session.disappeared() }
     }
@@ -173,6 +193,9 @@ struct ClientAutomationWorkspace: View {
                 .textFieldStyle(.themed)
                 .accessibilityLabel("Search automations")
                 .clientCardRow()
+            if session.loaded {
+                schedulerCard(compactCopy: false).clientCardRow()
+            }
             if session.loaded, !session.jobs.isEmpty {
                 Text(listSummary)
                     .font(ClientType.caption)
@@ -227,6 +250,9 @@ struct ClientAutomationWorkspace: View {
             LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField("Search automations", text: $search).textFieldStyle(.themed)
                     .accessibilityLabel("Search automations")
+                if session.loaded {
+                    schedulerCard(compactCopy: true)
+                }
                 if session.loaded, !session.jobs.isEmpty {
                     Text(listSummary)
                         .font(ClientType.caption)
@@ -266,6 +292,17 @@ struct ClientAutomationWorkspace: View {
             await ClientRefresh.pull("workspace-automations-\(workspaceID)") {
                 await session.load()
             }
+        }
+    }
+
+    private func schedulerCard(compactCopy: Bool) -> some View {
+        ClientSchedulerCard(
+            hostName: hostName,
+            folderName: folderName,
+            queue: session.queue,
+            compactCopy: compactCopy
+        ) {
+            showingQueue = true
         }
     }
 

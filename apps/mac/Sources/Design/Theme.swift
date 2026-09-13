@@ -2062,6 +2062,42 @@ struct TimeLimitChips: View {
     }
 }
 
+/// How many jobs may run at once, same chips as the time limit.
+///
+/// 0 is a real host value: no cap. The chip says that in words so nobody has
+/// to know the sentinel. A custom number in the field selects none of them.
+struct ConcurrentChips: View {
+    @Binding var countText: String
+    var onChange: () -> Void = {}
+
+    private static let presets: [(count: UInt32, title: String)] = [
+        (1, "1"), (2, "2"), (4, "4"), (8, "8"),
+    ]
+
+    var body: some View {
+        FlowLayout(spacing: 6, rowSpacing: 6) {
+            ForEach(Self.presets, id: \.count) { preset in
+                ChoiceChip(title: preset.title, isSelected: isPreset(preset.count)) {
+                    countText = String(preset.count)
+                    onChange()
+                }
+            }
+            ChoiceChip(title: "No cap", isSelected: isUncapped) {
+                countText = "0"
+                onChange()
+            }
+        }
+    }
+
+    private var isUncapped: Bool {
+        (UInt32(countText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1) == 0
+    }
+
+    private func isPreset(_ count: UInt32) -> Bool {
+        !isUncapped && (UInt32(countText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) == count
+    }
+}
+
 /// One segment of `SegmentedCapsulePicker`.
 private struct SegmentButton: View {
     var label: String

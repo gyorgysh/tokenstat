@@ -25,6 +25,8 @@ final class ClientAutomationSession {
     /// IANA name of the connected computer's scheduler. Empty until queue
     /// answers, and never this device's zone.
     private(set) var schedulerTimezone: String = ""
+    /// Host-wide queue, not this folder. Nil until `automation.queue` answers.
+    private(set) var queue: AutomationQueue?
     var errorMessage: String?
     var working = false
 
@@ -116,14 +118,17 @@ final class ClientAutomationSession {
         do {
             async let all = service.automations(peer: peer)
             async let history = service.automationRuns(peer: peer)
-            async let queue = service.automationQueue(peer: peer)
+            async let hostQueue = service.automationQueue(peer: peer)
             let (freshItems, freshRuns) = try await (all, history)
-            let freshQueue = try? await queue
+            let freshQueue = try? await hostQueue
             guard generation == loadGeneration, !Task.isCancelled else { return }
             jobs = freshItems.filter { $0.workspaceID == workspaceID }
             runs = freshRuns.filter { $0.workspaceID == workspaceID }
-            if let timezone = HostScheduleClock.resolved(freshQueue?.timezone) {
-                schedulerTimezone = timezone
+            if let freshQueue {
+                queue = freshQueue
+                if let timezone = HostScheduleClock.resolved(freshQueue.timezone) {
+                    schedulerTimezone = timezone
+                }
             }
             errorMessage = nil
             if selectedJobID == nil, pinnedRunID == nil {
@@ -140,6 +145,10 @@ final class ClientAutomationSession {
         }
         loaded = true
         syncWatching()
+    }
+
+    func queueService() -> ClientJobQueueService {
+        ClientJobQueueService(peer: peer, jobs: service)
     }
 
     func selectJob(_ id: String) {

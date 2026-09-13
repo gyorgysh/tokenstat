@@ -417,6 +417,22 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "automation.queue", as: AutomationQueue.self)
     }
 
+    static func setAutomationQueue(
+        peer: String,
+        defaultBudgetSeconds: UInt64,
+        maxConcurrent: UInt32
+    ) async throws -> AutomationQueue {
+        try await Bridge.onPeer(
+            peer,
+            "automation.setQueue",
+            [
+                "defaultBudgetSeconds": defaultBudgetSeconds,
+                "maxConcurrent": maxConcurrent,
+            ],
+            as: AutomationQueue.self
+        )
+    }
+
     static func workflows(peer: String) async throws -> [WorkflowGraph] {
         try await Bridge.onPeer(peer, "workflow.list", as: [WorkflowGraph].self)
     }

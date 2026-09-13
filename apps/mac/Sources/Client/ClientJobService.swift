@@ -13,6 +13,11 @@ protocol ClientJobService: Sendable {
     func removeAutomation(peer: String, id: String) async throws
     func automationBackends(peer: String) async throws -> [AgentBackend]
     func automationQueue(peer: String) async throws -> AutomationQueue
+    func setAutomationQueue(
+        peer: String,
+        defaultBudgetSeconds: UInt64,
+        maxConcurrent: UInt32
+    ) async throws -> AutomationQueue
     func runAutomation(peer: String, id: String) async throws -> Automation
     func setAutomation(peer: String, id: String, enabled: Bool) async throws -> Automation
     func killAutomation(peer: String, runID: String) async throws
@@ -48,6 +53,17 @@ struct ClientRemoteJobService: ClientJobService {
     func automationQueue(peer: String) async throws -> AutomationQueue {
         try await ClientRemote.automationQueue(peer: peer)
     }
+    func setAutomationQueue(
+        peer: String,
+        defaultBudgetSeconds: UInt64,
+        maxConcurrent: UInt32
+    ) async throws -> AutomationQueue {
+        try await ClientRemote.setAutomationQueue(
+            peer: peer,
+            defaultBudgetSeconds: defaultBudgetSeconds,
+            maxConcurrent: maxConcurrent
+        )
+    }
     func runAutomation(peer: String, id: String) async throws -> Automation {
         try await ClientRemote.runAutomation(peer: peer, id: id)
     }
@@ -80,6 +96,32 @@ struct ClientRemoteJobService: ClientJobService {
     }
     func workflowTranscript(peer: String, runID: String, nodeID: String, offset: UInt64) async throws -> TranscriptChunk {
         try await ClientRemote.workflowTranscript(peer: peer, runID: runID, nodeID: nodeID, offset: offset)
+    }
+}
+
+/// Job sessions are folder-scoped. Queue settings are not, so the scheduler
+/// sheet talks to this adapter instead of the folder session.
+struct ClientJobQueueService: AutomationQueueService {
+    let peer: String
+    let jobs: any ClientJobService
+
+    func automationQueue() async throws -> AutomationQueue {
+        try await jobs.automationQueue(peer: peer)
+    }
+
+    func setAutomationQueue(
+        defaultBudgetSeconds: UInt64,
+        maxConcurrent: UInt32
+    ) async throws -> AutomationQueue {
+        try await jobs.setAutomationQueue(
+            peer: peer,
+            defaultBudgetSeconds: defaultBudgetSeconds,
+            maxConcurrent: maxConcurrent
+        )
+    }
+
+    func runningJobCount() async throws -> Int {
+        try await jobs.automationRuns(peer: peer).filter { $0.status == "running" }.count
     }
 }
 #endif
