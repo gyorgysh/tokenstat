@@ -408,6 +408,8 @@ struct ClientChatThread: View {
     @State private var showingHandoff = false
     @State private var showingSetup = false
     @State private var showingPersonas = false
+    @State private var showingToolsPane = false
+    @State private var pushingTools = false
     @State private var urlDropTargeted = false
     @State private var textDropTargeted = false
     @State private var dataDropTargeted = false
@@ -421,9 +423,57 @@ struct ClientChatThread: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var chat: ChatConversation? {
         model.chats.first { $0.id == chatID } ?? model.selected
+    }
+
+    /// Files, Changes and History for this folder, beside the transcript.
+    /// Wide iPad only: compact layouts push the same surface instead, and a
+    /// large iPhone in landscape stays the phone layout.
+    private var showsToolsPane: Bool {
+        showingToolsPane
+            && sizeClass == .regular
+            && UIDevice.current.userInterfaceIdiom == .pad
+            && model.peer != nil
+            && model.workspaceID != nil
+    }
+
+    private var toolsIdentity: (peer: String, workspaceID: String)? {
+        guard let peer = model.peer, !peer.isEmpty,
+              let workspaceID = model.workspaceID, !workspaceID.isEmpty else { return nil }
+        return (peer, workspaceID)
+    }
+
+    @ViewBuilder
+    private func toolsPane(peer: String, workspaceID: String) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Workspace")
+                    .font(ClientType.caption.weight(.semibold))
+                    .foregroundStyle(Theme.controlGlyph)
+                Spacer(minLength: 0)
+                Button(action: {
+                    showingToolsPane = false
+                }) {
+                    Image(systemName: "xmark")
+                        .frame(minWidth: 44, minHeight: 32)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.controlGlyph)
+                .accessibilityLabel("Hide workspace tools")
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.top, Theme.Space.s)
+            ClientWorkspaceToolsView(
+                peer: peer,
+                workspaceID: workspaceID,
+                folderName: folderName,
+                hostName: hostName
+            )
+        }
+        .background(Theme.background)
     }
 
     /// What a pin files this conversation under. Nothing without an account
@@ -476,12 +526,9 @@ struct ClientChatThread: View {
                 if model.savedCopy == nil {
                     WorkHandoffOffer(chat: model) { showingHandoff = true }
                 }
-                // The bar is pinned, not the next row of a stack. Stacked,
-                // it had the window background under it rather than the
-                // conversation, so its glass had nothing to be glass about and
-                // read as a white slab whatever material it asked for. As a
-                // bottom bar the transcript runs underneath, including the
-                // home indicator, which is the whole point of the material.
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        // The bar is pinned, not the next row of a stack. Stacked,
                 transcript(chat)
                     .overlay {
                         if dropExperienceVisible {
@@ -492,6 +539,13 @@ struct ClientChatThread: View {
                         bar(chat)
                             .padding(.top, Theme.Space.s)
                     }
+                    }
+                    if showsToolsPane, let peer = model.peer, let workspace = model.workspaceID {
+                        ThemeRule.vertical
+                        toolsPane(peer: peer, workspaceID: workspace)
+                            .frame(width: 320)
+                    }
+                }
             } else {
                 ClientEmptyState(
                     kind: .nothingYet,
@@ -556,12 +610,33 @@ struct ClientChatThread: View {
                             label: chat?.title ?? "Chat",
                             folderName: folderName
                         )
+                        if let tools = toolsIdentity {
+                            Button("Workspace tools", .source) {
+                                if sizeClass == .regular,
+                                   UIDevice.current.userInterfaceIdiom == .pad {
+                                    showingToolsPane.toggle()
+                                } else {
+                                    pushingTools = true
+                                }
+                            }
+                            .accessibilityLabel("Workspace files, changes and history")
+                        }
                         if model.savedCopy == nil {
                             Button("Continue on another device", .device) { showingHandoff = true }
                             Button("Setup", .settings) { showingSetup = true }
                         }
                     }
                 }
+            }
+        }
+        .navigationDestination(isPresented: $pushingTools) {
+            if let tools = toolsIdentity {
+                ClientWorkspaceToolsView(
+                    peer: tools.peer,
+                    workspaceID: tools.workspaceID,
+                    folderName: folderName,
+                    hostName: hostName
+                )
             }
         }
         .sheet(isPresented: $showingHandoff) { WorkHandoffSheet(chat: model) }

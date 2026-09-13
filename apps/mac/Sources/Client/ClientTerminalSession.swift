@@ -520,6 +520,7 @@ struct ClientTerminalScreen: View {
     var onClosedProcess: (() -> Void)?
 
     @State private var confirmClose = false
+    @State private var showingWorkspace = false
 
     private func rememberTerminal() {
         guard !session.hostID.hasPrefix("pending-") else { return }
@@ -556,6 +557,11 @@ struct ClientTerminalScreen: View {
                     Text("output dropped")
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.warning)
+                }
+                if session.workspaceID != nil {
+                    Button("Workspace", .source) { showingWorkspace = true }
+                        .font(ClientType.caption.weight(.semibold))
+                        .accessibilityLabel("Workspace files, changes and history")
                 }
                 Button("Close", .dismiss, role: .destructive) {
                     confirmClose = true
@@ -659,6 +665,23 @@ struct ClientTerminalScreen: View {
             Text(hostName.isEmpty
                 ? "Stops the process on the computer."
                 : "Stops the process on \(hostName).")
+        }
+        .sheet(isPresented: $showingWorkspace) {
+            if let workspaceID = session.workspaceID {
+                NavigationStack {
+                    ClientWorkspaceToolsView(
+                        peer: session.peer,
+                        workspaceID: workspaceID,
+                        folderName: URL(fileURLWithPath: session.cwd).lastPathComponent,
+                        hostName: hostName
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done", .done) { showingWorkspace = false }
+                        }
+                    }
+                }
+            }
         }
     }
 }
