@@ -2212,7 +2212,7 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             Ok(json!({"killed": true}))
         }
         "automation.queue" => {
-            serde_json::to_value(crate::automations::shared().queue_config()).envelope()
+            serde_json::to_value(crate::automations::shared().queue_status()).envelope()
         }
         "automation.setQueue" => {
             let p: AutomationParams = parse(params)?;
@@ -2223,7 +2223,8 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                     .unwrap_or(current.default_budget_seconds),
                 max_concurrent: p.max_concurrent.unwrap_or(current.max_concurrent),
             };
-            serde_json::to_value(crate::automations::shared().apply_queue_config(next)?).envelope()
+            let config = crate::automations::shared().apply_queue_config(next)?;
+            serde_json::to_value(crate::automations::QueueStatus::from(config)).envelope()
         }
 
         "todo.list" => {

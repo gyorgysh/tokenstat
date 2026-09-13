@@ -163,37 +163,50 @@ impl ScheduleSpec {
         }
     }
 
-    /// The next time this fires, or None for a once job.
+    /// The next time this fires on this process's clock, or None for a once job.
     pub fn next_run_ms(&self, from: i64) -> Option<i64> {
+        self.next_run_ms_in(from, jiff::tz::TimeZone::system())
+    }
+
+    /// The next time this fires in `tz`. Wall-clock kinds use that zone's civil
+    /// time, including its daylight-saving transitions. Interval jobs ignore it.
+    pub fn next_run_ms_in(&self, from: i64, tz: jiff::tz::TimeZone) -> Option<i64> {
         match self.kind {
             ScheduleKind::Once => None,
             ScheduleKind::Interval => {
                 let step = i64::try_from(self.every_seconds).ok()?.checked_mul(1000)?;
                 from.checked_add(step)
             }
-            ScheduleKind::Daily => next_wall_clock(from, self.hour, self.minute, None),
+            ScheduleKind::Daily => next_wall_clock(from, self.hour, self.minute, None, tz),
             ScheduleKind::Weekdays | ScheduleKind::Weekly | ScheduleKind::Custom => {
                 let mask = self.day_mask();
                 if mask == 0 {
                     return None;
                 }
-                next_wall_clock(from, self.hour, self.minute, Some(mask))
+                next_wall_clock(from, self.hour, self.minute, Some(mask), tz)
             }
         }
     }
 }
 
-/// Next local occurrence of hour:minute, optionally restricted to a day mask.
+/// Next occurrence of hour:minute in `tz`, optionally restricted to a day mask.
 ///
 /// The mask uses Monday = bit 0 so the picker matches the calendar the app
 /// already draws. Pass `None` for every day. The result is strictly after
-/// `from_ms`.
-fn next_wall_clock(from_ms: i64, hour: u8, minute: u8, day_mask: Option<u8>) -> Option<i64> {
+/// `from_ms`. Civil times that do not exist (spring-forward gaps) or that
+/// happen twice (fall-back folds) use jiff's compatible disambiguation: the
+/// later offset in a gap, the earlier offset in a fold. A daily 09:00 stays
+/// 09:00 on both sides of a transition, which is not "24 hours later".
+fn next_wall_clock(
+    from_ms: i64,
+    hour: u8,
+    minute: u8,
+    day_mask: Option<u8>,
+    tz: jiff::tz::TimeZone,
+) -> Option<i64> {
     use jiff::civil::DateTime;
-    use jiff::tz::TimeZone;
 
     let from = jiff::Timestamp::from_millisecond(from_ms).ok()?;
-    let tz = TimeZone::system();
     let zoned = from.to_zoned(tz.clone());
     let mut day = zoned.date();
     // A schedule within a year of today is far more than anybody asks for.
@@ -1153,6 +1166,35 @@ impl Default for QueueConfig {
     }
 }
 
+/// What `automation.queue` returns. Timezone is this process's scheduler clock,
+/// not a stored setting, so it is never written into automations.json.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueStatus {
+    pub default_budget_seconds: u64,
+    pub max_concurrent: u32,
+    pub timezone: String,
+}
+
+impl From<QueueConfig> for QueueStatus {
+    fn from(config: QueueConfig) -> Self {
+        Self {
+            default_budget_seconds: config.default_budget_seconds,
+            max_concurrent: config.max_concurrent,
+            timezone: scheduler_timezone(),
+        }
+    }
+}
+
+/// IANA name of the zone wall-clock jobs fire in, or `unknown` when the
+/// process clock has no name.
+pub fn scheduler_timezone() -> String {
+    jiff::tz::TimeZone::system()
+        .iana_name()
+        .unwrap_or("unknown")
+        .to_string()
+}
+
 /// A job waiting for a free slot.
 struct Pending {
     interactive: bool,
@@ -1291,6 +1333,10 @@ impl Store {
 
     pub fn queue_config(&self) -> QueueConfig {
         *self.queue.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub fn queue_status(&self) -> QueueStatus {
+        QueueStatus::from(self.queue_config())
     }
 
     pub fn set_queue_config(&self, mut next: QueueConfig) -> Result<QueueConfig, String> {
@@ -2496,6 +2542,95 @@ mod tests {
         assert_eq!(s.weekday, 2);
         assert_eq!(s.weekdays, 0);
         assert_eq!(s.day_mask(), 1 << 2);
+    }
+
+    fn ny() -> jiff::tz::TimeZone {
+        jiff::tz::TimeZone::get("America/New_York").unwrap()
+    }
+
+    #[test]
+    fn a_daily_nine_stays_nine_across_spring_forward() {
+        // 7 Mar 2026 09:00 EST to 8 Mar 2026 09:00 EDT is 23 hours, not 24.
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Daily,
+            hour: 9,
+            minute: 0,
+            ..ScheduleSpec::default()
+        };
+        let from = 1_772_892_000_000; // 2026-03-07 09:00 EST
+        assert_eq!(s.next_run_ms_in(from, ny()), Some(1_772_974_800_000));
+        let earlier = 1_772_888_400_000; // 2026-03-07 08:00 EST
+        assert_eq!(s.next_run_ms_in(earlier, ny()), Some(from));
+        assert_ne!(
+            s.next_run_ms_in(from, ny()),
+            s.next_run_ms_in(from, jiff::tz::TimeZone::UTC),
+            "the host zone owns the civil time, UTC does not"
+        );
+    }
+
+    #[test]
+    fn a_missing_civil_time_on_spring_forward_uses_compatible_offset() {
+        // 8 Mar 2026 02:00 EST jumps to 03:00 EDT. 02:30 does not exist.
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Daily,
+            hour: 2,
+            minute: 30,
+            ..ScheduleSpec::default()
+        };
+        let from = 1_772_949_600_000; // 2026-03-08 01:00 EST
+        let next = s.next_run_ms_in(from, ny()).unwrap();
+        assert!(next > from);
+        let zoned = jiff::Timestamp::from_millisecond(next)
+            .unwrap()
+            .to_zoned(ny());
+        // Compatible disambiguation lands after the gap, still on that date.
+        assert_eq!(zoned.date().to_string(), "2026-03-08");
+        assert!(zoned.hour() >= 3);
+    }
+
+    #[test]
+    fn a_folded_civil_time_on_fall_back_fires_once() {
+        // 1 Nov 2026 02:00 EDT falls back to 01:00 EST. 01:30 happens twice.
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Daily,
+            hour: 1,
+            minute: 30,
+            ..ScheduleSpec::default()
+        };
+        let from = 1_793_507_400_000; // 2026-11-01 00:30 EDT
+        assert_eq!(s.next_run_ms_in(from, ny()), Some(1_793_511_000_000)); // first 01:30
+        let after_first = 1_793_511_000_000 + 1;
+        assert_eq!(
+            s.next_run_ms_in(after_first, ny()),
+            Some(1_793_601_000_000) // 2 Nov 01:30 EST, not the second 01:30
+        );
+    }
+
+    #[test]
+    fn a_weekly_monday_uses_the_named_zone() {
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Weekly,
+            weekday: 0,
+            hour: 9,
+            minute: 0,
+            ..ScheduleSpec::default()
+        };
+        let from = 1_789_315_200_000; // Sunday 13 Sep 2026 12:00 New York
+        assert_eq!(s.next_run_ms_in(from, ny()), Some(1_789_390_800_000));
+    }
+
+    #[test]
+    fn an_interval_ignores_the_timezone() {
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Interval,
+            every_seconds: 120,
+            ..ScheduleSpec::default()
+        };
+        assert_eq!(s.next_run_ms_in(1_000, ny()), Some(121_000));
+        assert_eq!(
+            s.next_run_ms_in(1_000, jiff::tz::TimeZone::UTC),
+            Some(121_000)
+        );
     }
 
     #[test]
@@ -3949,8 +4084,16 @@ mod tests {
         let body = std::fs::read_to_string(dir.join("automations.json")).unwrap();
         assert!(body.contains("\"defaultBudgetSeconds\": 0"));
         assert!(body.contains("\"maxConcurrent\": 4"));
+        assert!(
+            !body.contains("timezone"),
+            "the scheduler zone is this process, not a saved field"
+        );
         let parsed: QueueConfig = serde_json::from_str(r#"{"defaultBudgetSeconds":0}"#).unwrap();
         assert_eq!(parsed.max_concurrent, DEFAULT_MAX_CONCURRENT);
+        let status = store.queue_status();
+        assert_eq!(status.default_budget_seconds, 0);
+        assert_eq!(status.max_concurrent, 4);
+        assert!(!status.timezone.is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 

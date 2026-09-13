@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 // Compile with AutomationEditorDraft.swift AutomationEditorService.swift AutomationEditorSession.swift
-// WorkbenchDraftFile.swift OriginalFileCoordination.swift WorkReference.swift.
+// HostScheduleClock.swift WorkbenchDraftFile.swift OriginalFileCoordination.swift WorkReference.swift.
 import Foundation
 
 enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {
@@ -58,7 +58,11 @@ struct AgentBackend: Codable, Sendable {
     }
 }
 
-struct AutomationQueue: Codable, Sendable { var defaultBudgetSeconds: UInt64; var maxConcurrent: UInt32 = 2 }
+struct AutomationQueue: Codable, Sendable {
+    var defaultBudgetSeconds: UInt64
+    var maxConcurrent: UInt32 = 2
+    var timezone: String? = nil
+}
 enum TodoCard {
     static func cleanModelID(_ raw: String) -> String { raw.trimmingCharacters(in: .whitespacesAndNewlines) }
 }
@@ -86,7 +90,7 @@ enum Bridge {
 actor FixtureAutomations: AutomationEditorService {
     var jobs: [Automation] = []
     var backends: [AgentBackend] = [AgentBackend(id: "codex", label: "Codex", command: "codex")]
-    var queue = AutomationQueue(defaultBudgetSeconds: 121)
+    var queue = AutomationQueue(defaultBudgetSeconds: 121, timezone: "America/New_York")
     var creates = 0
     var updates = 0
     var loseCreateReply = false
@@ -198,6 +202,7 @@ actor FixtureAutomations: AutomationEditorService {
         check(created.fields.workspaceID == "folder", "create keeps the folder")
         check(created.fields.backend == "codex", "create picks the default agent")
         check(created.fields.budgetMinutes == "2", "queue default minutes")
+        check(created.schedulerTimezone == "America/New_York", "host scheduler zone")
         check(created.persistedFields == created.fields, "load keeps the opening draft")
         created.fields.workspaceID = "other"
         created.fields.name = "Nightly docs"

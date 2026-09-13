@@ -78,8 +78,11 @@ struct AutomationsInspector: View {
                 if let folder = folders.first(where: { $0.id == job.workspaceID }) {
                     labeled("Folder", folder.name)
                 }
+                if let clock = HostScheduleClock.clock(model.schedulerTimezone) {
+                    labeled("Time zone", clock)
+                }
                 if let next = job.nextRun, job.enabled {
-                    labeled("Next", next.formatted(date: .abbreviated, time: .shortened))
+                    labeled("Next", HostScheduleClock.nextRun(next, timezone: model.schedulerTimezone))
                 }
                 if let last = model.lastRun(for: job) {
                     labeled("Last", last.startedAt.formatted(date: .abbreviated, time: .shortened))

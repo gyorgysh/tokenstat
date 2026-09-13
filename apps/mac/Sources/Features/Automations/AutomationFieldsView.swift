@@ -13,6 +13,9 @@ struct AutomationFieldsView: View {
     let minimumHeight: CGFloat
     let draftStatus: String
     var showValidation = true
+    var hostName: String = ""
+    var timezone: String = ""
+    var nextCaption: String? = nil
 
     var body: some View {
         if wide {
@@ -109,7 +112,12 @@ struct AutomationFieldsView: View {
                     .foregroundStyle(Theme.controlGlyph)
             }
             ThemeRule()
-            AutomationScheduleFields(fields: $fields)
+            AutomationScheduleFields(
+                fields: $fields,
+                hostName: hostName,
+                timezone: timezone,
+                nextCaption: nextCaption
+            )
             ThemeRule()
             AutomationBudgetFields(fields: $fields)
             if showValidation, let validation = fields.validation {
@@ -146,6 +154,9 @@ struct AutomationFieldsView: View {
 /// Frequency block shared by the Mac sheet and the mobile editor.
 struct AutomationScheduleFields: View {
     @Binding var fields: AutomationEditorDraft
+    var hostName: String = ""
+    var timezone: String = ""
+    var nextCaption: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -264,7 +275,28 @@ struct AutomationScheduleFields: View {
             }
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+
+            if usesHostClock {
+                Text(HostScheduleClock.timeCaption(hostName: hostName, timezone: timezone))
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, Theme.Space.s)
+                if let nextCaption {
+                    Text(nextCaption)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
+    }
+
+    private var usesHostClock: Bool {
+        fields.scheduleKind == .daily
+            || fields.scheduleKind == .weekdays
+            || fields.scheduleKind == .weekly
+            || fields.scheduleKind == .custom
     }
 
     private var intervalOptions: [(value: String, label: String)] {

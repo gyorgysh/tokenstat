@@ -148,19 +148,26 @@ struct ClientAutomationDetailView: View {
             if let model = job.model, !model.isEmpty {
                 ClientFactRow(label: "Model", value: model)
             }
-            ClientFactRow(label: "Budget", value: ClientJobCopy.budget(job.budgetSeconds))
-            if let next = job.nextRun, job.enabled {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                ClientFactRow(label: "Budget", value: ClientJobCopy.budget(job.budgetSeconds))
+                if let clock = HostScheduleClock.clock(session.schedulerTimezone) {
+                    ClientFactRow(label: "Time zone", value: clock)
+                }
+            }
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                if let next = job.nextRun, job.enabled {
+                    ClientFactRow(
+                        label: "Next",
+                        value: HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone)
+                    )
+                }
                 ClientFactRow(
-                    label: "Next",
-                    value: next.formatted(date: .abbreviated, time: .shortened)
+                    label: "Last",
+                    value: ClientJobCopy.lastRunWhen(
+                        session.lastRun(for: job)?.startedAt ?? job.lastRun
+                    )
                 )
             }
-            ClientFactRow(
-                label: "Last",
-                value: ClientJobCopy.lastRunWhen(
-                    session.lastRun(for: job)?.startedAt ?? job.lastRun
-                )
-            )
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)

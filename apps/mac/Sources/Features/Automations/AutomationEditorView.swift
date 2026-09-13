@@ -91,7 +91,10 @@ struct AutomationEditorView: View {
                                     ? max(320, geometry.size.height - 120)
                                     : max(160, geometry.size.height * 0.30),
                                 draftStatus: draftStatus,
-                                showValidation: !session.fields.name.isEmpty || !session.fields.prompt.isEmpty
+                                showValidation: !session.fields.name.isEmpty || !session.fields.prompt.isEmpty,
+                                hostName: hostName,
+                                timezone: session.schedulerTimezone,
+                                nextCaption: nextCaption
                             )
                             .disabled(!session.loaded || session.working || session.saved.pendingCreate)
                         }
@@ -115,6 +118,19 @@ struct AutomationEditorView: View {
     private var draftStatus: String {
         if session.persistedFields == session.fields { return "Draft kept on this device" }
         return "Saving draft on this device…"
+    }
+
+    private var nextCaption: String? {
+        if session.fields.scheduleKind == .once { return nil }
+        if session.isCreate || session.dirty {
+            return "The next run is set on the connected computer when you save."
+        }
+        let job = session.current ?? session.saved.baseline
+        if job?.enabled == false {
+            return "Paused. It will not fire on its own."
+        }
+        guard let next = job?.nextRun else { return nil }
+        return "Next \(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone))."
     }
 
     @ViewBuilder private var notices: some View {
@@ -174,9 +190,19 @@ struct AutomationEditorView: View {
             Text(session.saved.created?.schedule.summary ?? session.fields.builtSchedule.summary)
                 .font(Theme.callout)
                 .foregroundStyle(Theme.controlGlyph)
+            if let created = session.saved.created, created.enabled, let next = created.nextRun {
+                Text("Next \(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone)).")
+                    .font(Theme.callout)
+                    .foregroundStyle(Theme.controlGlyph)
+            }
             Text("It runs on \(hostName), in \(session.folderName).")
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
+            if let place = HostScheduleClock.place(session.schedulerTimezone) {
+                Text("Times are \(place) time.")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

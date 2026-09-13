@@ -3596,6 +3596,9 @@ struct RunRecord: Codable, Sendable, Identifiable {
 struct AutomationQueue: Codable, Sendable {
     var defaultBudgetSeconds: UInt64
     var maxConcurrent: UInt32
+    /// IANA name of the host scheduler clock. Nil on a host that does not
+    /// name it yet. Never the device zone.
+    var timezone: String? = nil
 }
 
 // MARK: - Workflows

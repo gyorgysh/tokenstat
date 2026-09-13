@@ -22,6 +22,7 @@ struct ClientAutomationWorkspace: View {
     @State private var editor: AutomationEditorRoute?
     @State private var pendingDelete: Automation?
     @Environment(\.dynamicTypeSize) private var typeSize
+    private let opensDetailWhenReady: Bool
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String) {
         self.peer = peer
@@ -36,6 +37,7 @@ struct ClientAutomationWorkspace: View {
                 folderName: folderName
             )
         )
+        opensDetailWhenReady = false
     }
 
     init(session: ClientAutomationSession, opensDetail: Bool = false) {
@@ -44,9 +46,8 @@ struct ClientAutomationWorkspace: View {
         hostName = session.hostName
         folderName = session.folderName
         _session = State(initialValue: session)
-        var initialNavigation = ClientJobNavigation()
-        if opensDetail { initialNavigation.openDetail() }
-        _navigation = State(initialValue: initialNavigation)
+        _navigation = State(initialValue: ClientJobNavigation())
+        opensDetailWhenReady = opensDetail
     }
 
     var body: some View {
@@ -109,7 +110,10 @@ struct ClientAutomationWorkspace: View {
         .onReceive(NotificationCenter.default.publisher(for: AutomationEditorSession.didChange)) { _ in
             Task { await session.load() }
         }
-        .task { await session.appeared() }
+        .task {
+            await session.appeared()
+            if opensDetailWhenReady { navigation.openDetail() }
+        }
         .onDisappear { session.disappeared() }
     }
 
@@ -287,7 +291,13 @@ struct ClientAutomationWorkspace: View {
         } label: {
             ClientJobRow(
                 title: job.name,
-                subtitle: job.schedule.summary,
+                subtitle: HostScheduleClock.listSubtitle(
+                    cadence: job.schedule.summary,
+                    next: job.nextRun,
+                    enabled: job.enabled,
+                    repeats: job.schedule.repeats,
+                    timezone: session.schedulerTimezone
+                ),
                 isLive: session.runs.contains { $0.jobId == job.id && $0.isRunning },
                 isEnabled: job.enabled,
                 cadence: job.schedule,
@@ -336,19 +346,26 @@ struct ClientAutomationWorkspace: View {
                     ClientFactRow(label: "Model", value: model)
                 }
                 ClientFactRow(label: "Schedule", value: job.schedule.summary)
-                ClientFactRow(label: "Budget", value: ClientJobCopy.budget(job.budgetSeconds))
-                if let next = job.nextRun, job.enabled {
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    ClientFactRow(label: "Budget", value: ClientJobCopy.budget(job.budgetSeconds))
+                    if let clock = HostScheduleClock.clock(session.schedulerTimezone) {
+                        ClientFactRow(label: "Time zone", value: clock)
+                    }
+                }
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    if let next = job.nextRun, job.enabled {
+                        ClientFactRow(
+                            label: "Next",
+                            value: HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone)
+                        )
+                    }
                     ClientFactRow(
-                        label: "Next",
-                        value: next.formatted(date: .abbreviated, time: .shortened)
+                        label: "Last",
+                        value: ClientJobCopy.lastRunWhen(
+                            session.lastRun(for: job)?.startedAt ?? job.lastRun
+                        )
                     )
                 }
-                ClientFactRow(
-                    label: "Last",
-                    value: ClientJobCopy.lastRunWhen(
-                        session.lastRun(for: job)?.startedAt ?? job.lastRun
-                    )
-                )
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -27,6 +27,9 @@ final class ClientWorkflowSession {
     private(set) var graphs: [WorkflowGraph] = []
     private(set) var runs: [WorkflowRunRecord] = []
     private(set) var loaded = false
+    /// IANA name of the connected computer's scheduler. Empty until queue
+    /// answers, and never this device's zone.
+    private(set) var schedulerTimezone: String = ""
     var errorMessage: String?
     private var inputs = ClientWorkflowInputs()
     var input: String {
@@ -117,10 +120,15 @@ final class ClientWorkflowSession {
         do {
             async let all = service.workflows(peer: peer)
             async let history = service.workflowRuns(peer: peer)
+            async let queue = service.automationQueue(peer: peer)
             let (freshItems, freshRuns) = try await (all, history)
+            let freshQueue = try? await queue
             guard generation == loadGeneration, !Task.isCancelled else { return }
             graphs = freshItems.filter { $0.workspaceID == workspaceID }
             runs = freshRuns.filter { $0.workspaceID == workspaceID }
+            if let timezone = HostScheduleClock.resolved(freshQueue?.timezone) {
+                schedulerTimezone = timezone
+            }
             errorMessage = nil
             if selectedGraphID == nil {
                 selectedGraphID = pinnedGraphID ?? graphs.first?.id

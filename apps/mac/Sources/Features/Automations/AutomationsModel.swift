@@ -47,6 +47,9 @@ final class AutomationsModel {
     private(set) var savedQueueBudgetMinutes = "180"
     private(set) var savedQueueNoLimit = false
     private(set) var savedQueueMaxConcurrent = "2"
+    /// IANA name of the host scheduler clock. Local Mac falls back to this
+    /// process because it is the host.
+    private(set) var schedulerTimezone: String = TimeZone.current.identifier
 
     var queueDirty: Bool {
         queueBudgetMinutes != savedQueueBudgetMinutes
@@ -366,6 +369,9 @@ final class AutomationsModel {
         savedQueueBudgetMinutes = queueBudgetMinutes
         savedQueueNoLimit = queueNoLimit
         savedQueueMaxConcurrent = queueMaxConcurrent
+        if let timezone = HostScheduleClock.resolved(queue.timezone) {
+            schedulerTimezone = timezone
+        }
     }
 
     func toggle(_ job: Automation) async {

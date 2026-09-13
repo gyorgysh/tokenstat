@@ -22,6 +22,9 @@ final class ClientAutomationSession {
     private(set) var jobs: [Automation] = []
     private(set) var runs: [RunRecord] = []
     private(set) var loaded = false
+    /// IANA name of the connected computer's scheduler. Empty until queue
+    /// answers, and never this device's zone.
+    private(set) var schedulerTimezone: String = ""
     var errorMessage: String?
     var working = false
 
@@ -113,10 +116,15 @@ final class ClientAutomationSession {
         do {
             async let all = service.automations(peer: peer)
             async let history = service.automationRuns(peer: peer)
+            async let queue = service.automationQueue(peer: peer)
             let (freshItems, freshRuns) = try await (all, history)
+            let freshQueue = try? await queue
             guard generation == loadGeneration, !Task.isCancelled else { return }
             jobs = freshItems.filter { $0.workspaceID == workspaceID }
             runs = freshRuns.filter { $0.workspaceID == workspaceID }
+            if let timezone = HostScheduleClock.resolved(freshQueue?.timezone) {
+                schedulerTimezone = timezone
+            }
             errorMessage = nil
             if selectedJobID == nil, pinnedRunID == nil {
                 selectedJobID = pinnedJobID ?? jobs.first?.id

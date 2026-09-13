@@ -741,6 +741,12 @@ private struct AutomationRow: View {
                 // A ring closing on the next fire, rather than a date the
                 // reader has to subtract today from.
                 NextRunBadge(start: model.lastRun(for: job)?.startedAt, end: next)
+                if let wall = HostScheduleClock.wallClock(next, timezone: model.schedulerTimezone) {
+                    Text(wall)
+                        .font(Theme.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
             // How the last dozen went, beside the job rather than in a shared
             // list at the bottom of the screen. Three red ticks in a row is the

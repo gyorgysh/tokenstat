@@ -94,11 +94,19 @@ struct ClientWorkflowDetailView: View {
                 ClientFactRow(label: "Schedule", value: graph.schedule.summary)
                 ClientFactRow(label: "Budget", value: ClientJobCopy.budget(graph.budgetSeconds))
             }
-            if let next = graph.nextRun, graph.enabled {
-                ClientFactRow(
-                    label: "Next",
-                    value: next.formatted(date: .abbreviated, time: .shortened)
-                )
+            if HostScheduleClock.clock(session.schedulerTimezone) != nil
+                || (graph.nextRun != nil && graph.enabled) {
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    if let clock = HostScheduleClock.clock(session.schedulerTimezone) {
+                        ClientFactRow(label: "Time zone", value: clock)
+                    }
+                    if let next = graph.nextRun, graph.enabled {
+                        ClientFactRow(
+                            label: "Next",
+                            value: HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone)
+                        )
+                    }
+                }
             }
             ClientFactRow(
                 label: "Last",

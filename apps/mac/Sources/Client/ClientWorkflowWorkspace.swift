@@ -20,6 +20,7 @@ struct ClientWorkflowWorkspace: View {
     @State private var search = ""
     @State private var navigation = ClientJobNavigation()
     @Environment(\.dynamicTypeSize) private var typeSize
+    private let opensDetailWhenReady: Bool
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String) {
         self.peer = peer
@@ -34,6 +35,7 @@ struct ClientWorkflowWorkspace: View {
                 folderName: folderName
             )
         )
+        opensDetailWhenReady = false
     }
 
     init(session: ClientWorkflowSession, opensDetail: Bool = false) {
@@ -42,9 +44,8 @@ struct ClientWorkflowWorkspace: View {
         hostName = session.hostName
         folderName = session.folderName
         _session = State(initialValue: session)
-        var initialNavigation = ClientJobNavigation()
-        if opensDetail { initialNavigation.openDetail() }
-        _navigation = State(initialValue: initialNavigation)
+        _navigation = State(initialValue: ClientJobNavigation())
+        opensDetailWhenReady = opensDetail
     }
 
     var body: some View {
@@ -64,7 +65,10 @@ struct ClientWorkflowWorkspace: View {
         .background(Theme.background)
         .navigationTitle("Workflows")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await session.appeared() }
+        .task {
+            await session.appeared()
+            if opensDetailWhenReady { navigation.openDetail() }
+        }
         .onDisappear { session.disappeared() }
         .onChange(of: session.input) { _, _ in navigation.openDetail() }
     }

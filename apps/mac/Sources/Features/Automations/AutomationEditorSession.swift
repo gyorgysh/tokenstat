@@ -32,6 +32,8 @@ final class AutomationEditorSession {
     private(set) var errorMessage: String?
     private(set) var noticeMessage: String?
     private(set) var backends: [AgentBackend] = []
+    /// IANA name of the host scheduler clock. Empty until queue answers.
+    private(set) var schedulerTimezone: String = ""
     private(set) var otherDraft: WorkbenchDraftFile<SavedAutomationDraft>.Record?
     private(set) var persistedFields: AutomationEditorDraft?
     private let service: any AutomationEditorService
@@ -89,6 +91,7 @@ final class AutomationEditorSession {
         if loaded {
             await refresh()
             await loadOptions()
+            await loadQueue()
             return
         }
         guard !working else { return }
@@ -109,9 +112,7 @@ final class AutomationEditorSession {
             return
         }
         await loadOptions()
-        if isCreate, !appliedDefaultBudget {
-            await applyQueueDefault()
-        }
+        await loadQueue()
         lockFolderIfNeeded()
         await readCurrent()
         if isCreate, fields.backend.isEmpty, let agent = defaultBackend() {
@@ -187,7 +188,11 @@ final class AutomationEditorSession {
             fields = AutomationEditorDraft(created)
             restoring = false
             errorMessage = nil
-            noticeMessage = "\(created.name) will run \(created.schedule.summary)."
+            if let place = HostScheduleClock.place(schedulerTimezone) {
+                noticeMessage = "\(created.name) will run \(created.schedule.summary) in \(place)."
+            } else {
+                noticeMessage = "\(created.name) will run \(created.schedule.summary)."
+            }
             _ = await persist()
             NotificationCenter.default.post(name: Self.didChange, object: target)
         } catch {
@@ -293,19 +298,24 @@ final class AutomationEditorSession {
         }
     }
 
-    private func applyQueueDefault() async {
+    private func loadQueue() async {
         do {
             let queue = try await service.automationQueue()
-            restoring = true
-            fields.noTimeLimit = queue.defaultBudgetSeconds == 0
-            if queue.defaultBudgetSeconds > 0 {
-                fields.budgetMinutes = String(max(1, queue.defaultBudgetSeconds / 60))
+            if let timezone = HostScheduleClock.resolved(queue.timezone) {
+                schedulerTimezone = timezone
             }
-            restoring = false
-            appliedDefaultBudget = true
-            _ = await persist()
+            if isCreate, !appliedDefaultBudget {
+                restoring = true
+                fields.noTimeLimit = queue.defaultBudgetSeconds == 0
+                if queue.defaultBudgetSeconds > 0 {
+                    fields.budgetMinutes = String(max(1, queue.defaultBudgetSeconds / 60))
+                }
+                restoring = false
+                appliedDefaultBudget = true
+                _ = await persist()
+            }
         } catch {
-            appliedDefaultBudget = true
+            if isCreate { appliedDefaultBudget = true }
         }
     }
 
