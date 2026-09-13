@@ -60,6 +60,9 @@ struct IOSCodeTextView: UIViewRepresentable {
         private weak var view: UITextView?
         private var find: EditorFindSession?
         private var appliedFindRevision = -1
+        private var gutter: IOSGutterView?
+        private var gutterWidth: CGFloat = 0
+        private var gutterStarts: [Int] = [0]
 
         init(document: EditorDocument) {
             self.document = document
@@ -75,6 +78,59 @@ struct IOSCodeTextView: UIViewRepresentable {
                 guard let view = self?.view else { return }
                 self?.perform(action, in: view)
             }
+            if gutter == nil {
+                let gutter = IOSGutterView()
+                gutter.textView = view
+                view.addSubview(gutter)
+                self.gutter = gutter
+                view.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UITraitEnvironment, _: UITraitCollection) in
+                    self?.gutter?.setNeedsDisplay()
+                }
+            }
+            layoutGutter(beside: view)
+        }
+
+        /// The gutter floats over the leading inset, so the text view keeps
+        /// its own scrolling, selection and keyboard behavior untouched.
+        private func layoutGutter(beside view: UITextView) {
+            let text = view.text as NSString
+            gutterStarts = EditorGutterMap.lineStarts(in: text)
+            let digitAdvance = ("8" as NSString).size(withAttributes: [.font: Self.editorFont]).width
+            let width = EditorGutterMap.width(
+                digitAdvance: digitAdvance,
+                lineCount: max(1, gutterStarts.count)
+            )
+            if width != gutterWidth {
+                gutterWidth = width
+                var inset = view.textContainerInset
+                inset.left = width + 8
+                view.textContainerInset = inset
+            }
+            gutter?.font = Self.editorFont
+            gutter?.frame = CGRect(
+                x: 0,
+                y: view.contentOffset.y,
+                width: width,
+                height: view.bounds.height
+            )
+            refreshGutterState(beside: view)
+        }
+
+        private func refreshGutterState(beside view: UITextView) {
+            gutter?.lineStarts = gutterStarts
+            gutter?.lineCount = max(1, gutterStarts.count)
+            gutter?.changedLines = document.changedLines
+            gutter?.currentLine = EditorGutterMap.paragraph(
+                for: min(max(view.selectedRange.location, 0), max((view.text as NSString).length - 1, 0)),
+                lineStarts: gutterStarts
+            )
+            gutter?.setNeedsDisplay()
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            guard let view = view, scrollView === view else { return }
+            gutter?.frame.origin.y = view.contentOffset.y
+            gutter?.setNeedsDisplay()
         }
 
         func sync(_ next: EditorDocument, into view: UITextView) {
@@ -93,10 +149,12 @@ struct IOSCodeTextView: UIViewRepresentable {
                 )
                 find?.refresh(text: next.text)
                 applyFindHighlights(to: view, force: true)
+                layoutGutter(beside: view)
                 return
             }
             guard next.spansVersion != appliedSpans else {
                 applyFindHighlights(to: view, force: false)
+                refreshGutterState(beside: view)
                 return
             }
             // Not while an input method is composing. Marked text is a live
@@ -117,6 +175,7 @@ struct IOSCodeTextView: UIViewRepresentable {
             appliedSpans = next.spansVersion
             view.selectedRange = selection
             applyFindHighlights(to: view, force: false)
+            refreshGutterState(beside: view)
         }
 
         /// Match backgrounds over the buffer. Foreground colours belong to
@@ -229,6 +288,7 @@ struct IOSCodeTextView: UIViewRepresentable {
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard !applying else { return }
             document.selection = textView.selectedRange
+            refreshGutterState(beside: textView)
         }
 
         private func attributedText(_ document: EditorDocument) -> NSAttributedString {

@@ -906,6 +906,7 @@ struct ClientFileEditor: View {
                 }
                 IOSCodeTextView(document: document, find: find)
                     .background(Theme.background)
+                    .editorChangedLines(peer: peer, workspace: workspace, document: document)
             }
             .navigationTitle((path as NSString).lastPathComponent)
             .navigationBarTitleDisplayMode(.inline)

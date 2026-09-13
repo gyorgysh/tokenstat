@@ -108,6 +108,7 @@ struct ClientFileTabs<Files: View>: View {
                 EditorFindBar(find: find)
             }
             IOSCodeTextView(document: tab.document, find: find)
+                .editorChangedLines(peer: peer, workspace: workspace, document: tab.document)
             if let error = tab.errorMessage {
                 ClientErrorCard(message: error) { Task { await editors.save(tab) } }
                     .padding(Theme.Space.s)
