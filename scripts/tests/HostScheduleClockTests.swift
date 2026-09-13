@@ -54,6 +54,16 @@ import Foundation
                 == "This time is on Studio, not this device.",
             "picker caption without a zone"
         )
+        check(
+            HostScheduleClock.timesCaption(hostName: "Studio", timezone: "America/New_York")
+                == "Times are on Studio (New York).",
+            "history caption names the computer"
+        )
+        check(
+            HostScheduleClock.timesCaption(hostName: "", timezone: nil)
+                == "Times are on the connected computer, not this device.",
+            "history caption without a host or zone"
+        )
 
         let list = HostScheduleClock.listSubtitle(
             cadence: "daily at 9:00",

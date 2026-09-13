@@ -241,6 +241,9 @@ struct ClientPastRunRow: View {
     let status: String
     let label: String
     let started: Date
+    var timezone: String = ""
+    var isSelected: Bool = false
+    var showsChevron: Bool = false
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -249,17 +252,70 @@ struct ClientPastRunRow: View {
                 .frame(width: 8, height: 8)
             Text(title)
                 .font(ClientType.label.weight(.medium))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
             Spacer(minLength: 0)
             StatusPill(status: status, text: label)
-            Text(started.formatted(date: .omitted, time: .shortened))
+            Text(when)
                 .font(ClientType.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.controlGlyph)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(Theme.caption.weight(.semibold))
+                    .foregroundStyle(Theme.controlGlyph)
+            }
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, minHeight: 44)
-        .cardSurface()
+        .background(
+            isSelected ? Theme.rowSelected : Theme.panel,
+            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(isSelected ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1)
+        }
         .contentShape(.rect)
+        .accessibilityLabel("\(title), \(label), \(when)")
+    }
+
+    private var when: String {
+        HostScheduleClock.wallClock(started, timezone: timezone)
+            ?? started.formatted(date: .omitted, time: .shortened)
+    }
+}
+
+/// Opens the complete run history from a short preview.
+struct ClientAllRunsRow: View {
+    let count: Int
+    var showsChevron: Bool = true
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            Image(systemName: ActionIcon.history.symbol)
+                .font(Theme.callout.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 22, height: 22)
+            Text(count == 1 ? "All runs" : "All \(count) runs")
+                .font(ClientType.label.weight(.medium))
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(Theme.caption.weight(.semibold))
+                    .foregroundStyle(Theme.controlGlyph)
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        }
+        .contentShape(.rect)
+        .accessibilityLabel(count == 1 ? "All runs" : "All \(count) runs")
+        .accessibilityHint("Opens every retained run for this job")
     }
 }
 

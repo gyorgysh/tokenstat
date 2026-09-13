@@ -27,6 +27,13 @@ struct ClientAutomationRunView: View {
                 }
                 if let run {
                     header(run)
+                    if let live = session.liveRun, live.id != run.id {
+                        Text("A run is going. This is an earlier one.")
+                            .font(ClientType.caption)
+                            .foregroundStyle(Theme.controlGlyph)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, Theme.Space.m)
+                    }
                     ClientAutomationActions(session: session, pinnedRunID: runID)
                         .padding(Theme.Space.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -66,7 +73,10 @@ struct ClientAutomationRunView: View {
             HStack {
                 StatusPill(status: run.status, text: run.endedLabel)
                 Spacer()
-                Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
+                Text(
+                    HostScheduleClock.wallClock(run.startedAt, timezone: session.schedulerTimezone)
+                        ?? run.startedAt.formatted(date: .abbreviated, time: .shortened)
+                )
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             }

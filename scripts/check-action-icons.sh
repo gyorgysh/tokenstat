@@ -181,6 +181,13 @@ ALLOWED = [
     ("Client/ClientWorkflowWorkspace.swift", "session.selectRun"),
     ("Client/ClientAutomationWorkspace.swift", "session.selectJob"),
     ("Client/ClientAutomationWorkspace.swift", "session.selectRun"),
+    # Whole-surface rows into a job's complete run history. The history mark
+    # already leads the All-runs row; a second glyph on the Button would
+    # duplicate it.
+    ("Client/ClientAutomationWorkspace.swift", "showingHistory = true"),
+    # The same run rows in the history destination: the status dot is the
+    # mark, like the preview rows above.
+    ("Client/ClientAutomationHistoryView.swift", "session.selectRun(run)"),
     ("Client/ClientWorkflowRunView.swift", "session.selectNode"),
     ("App/RootView.swift", "Button(action: toggle) {"),
     ("Client/ClientWorkspacesView.swift", "model.openSession(session)"),

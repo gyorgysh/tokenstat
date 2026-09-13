@@ -68,17 +68,12 @@ enum HostScheduleClock {
     }
 
     static func timeCaption(hostName: String, timezone: String?) -> String {
-        let host = hostName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let place = place(timezone) {
-            if host.isEmpty {
-                return "This time is on the connected computer (\(place))."
-            }
-            return "This time is on \(host) (\(place))."
-        }
-        if host.isEmpty {
-            return "This time is on the connected computer, not this device."
-        }
-        return "This time is on \(host), not this device."
+        clockOwnership(hostName: hostName, timezone: timezone, subject: "This time is")
+    }
+
+    /// Same ownership sentence for a list of run times.
+    static func timesCaption(hostName: String, timezone: String?) -> String {
+        clockOwnership(hostName: hostName, timezone: timezone, subject: "Times are")
     }
 
     static func listSubtitle(
@@ -95,6 +90,20 @@ enum HostScheduleClock {
             return "\(cadence) · \(day), \(place)"
         }
         return "\(cadence) · \(day)"
+    }
+
+    private static func clockOwnership(hostName: String, timezone: String?, subject: String) -> String {
+        let host = hostName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let place = place(timezone) {
+            if host.isEmpty {
+                return "\(subject) on the connected computer (\(place))."
+            }
+            return "\(subject) on \(host) (\(place))."
+        }
+        if host.isEmpty {
+            return "\(subject) on the connected computer, not this device."
+        }
+        return "\(subject) on \(host), not this device."
     }
 
     private static let months = [

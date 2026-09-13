@@ -186,13 +186,24 @@ struct ClientAutomationDetailView: View {
 
     @ViewBuilder
     private func runs(of job: Automation) -> some View {
-        let history = session.runs(of: job).prefix(6)
+        let all = session.runs(of: job)
+        let history = AutomationRunHistory.preview(
+            all, id: \.id, startedAtMs: \.startedAtMs, isLive: \.isRunning
+        )
         if !history.isEmpty {
             Text("Recent runs")
                 .font(ClientType.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
                 .padding(.top, Theme.Space.xs)
-            ForEach(Array(history)) { run in
+            if AutomationRunHistory.showsAllRuns(all.count) {
+                NavigationLink {
+                    ClientAutomationHistoryView(session: session, jobID: job.id)
+                } label: {
+                    ClientAllRunsRow(count: all.count)
+                }
+                .buttonStyle(.plain)
+            }
+            ForEach(history) { run in
                 NavigationLink {
                     ClientAutomationRunView(session: session, runID: run.id)
                 } label: {
@@ -200,7 +211,9 @@ struct ClientAutomationDetailView: View {
                         title: run.name,
                         status: run.status,
                         label: run.endedLabel,
-                        started: run.startedAt
+                        started: run.startedAt,
+                        timezone: session.schedulerTimezone,
+                        showsChevron: true
                     )
                 }
                 .buttonStyle(.plain)

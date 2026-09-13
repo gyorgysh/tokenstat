@@ -79,16 +79,22 @@ final class ClientAutomationSession {
         if let selectedRunID, let run = runs.first(where: { $0.id == selectedRunID && $0.isRunning }) {
             return run
         }
-        guard let id = selectedJob?.id else { return nil }
-        return runs.first { $0.jobId == id && $0.isRunning }
+        guard let latest = lastRun(for: selectedJob), latest.isRunning else { return nil }
+        return latest
     }
 
     func lastRun(for job: Automation?) -> RunRecord? {
         guard let job else { return nil }
-        if let id = job.lastRunID, let run = runs.first(where: { $0.id == id }) {
-            return run
+        let jobRuns = runs.filter { $0.jobId == job.id }
+        if let latest = AutomationRunHistory.latest(
+            jobRuns, id: \.id, startedAtMs: \.startedAtMs, isLive: \.isRunning
+        ) {
+            return latest
         }
-        return runs.first { $0.jobId == job.id }
+        if let id = job.lastRunID {
+            return runs.first { $0.id == id }
+        }
+        return nil
     }
 
     func runs(of job: Automation) -> [RunRecord] {

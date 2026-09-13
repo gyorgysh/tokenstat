@@ -21,6 +21,7 @@ struct ClientAutomationWorkspace: View {
     @State private var navigation = ClientJobNavigation()
     @State private var editor: AutomationEditorRoute?
     @State private var showingQueue = false
+    @State private var showingHistory = false
     @State private var pendingDelete: Automation?
     @Environment(\.dynamicTypeSize) private var typeSize
     private let opensDetailWhenReady: Bool
@@ -101,6 +102,14 @@ struct ClientAutomationWorkspace: View {
             }
             .modifier(QueueSheetPresentation())
         }
+        .sheet(isPresented: $showingHistory) {
+            if let job = session.selectedJob {
+                ClientAutomationHistorySheet(session: session, jobID: job.id) { run in
+                    session.selectRun(run)
+                }
+                .modifier(HistorySheetPresentation())
+            }
+        }
         .confirmationDialog(
             "Delete \(pendingDelete?.name ?? "this job")?",
             isPresented: Binding(
@@ -131,6 +140,9 @@ struct ClientAutomationWorkspace: View {
             #if WORKBENCH_QA
             if ProcessInfo.processInfo.environment["WORKBENCH_QUEUE"] == "1" {
                 showingQueue = true
+            }
+            if ProcessInfo.processInfo.environment["WORKBENCH_HISTORY"] == "1" {
+                showingHistory = true
             }
             #endif
         }
@@ -424,13 +436,24 @@ struct ClientAutomationWorkspace: View {
                 )
             }
             if let job = session.selectedJob {
-                let history = session.runs(of: job).prefix(5)
+                let all = session.runs(of: job)
+                let history = AutomationRunHistory.preview(
+                    all, id: \.id, startedAtMs: \.startedAtMs, isLive: \.isRunning
+                )
                 if !history.isEmpty {
                     Text("Recent runs")
                         .font(ClientType.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                         .padding(.top, Theme.Space.xs)
-                    ForEach(Array(history)) { run in
+                    if AutomationRunHistory.showsAllRuns(all.count) {
+                        Button {
+                            showingHistory = true
+                        } label: {
+                            ClientAllRunsRow(count: all.count)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    ForEach(history) { run in
                         Button {
                             session.selectRun(run)
                             navigation.openDetail()
@@ -439,7 +462,9 @@ struct ClientAutomationWorkspace: View {
                                 title: run.name,
                                 status: run.status,
                                 label: run.endedLabel,
-                                started: run.startedAt
+                                started: run.startedAt,
+                                timezone: session.schedulerTimezone,
+                                isSelected: session.selectedRunID == run.id
                             )
                         }
                         .buttonStyle(.plain)
