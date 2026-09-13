@@ -37,6 +37,8 @@ final class AutomationsModel {
 
     var errorMessage: String?
     var noticeMessage: String?
+    private var pendingCreate: (operationID: String, job: Automation)?
+    private var pendingLaunches: [String: String] = [:]
 
     /// Scheduler settings, edited on the Automations screen.
     var queueBudgetMinutes = "180"
@@ -321,12 +323,38 @@ final class AutomationsModel {
             schedule: schedule, budgetSeconds: budget, enabled: true,
             lastRunAtMs: nil, nextRunAtMs: nil, lastRunID: nil
         )
+        if Self.isAutoCommitName(trimmed) {
+            do {
+                _ = try await Bridge.createAutomation(job)
+                showNotice("\(trimmed) will run \(scheduleSummary(schedule)).")
+                errorMessage = nil
+                await load()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            return
+        }
+        if let pending = pendingCreate, !Self.sameCreateRequest(pending.job, job) {
+            errorMessage = "A new job was sent and is not confirmed yet. Check creation before making another."
+            return
+        }
         do {
-            _ = try await Bridge.createAutomation(job)
-            showNotice("\(trimmed) will run \(scheduleSummary(schedule)).")
-            errorMessage = nil
-            await load()
+            let operationID: String
+            if let pending = pendingCreate, Self.sameCreateRequest(pending.job, job) {
+                operationID = pending.operationID
+            } else {
+                operationID = "automation-create-\(UUID().uuidString)"
+                pendingCreate = (operationID, job)
+            }
+            let outcome = try await Bridge.createAutomationOnce(job, operationID: operationID)
+            await confirmCreate(outcome, name: trimmed, schedule: schedule)
         } catch {
+            if let operationID = pendingCreate?.operationID,
+               let outcome = try? await Bridge.automationCreationReceipt(operationID: operationID)
+            {
+                await confirmCreate(outcome, name: trimmed, schedule: schedule)
+                return
+            }
             errorMessage = error.localizedDescription
         }
     }
@@ -385,7 +413,7 @@ final class AutomationsModel {
 
     func update(_ job: Automation, announce: Bool = true) async {
         do {
-            _ = try await Bridge.updateAutomation(job)
+            _ = try await Bridge.editAutomation(job, expectedRevision: job.revision)
             if announce {
                 showNotice("Saved \(job.name).")
             }
@@ -393,19 +421,72 @@ final class AutomationsModel {
             await load()
         } catch {
             errorMessage = error.localizedDescription
+            await load()
         }
     }
 
-    func run(_ job: Automation) async {
+    var hasUnconfirmedCreate: Bool { pendingCreate != nil }
+    var unconfirmedCreate: Automation? { pendingCreate?.job }
+
+    func checkCreate() async {
+        guard let pending = pendingCreate else { return }
         do {
-            let updated = try await Bridge.runAutomation(job.id)
-            showNotice("Started \(job.name).")
-            errorMessage = nil
-            await load()
-            if let id = updated.lastRunID, let run = runs.first(where: { $0.id == id }) {
-                selectRun(run)
-            } else if let last = lastRun(for: updated) ?? lastRun(for: job) {
-                selectRun(last)
+            if let outcome = try await Bridge.automationCreationReceipt(operationID: pending.operationID) {
+                await confirmCreate(outcome, name: pending.job.name, schedule: pending.job.schedule)
+            } else {
+                errorMessage = nil
+                showNotice("The computer has no creation receipt yet. Retry creation uses the same request.")
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func retryCreate() async {
+        guard let pending = pendingCreate else { return }
+        do {
+            let outcome = try await Bridge.createAutomationOnce(pending.job, operationID: pending.operationID)
+            await confirmCreate(outcome, name: pending.job.name, schedule: pending.job.schedule)
+        } catch {
+            if let outcome = try? await Bridge.automationCreationReceipt(operationID: pending.operationID) {
+                await confirmCreate(outcome, name: pending.job.name, schedule: pending.job.schedule)
+                return
+            }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func hasUnconfirmedLaunch(_ jobID: String) -> Bool {
+        pendingLaunches[jobID] != nil
+    }
+
+    static func isConcurrentEdit(_ message: String?) -> Bool {
+        message?.contains("This job changed since you opened it") == true
+    }
+
+    func run(_ job: Automation) async {
+        let operationID = pendingLaunches[job.id] ?? "automation-run-\(UUID().uuidString)"
+        pendingLaunches[job.id] = operationID
+        do {
+            let outcome = try await Bridge.runAutomationOnce(id: job.id, operationID: operationID)
+            await confirmRun(outcome, job: job)
+        } catch {
+            if let outcome = try? await Bridge.automationRunReceipt(operationID: operationID) {
+                await confirmRun(outcome, job: job)
+                return
+            }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func checkLaunch(_ job: Automation) async {
+        guard let operationID = pendingLaunches[job.id] else { return }
+        do {
+            if let outcome = try await Bridge.automationRunReceipt(operationID: operationID) {
+                await confirmRun(outcome, job: job)
+            } else {
+                errorMessage = nil
+                showNotice("The computer has no run receipt yet. Retry run uses the same request.")
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -472,6 +553,52 @@ final class AutomationsModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func confirmCreate(
+        _ outcome: AutomationCreationOutcome,
+        name: String,
+        schedule: AutomationSchedule
+    ) async {
+        pendingCreate = nil
+        showNotice("\(name) will run \(scheduleSummary(schedule)).")
+        errorMessage = nil
+        await load()
+        if let created = outcome.job {
+            selectJob(created.id)
+        } else if !outcome.jobID.isEmpty {
+            selectJob(outcome.jobID)
+        }
+    }
+
+    private func confirmRun(_ outcome: AutomationRunOutcome, job: Automation) async {
+        pendingLaunches[job.id] = nil
+        showNotice("Started \(job.name).")
+        errorMessage = nil
+        await load()
+        if let run = outcome.run, runs.contains(where: { $0.id == run.id }) {
+            selectRun(run)
+        } else if !outcome.runID.isEmpty, let run = runs.first(where: { $0.id == outcome.runID }) {
+            selectRun(run)
+        } else if let updated = outcome.job {
+            if let id = updated.lastRunID, let run = runs.first(where: { $0.id == id }) {
+                selectRun(run)
+            } else if let last = lastRun(for: updated) ?? lastRun(for: job) {
+                selectRun(last)
+            }
+        }
+    }
+
+    private static func sameCreateRequest(_ left: Automation, _ right: Automation) -> Bool {
+        left.name == right.name
+            && left.backend == right.backend
+            && left.model == right.model
+            && left.effort == right.effort
+            && left.workspaceID == right.workspaceID
+            && left.prompt == right.prompt
+            && left.schedule == right.schedule
+            && left.budgetSeconds == right.budgetSeconds
+            && left.enabled == right.enabled
     }
 
     static func autoCommitPrompt(workspaceName: String) -> String {

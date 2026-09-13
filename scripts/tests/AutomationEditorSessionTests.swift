@@ -34,17 +34,31 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
     var lastRunAtMs: Int64?
     var nextRunAtMs: Int64?
     var lastRunID: String?
+    var revision: UInt64 = 0
     init(
         id: String, name: String, backend: String, model: String? = nil, effort: String? = nil,
         workspaceID: String, prompt: String, schedule: AutomationSchedule, budgetSeconds: UInt64,
-        enabled: Bool, lastRunAtMs: Int64? = nil, nextRunAtMs: Int64? = nil, lastRunID: String? = nil
+        enabled: Bool, lastRunAtMs: Int64? = nil, nextRunAtMs: Int64? = nil, lastRunID: String? = nil,
+        revision: UInt64 = 0
     ) {
         self.id = id; self.name = name; self.backend = backend; self.model = model; self.effort = effort
         self.workspaceID = workspaceID; self.prompt = prompt; self.schedule = schedule
         self.budgetSeconds = budgetSeconds; self.enabled = enabled
         self.lastRunAtMs = lastRunAtMs; self.nextRunAtMs = nextRunAtMs; self.lastRunID = lastRunID
+        self.revision = revision
     }
     var payload: [String: Any] { [:] }
+}
+struct AutomationCreationOutcome: Codable, Equatable, Sendable {
+    var operationID: String
+    var jobID: String
+    var createdAtMs: Int64
+    var job: Automation?
+}
+struct RunRecord: Codable, Sendable {
+    var id = ""
+    var jobId = ""
+    var isRunning = false
 }
 
 struct AgentBackend: Codable, Sendable {
@@ -81,6 +95,10 @@ enum Bridge {
     static func onPeer<T: Decodable & Sendable>(_ peer: String, _ method: String, _ params: [String: Any], as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
     static func localTaskEditor<T: Decodable & Sendable>(_ method: String, _ params: [String: Any], as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
 }
+enum RemoteHostFeature {
+    case automationReceipts
+    func isSupported(peer: String?) async -> Bool { true }
+}
 @MainActor final class WorkSessionContext {
     static let shared = WorkSessionContext()
     var scope: WorkReference.Scope?
@@ -93,13 +111,21 @@ actor FixtureAutomations: AutomationEditorService {
     var queue = AutomationQueue(defaultBudgetSeconds: 121, timezone: "America/New_York")
     var creates = 0
     var updates = 0
+    var edits = 0
+    var createOnceCalls = 0
     var loseCreateReply = false
+    var loseCreateBefore = false
     var failCreateBeforeAcceptance = false
+    var receiptsEnabled = false
+    var running: [String] = []
+    var creations: [String: AutomationCreationOutcome] = [:]
+    func supportsReceipts() async -> Bool { receiptsEnabled }
     func createAutomation(_ job: Automation) async throws -> Automation {
         if failCreateBeforeAcceptance { throw FixtureError.invalid("an automation needs a name") }
         creates += 1
         var created = job
         if created.id.isEmpty { created.id = "job-\(creates)" }
+        if created.revision == 0 { created.revision = 1 }
         if let index = jobs.firstIndex(where: { $0.id == created.id }) {
             jobs[index] = created
         } else {
@@ -108,12 +134,58 @@ actor FixtureAutomations: AutomationEditorService {
         if loseCreateReply { throw FixtureError.disconnected }
         return created
     }
+    func createAutomationOnce(_ job: Automation, operationID: String) async throws -> AutomationCreationOutcome {
+        if failCreateBeforeAcceptance { throw FixtureError.invalid("an automation needs a name") }
+        if loseCreateBefore { throw FixtureError.disconnected }
+        if let existing = creations[operationID] {
+            if loseCreateReply { throw FixtureError.disconnected }
+            return existing
+        }
+        createOnceCalls += 1
+        var created = job
+        if created.id.isEmpty { created.id = "job-once-\(createOnceCalls)" }
+        if created.revision == 0 { created.revision = 1 }
+        if let index = jobs.firstIndex(where: { $0.id == created.id }) {
+            jobs[index] = created
+        } else {
+            jobs.append(created)
+        }
+        let outcome = AutomationCreationOutcome(
+            operationID: operationID, jobID: created.id, createdAtMs: 1, job: created
+        )
+        creations[operationID] = outcome
+        if loseCreateReply { throw FixtureError.disconnected }
+        return outcome
+    }
+    func automationCreationReceipt(operationID: String) async throws -> AutomationCreationOutcome? {
+        creations[operationID]
+    }
     func updateAutomation(_ job: Automation) async throws -> Automation {
         updates += 1
         guard let index = jobs.firstIndex(where: { $0.id == job.id }) else { throw FixtureError.conflict }
         jobs[index] = job
         return job
     }
+    func editAutomation(_ job: Automation, revision: UInt64) async throws -> Automation {
+        edits += 1
+        guard var current = jobs.first(where: { $0.id == job.id }) else { throw FixtureError.conflict }
+        guard current.revision == revision else { throw FixtureError.conflict }
+        current.name = job.name
+        current.prompt = job.prompt
+        current.backend = job.backend
+        current.model = job.model
+        current.effort = job.effort
+        current.workspaceID = job.workspaceID
+        current.schedule = job.schedule
+        current.budgetSeconds = job.budgetSeconds
+        current.enabled = job.enabled
+        current.revision = revision + 1
+        if let index = jobs.firstIndex(where: { $0.id == job.id }) {
+            jobs[index] = current
+        }
+        return current
+    }
+    func runningJobIDs() async throws -> [String] { running }
     func removeAutomation(id: String) async throws {
         jobs.removeAll { $0.id == id }
     }
@@ -121,9 +193,17 @@ actor FixtureAutomations: AutomationEditorService {
     func automations() async throws -> [Automation] { jobs }
     func automationBackends() async throws -> [AgentBackend] { backends }
     func automationQueue() async throws -> AutomationQueue { queue }
-    func setCreateFailure(before: Bool = false, after: Bool = false) {
+    func setCreateFailure(before: Bool = false, after: Bool = false, uncertainBefore: Bool = false) {
         failCreateBeforeAcceptance = before
         loseCreateReply = after
+        loseCreateBefore = uncertainBefore
+    }
+    func setReceipts(_ value: Bool) { receiptsEnabled = value }
+    func setRunning(_ ids: [String]) { running = ids }
+    func changePrompt(_ id: String, _ prompt: String) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        jobs[index].prompt = prompt
+        jobs[index].revision += 1
     }
     func seed(_ job: Automation) { jobs.append(job) }
     func delete(_ id: String) { jobs.removeAll { $0.id == id } }
@@ -348,6 +428,111 @@ actor FixtureAutomations: AutomationEditorService {
         check(recovered.saved.created == nil, "finish clears the create draft")
         check(recovered.isCreate, "finish leaves a blank create")
         check(recovered.fields.name.isEmpty, "finish does not keep the old name")
+
+        let receipts = FixtureAutomations()
+        await receipts.setReceipts(true)
+        let receiptDir = directory.appendingPathComponent("receipts")
+        try FileManager.default.createDirectory(at: receiptDir, withIntermediateDirectories: true)
+        let receiptCreate = AutomationEditorSession(
+            target: AutomationEditorTarget(peer: "computer"),
+            workspaceID: "folder",
+            folderName: "Website",
+            existing: nil,
+            lockedFolder: true,
+            scope: .local(installationID: "fixture"),
+            hostIdentity: "receipts",
+            service: receipts,
+            draftDirectory: receiptDir
+        )
+        await receiptCreate.load()
+        check(receiptCreate.supportsReceipts, "protocol 21 is available")
+        receiptCreate.fields.name = "Durable nightly"
+        receiptCreate.fields.prompt = "Read the tree once."
+        await receipts.setCreateFailure(after: true)
+        await receiptCreate.create()
+        check(await receipts.createOnceCalls == 1, "createOnce reached the host")
+        check(receiptCreate.saved.created?.name == "Durable nightly", "a lost reply recovers the receipt")
+        check(receiptCreate.creating == false, "recovered create is not pending")
+
+        let pendingDir = directory.appendingPathComponent("pending-create")
+        try FileManager.default.createDirectory(at: pendingDir, withIntermediateDirectories: true)
+        let pendingCreate = AutomationEditorSession(
+            target: AutomationEditorTarget(peer: "computer"),
+            workspaceID: "folder",
+            folderName: "Website",
+            existing: nil,
+            lockedFolder: true,
+            scope: .local(installationID: "fixture"),
+            hostIdentity: "pending-create",
+            service: receipts,
+            draftDirectory: pendingDir
+        )
+        await pendingCreate.load()
+        pendingCreate.fields.name = "Retry nightly"
+        pendingCreate.fields.prompt = "Retry the same creation."
+        await receipts.setCreateFailure(uncertainBefore: true)
+        await pendingCreate.create()
+        check(await receipts.createOnceCalls == 1, "uncertain createOnce did not store a job")
+        check(pendingCreate.creating, "lost createOnce stays pending")
+        check(pendingCreate.canRetryCreate, "lost createOnce can retry the same id")
+        check(pendingCreate.canCreate == false, "create stays off after a lost receipt")
+        await pendingCreate.create()
+        check(await receipts.createOnceCalls == 1, "pending create is not retried automatically")
+        await receipts.setCreateFailure()
+        await pendingCreate.retryCreate()
+        check(await receipts.createOnceCalls == 2, "retry uses the original creation")
+        check(pendingCreate.saved.created?.name == "Retry nightly", "retry createOnce stores the job")
+        check(pendingCreate.creating == false, "retry clears pending create")
+
+        let live = Automation(
+            id: "live", name: "Live job", backend: "codex", workspaceID: "folder",
+            prompt: "Original prompt", schedule: AutomationSchedule(kind: .daily, hour: 9),
+            budgetSeconds: 1800, enabled: true, revision: 1
+        )
+        await receipts.seed(live)
+        await receipts.setRunning(["live"])
+        let liveDir = directory.appendingPathComponent("live")
+        try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+        let liveEditor = AutomationEditorSession(
+            target: AutomationEditorTarget(peer: "computer"),
+            workspaceID: "folder",
+            folderName: "Website",
+            existing: live,
+            lockedFolder: true,
+            scope: .local(installationID: "fixture"),
+            hostIdentity: "live",
+            service: receipts,
+            draftDirectory: liveDir
+        )
+        await liveEditor.load()
+        check(liveEditor.liveRun, "a live run is visible in the editor")
+        liveEditor.fields.prompt = "Next run prompt"
+        await liveEditor.save()
+        check(await receipts.edits == 1, "live save uses edit")
+        check(liveEditor.saved.baseline?.prompt == "Next run prompt", "saved prompt is for the next run")
+        check(liveEditor.saved.baseline?.revision == 2, "edit advances revision")
+
+        await receipts.changePrompt("live", "Computer prompt")
+        liveEditor.fields.prompt = "Phone prompt"
+        await liveEditor.refresh()
+        check(liveEditor.conflict, "stale host copy is a conflict")
+        check(liveEditor.canSave == false, "conflict blocks save")
+        check(liveEditor.fields.prompt == "Phone prompt", "draft stays during conflict")
+        await liveEditor.resolveConflict(keepMine: true)
+        check(liveEditor.conflict == false, "keeping the draft clears conflict")
+        check(liveEditor.fields.prompt == "Phone prompt", "keep mine retains the draft")
+        check(liveEditor.saved.baseline?.prompt == "Computer prompt", "baseline becomes the computer copy")
+        await liveEditor.save()
+        check(await receipts.edits == 2, "kept draft saves against the new revision")
+        check(liveEditor.saved.baseline?.prompt == "Phone prompt", "kept draft replaced the computer copy")
+
+        await receipts.changePrompt("live", "Later computer prompt")
+        liveEditor.fields.prompt = "Later phone prompt"
+        await liveEditor.save()
+        check(liveEditor.conflict, "a stale save opens the comparison")
+        check(liveEditor.canSave == false, "conflict after a stale save still blocks save")
+        check(liveEditor.fields.prompt == "Later phone prompt", "stale save keeps the draft")
+        check(liveEditor.saved.pendingEdit == nil, "stale save is not left pending")
 
         print("AutomationEditorSessionTests passed")
     }

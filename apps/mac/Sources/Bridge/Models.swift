@@ -3380,10 +3380,12 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
     var lastRunAtMs: Int64?
     var nextRunAtMs: Int64?
     var lastRunID: String?
+    /// Missing on hosts before protocol 21, and on cached copies from then.
+    var revision: UInt64 = 0
 
     enum CodingKeys: String, CodingKey {
         case id, name, backend, model, effort, workspaceID = "workspaceId", prompt, schedule
-        case budgetSeconds, enabled, lastRunAtMs, nextRunAtMs, lastRunID = "lastRunId"
+        case budgetSeconds, enabled, lastRunAtMs, nextRunAtMs, lastRunID = "lastRunId", revision
     }
 
     init(
@@ -3399,7 +3401,8 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
         enabled: Bool,
         lastRunAtMs: Int64? = nil,
         nextRunAtMs: Int64? = nil,
-        lastRunID: String? = nil
+        lastRunID: String? = nil,
+        revision: UInt64 = 0
     ) {
         self.id = id
         self.name = name
@@ -3414,6 +3417,25 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
         self.lastRunAtMs = lastRunAtMs
         self.nextRunAtMs = nextRunAtMs
         self.lastRunID = lastRunID
+        self.revision = revision
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        backend = try values.decode(String.self, forKey: .backend)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        effort = try values.decodeIfPresent(String.self, forKey: .effort)
+        workspaceID = try values.decode(String.self, forKey: .workspaceID)
+        prompt = try values.decode(String.self, forKey: .prompt)
+        schedule = try values.decode(AutomationSchedule.self, forKey: .schedule)
+        budgetSeconds = try values.decode(UInt64.self, forKey: .budgetSeconds)
+        enabled = try values.decode(Bool.self, forKey: .enabled)
+        lastRunAtMs = try values.decodeIfPresent(Int64.self, forKey: .lastRunAtMs)
+        nextRunAtMs = try values.decodeIfPresent(Int64.self, forKey: .nextRunAtMs)
+        lastRunID = try values.decodeIfPresent(String.self, forKey: .lastRunID)
+        revision = try values.decodeIfPresent(UInt64.self, forKey: .revision) ?? 0
     }
 
     var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
@@ -3436,7 +3458,22 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
             "budgetSeconds": budgetSeconds, "enabled": enabled,
             "lastRunAtMs": lastRunAtMs as Any, "nextRunAtMs": nextRunAtMs as Any,
             "lastRunID": lastRunID as Any,
+            "revision": revision,
         ]
+    }
+}
+
+/// A confirmed creation, including when the job has since been deleted.
+struct AutomationCreationOutcome: Codable, Equatable, Sendable {
+    var operationID: String
+    var jobID: String
+    var createdAtMs: Int64
+    var job: Automation?
+
+    enum CodingKeys: String, CodingKey {
+        case operationID = "operationId"
+        case jobID = "jobId"
+        case createdAtMs, job
     }
 }
 
@@ -3589,6 +3626,29 @@ struct RunRecord: Codable, Sendable, Identifiable {
         case "interrupted": return "Interrupted by restart"
         default: return status
         }
+    }
+}
+
+struct AutomationRunSubmission: Codable, Equatable, Sendable {
+    let operationID: String
+    let jobID: String
+    enum CodingKeys: String, CodingKey { case operationID = "operationId", jobID = "jobId" }
+}
+
+/// A confirmed run request. `run` is absent when the process was never recorded.
+struct AutomationRunOutcome: Codable, Sendable {
+    var operationID: String
+    var jobID: String
+    var runID: String
+    var createdAtMs: Int64
+    var job: Automation?
+    var run: RunRecord?
+
+    enum CodingKeys: String, CodingKey {
+        case operationID = "operationId"
+        case jobID = "jobId"
+        case runID = "runId"
+        case createdAtMs, job, run
     }
 }
 

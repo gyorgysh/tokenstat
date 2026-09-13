@@ -938,6 +938,8 @@ struct NewAutomationSheet: View {
     @State private var noTimeLimit = false
     @State private var working = false
     @State private var step = 0
+    @State private var jobRevision: UInt64 = 0
+    @State private var conflictJob: Automation?
 
     /// Monday first, and zero-based, matching `AutomationSchedule.weekday` and
     /// the daemon's `to_monday_zero_offset`. The picker used to be one-based
@@ -995,59 +997,105 @@ struct NewAutomationSheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: existing == nil ? "New automation" : "Edit automation",
+            title: sheetTitle,
             subtitle: "An agent run headless in a folder, like a person launching it.",
-            icon: .scheduled,
+            icon: sheetIcon,
             scrolls: true,
             onClose: { dismiss() }
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
-                if let error = model.errorMessage {
+                if let error = model.errorMessage, conflictJob == nil {
                     ErrorBanner(message: error) { Task { await model.load() } }
                 }
-                stepHeader
-                fields
+                if let pending = model.unconfirmedCreate, existing == nil {
+                    pendingCreateBody(pending)
+                } else {
+                    if let existing, model.lastRun(for: existing)?.isRunning == true {
+                        Text("A run is going. This save is for the next one.")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.controlGlyph)
+                    }
+                    if let conflictJob {
+                        conflictBody(conflictJob)
+                    }
+                    stepHeader
+                    fields
+                        .disabled(conflictJob != nil || working)
+                }
             }
         } actions: {
             Button("Cancel", .dismiss, role: .cancel) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
-            if step > 0 {
-                Button("Back", .back) { step -= 1 }
-                    .buttonStyle(SecondaryButtonStyle())
-            }
-            Spacer()
-            Button {
-                if step < 2 {
-                    step += 1
-                } else {
-                    working = true
+            if model.hasUnconfirmedCreate, existing == nil {
+                Spacer()
+                Button("Check creation", .refresh) {
                     Task {
-                        await save()
+                        working = true
+                        await model.checkCreate()
                         working = false
-                        if model.errorMessage == nil { dismiss() }
+                        if !model.hasUnconfirmedCreate, model.errorMessage == nil { dismiss() }
                     }
                 }
-            } label: {
-                let icon: ActionIcon = step < 2 ? .next : (existing == nil ? .create : .save)
-                let title = step < 2 ? "Continue" : (existing == nil ? "Create" : "Save")
-                icon.label(title)
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(working)
+                Button("Retry creation", .create) {
+                    Task {
+                        working = true
+                        await model.retryCreate()
+                        working = false
+                        if !model.hasUnconfirmedCreate, model.errorMessage == nil { dismiss() }
+                    }
+                }
+                .buttonStyle(AccentButtonStyle())
+                .disabled(working)
+            } else if conflictJob == nil {
+                if step > 0 {
+                    Button("Back", .back) { step -= 1 }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                Spacer()
+                Button {
+                    if step < 2 {
+                        step += 1
+                    } else {
+                        working = true
+                        Task {
+                            await save()
+                            working = false
+                            if model.errorMessage == nil, conflictJob == nil { dismiss() }
+                        }
+                    }
+                } label: {
+                    let icon: ActionIcon = step < 2 ? .next : (existing == nil ? .create : .save)
+                    let title = step < 2 ? "Continue" : (existing == nil ? "Create" : "Save")
+                    icon.label(title)
+                }
+                .buttonStyle(AccentButtonStyle())
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canContinue || working)
+            } else if let conflictJob {
+                Spacer()
+                Button("Use computer version", .restore) {
+                    apply(conflictJob)
+                    self.conflictJob = nil
+                    model.errorMessage = nil
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(working)
+                Button("Keep my draft", .edit) {
+                    jobRevision = conflictJob.revision
+                    self.conflictJob = nil
+                    model.errorMessage = nil
+                }
+                .buttonStyle(AccentButtonStyle())
+                .disabled(working)
             }
-            .buttonStyle(AccentButtonStyle())
-            .keyboardShortcut(.defaultAction)
-            .disabled(!canContinue || working)
         }
         .modalFrame(width: 560, height: 640)
         .onAppear {
             if let existing, name.isEmpty {
-                name = existing.name
-                backendID = existing.backend
-                workspaceID = existing.workspaceID
-                prompt = existing.prompt
-                modelChoice = TodoCard.cleanModelID(existing.model ?? "")
-                effortChoice = existing.effort ?? ""
-                applySchedule(existing.schedule)
-                applyBudget(existing.budgetSeconds)
+                apply(existing)
             }
             if let template {
                 name = template.name
@@ -1080,6 +1128,68 @@ struct NewAutomationSheet: View {
             modelChoice = ""
             effortChoice = ""
         }
+    }
+
+    private var sheetTitle: String {
+        if existing == nil, model.hasUnconfirmedCreate { return "Check creation" }
+        return existing == nil ? "New automation" : "Edit automation"
+    }
+
+    private var sheetIcon: ActionIcon {
+        if existing == nil, model.hasUnconfirmedCreate { return .refresh }
+        return .scheduled
+    }
+
+    private func pendingCreateBody(_ job: Automation) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("A new job was sent and is not confirmed yet.")
+                .font(Theme.callout.weight(.semibold))
+            Text(job.name)
+                .font(Theme.callout)
+            Text(model.scheduleSummary(job.schedule))
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+            Text("Check creation before making another. Retry creation sends the same request.")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    }
+
+    private func conflictBody(_ job: Automation) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("Changed on the computer")
+                    .font(Theme.callout.weight(.semibold))
+                Text(job.name).font(Theme.callout)
+                Text(job.prompt).font(Theme.callout).textSelection(.enabled)
+                Text("\(model.scheduleSummary(job.schedule)) · \(job.backend)")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+            Text("This job changed since you opened it. Compare the saved job before replacing it.")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+        }
+    }
+
+    private func apply(_ job: Automation) {
+        name = job.name
+        backendID = job.backend
+        workspaceID = job.workspaceID
+        prompt = job.prompt
+        modelChoice = TodoCard.cleanModelID(job.model ?? "")
+        effortChoice = job.effort ?? ""
+        applySchedule(job.schedule)
+        applyBudget(job.budgetSeconds)
+        jobRevision = job.revision
     }
 
     private var stepHeader: some View {
@@ -1509,8 +1619,12 @@ struct NewAutomationSheet: View {
                 lastRunAtMs: existing.lastRunAtMs,
                 // Host recomputes next run from the new schedule on update.
                 nextRunAtMs: nil,
-                lastRunID: existing.lastRunID
+                lastRunID: existing.lastRunID,
+                revision: jobRevision
             ))
+            if AutomationsModel.isConcurrentEdit(model.errorMessage) {
+                conflictJob = model.jobs.first { $0.id == existing.id }
+            }
         } else {
             await model.create(
                 name: name.trimmingCharacters(in: .whitespaces),

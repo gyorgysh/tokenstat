@@ -500,6 +500,8 @@ struct AutomationParams {
     /// `automation.backends` only: probe the agent CLIs now instead of
     /// serving the cached lists. Somebody pressed Refresh in the picker.
     refresh: Option<bool>,
+    expected_revision: Option<u64>,
+    operation_id: Option<String>,
 }
 
 #[cfg(feature = "local-host")]
@@ -2144,10 +2146,42 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             }
             serde_json::to_value(crate::automations::shared().create(job)?).envelope()
         }
+        "automation.createOnce" => {
+            let mut p: AutomationParams = parse(params)?;
+            serde_json::to_value(
+                crate::automations::shared().create_once(
+                    &p.operation_id
+                        .ok_or("A job creation needs an operation id")?,
+                    p.job.take().ok_or("automation.createOnce needs job")?,
+                )?,
+            )
+            .envelope()
+        }
+        "automation.creationReceipt" => {
+            let p: AutomationParams = parse(params)?;
+            serde_json::to_value(
+                crate::automations::shared().creation_receipt(
+                    &p.operation_id
+                        .ok_or("A creation read needs an operation id")?,
+                )?,
+            )
+            .envelope()
+        }
         "automation.update" => {
             let p: AutomationParams = parse(params)?;
             serde_json::to_value(
                 crate::automations::shared().update(p.job.ok_or("automation.update needs job")?)?,
+            )
+            .envelope()
+        }
+        "automation.edit" => {
+            let p: AutomationParams = parse(params)?;
+            serde_json::to_value(
+                crate::automations::shared().edit(
+                    p.job.ok_or("automation.edit needs job")?,
+                    p.expected_revision
+                        .ok_or("A job edit needs its saved revision")?,
+                )?,
             )
             .envelope()
         }
@@ -2170,6 +2204,22 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             let p: AutomationParams = parse(params)?;
             serde_json::to_value(
                 crate::automations::shared().run(&p.id.ok_or("automation.run needs id")?)?,
+            )
+            .envelope()
+        }
+        "automation.runOnce" => {
+            let p: AutomationParams = parse(params)?;
+            serde_json::to_value(crate::automations::shared().run_once(
+                &p.id.ok_or("A job run needs an id")?,
+                &p.operation_id.ok_or("A job run needs an operation id")?,
+            )?)
+            .envelope()
+        }
+        "automation.runReceipt" => {
+            let p: AutomationParams = parse(params)?;
+            serde_json::to_value(
+                crate::automations::shared()
+                    .run_receipt(&p.operation_id.ok_or("A run read needs an operation id")?)?,
             )
             .envelope()
         }

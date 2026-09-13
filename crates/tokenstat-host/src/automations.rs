@@ -10,7 +10,7 @@
 //! by the host and killed when the budget expires, so an automation can never
 //! run away.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,6 +20,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::transcript::{self, Parser};
 
 use serde::{Deserialize, Serialize};
+
+mod receipts;
+pub use receipts::{AutomationCreationOutcome, AutomationRunOutcome};
 
 /// How many completed runs to remember per machine.
 const RUNS_KEPT: usize = 100;
@@ -1098,6 +1101,19 @@ pub struct Automation {
     pub last_run_at_ms: Option<i64>,
     pub next_run_at_ms: Option<i64>,
     pub last_run_id: Option<String>,
+    /// Monotonic within this job. User-facing mutations advance it. Run
+    /// metadata (`last_run_*`) does not, so a live run cannot collide with
+    /// an editor that did not change the job.
+    #[serde(default)]
+    pub revision: u64,
+}
+
+fn advance_revision(job: &mut Automation) -> Result<(), String> {
+    if job.revision == u64::MAX {
+        return Err("This job's revision cannot be advanced.".into());
+    }
+    job.revision += 1;
+    Ok(())
 }
 
 const AUTO_COMMIT_NAME: &str = "Auto commit";
@@ -1211,6 +1227,10 @@ struct JobsFile {
     jobs: Vec<Automation>,
     #[serde(default)]
     queue: QueueConfig,
+    #[serde(default)]
+    creations: BTreeMap<String, receipts::CreationReceipt>,
+    #[serde(default)]
+    launches: BTreeMap<String, receipts::LaunchReceipt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1226,7 +1246,10 @@ pub struct Store {
     jobs: Mutex<Vec<Automation>>,
     runs: Mutex<Vec<RunRecord>>,
     runs_error: Mutex<Option<String>>,
+    jobs_error: Mutex<Option<String>>,
     queue: Mutex<QueueConfig>,
+    creations: Mutex<BTreeMap<String, receipts::CreationReceipt>>,
+    launches: Mutex<BTreeMap<String, receipts::LaunchReceipt>>,
     waiting: Mutex<VecDeque<Pending>>,
     /// Slots currently in use. Separate from the runs list so a count
     /// cannot race a status write.
@@ -1239,6 +1262,23 @@ pub struct Store {
 pub fn shared() -> Arc<Store> {
     static STORE: std::sync::OnceLock<Arc<Store>> = std::sync::OnceLock::new();
     Arc::clone(STORE.get_or_init(|| Arc::new(Store::load())))
+}
+
+fn load_jobs_file(path: &Path) -> (JobsFile, Option<String>) {
+    let loaded = match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice::<JobsFile>(&bytes).map_err(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(JobsFile::default()),
+        Err(error) => Err(error.to_string()),
+    };
+    match loaded {
+        Ok(file) => (file, None),
+        Err(error) => (
+            JobsFile::default(),
+            Some(format!(
+                "The saved jobs could not be read. Their contents have been preserved. Restart the host after restoring access: {error}"
+            )),
+        ),
+    }
 }
 
 fn load_runs_file(path: &Path) -> (Vec<RunRecord>, Option<String>) {
@@ -1261,7 +1301,8 @@ fn load_runs_file(path: &Path) -> (Vec<RunRecord>, Option<String>) {
 impl Store {
     #[cfg(test)]
     fn at(path: PathBuf) -> Store {
-        let runs_dir = path.parent().unwrap_or(&path).join("runs");
+        let parent = path.parent().unwrap_or(&path);
+        let runs_dir = parent.join("runs");
         let runs_path = runs_dir.join("runs.json");
         let (runs, runs_error) = load_runs_file(&runs_path);
         Store {
@@ -1271,7 +1312,33 @@ impl Store {
             jobs: Mutex::new(Vec::new()),
             runs: Mutex::new(runs),
             runs_error: Mutex::new(runs_error),
+            jobs_error: Mutex::new(None),
             queue: Mutex::new(QueueConfig::default()),
+            creations: Mutex::new(BTreeMap::new()),
+            launches: Mutex::new(BTreeMap::new()),
+            waiting: Mutex::new(VecDeque::new()),
+            active: Mutex::new(0),
+            killed: Mutex::new(HashSet::new()),
+        }
+    }
+
+    #[cfg(test)]
+    fn load_at(path: PathBuf) -> Store {
+        let (file, jobs_error) = load_jobs_file(&path);
+        let runs_dir = path.parent().unwrap_or(&path).join("runs");
+        let runs_path = runs_dir.join("runs.json");
+        let (runs, runs_error) = load_runs_file(&runs_path);
+        Store {
+            path,
+            runs_path,
+            runs_dir,
+            jobs: Mutex::new(file.jobs),
+            runs: Mutex::new(runs),
+            runs_error: Mutex::new(runs_error),
+            jobs_error: Mutex::new(jobs_error),
+            queue: Mutex::new(file.queue),
+            creations: Mutex::new(file.creations),
+            launches: Mutex::new(file.launches),
             waiting: Mutex::new(VecDeque::new()),
             active: Mutex::new(0),
             killed: Mutex::new(HashSet::new()),
@@ -1281,12 +1348,7 @@ impl Store {
     pub fn load() -> Store {
         let dir = tokenstat_paths::data_dir().unwrap_or_else(|| PathBuf::from("."));
         let path = dir.join("automations.json");
-        let file = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<JobsFile>(&text).ok())
-            .unwrap_or_default();
-        let jobs = file.jobs;
-        let queue = file.queue;
+        let (file, jobs_error) = load_jobs_file(&path);
         let runs_dir = dir.join("runs");
         let runs_path = runs_dir.join("runs.json");
         let (mut runs, runs_error) = load_runs_file(&runs_path);
@@ -1305,10 +1367,13 @@ impl Store {
             path,
             runs_path,
             runs_dir,
-            jobs: Mutex::new(jobs),
+            jobs: Mutex::new(file.jobs),
             runs: Mutex::new(runs),
             runs_error: Mutex::new(runs_error),
-            queue: Mutex::new(queue),
+            jobs_error: Mutex::new(jobs_error),
+            queue: Mutex::new(file.queue),
+            creations: Mutex::new(file.creations),
+            launches: Mutex::new(file.launches),
             waiting: Mutex::new(VecDeque::new()),
             active: Mutex::new(0),
             killed: Mutex::new(HashSet::new()),
@@ -1319,6 +1384,14 @@ impl Store {
         store
     }
 
+    pub(super) fn ensure_jobs_available(&self) -> Result<(), String> {
+        self.jobs_error
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map_or(Ok(()), |error| Err(error.clone()))
+    }
+
     fn save(&self) -> Result<(), String> {
         let jobs = self
             .jobs
@@ -1326,8 +1399,34 @@ impl Store {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         let queue = *self.queue.lock().unwrap_or_else(PoisonError::into_inner);
-        let body =
-            serde_json::to_string_pretty(&JobsFile { jobs, queue }).map_err(|e| e.to_string())?;
+        let creations = self
+            .creations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let launches = self
+            .launches
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        self.write_jobs(&jobs, queue, &creations, &launches)
+    }
+
+    fn write_jobs(
+        &self,
+        jobs: &[Automation],
+        queue: QueueConfig,
+        creations: &BTreeMap<String, receipts::CreationReceipt>,
+        launches: &BTreeMap<String, receipts::LaunchReceipt>,
+    ) -> Result<(), String> {
+        self.ensure_jobs_available()?;
+        let body = serde_json::to_string_pretty(&JobsFile {
+            jobs: jobs.to_vec(),
+            queue,
+            creations: creations.clone(),
+            launches: launches.clone(),
+        })
+        .map_err(|e| e.to_string())?;
         write_atomic(&self.path, &body)
     }
 
@@ -1424,6 +1523,7 @@ impl Store {
     }
 
     pub fn create(&self, mut job: Automation) -> Result<Automation, String> {
+        self.ensure_jobs_available()?;
         validate(&job)?;
         job.schedule.validate()?;
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1443,6 +1543,7 @@ impl Store {
                 let last_run_at_ms = jobs[idx].last_run_at_ms;
                 let last_run_id = jobs[idx].last_run_id.clone();
                 job.id = id;
+                job.revision = jobs[idx].revision;
                 job.last_run_at_ms = last_run_at_ms;
                 job.last_run_id = last_run_id;
                 if job.enabled {
@@ -1450,6 +1551,7 @@ impl Store {
                 } else {
                     job.next_run_at_ms = None;
                 }
+                advance_revision(&mut job)?;
                 jobs[idx] = job.clone();
                 drop(jobs);
                 self.save()?;
@@ -1459,6 +1561,7 @@ impl Store {
         if job.id.is_empty() {
             job.id = format!("automation-{}", now_ms());
         }
+        job.revision = 1;
         if job.enabled {
             job.next_run_at_ms = job.schedule.next_run_ms(now_ms());
         }
@@ -1468,7 +1571,22 @@ impl Store {
         Ok(job)
     }
 
-    pub fn update(&self, mut job: Automation) -> Result<Automation, String> {
+    pub fn update(&self, job: Automation) -> Result<Automation, String> {
+        self.put(job, None)
+    }
+
+    /// Checked replacement. A stale editor cannot overwrite a newer schedule
+    /// or prompt. The live run already holds its own snapshot.
+    pub fn edit(&self, job: Automation, expected_revision: u64) -> Result<Automation, String> {
+        self.put(job, Some(expected_revision))
+    }
+
+    fn put(
+        &self,
+        mut job: Automation,
+        expected_revision: Option<u64>,
+    ) -> Result<Automation, String> {
+        self.ensure_jobs_available()?;
         validate(&job)?;
         job.schedule.validate()?;
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1485,8 +1603,15 @@ impl Store {
             .iter_mut()
             .find(|existing| existing.id == job.id)
             .ok_or_else(|| format!("no automation with id {}", job.id))?;
+        if expected_revision.is_some_and(|expected| expected != current.revision) {
+            return Err(
+                "This job changed since you opened it. Compare the saved job before replacing it."
+                    .into(),
+            );
+        }
         let last_run_at_ms = current.last_run_at_ms;
         let last_run_id = current.last_run_id.clone();
+        job.revision = current.revision;
         job.last_run_at_ms = last_run_at_ms;
         job.last_run_id = last_run_id;
         // Always recompute next run from the schedule the client just sent.
@@ -1497,6 +1622,7 @@ impl Store {
         } else {
             job.next_run_at_ms = job.schedule.next_run_ms(now_ms());
         }
+        advance_revision(&mut job)?;
         *current = job;
         let result = current.clone();
         drop(jobs);
@@ -1505,6 +1631,7 @@ impl Store {
     }
 
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<Automation, String> {
+        self.ensure_jobs_available()?;
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
         let job = jobs
             .iter_mut()
@@ -1516,6 +1643,7 @@ impl Store {
         } else {
             None
         };
+        advance_revision(job)?;
         let result = job.clone();
         drop(jobs);
         self.save()?;
@@ -1523,6 +1651,7 @@ impl Store {
     }
 
     pub fn remove(&self, id: &str) -> Result<bool, String> {
+        self.ensure_jobs_available()?;
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
         let old = jobs.len();
         jobs.retain(|job| job.id != id);
@@ -2437,6 +2566,7 @@ mod tests {
             last_run_at_ms: None,
             next_run_at_ms: None,
             last_run_id: None,
+            revision: 0,
         }
     }
 
@@ -4123,6 +4253,7 @@ mod tests {
             last_run_at_ms: None,
             next_run_at_ms: None,
             last_run_id: None,
+            revision: 0,
         };
         let first = store.run_adhoc(make("a")).unwrap();
         let second = store.run_adhoc(make("b")).unwrap();
@@ -4171,6 +4302,7 @@ mod tests {
             last_run_at_ms: None,
             next_run_at_ms: None,
             last_run_id: None,
+            revision: 0,
         };
         let first = store.run_adhoc(make("a")).unwrap();
         let second = store.run_adhoc(make("b")).unwrap();
@@ -4261,6 +4393,7 @@ mod tests {
             last_run_at_ms: None,
             next_run_at_ms: None,
             last_run_id: None,
+            revision: 0,
         };
         let run = store.run_adhoc(job).unwrap();
         let deadline = Instant::now() + Duration::from_secs(8);
@@ -4309,6 +4442,7 @@ mod tests {
                 last_run_at_ms: None,
                 next_run_at_ms: None,
                 last_run_id: None,
+                revision: 0,
             })
             .unwrap();
         let run = store.start_now(&job.id, None, None).unwrap();
@@ -4352,6 +4486,7 @@ mod tests {
                 last_run_at_ms: None,
                 next_run_at_ms: None,
                 last_run_id: None,
+                revision: 0,
             })
             .unwrap();
         let run = store
@@ -4387,6 +4522,126 @@ mod tests {
             !text.contains("STORED"),
             "stored prompt still ran: {text:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stale_edit_is_refused_and_legacy_update_still_advances_revision() {
+        let dir = temp_dir("edit-revision");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::at(dir.join("jobs.json"));
+        let created = store
+            .create(job("daily", ScheduleSpec::default(), 60))
+            .unwrap();
+        assert_eq!(created.revision, 1);
+        let mut next = created.clone();
+        next.prompt = "first save".into();
+        let saved = store.edit(next.clone(), created.revision).unwrap();
+        assert_eq!(saved.revision, 2);
+        assert_eq!(saved.prompt, "first save");
+        next.prompt = "stale save".into();
+        assert!(store.edit(next, created.revision).is_err());
+        assert_eq!(store.list()[0].prompt, "first save");
+        let mut legacy = saved.clone();
+        legacy.prompt = "legacy overwrite".into();
+        let updated = store.update(legacy).unwrap();
+        assert_eq!(updated.revision, 3);
+        assert!(store.edit(saved, 2).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn editing_a_live_job_does_not_rewrite_the_running_record() {
+        let dir = temp_dir("edit-live");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+        let workspace_id = sh_workspace(&dir);
+        let created = store
+            .create(Automation {
+                id: "live".into(),
+                name: "Original".into(),
+                backend: "sh".into(),
+                model: None,
+                effort: None,
+                workspace_id,
+                prompt: if cfg!(windows) {
+                    "ping -n 3 127.0.0.1 >nul".into()
+                } else {
+                    "sleep 1".into()
+                },
+                schedule: ScheduleSpec::default(),
+                budget_seconds: 15,
+                enabled: false,
+                last_run_at_ms: None,
+                next_run_at_ms: None,
+                last_run_id: None,
+                revision: 0,
+            })
+            .unwrap();
+        let started = store.run_once(&created.id, "fixture-live-run-op").unwrap();
+        assert_eq!(started.run.as_ref().unwrap().name, "Original");
+        let mut renamed = created.clone();
+        renamed.name = "Edited".into();
+        renamed.prompt = "printf EDITED".into();
+        let saved = store.edit(renamed, created.revision).unwrap();
+        assert_eq!(saved.name, "Edited");
+        let run = store.get_run(&started.run_id).unwrap();
+        assert_eq!(run.name, "Original");
+        assert!(
+            matches!(
+                run.status.as_str(),
+                "running" | "starting" | "queued" | "ok"
+            ),
+            "live run status {}",
+            run.status
+        );
+        let deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            let row = store.get_run(&started.run_id).unwrap();
+            if row.status != "running" && row.status != "queued" && row.status != "starting" {
+                break;
+            }
+            assert!(Instant::now() < deadline, "live run still {}", row.status);
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_once_retries_the_same_run() {
+        let dir = temp_dir("run-once");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+        let workspace_id = sh_workspace(&dir);
+        let created = store
+            .create(Automation {
+                id: "once".into(),
+                name: "Once".into(),
+                backend: "sh".into(),
+                model: None,
+                effort: None,
+                workspace_id,
+                prompt: if cfg!(windows) {
+                    "exit 0".into()
+                } else {
+                    "true".into()
+                },
+                schedule: ScheduleSpec::default(),
+                budget_seconds: 15,
+                enabled: false,
+                last_run_at_ms: None,
+                next_run_at_ms: None,
+                last_run_id: None,
+                revision: 0,
+            })
+            .unwrap();
+        let first = store.run_once(&created.id, "fixture-run-once-op").unwrap();
+        let again = store.run_once(&created.id, "fixture-run-once-op").unwrap();
+        assert_eq!(first.run_id, again.run_id);
+        assert_eq!(store.runs().len(), 1);
+        assert!(store.run_once("other", "fixture-run-once-op").is_err());
+        let receipt = store.run_receipt("fixture-run-once-op").unwrap().unwrap();
+        assert_eq!(receipt.run_id, first.run_id);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

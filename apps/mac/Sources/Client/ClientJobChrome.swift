@@ -164,11 +164,17 @@ struct ClientAutomationActions: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
         HStack(spacing: Theme.Space.s) {
             if let run = session.liveRun, pinnedRunID == nil || pinnedRunID == run.id {
                 Button("Stop", .stop) { pending = .stop }
                     .clientGlassStyle()
                     .disabled(session.working)
+            } else if pinnedRunID == nil, let job = session.selectedJob, session.pendingLaunch(for: job) != nil {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Theme.Space.s) { launchRecovery(for: job) }
+                    VStack(alignment: .leading, spacing: Theme.Space.s) { launchRecovery(for: job) }
+                }
             } else if pinnedRunID == nil {
                 Button(session.working ? "Starting" : "Run now", .run) { pending = .run }
                     .clientProminentStyle()
@@ -184,6 +190,12 @@ struct ClientAutomationActions: View {
                 )
                 .accessibilityLabel("Enabled")
             }
+        }
+        if pinnedRunID == nil, let job = session.selectedJob, session.pendingLaunch(for: job) != nil, session.liveRun == nil {
+            Text("This run is not confirmed yet. Check it before starting another.")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+        }
         }
         .confirmationDialog(confirmTitle, isPresented: confirmPresented, titleVisibility: .visible) {
             switch pending {
@@ -232,6 +244,18 @@ struct ClientAutomationActions: View {
     private var selectedName: String {
         if pinnedRunID != nil { return session.selectedRun?.name ?? "this run" }
         return session.selectedJob?.name ?? session.selectedRun?.name ?? "this job"
+    }
+
+    @ViewBuilder
+    private func launchRecovery(for job: Automation) -> some View {
+        Button("Check run", .refresh) { Task { await session.checkLaunch() } }
+            .clientGlassStyle()
+            .disabled(session.working)
+        if session.canRetryLaunch(for: job) {
+            Button("Retry run", .run) { Task { await session.retryLaunch() } }
+                .clientProminentStyle()
+                .disabled(session.working)
+        }
     }
 }
 

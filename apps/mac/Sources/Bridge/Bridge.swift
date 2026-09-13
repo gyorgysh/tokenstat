@@ -2463,8 +2463,32 @@ extension Bridge {
         try await background("automation.create", ["job": job.payload], as: Automation.self)
     }
 
+    static func createAutomationOnce(_ job: Automation, operationID: String) async throws -> AutomationCreationOutcome {
+        try await background(
+            "automation.createOnce",
+            ["job": job.payload, "operationId": operationID],
+            as: AutomationCreationOutcome.self
+        )
+    }
+
+    static func automationCreationReceipt(operationID: String) async throws -> AutomationCreationOutcome? {
+        try await background(
+            "automation.creationReceipt",
+            ["operationId": operationID],
+            as: AutomationCreationOutcome?.self
+        )
+    }
+
     static func updateAutomation(_ job: Automation) async throws -> Automation {
         try await background("automation.update", ["job": job.payload], as: Automation.self)
+    }
+
+    static func editAutomation(_ job: Automation, expectedRevision: UInt64) async throws -> Automation {
+        try await background(
+            "automation.edit",
+            ["job": job.payload, "expectedRevision": expectedRevision],
+            as: Automation.self
+        )
     }
 
     static func setAutomation(_ id: String, enabled: Bool) async throws -> Automation {
@@ -2473,6 +2497,22 @@ extension Bridge {
 
     static func runAutomation(_ id: String) async throws -> Automation {
         try await background("automation.run", ["id": id], as: Automation.self)
+    }
+
+    static func runAutomationOnce(id: String, operationID: String) async throws -> AutomationRunOutcome {
+        try await background(
+            "automation.runOnce",
+            ["id": id, "operationId": operationID],
+            as: AutomationRunOutcome.self
+        )
+    }
+
+    static func automationRunReceipt(operationID: String) async throws -> AutomationRunOutcome? {
+        try await background(
+            "automation.runReceipt",
+            ["operationId": operationID],
+            as: AutomationRunOutcome?.self
+        )
     }
 
     static func removeAutomation(_ id: String) async throws {

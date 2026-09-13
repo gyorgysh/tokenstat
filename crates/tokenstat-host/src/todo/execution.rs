@@ -71,6 +71,7 @@ fn job(card: &Card) -> Automation {
         last_run_at_ms: None,
         next_run_at_ms: None,
         last_run_id: None,
+        revision: 0,
     }
 }
 

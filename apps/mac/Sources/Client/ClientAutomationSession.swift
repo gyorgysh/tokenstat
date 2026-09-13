@@ -29,6 +29,9 @@ final class ClientAutomationSession {
     private(set) var queue: AutomationQueue?
     var errorMessage: String?
     var working = false
+    private(set) var supportsReceipts = false
+    private(set) var pendingLaunches: [String: AutomationRunSubmission] = [:]
+    private(set) var retryableLaunchIDs: Set<String> = []
 
     var selectedJobID: String?
     var selectedRunID: String?
@@ -45,8 +48,20 @@ final class ClientAutomationSession {
     /// then stays missing instead of becoming some other job.
     private let pinnedJobID: String?
     private let pinnedRunID: String?
+    private let launchStorage: WorkbenchDraftFile<SavedAutomationLaunches>?
+    private var launchRevision: String?
+    private var writingLaunches = false
 
-    init(peer: String, workspaceID: String, hostName: String, folderName: String, jobID: String? = nil, runID: String? = nil, service: any ClientJobService = ClientRemoteJobService()) {
+    init(
+        peer: String,
+        workspaceID: String,
+        hostName: String,
+        folderName: String,
+        jobID: String? = nil,
+        runID: String? = nil,
+        service: any ClientJobService = ClientRemoteJobService(),
+        launchDirectory: URL? = nil
+    ) {
         self.peer = peer
         self.workspaceID = workspaceID
         self.hostName = hostName
@@ -56,6 +71,18 @@ final class ClientAutomationSession {
         self.pinnedRunID = runID
         self.selectedJobID = jobID
         self.selectedRunID = runID
+        if let scope = WorkSessionContext.shared.scope, !peer.isEmpty {
+            let key = WorkReferenceKey.folder(scope: scope, hostIdentity: peer, workspaceID: workspaceID) + "automation-launches"
+            launchStorage = WorkbenchDraftFile(key: key, directory: launchDirectory, maximumBytes: 64 * 1024)
+        } else if let launchDirectory {
+            launchStorage = WorkbenchDraftFile(
+                key: "automation-launches|\(peer)|\(workspaceID)",
+                directory: launchDirectory,
+                maximumBytes: 64 * 1024
+            )
+        } else {
+            launchStorage = nil
+        }
     }
 
     /// When the caller asked for a specific job, do not fall back to another
@@ -118,9 +145,19 @@ final class ClientAutomationSession {
         }
     }
 
+    func pendingLaunch(for job: Automation) -> AutomationRunSubmission? {
+        pendingLaunches[job.id]
+    }
+
+    func canRetryLaunch(for job: Automation) -> Bool {
+        retryableLaunchIDs.contains(job.id)
+    }
+
     func load() async {
         loadGeneration += 1
         let generation = loadGeneration
+        supportsReceipts = await service.supportsAutomationReceipts(peer: peer)
+        await restoreLaunches()
         do {
             async let all = service.automations(peer: peer)
             async let history = service.automationRuns(peer: peer)
@@ -145,6 +182,7 @@ final class ClientAutomationSession {
             } else if selectedRunID == nil {
                 selectedRunID = pinnedRunID
             }
+            await reconcilePendingLaunches()
         } catch {
             guard generation == loadGeneration, !Task.isCancelled else { return }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
@@ -178,20 +216,49 @@ final class ClientAutomationSession {
 
     func run() async {
         guard !working, let job = selectedJob else { return }
+        if supportsReceipts {
+            let submission = pendingLaunches[job.id] ?? AutomationRunSubmission(
+                operationID: "automation-run-\(UUID().uuidString)",
+                jobID: job.id
+            )
+            pendingLaunches[job.id] = submission
+            retryableLaunchIDs.remove(job.id)
+            guard await persistLaunches() else { return }
+            await submitLaunch(submission)
+            return
+        }
         working = true
         defer { working = false }
         do {
             let updated = try await service.runAutomation(peer: peer, id: job.id)
             errorMessage = nil
-            await load()
-            if let id = updated.lastRunID, let run = runs.first(where: { $0.id == id }) {
-                selectRun(run)
-            } else if let last = lastRun(for: updated) ?? lastRun(for: job) {
-                selectRun(last)
+            await adoptRun(of: updated, fallback: job)
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
+    }
+
+    func checkLaunch() async {
+        guard !working, let job = selectedJob, let submission = pendingLaunches[job.id] else { return }
+        working = true
+        defer { working = false }
+        do {
+            if let outcome = try await service.automationRunReceipt(peer: peer, operationID: submission.operationID) {
+                await confirmLaunch(outcome, submission: submission)
+            } else {
+                retryableLaunchIDs.insert(job.id)
+                errorMessage = nil
             }
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
+    }
+
+    func retryLaunch() async {
+        guard !working, let job = selectedJob, let submission = pendingLaunches[job.id], retryableLaunchIDs.contains(job.id) else { return }
+        retryableLaunchIDs.remove(job.id)
+        guard await persistLaunches() else { return }
+        await submitLaunch(submission)
     }
 
     func stop() async {
@@ -241,6 +308,115 @@ final class ClientAutomationSession {
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
+    }
+
+    private struct SavedAutomationLaunches: Codable, Equatable, Sendable {
+        var pending: [String: AutomationRunSubmission] = [:]
+    }
+
+    private func restoreLaunches() async {
+        guard let launchStorage, pendingLaunches.isEmpty else { return }
+        if let record = try? await launchStorage.load() {
+            launchRevision = record.revision
+            pendingLaunches = record.value.pending
+        }
+    }
+
+    @discardableResult
+    private func persistLaunches() async -> Bool {
+        guard let launchStorage, !writingLaunches else {
+            return launchStorage == nil
+        }
+        writingLaunches = true
+        defer { writingLaunches = false }
+        do {
+            let record = try await launchStorage.save(
+                SavedAutomationLaunches(pending: pendingLaunches),
+                expectedRevision: launchRevision
+            )
+            launchRevision = record.revision
+            return true
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+            return false
+        }
+    }
+
+    private func submitLaunch(_ submission: AutomationRunSubmission) async {
+        working = true
+        defer { working = false }
+        do {
+            let outcome = try await service.runAutomationOnce(
+                peer: peer,
+                id: submission.jobID,
+                operationID: submission.operationID
+            )
+            await confirmLaunch(outcome, submission: submission)
+        } catch {
+            if let outcome = try? await service.automationRunReceipt(peer: peer, operationID: submission.operationID) {
+                await confirmLaunch(outcome, submission: submission)
+                return
+            }
+            retryableLaunchIDs.insert(submission.jobID)
+            errorMessage = ClientTunnelCopy.display(
+                "The computer did not confirm this run. Check it before starting another. \(error.localizedDescription)",
+                host: hostName
+            )
+        }
+    }
+
+    private func confirmLaunch(_ outcome: AutomationRunOutcome, submission: AutomationRunSubmission) async {
+        guard outcome.operationID == submission.operationID else {
+            errorMessage = ClientTunnelCopy.display("The computer returned a different run. Check this job again.", host: hostName)
+            return
+        }
+        pendingLaunches[submission.jobID] = nil
+        retryableLaunchIDs.remove(submission.jobID)
+        errorMessage = nil
+        _ = await persistLaunches()
+        await load()
+        if let run = outcome.run, runs.contains(where: { $0.id == run.id }) {
+            selectRun(run)
+        } else if !outcome.runID.isEmpty, let run = runs.first(where: { $0.id == outcome.runID }) {
+            selectRun(run)
+        } else if let job = outcome.job {
+            await adoptRun(of: job, fallback: job)
+        }
+    }
+
+    private func adoptRun(of updated: Automation, fallback: Automation) async {
+        await load()
+        if let id = updated.lastRunID, let run = runs.first(where: { $0.id == id }) {
+            selectRun(run)
+        } else if let last = lastRun(for: updated) ?? lastRun(for: fallback) {
+            selectRun(last)
+        }
+    }
+
+    private func reconcilePendingLaunches() async {
+        guard supportsReceipts, !pendingLaunches.isEmpty else { return }
+        var changed = false
+        for (jobID, submission) in pendingLaunches {
+            if let outcome = try? await service.automationRunReceipt(peer: peer, operationID: submission.operationID) {
+                pendingLaunches[jobID] = nil
+                retryableLaunchIDs.remove(jobID)
+                changed = true
+                if let run = outcome.run ?? runs.first(where: { $0.id == outcome.runID }) {
+                    selectRun(run)
+                }
+            }
+        }
+        if changed { _ = await persistLaunches() }
+    }
+
+    func seedPendingLaunch(_ submission: AutomationRunSubmission, retryable: Bool) async {
+        pendingLaunches[submission.jobID] = submission
+        if retryable {
+            retryableLaunchIDs.insert(submission.jobID)
+        } else {
+            retryableLaunchIDs.remove(submission.jobID)
+        }
+        _ = await persistLaunches()
     }
 
     private func syncWatching() {

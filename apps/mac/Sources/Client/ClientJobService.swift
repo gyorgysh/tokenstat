@@ -10,6 +10,12 @@ protocol ClientJobService: Sendable {
     func automationRuns(peer: String) async throws -> [RunRecord]
     func createAutomation(peer: String, job: Automation) async throws -> Automation
     func updateAutomation(peer: String, job: Automation) async throws -> Automation
+    func supportsAutomationReceipts(peer: String) async -> Bool
+    func editAutomation(peer: String, job: Automation, revision: UInt64) async throws -> Automation
+    func createAutomationOnce(peer: String, job: Automation, operationID: String) async throws -> AutomationCreationOutcome
+    func automationCreationReceipt(peer: String, operationID: String) async throws -> AutomationCreationOutcome?
+    func runAutomationOnce(peer: String, id: String, operationID: String) async throws -> AutomationRunOutcome
+    func automationRunReceipt(peer: String, operationID: String) async throws -> AutomationRunOutcome?
     func removeAutomation(peer: String, id: String) async throws
     func automationBackends(peer: String) async throws -> [AgentBackend]
     func automationQueue(peer: String) async throws -> AutomationQueue
@@ -31,6 +37,30 @@ protocol ClientJobService: Sendable {
     func workflowTranscript(peer: String, runID: String, nodeID: String, offset: UInt64) async throws -> TranscriptChunk
 }
 
+extension ClientJobService {
+    func supportsAutomationReceipts(peer: String) async -> Bool { false }
+    func editAutomation(peer: String, job: Automation, revision: UInt64) async throws -> Automation {
+        try await updateAutomation(peer: peer, job: job)
+    }
+    func createAutomationOnce(peer: String, job: Automation, operationID: String) async throws -> AutomationCreationOutcome {
+        let created = try await createAutomation(peer: peer, job: job)
+        return AutomationCreationOutcome(operationID: operationID, jobID: created.id, createdAtMs: 0, job: created)
+    }
+    func automationCreationReceipt(peer: String, operationID: String) async throws -> AutomationCreationOutcome? { nil }
+    func runAutomationOnce(peer: String, id: String, operationID: String) async throws -> AutomationRunOutcome {
+        let job = try await runAutomation(peer: peer, id: id)
+        return AutomationRunOutcome(
+            operationID: operationID,
+            jobID: id,
+            runID: job.lastRunID ?? "",
+            createdAtMs: 0,
+            job: job,
+            run: nil
+        )
+    }
+    func automationRunReceipt(peer: String, operationID: String) async throws -> AutomationRunOutcome? { nil }
+}
+
 struct ClientRemoteJobService: ClientJobService {
     func automations(peer: String) async throws -> [Automation] {
         try await ClientRemote.automations(peer: peer)
@@ -43,6 +73,24 @@ struct ClientRemoteJobService: ClientJobService {
     }
     func updateAutomation(peer: String, job: Automation) async throws -> Automation {
         try await ClientRemote.updateAutomation(peer: peer, job: job)
+    }
+    func supportsAutomationReceipts(peer: String) async -> Bool {
+        await RemoteHostFeature.automationReceipts.isSupported(peer: peer)
+    }
+    func editAutomation(peer: String, job: Automation, revision: UInt64) async throws -> Automation {
+        try await ClientRemote.editAutomation(peer: peer, job: job, revision: revision)
+    }
+    func createAutomationOnce(peer: String, job: Automation, operationID: String) async throws -> AutomationCreationOutcome {
+        try await ClientRemote.createAutomationOnce(peer: peer, job: job, operationID: operationID)
+    }
+    func automationCreationReceipt(peer: String, operationID: String) async throws -> AutomationCreationOutcome? {
+        try await ClientRemote.automationCreationReceipt(peer: peer, operationID: operationID)
+    }
+    func runAutomationOnce(peer: String, id: String, operationID: String) async throws -> AutomationRunOutcome {
+        try await ClientRemote.runAutomationOnce(peer: peer, id: id, operationID: operationID)
+    }
+    func automationRunReceipt(peer: String, operationID: String) async throws -> AutomationRunOutcome? {
+        try await ClientRemote.automationRunReceipt(peer: peer, operationID: operationID)
     }
     func removeAutomation(peer: String, id: String) async throws {
         try await ClientRemote.removeAutomation(peer: peer, id: id)

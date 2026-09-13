@@ -400,8 +400,35 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "automation.create", ["job": job.payload], as: Automation.self)
     }
 
+    static func createAutomationOnce(peer: String, job: Automation, operationID: String) async throws -> AutomationCreationOutcome {
+        try await Bridge.onPeer(
+            peer,
+            "automation.createOnce",
+            ["job": job.payload, "operationId": operationID],
+            as: AutomationCreationOutcome.self
+        )
+    }
+
+    static func automationCreationReceipt(peer: String, operationID: String) async throws -> AutomationCreationOutcome? {
+        try await Bridge.onPeer(
+            peer,
+            "automation.creationReceipt",
+            ["operationId": operationID],
+            as: AutomationCreationOutcome?.self
+        )
+    }
+
     static func updateAutomation(peer: String, job: Automation) async throws -> Automation {
         try await Bridge.onPeer(peer, "automation.update", ["job": job.payload], as: Automation.self)
+    }
+
+    static func editAutomation(peer: String, job: Automation, revision: UInt64) async throws -> Automation {
+        try await Bridge.onPeer(
+            peer,
+            "automation.edit",
+            ["job": job.payload, "expectedRevision": revision],
+            as: Automation.self
+        )
     }
 
     static func removeAutomation(peer: String, id: String) async throws {
@@ -443,6 +470,24 @@ enum ClientRemote {
 
     static func runAutomation(peer: String, id: String) async throws -> Automation {
         try await Bridge.onPeer(peer, "automation.run", ["id": id], as: Automation.self)
+    }
+
+    static func runAutomationOnce(peer: String, id: String, operationID: String) async throws -> AutomationRunOutcome {
+        try await Bridge.onPeer(
+            peer,
+            "automation.runOnce",
+            ["id": id, "operationId": operationID],
+            as: AutomationRunOutcome.self
+        )
+    }
+
+    static func automationRunReceipt(peer: String, operationID: String) async throws -> AutomationRunOutcome? {
+        try await Bridge.onPeer(
+            peer,
+            "automation.runReceipt",
+            ["operationId": operationID],
+            as: AutomationRunOutcome?.self
+        )
     }
 
     static func setAutomation(peer: String, id: String, enabled: Bool) async throws -> Automation {

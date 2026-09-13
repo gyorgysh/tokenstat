@@ -205,7 +205,13 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable {
             && budgetSeconds == job.budgetSeconds
     }
 
-    func makeJob(id: String, enabled: Bool, lastRunAtMs: Int64? = nil, lastRunID: String? = nil) throws -> Automation {
+    func makeJob(
+        id: String,
+        enabled: Bool,
+        lastRunAtMs: Int64? = nil,
+        lastRunID: String? = nil,
+        revision: UInt64 = 0
+    ) throws -> Automation {
         guard validation == nil, let budgetSeconds else {
             throw Invalid.fields(validation ?? "Check this job's settings.")
         }
@@ -223,7 +229,8 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable {
             enabled: enabled,
             lastRunAtMs: lastRunAtMs,
             nextRunAtMs: nil,
-            lastRunID: lastRunID
+            lastRunID: lastRunID,
+            revision: revision
         )
     }
 

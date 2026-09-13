@@ -10,18 +10,69 @@ protocol AutomationEditorService: Sendable {
     func automations() async throws -> [Automation]
     func automationBackends() async throws -> [AgentBackend]
     func automationQueue() async throws -> AutomationQueue
+    func supportsReceipts() async -> Bool
+    func editAutomation(_ job: Automation, revision: UInt64) async throws -> Automation
+    func createAutomationOnce(_ job: Automation, operationID: String) async throws -> AutomationCreationOutcome
+    func automationCreationReceipt(operationID: String) async throws -> AutomationCreationOutcome?
+    func runningJobIDs() async throws -> [String]
+}
+
+extension AutomationEditorService {
+    func supportsReceipts() async -> Bool { false }
+    func editAutomation(_ job: Automation, revision: UInt64) async throws -> Automation {
+        try await updateAutomation(job)
+    }
+    func createAutomationOnce(_ job: Automation, operationID: String) async throws -> AutomationCreationOutcome {
+        let created = try await createAutomation(job)
+        return AutomationCreationOutcome(operationID: operationID, jobID: created.id, createdAtMs: 0, job: created)
+    }
+    func automationCreationReceipt(operationID: String) async throws -> AutomationCreationOutcome? { nil }
+    func runningJobIDs() async throws -> [String] { [] }
 }
 
 /// One computer. Mobile always has a peer. Mac local uses the daemon.
 struct AutomationEditorTarget: Hashable, Sendable, AutomationEditorService {
     let peer: String?
 
+    func supportsReceipts() async -> Bool {
+        await RemoteHostFeature.automationReceipts.isSupported(peer: peer)
+    }
+
     func createAutomation(_ job: Automation) async throws -> Automation {
         try await call("automation.create", ["job": job.payload], as: Automation.self)
     }
 
+    func createAutomationOnce(_ job: Automation, operationID: String) async throws -> AutomationCreationOutcome {
+        try await call(
+            "automation.createOnce",
+            ["job": job.payload, "operationId": operationID],
+            as: AutomationCreationOutcome.self
+        )
+    }
+
+    func automationCreationReceipt(operationID: String) async throws -> AutomationCreationOutcome? {
+        try await call(
+            "automation.creationReceipt",
+            ["operationId": operationID],
+            as: AutomationCreationOutcome?.self
+        )
+    }
+
     func updateAutomation(_ job: Automation) async throws -> Automation {
         try await call("automation.update", ["job": job.payload], as: Automation.self)
+    }
+
+    func editAutomation(_ job: Automation, revision: UInt64) async throws -> Automation {
+        try await call(
+            "automation.edit",
+            ["job": job.payload, "expectedRevision": revision],
+            as: Automation.self
+        )
+    }
+
+    func runningJobIDs() async throws -> [String] {
+        let runs: [RunRecord] = try await call("automation.runs", [:], as: [RunRecord].self)
+        return Array(Set(runs.filter(\.isRunning).map(\.jobId)))
     }
 
     func removeAutomation(id: String) async throws {

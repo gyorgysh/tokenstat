@@ -106,7 +106,9 @@ pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
         | "automation.runs"
         | "automation.transcript"
         | "automation.queue"
-        | "automation.backends" => false,
+        | "automation.backends"
+        | "automation.creationReceipt"
+        | "automation.runReceipt" => false,
         "launcher.catalog" => false,
         "harness.config.get" => false,
         "todo.list" => false,
@@ -515,6 +517,9 @@ mod tests {
         for method in [
             "chat.send",
             "automation.run",
+            "automation.runOnce",
+            "automation.edit",
+            "automation.createOnce",
             "launcher.install",
             "harness.config.set",
             "todo.delegate",
@@ -525,6 +530,8 @@ mod tests {
         // The handoff poll and attachment read are not the work.
         assert!(!counts_as_work("work.continuity.get", None));
         assert!(!counts_as_work("work.continuity.attachments", None));
+        assert!(!counts_as_work("automation.creationReceipt", None));
+        assert!(!counts_as_work("automation.runReceipt", None));
     }
 
     #[test]

@@ -88,22 +88,38 @@ struct AutomationsInspector: View {
                     labeled("Last", last.startedAt.formatted(date: .abbreviated, time: .shortened))
                 }
 
-                HStack(spacing: Theme.Space.s) {
-                    if let last = model.lastRun(for: job), last.isRunning {
-                        Button("Stop", .stop) { Task { await model.stop(last) } }
-                            .buttonStyle(AccentButtonStyle())
-                            .help("Kill this run now")
-                    } else {
-                        Button("Run now", .run) { Task { await model.run(job) } }
-                            .buttonStyle(AccentButtonStyle())
-                    }
-                    Button("Edit", .edit) { editing = true }
-                        .buttonStyle(SecondaryButtonStyle())
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Theme.Space.s) { jobActions(job) }
+                    VStack(alignment: .leading, spacing: Theme.Space.s) { jobActions(job) }
+                }
+                if model.hasUnconfirmedLaunch(job.id), model.lastRun(for: job)?.isRunning != true {
+                    Text("This run is not confirmed yet. Check it before starting another.")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
                 }
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    @ViewBuilder
+    private func jobActions(_ job: Automation) -> some View {
+        if let last = model.lastRun(for: job), last.isRunning {
+            Button("Stop", .stop) { Task { await model.stop(last) } }
+                .buttonStyle(AccentButtonStyle())
+                .help("Kill this run now")
+        } else if model.hasUnconfirmedLaunch(job.id) {
+            Button("Check run", .refresh) { Task { await model.checkLaunch(job) } }
+                .buttonStyle(SecondaryButtonStyle())
+            Button("Retry run", .run) { Task { await model.run(job) } }
+                .buttonStyle(AccentButtonStyle())
+        } else {
+            Button("Run now", .run) { Task { await model.run(job) } }
+                .buttonStyle(AccentButtonStyle())
+        }
+        Button("Edit", .edit) { editing = true }
+            .buttonStyle(SecondaryButtonStyle())
     }
 
     private func runBody(_ run: RunRecord) -> some View {

@@ -173,7 +173,7 @@ struct AutomationEditorView: View {
             nextCaption: nextCaption,
             section: section
         )
-        .disabled(!session.loaded || session.working || session.saved.pendingCreate)
+        .disabled(!session.loaded || session.working || session.creating)
     }
 
     private var title: String {
@@ -203,7 +203,7 @@ struct AutomationEditorView: View {
 
     @ViewBuilder private var notices: some View {
         if session.working {
-            ProgressView(session.isCreate ? "Creating job" : "Saving job")
+            ProgressView(session.creating ? "Creating job" : "Saving job")
                 .font(Theme.callout)
         }
         if let message = session.noticeMessage {
@@ -211,44 +211,67 @@ struct AutomationEditorView: View {
                 .font(Theme.callout)
                 .foregroundStyle(Theme.controlGlyph)
         }
+        if session.loaded, !session.supportsReceipts, session.saved.created == nil, !session.isCreate {
+            Text("This computer cannot protect concurrent edits yet. Saving overwrites the job as it is now.")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+        }
+        if session.liveRun, session.saved.created == nil {
+            Text("A run is going. This save is for the next one.")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+        }
         if let message = session.errorMessage {
             Text(message)
                 .font(Theme.callout)
                 .foregroundStyle(Theme.danger)
                 .textSelection(.enabled)
-            if session.saved.pendingCreate == false, session.saved.created == nil {
+            if !session.creating, session.saved.created == nil, session.saved.pendingEdit == nil {
                 Button("Reload options", .refresh) { Task { await session.load() } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     .disabled(session.working)
             }
         }
-        if session.backends.isEmpty, session.loaded, session.saved.created == nil, session.saved.pendingCreate == false {
+        if session.backends.isEmpty, session.loaded, session.saved.created == nil, !session.creating {
             Text("No supported agent CLI is installed on this computer yet. Install one there, then reload.")
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
+        if session.conflict, let current = session.current {
+            comparison(title: "Changed on the computer", draft: AutomationEditorDraft(current))
+            Text("This job changed since you opened it. Compare the saved job before replacing it.")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+        }
         if let other = session.otherDraft {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Draft from another window")
-                    .font(Theme.callout.weight(.semibold))
-                Text(other.value.fields.name)
-                    .font(Theme.callout)
-                Text(other.value.fields.prompt)
-                    .font(Theme.callout)
-                    .textSelection(.enabled)
-                Text("Choose which draft to continue. A creation already sent must be checked first.")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.controlGlyph)
-                Button("Use saved draft", .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
+            comparison(title: "Draft from another window", draft: other.value.fields)
+            Text("Choose which draft to continue. A creation already sent must be checked first.")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+            Button("Use saved draft", .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
+                .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                .disabled(session.working)
+            if other.value.pendingCreate == false, other.value.pendingCreation == nil, other.value.pendingEdit == nil {
+                Button("Keep my draft", .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     .disabled(session.working)
-                if other.value.pendingCreate == false {
-                    Button("Keep my draft", .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
-                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
-                        .disabled(session.working)
-                }
             }
         }
+    }
+
+    private func comparison(title: String, draft: AutomationEditorDraft) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(title).font(Theme.callout.weight(.semibold))
+            Text(draft.name).font(Theme.callout)
+            Text(draft.prompt).font(Theme.callout).textSelection(.enabled)
+            Text("\(draft.builtSchedule.summary) · \(draft.backend)")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
     private var confirmation: some View {
@@ -286,10 +309,26 @@ struct AutomationEditorView: View {
             }
             .buttonStyle(AccentButtonStyle(comfortable: true))
             .disabled(session.working)
-        } else if session.saved.pendingCreate {
-            Button("Check automations", .refresh) { Task { await session.checkCreated() } }
+        } else if session.conflict {
+            Button("Use computer version", .restore) { Task { await session.resolveConflict(keepMine: false) } }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(session.working)
+            Button("Keep my draft", .edit) { Task { await session.resolveConflict(keepMine: true) } }
+                .buttonStyle(AccentButtonStyle(comfortable: true))
+                .disabled(session.working)
+        } else if session.saved.pendingEdit != nil {
+            Button("Check saved job", .refresh) { Task { await session.refresh() } }
+                .buttonStyle(AccentButtonStyle(comfortable: true))
+                .disabled(session.working)
+        } else if session.creating {
+            Button("Check creation", .refresh) { Task { await session.checkCreated() } }
+                .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                .disabled(session.working)
+            if session.canRetryCreate {
+                Button("Retry creation", .create) { Task { await session.retryCreate() } }
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
+                    .disabled(session.working || session.otherDraft != nil)
+            }
         } else if session.isCreate {
             Button("Create automation", .create) { Task { await session.create() } }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
