@@ -19,9 +19,15 @@ struct ClientEditorStoreTests {
     static func main() async {
         var finish: CheckedContinuation<Void, Error>?
         var submitted: String?
-        let store = ClientEditorStore { _, _, _, content in
+        var hostContent = "original"
+        let store = ClientEditorStore {
+            _, _, _, content in
             submitted = content
+            // The fake host holds what was written, like the real one.
+            hostContent = content
             try await withCheckedThrowingContinuation { finish = $0 }
+        } read: { _, _, _ in
+            hostContent
         }
         let a = ClientEditorKey(peer: "host-a", workspace: "workspace", path: "src/main.swift")
         let b = ClientEditorKey(peer: "host-b", workspace: "workspace", path: "src/main.swift")
@@ -69,6 +75,63 @@ struct ClientEditorStoreTests {
         store.adoptSaved(clean, content: "stale host")
         precondition(store.tab(for: clean)?.document.text == "typed", "Dirty tabs keep the buffer")
         store.reset()
+
+        var writes = 0
+        var host = "opened"
+        let checked = ClientEditorStore { _, _, _, _ in
+            writes += 1
+        } read: { _, _, _ in
+            host
+        }
+        let key = ClientEditorKey(peer: "host-a", workspace: "workspace", path: "notes.txt")
+        checked.open(key, content: "opened")
+        let draft = checked.tab(for: key)!
+        draft.document.setText("my edits")
+        await checked.save(draft)
+        precondition(writes == 1 && !draft.document.isDirty, "Unchanged host saves straight through")
+        precondition(draft.document.savedAt != nil, "Save stamps an outcome")
+        draft.document.setText("more edits")
+        precondition(draft.document.savedAt == nil, "New edits clear the stamp")
+
+        host = "more edits"
+        await checked.save(draft)
+        precondition(writes == 1 && !draft.document.isDirty, "Converged host just marks saved")
+        draft.document.setText("diverged again")
+
+        host = "someone else"
+        await checked.save(draft)
+        precondition(writes == 1, "Moved host blocks the write")
+        precondition(draft.conflictHostContent == "someone else", "Conflict keeps the host copy")
+        precondition(draft.document.text == "diverged again", "Conflict keeps the draft")
+        await checked.save(draft)
+        precondition(writes == 1, "Conflicted save stays off")
+        await checked.resolveConflict(draft, keepMine: false)
+        precondition(draft.document.text == "someone else" && !draft.document.isDirty, "Reload adopts the host")
+        precondition(draft.conflictHostContent == nil, "Reload clears the conflict")
+
+        draft.document.setText("mine once more")
+        host = "host again"
+        await checked.save(draft)
+        precondition(draft.conflictHostContent != nil, "Conflict again")
+        await checked.resolveConflict(draft, keepMine: true)
+        precondition(writes == 2 && !draft.document.isDirty, "Keeping writes the draft through")
+
+        precondition(EditorDocument.firstDifference(between: "a\nb\nc", and: "a\nB\nc") == 2, "First difference names the line")
+        precondition(EditorDocument.firstDifference(between: "same", and: "same") == nil, "Matching files have none")
+        precondition(EditorDocument.firstDifference(between: "a", and: "a\nb") == 2, "Appended lines count")
+
+        var blindWrites = 0
+        let blind = ClientEditorStore { _, _, _, _ in
+            blindWrites += 1
+        } read: { _, _, _ in
+            throw NSError(domain: "offline", code: 1)
+        }
+        blind.open(key, content: "opened")
+        let offline = blind.tab(for: key)!
+        offline.document.setText("offline edits")
+        await blind.save(offline)
+        precondition(blindWrites == 0 && offline.document.isDirty, "Unreadable host waits, edits kept")
+        precondition(offline.errorMessage != nil, "Refusal says why")
         print("ClientEditorStoreTests passed")
     }
 }

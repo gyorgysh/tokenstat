@@ -793,6 +793,11 @@ struct ClientFilesView: View {
                         Text(entry.name)
                             .foregroundStyle(entry.ignored ? .secondary : .primary)
                         Spacer()
+                        if !entry.isDir, let tab = editors.tab(for: ClientEditorKey(peer: peer, workspace: workspace, path: entry.path)),
+                           tab.document.isDirty {
+                            Circle().fill(Theme.accent).frame(width: 6, height: 6)
+                                .accessibilityLabel("Unsaved changes")
+                        }
                         if entry.isDir {
                             Image(systemName: "chevron.right")
                                 .font(Theme.caption)
@@ -886,9 +891,22 @@ struct ClientFileEditor: View {
     @State private var errorMessage: String?
     @State private var confirmClose = false
     @State private var find: EditorFindSession
+    @State private var conflictHostContent: String?
+    private let read: ClientEditorStore.Reader
+    private let write: ClientEditorStore.Writer
 
     @MainActor
-    init(peer: String, workspace: String, path: String, content: String, find: EditorFindSession? = nil) {
+    init(
+        peer: String,
+        workspace: String,
+        path: String,
+        content: String,
+        find: EditorFindSession? = nil,
+        read: @escaping ClientEditorStore.Reader = { peer, workspace, path in
+            try await ClientRemote.readFile(peer: peer, workspace: workspace, path: path).content
+        },
+        write: @escaping ClientEditorStore.Writer = ClientRemote.writeFile
+    ) {
         self.peer = peer
         self.workspace = workspace
         self.path = path
@@ -896,6 +914,8 @@ struct ClientFileEditor: View {
             initialValue: EditorDocument(workspaceID: workspace, path: path, content: content)
         )
         _find = State(initialValue: find ?? EditorFindSession())
+        self.read = read
+        self.write = write
     }
 
     var body: some View {
@@ -903,6 +923,15 @@ struct ClientFileEditor: View {
             VStack(spacing: 0) {
                 if find.showing {
                     EditorFindBar(find: find)
+                }
+                if let host = conflictHostContent {
+                    EditorConflictCard(document: document, hostContent: host) {
+                        resolveConflict(keepMine: false)
+                    } onKeep: {
+                        resolveConflict(keepMine: true)
+                    }
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.top, Theme.Space.s)
                 }
                 IOSCodeTextView(document: document, find: find)
                     .background(Theme.background)
@@ -930,7 +959,7 @@ struct ClientFileEditor: View {
                         Button(isSaving ? "Saving…" : "Save") {
                             Task { await save() }
                         }
-                        .disabled(isSaving || !document.isDirty)
+                        .disabled(isSaving || !document.isDirty || conflictHostContent != nil)
                     }
                 }
                 .safeAreaInset(edge: .bottom) { status }
@@ -938,6 +967,14 @@ struct ClientFileEditor: View {
         // The first parse, before anybody types. Colour is not worth blocking
         // the sheet on, so the text is up either way.
         .task { await document.highlightNow() }
+        #if WORKBENCH_QA
+        .task {
+            if ProcessInfo.processInfo.environment["FILE_DIRTY"] == "1", !document.isDirty {
+                document.setText(document.text + "\n// Edited on this device.\n")
+                await save()
+            }
+        }
+        #endif
         .interactiveDismissDisabled(document.isDirty || isSaving)
         .confirmationDialog(
             "Discard changes?",
@@ -951,9 +988,10 @@ struct ClientFileEditor: View {
         }
     }
 
-    /// The line under the buffer. A failed save is the loud case; a file with
-    /// no grammar is the quiet one, and saying so beats leaving somebody to
-    /// wonder why their config is grey.
+    /// The line under the buffer: unsaved state, save outcome, and colour
+    /// notes. A failed save is the loud case; a file with no grammar is the
+    /// quiet one, and saying so beats leaving somebody to wonder why their
+    /// config is grey.
     @ViewBuilder
     private var status: some View {
         if let errorMessage {
@@ -961,31 +999,92 @@ struct ClientFileEditor: View {
                 .font(ClientType.caption)
                 .foregroundStyle(Theme.danger)
                 .padding()
-        } else if let note = document.highlightNote {
-            Text(note)
-                .font(ClientType.caption)
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.vertical, Theme.Space.s)
+        } else {
+            HStack(spacing: Theme.Space.s) {
+                if document.isDirty {
+                    Label("Unsaved", systemImage: "circle.fill")
+                        .font(ClientType.caption)
+                        .foregroundStyle(Theme.warning)
+                } else if let savedAt = document.savedAt {
+                    Text("Saved \(savedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(ClientType.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                }
+                if !document.changedLines.isEmpty {
+                    Text("\(document.changedLines.count) changed")
+                        .font(ClientType.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                if let note = document.highlightNote {
+                    Text(note)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.s)
         }
     }
 
     private func save() async {
-        guard !isSaving else { return }
+        guard !isSaving, conflictHostContent == nil else { return }
         isSaving = true
-        let sent = document.text
         defer { isSaving = false }
+        let host: String
         do {
-            try await ClientRemote.writeFile(
-                peer: peer,
-                workspace: workspace,
-                path: path,
-                content: sent
-            )
+            host = try await read(peer, workspace, path)
+        } catch {
+            errorMessage = "Could not re-read this file on the host, so the save waits. Your edits are kept."
+            return
+        }
+        let draft = document.text
+        if host != draft, host != document.savedText {
+            errorMessage = nil
+            conflictHostContent = host
+            return
+        }
+        if host == draft {
+            document.markSaved(content: draft)
+            errorMessage = nil
+            return
+        }
+        let sent = draft
+        do {
+            try await write(peer, workspace, path, sent)
             document.markSaved(content: sent)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func resolveConflict(keepMine: Bool) {
+        guard conflictHostContent != nil, !isSaving else { return }
+        if keepMine {
+            // Explicit choice: write the draft through without re-verifying.
+            // Re-reading first would raise the same conflict again.
+            conflictHostContent = nil
+            errorMessage = nil
+            let sent = document.text
+            Task {
+                isSaving = true
+                defer { isSaving = false }
+                do {
+                    try await write(peer, workspace, path, sent)
+                    document.markSaved(content: sent)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        } else {
+            if let host = conflictHostContent {
+                document.adopt(saved: host)
+            }
+            conflictHostContent = nil
+            errorMessage = nil
         }
     }
 }

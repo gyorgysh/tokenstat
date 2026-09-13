@@ -74,7 +74,7 @@ struct ClientFileTabs<Files: View>: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button(tab.isSaving ? "Saving…" : "Save") { Task { await editors.save(tab) } }
                         .keyboardShortcut("s", modifiers: .command)
-                        .disabled(tab.isSaving || !tab.document.isDirty)
+                        .disabled(tab.isSaving || !tab.document.isDirty || tab.conflictHostContent != nil)
                 }
                 ToolbarItem(placement: .secondaryAction) {
                     Button("Close file") { requestClose(tab) }
@@ -99,13 +99,40 @@ struct ClientFileTabs<Files: View>: View {
 
     private func editor(_ tab: ClientEditorTab) -> some View {
         VStack(spacing: 0) {
-            Text(tab.id.path)
-                .font(ClientType.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(Theme.Space.s)
+            HStack(spacing: Theme.Space.s) {
+                Text(tab.id.path)
+                    .font(ClientType.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                if tab.document.isDirty {
+                    Label("Unsaved", systemImage: "circle.fill")
+                        .font(ClientType.caption)
+                        .foregroundStyle(Theme.warning)
+                } else if let savedAt = tab.document.savedAt {
+                    Text("Saved \(savedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(ClientType.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                }
+                if !tab.document.changedLines.isEmpty {
+                    Text("\(tab.document.changedLines.count) changed")
+                        .font(ClientType.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.Space.s)
             if find.showing {
                 EditorFindBar(find: find)
+            }
+            if let host = tab.conflictHostContent {
+                EditorConflictCard(document: tab.document, hostContent: host) {
+                    Task { await editors.resolveConflict(tab, keepMine: false) }
+                } onKeep: {
+                    Task { await editors.resolveConflict(tab, keepMine: true) }
+                }
+                .padding(.horizontal, Theme.Space.m)
             }
             IOSCodeTextView(document: tab.document, find: find)
                 .editorChangedLines(peer: peer, workspace: workspace, document: tab.document)

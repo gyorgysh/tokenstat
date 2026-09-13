@@ -17,6 +17,9 @@ final class ClientEditorTab: Identifiable {
     let document: EditorDocument
     var isSaving = false
     var errorMessage: String?
+    /// Host content that arrived while the draft was dirty. Saving stays off
+    /// until the person chooses a copy.
+    var conflictHostContent: String?
 
     init(id: ClientEditorKey, content: String) {
         self.id = id
@@ -29,11 +32,16 @@ final class ClientEditorTab: Identifiable {
 @MainActor
 final class ClientEditorStore {
     typealias Writer = @MainActor (String, String, String, String) async throws -> Void
+    typealias Reader = @MainActor (String, String, String) async throws -> String
     private(set) var tabs: [ClientEditorTab] = []
     private var selections: [ClientEditorScope: ClientEditorKey] = [:]
     @ObservationIgnored private let write: Writer
+    @ObservationIgnored private let read: Reader
 
-    init(write: @escaping Writer) { self.write = write }
+    init(write: @escaping Writer, read: @escaping Reader) {
+        self.write = write
+        self.read = read
+    }
 
     func tabs(peer: String, workspace: String) -> [ClientEditorTab] {
         tabs.filter { $0.id.peer == peer && $0.id.workspace == workspace }
@@ -102,16 +110,62 @@ final class ClientEditorStore {
     }
 
     func save(_ tab: ClientEditorTab) async {
-        guard tabs.contains(where: { $0 === tab }), !tab.isSaving, tab.document.isDirty else { return }
+        guard tabs.contains(where: { $0 === tab }), !tab.isSaving, tab.document.isDirty,
+              tab.conflictHostContent == nil else { return }
         tab.isSaving = true
         tab.errorMessage = nil
-        let sent = tab.document.text
         defer { tab.isSaving = false }
+        // The host file may have moved since this buffer opened: another
+        // window, the Mac, or a run writing output. Re-read before writing
+        // so a stale draft cannot silently overwrite newer host content.
+        let host: String
+        do {
+            host = try await read(tab.id.peer, tab.id.workspace, tab.id.path)
+        } catch {
+            tab.errorMessage = "Could not re-read this file on the host, so the save waits. Your edits are kept."
+            return
+        }
+        let draft = tab.document.text
+        if host != draft, host != tab.document.savedText {
+            tab.conflictHostContent = host
+            return
+        }
+        if host == draft {
+            // Already there: a lost acknowledgement or a matching remote
+            // edit. Mark it saved without writing the same bytes again.
+            tab.document.markSaved(content: draft)
+            return
+        }
+        let sent = draft
         do {
             try await write(tab.id.peer, tab.id.workspace, tab.id.path, sent)
             tab.document.markSaved(content: sent)
         } catch {
             tab.errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Choose a copy after a conflict. Reloading adopts the host and clears
+    /// the draft; keeping writes the draft through explicitly.
+    func resolveConflict(_ tab: ClientEditorTab, keepMine: Bool) async {
+        guard tabs.contains(where: { $0 === tab }), !tab.isSaving,
+              let host = tab.conflictHostContent else { return }
+        if keepMine {
+            tab.conflictHostContent = nil
+            tab.errorMessage = nil
+            let sent = tab.document.text
+            tab.isSaving = true
+            defer { tab.isSaving = false }
+            do {
+                try await write(tab.id.peer, tab.id.workspace, tab.id.path, sent)
+                tab.document.markSaved(content: sent)
+            } catch {
+                tab.errorMessage = error.localizedDescription
+            }
+        } else {
+            tab.document.adopt(saved: host)
+            tab.conflictHostContent = nil
+            tab.errorMessage = nil
         }
     }
 

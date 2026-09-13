@@ -47,6 +47,10 @@ final class EditorDocument: Identifiable {
     private(set) var changedLines: Set<Int> = []
 
     var isDirty: Bool { text != savedText }
+    /// When the host acknowledged the last save. Cleared by the next edit.
+    /// Status lines show it so a save has a visible outcome, not just a
+    /// Save button going quiet.
+    private(set) var savedAt: Date?
 
     private var highlightTask: Task<Void, Never>?
 
@@ -62,6 +66,7 @@ final class EditorDocument: Identifiable {
     func setText(_ next: String) {
         guard next != text else { return }
         text = next
+        if isDirty { savedAt = nil }
         scheduleHighlight()
     }
 
@@ -69,6 +74,7 @@ final class EditorDocument: Identifiable {
     func adopt(saved content: String) {
         text = content
         savedText = content
+        savedAt = nil
         scheduleHighlight()
     }
 
@@ -76,6 +82,20 @@ final class EditorDocument: Identifiable {
         // A network save acknowledges the submitted version. Edits made
         // while that request was in flight must remain dirty.
         savedText = content ?? text
+        if !isDirty { savedAt = Date() }
+    }
+
+    /// One-based number of the first line where this text and the other
+    /// differ, or nil when they match. The conflict card names it so the
+    /// person knows where to look instead of eyeballing two full files.
+    static func firstDifference(between mine: String, and other: String) -> Int? {
+        if mine == other { return nil }
+        let mineLines = mine.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        let otherLines = other.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        for (index, pair) in zip(mineLines, otherLines).enumerated() {
+            if pair.0 != pair.1 { return index + 1 }
+        }
+        return min(mineLines.count, otherLines.count) + 1
     }
 
     @ObservationIgnored var selection = NSRange(location: 0, length: 0)

@@ -54,7 +54,12 @@ struct ClientRootView: View {
     @State private var navigation = ClientNavigationModel()
     /// This device's tabs, shared with the editor in the account sheet.
     @State private var tabCustomization = ClientTabCustomization.shared
-    @State private var editors = ClientEditorStore(write: ClientRemote.writeFile)
+    @State private var editors = ClientEditorStore(
+        write: ClientRemote.writeFile,
+        read: { peer, workspace, path in
+            try await ClientRemote.readFile(peer: peer, workspace: workspace, path: path).content
+        }
+    )
     /// The account sheet, opened from the avatar rather than from a tab. See
     /// `AvatarButton`.
     @State private var showAccount = false
