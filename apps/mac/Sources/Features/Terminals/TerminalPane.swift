@@ -26,6 +26,10 @@ struct TerminalPane: View {
     /// apply when this is true.
     var isSurfaceActive: Bool = true
     @State private var closingSession: TerminalSession?
+    @State private var browserWorkspaces: Set<String> = []
+    @State private var browserURLs: [String: String] = [:]
+
+    private var showsBrowser: Bool { browserWorkspaces.contains(folder.id) }
 
     private var sessions: [TerminalSession] {
         terminals.sessions(in: folder.id)
@@ -148,7 +152,14 @@ struct TerminalPane: View {
                 // Must expand. A GeometryReader with no flexible frame can keep a
                 // zero size after a terminal↔launcher flip; the launch tiles then
                 // paint at their ideal width over the sidebar until a resize.
-                surface
+                HSplitView {
+                    surface
+                        .frame(minWidth: 240, maxWidth: .infinity, maxHeight: .infinity)
+                    if showsBrowser {
+                        browserPane
+                            .frame(minWidth: 280, idealWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if showsTerminal {
                     hostLines
@@ -420,6 +431,19 @@ struct TerminalPane: View {
 
     // MARK: - Session strip
 
+    private var browserPane: some View {
+        VStack(spacing: 0) {
+            InspectorChromeBar(onClose: { browserWorkspaces.remove(folder.id) }, closeLabel: "Close browser") {
+                InspectorTitle(title: "Browser", symbol: "globe")
+                Spacer(minLength: 0)
+            }
+            BrowserView(url: browserURLs[folder.id] ?? "", allowsExternalNavigation: true) {
+                browserURLs[folder.id] = $0
+            }
+            .id(folder.id)
+        }
+    }
+
     @ViewBuilder
     private func fileSurface(_ path: String) -> some View {
         EditorView(model: workspaces, folder: folder, path: path)
@@ -544,6 +568,12 @@ struct TerminalPane: View {
             }
 
             Spacer()
+
+            ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside sessions", isAccent: showsBrowser) {
+                if showsBrowser { browserWorkspaces.remove(folder.id) }
+                else { browserWorkspaces.insert(folder.id) }
+            }
+            .accessibilityLabel("Browser beside sessions")
 
             if !sessions.isEmpty {
                 Menu {
