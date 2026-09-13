@@ -19,6 +19,9 @@
 
 use std::time::Duration;
 
+// Unix only: `exchange` and its tests are the sole users, and both are
+// `#[cfg(unix)]`. Ungated, Windows builds fail on the unused import.
+#[cfg(unix)]
 use serde_json::{Value, json};
 
 /// Largest host reply accepted before the connection is refused.
