@@ -78,6 +78,9 @@ ALLOWED = [
     ("Features/Workflows/WorkflowCanvas.swift", "model.addNode(kind:"),
     ("Features/Workflows/WorkflowCanvas.swift", "onPick()"),
     ("Features/Workflows/WorkflowRecipes.swift", "onPick(recipe)"),
+    # Whole-surface blank/example cards. The step strip is the label, and the
+    # selected card is the accent stroke, not a second glyph on every row.
+    ("Features/Workflows/WorkflowFieldsView.swift", "Button(action: action) {"),
     ("Features/Automations/AutomationsView.swift", "Text(dayShort[bit])"),
     ("Features/Automations/AutomationsView.swift", "scheduleKind = kind"),
     ("Features/Automations/AutomationsView.swift", "intervalMinutes = String(minutes)"),

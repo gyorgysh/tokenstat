@@ -658,6 +658,15 @@ enum ClientRemote {
         )
     }
 
+    static func createWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph {
+        try await Bridge.onPeer(
+            peer,
+            "workflow.create",
+            ["workflow": try ClientJSON.object(graph)],
+            as: WorkflowGraph.self
+        )
+    }
+
     static func updateWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph {
         try await Bridge.onPeer(
             peer,
@@ -665,6 +674,11 @@ enum ClientRemote {
             ["workflow": try ClientJSON.object(graph)],
             as: WorkflowGraph.self
         )
+    }
+
+    static func removeWorkflow(peer: String, id: String) async throws {
+        struct Removed: Codable, Sendable { let removed: Bool? }
+        _ = try await Bridge.onPeer(peer, "workflow.remove", ["id": id], as: Removed.self)
     }
 
     static func killWorkflow(peer: String, runID: String) async throws {

@@ -12,9 +12,10 @@ import Observation
 /// Graphs and runs for one folder on a peer, plus the writes a phone or
 /// iPad is allowed to make.
 ///
-/// Construction stays on the Mac. This object lists, runs, stops, continues
-/// a gate, flips a schedule, and tails a step. The views decide how that
-/// looks. They do not talk to the host themselves.
+/// This object lists, creates, updates, removes, runs, stops, continues a
+/// gate, flips a schedule, and tails a step. Graph construction lives in
+/// the shared editor. The views decide how that looks. They do not talk
+/// to the host themselves.
 @MainActor
 @Observable
 final class ClientWorkflowSession {
@@ -214,6 +215,23 @@ final class ClientWorkflowSession {
             errorMessage = nil
             await load()
             selectRun(next)
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
+    }
+
+    func remove(_ graph: WorkflowGraph) async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            try await service.removeWorkflow(peer: peer, id: graph.id)
+            errorMessage = nil
+            if selectedGraphID == graph.id {
+                selectedGraphID = nil
+                selectedRunID = nil
+            }
+            await load()
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }

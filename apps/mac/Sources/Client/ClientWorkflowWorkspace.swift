@@ -19,6 +19,8 @@ struct ClientWorkflowWorkspace: View {
     @State private var session: ClientWorkflowSession
     @State private var search = ""
     @State private var navigation = ClientJobNavigation()
+    @State private var editor: WorkflowEditorRoute?
+    @State private var pendingDelete: WorkflowGraph?
     @Environment(\.dynamicTypeSize) private var typeSize
     private let opensDetailWhenReady: Bool
 
@@ -65,6 +67,49 @@ struct ClientWorkflowWorkspace: View {
         .background(Theme.background)
         .navigationTitle("Workflows")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New workflow", .create) {
+                    editor = WorkflowEditorRoute(
+                        workspaceID: workspaceID, folderName: folderName, graph: nil
+                    )
+                }
+                .labelStyle(.iconOnly)
+            }
+        }
+        .fullScreenCover(item: $editor) { route in
+            WorkflowEditorDestination(
+                target: WorkflowEditorTarget(peer: peer),
+                workspaceID: route.workspaceID,
+                folderName: route.folderName,
+                hostName: hostName,
+                existing: route.graph
+            ) { created in
+                await session.load()
+                if let created { session.selectGraph(created.id) }
+            }
+        }
+        .confirmationDialog(
+            "Delete \(pendingDelete?.name ?? "this workflow")?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let graph = pendingDelete {
+                    pendingDelete = nil
+                    Task { await session.remove(graph) }
+                }
+            }
+            Button("Keep it", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("The graph is removed. Past runs stay on this computer.")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: WorkflowEditorSession.didChange)) { _ in
+            Task { await session.load() }
+        }
         .task {
             await session.appeared()
             if opensDetailWhenReady { navigation.openDetail() }
@@ -98,14 +143,102 @@ struct ClientWorkflowWorkspace: View {
         }
     }
 
+    private var listSummary: String {
+        "\(session.graphs.count) workflows · \(session.runs.filter(\.isLive).count) running"
+    }
+
+    private var filteredGraphs: [WorkflowGraph] {
+        session.graphs.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+    }
+
+    private var emptyState: some View {
+        ClientSectionEmpty(
+            text: "No workflows here",
+            art: .workflows,
+            message: "Create a workflow for this folder. It runs on the connected computer.",
+            actionTitle: "New workflow",
+            actionIcon: .create,
+            action: {
+                editor = WorkflowEditorRoute(
+                    workspaceID: workspaceID, folderName: folderName, graph: nil
+                )
+            }
+        )
+    }
+
+    @ViewBuilder
     private func list(_ layout: ClientJobLayout) -> some View {
+        if layout.arrangement == .compact {
+            compactList
+        } else {
+            splitList
+        }
+    }
+
+    private var compactList: some View {
+        List {
+            TextField("Search workflows", text: $search)
+                .textFieldStyle(.themed)
+                .accessibilityLabel("Search workflows")
+                .clientCardRow()
+            if session.loaded, !session.graphs.isEmpty {
+                Text(listSummary)
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .clientCardRow()
+            }
+            if let errorMessage = session.errorMessage {
+                ClientErrorCard(message: errorMessage) {
+                    Task { await session.load() }
+                }
+                .clientCardRow()
+            }
+            if !session.loaded {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, Theme.Space.xl)
+                    .clientCardRow()
+            } else if session.graphs.isEmpty {
+                emptyState.clientCardRow()
+            } else if filteredGraphs.isEmpty {
+                Text("No matching workflows")
+                    .font(ClientType.body)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, Theme.Space.l)
+                    .clientCardRow()
+            } else {
+                ForEach(filteredGraphs) { graph in
+                    graphButton(graph, showsChevron: true, isSelected: false)
+                        .clientCardRow()
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button("Delete", role: .destructive) { pendingDelete = graph }
+                            Button("Edit") { openEditor(graph) }
+                                .tint(Theme.accent)
+                        }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
+        .contentMargins(.top, Theme.Space.m, for: .scrollContent)
+        .refreshable {
+            await ClientRefresh.pull("workspace-workflows-\(workspaceID)") {
+                await session.load()
+            }
+        }
+    }
+
+    private var splitList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField("Search workflows", text: $search).textFieldStyle(.themed)
                     .accessibilityLabel("Search workflows")
-                if session.loaded {
-                    Text("\(session.graphs.count) workflows · \(session.runs.filter(\.isLive).count) running")
-                        .font(ClientType.caption).foregroundStyle(.secondary)
+                if session.loaded, !session.graphs.isEmpty {
+                    Text(listSummary)
+                        .font(ClientType.caption)
+                        .foregroundStyle(Theme.controlGlyph)
                 }
                 if let errorMessage = session.errorMessage {
                     ClientErrorCard(message: errorMessage) {
@@ -117,38 +250,20 @@ struct ClientWorkflowWorkspace: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, Theme.Space.xl)
                 } else if session.graphs.isEmpty {
-                    ClientSectionEmpty(
-                        text: "No workflows here",
-                        art: .workflows,
-                        message: "Graphs are drawn on the Mac. Bind one to this folder and its runs land here."
-                    )
+                    emptyState
+                } else if filteredGraphs.isEmpty {
+                    Text("No matching workflows")
+                        .font(ClientType.body)
+                        .foregroundStyle(Theme.controlGlyph)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, Theme.Space.l)
                 } else {
-                    ForEach(session.graphs.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }) { graph in
-                        Button {
-                            session.selectGraph(graph.id)
-                            navigation.openDetail()
-                        } label: {
-                            ClientJobRow(
-                                title: graph.name,
-                                subtitle: ClientJobCopy.lastRunPhrase(
-                                    session.lastRun(for: graph)?.startedAt ?? graph.lastRun
-                                ),
-                                isLive: session.runs.contains { $0.workflowID == graph.id && $0.isLive },
-                                isEnabled: graph.enabled,
-                                graph: graph,
-                                liveRun: session.runs.first { $0.workflowID == graph.id && $0.isLive },
-                                showsChevron: layout.arrangement == .compact,
-                                isSelected: layout.arrangement != .compact && session.selectedGraphID == graph.id
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if !search.isEmpty && !session.graphs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) }) {
-                        Text("No matching workflows")
-                            .font(ClientType.body)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, Theme.Space.l)
+                    ForEach(filteredGraphs) { graph in
+                        graphButton(
+                            graph,
+                            showsChevron: false,
+                            isSelected: session.selectedGraphID == graph.id
+                        )
                     }
                 }
             }
@@ -160,6 +275,42 @@ struct ClientWorkflowWorkspace: View {
                 await session.load()
             }
         }
+    }
+
+    private func graphButton(_ graph: WorkflowGraph, showsChevron: Bool, isSelected: Bool) -> some View {
+        Button {
+            session.selectGraph(graph.id)
+            navigation.openDetail()
+        } label: {
+            ClientJobRow(
+                title: graph.name,
+                subtitle: HostScheduleClock.listSubtitle(
+                    cadence: graph.schedule.summary,
+                    next: graph.nextRun,
+                    enabled: graph.enabled,
+                    repeats: graph.schedule.repeats,
+                    timezone: session.schedulerTimezone
+                ),
+                isLive: session.runs.contains { $0.workflowID == graph.id && $0.isLive },
+                isEnabled: graph.enabled,
+                graph: graph,
+                liveRun: session.runs.first { $0.workflowID == graph.id && $0.isLive },
+                cadence: graph.schedule,
+                showsChevron: showsChevron,
+                isSelected: isSelected
+            )
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Edit workflow") { openEditor(graph) }
+            Button("Delete workflow", role: .destructive) { pendingDelete = graph }
+        }
+    }
+
+    private func openEditor(_ graph: WorkflowGraph) {
+        editor = WorkflowEditorRoute(
+            workspaceID: workspaceID, folderName: folderName, graph: graph
+        )
     }
 
     @ViewBuilder
@@ -185,11 +336,18 @@ struct ClientWorkflowWorkspace: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Run details").font(ClientType.sectionTitle)
             if let graph = session.selectedGraph {
-                Text(graph.name)
-                    .font(ClientType.sectionTitle)
+                HStack(spacing: Theme.Space.s) {
+                    Text(graph.name)
+                        .font(ClientType.sectionTitle)
+                    Spacer(minLength: 0)
+                    Button("Edit", .edit) { openEditor(graph) }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                    Button("Delete", .delete) { pendingDelete = graph }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                }
                 Text(graph.schedule.summary)
                     .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.controlGlyph)
                 ClientWorkflowActions(session: session)
                 if let run = session.selectedRun {
                     StatusPill(status: run.status, text: run.endedLabel)

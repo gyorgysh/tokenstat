@@ -170,8 +170,8 @@ struct AutomationFieldsView: View {
 }
 
 /// Frequency block shared by the Mac sheet and the mobile editor.
-struct AutomationScheduleFields: View {
-    @Binding var fields: AutomationEditorDraft
+struct AutomationScheduleFields<Draft: JobScheduleEditing>: View {
+    @Binding var fields: Draft
     var hostName: String = ""
     var timezone: String = ""
     var nextCaption: String? = nil
@@ -210,7 +210,7 @@ struct AutomationScheduleFields: View {
                     frequencyRow("On") {
                         AppMenuPicker(
                             title: "",
-                            options: (0..<7).map { (value: $0, label: AutomationEditorDraft.weekdayNames[$0]) },
+                            options: (0..<7).map { (value: $0, label: JobScheduleCopy.weekdayNames[$0]) },
                             selection: Binding(
                                 get: { fields.weekday },
                                 set: { value in
@@ -246,7 +246,7 @@ struct AutomationScheduleFields: View {
                                         fields.customDays |= (1 << bit)
                                     }
                                 } label: {
-                                    Text(AutomationEditorDraft.weekdayShort[bit])
+                                    Text(JobScheduleCopy.weekdayShort[bit])
                                         .font(Theme.caption2.weight(.medium))
                                         .frame(maxWidth: .infinity)
                                         .frame(minHeight: 44)
@@ -261,7 +261,7 @@ struct AutomationScheduleFields: View {
                                         )
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel(AutomationEditorDraft.weekdayNames[bit])
+                                .accessibilityLabel(JobScheduleCopy.weekdayNames[bit])
                                 .accessibilityAddTraits(on ? .isSelected : [])
                             }
                         }
@@ -319,12 +319,12 @@ struct AutomationScheduleFields: View {
 
     private var intervalOptions: [(value: String, label: String)] {
         var values = fields.intervalMenuMinutes.map {
-            (value: String($0), label: AutomationEditorDraft.intervalPresetLabel($0))
+            (value: String($0), label: JobScheduleCopy.intervalPresetLabel($0))
         }
         let seconds = fields.intervalCurrentSeconds
         if seconds % 60 != 0 {
             values.insert(
-                (value: "s:\(seconds)", label: AutomationEditorDraft.intervalLabel(seconds)),
+                (value: "s:\(seconds)", label: JobScheduleCopy.intervalLabel(seconds)),
                 at: 0
             )
         }
@@ -377,8 +377,8 @@ struct AutomationScheduleFields: View {
     }
 }
 
-struct AutomationBudgetFields: View {
-    @Binding var fields: AutomationEditorDraft
+struct AutomationBudgetFields<Draft: JobBudgetEditing>: View {
+    @Binding var fields: Draft
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {

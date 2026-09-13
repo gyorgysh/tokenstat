@@ -4,7 +4,7 @@ import Foundation
 
 /// Shared automation fields for Mac and mobile. Schedule values stay exact
 /// until a picker is touched, so a 90-second interval does not round to a minute.
-struct AutomationEditorDraft: Codable, Equatable, Sendable {
+struct AutomationEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, JobBudgetEditing {
     enum Invalid: LocalizedError {
         case fields(String)
         var errorDescription: String? { switch self { case let .fields(message): message } }
@@ -29,11 +29,9 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable {
     var budgetMinutes: String
     var noTimeLimit: Bool
 
-    static let weekdayNames = [
-        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
-    ]
-    static let weekdayShort = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
-    static let intervalPresets = [15, 30, 60, 120, 360, 720, 1440]
+    static let weekdayNames = JobScheduleCopy.weekdayNames
+    static let weekdayShort = JobScheduleCopy.weekdayShort
+    static let intervalPresets = JobScheduleCopy.intervalPresets
 
     enum CodingKeys: String, CodingKey {
         case name, prompt, backend, model, effort, scheduleKind, intervalMinutes, intervalSeconds
@@ -92,72 +90,6 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable {
         budgetMinutes = noTimeLimit ? "180" : String(max(1, job.budgetSeconds / 60))
     }
 
-    var intervalCurrentSeconds: UInt64 {
-        if !intervalTouched, intervalSeconds > 0 {
-            return max(intervalSeconds, 60)
-        }
-        let minutes = min(UInt64(intervalMinutes) ?? 60, UInt64.max / 60)
-        return max(minutes * 60, 60)
-    }
-
-    var intervalMenuMinutes: [Int] {
-        let seconds = intervalCurrentSeconds
-        guard seconds % 60 == 0 else { return Self.intervalPresets }
-        let current = max(1, Int(seconds / 60))
-        if Self.intervalPresets.contains(current) { return Self.intervalPresets }
-        return (Self.intervalPresets + [current]).sorted()
-    }
-
-    var budgetSeconds: UInt64? {
-        if noTimeLimit { return 0 }
-        guard let minutes = UInt64(budgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)), minutes > 0 else {
-            return nil
-        }
-        let product = minutes.multipliedReportingOverflow(by: 60)
-        return product.overflow ? nil : product.partialValue
-    }
-
-    var builtSchedule: AutomationSchedule {
-        switch scheduleKind {
-        case .once:
-            return AutomationSchedule(kind: .once)
-        case .interval:
-            return AutomationSchedule(kind: .interval, everySeconds: intervalCurrentSeconds)
-        case .daily:
-            return AutomationSchedule(kind: .daily, hour: hour, minute: minute)
-        case .weekdays:
-            return AutomationSchedule(
-                kind: .weekdays, hour: hour, minute: minute,
-                weekdays: AutomationSchedule.weekdaysMask
-            )
-        case .weekly:
-            return AutomationSchedule(
-                kind: .weekly, hour: hour, minute: minute, weekday: weekday,
-                weekdays: weeklyDayEdited ? 0 : weeklyDays
-            )
-        case .custom:
-            return AutomationSchedule(
-                kind: .custom, hour: hour, minute: minute, weekdays: customDays
-            )
-        }
-    }
-
-    var weeklyDayLabel: String {
-        if !weeklyDayEdited, weeklyDays != 0 {
-            return (0..<7).compactMap { bit in
-                (weeklyDays & (1 << bit)) != 0 ? Self.weekdayNames[bit] : nil
-            }.joined(separator: ", ")
-        }
-        guard weekday >= 0, weekday < Self.weekdayNames.count else { return "Day" }
-        return Self.weekdayNames[weekday]
-    }
-
-    func weeklyDaySelected(_ day: Int) -> Bool {
-        if weeklyDayEdited { return weekday == day }
-        if weeklyDays != 0 { return (weeklyDays & (1 << day)) != 0 }
-        return weekday == day
-    }
-
     var validation: String? {
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Give this job a name."
@@ -177,18 +109,8 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable {
         if backend.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Choose an agent for this job."
         }
-        if scheduleKind == .custom, (customDays & 0b0111_1111) == 0 {
-            return "Pick at least one day for a custom schedule."
-        }
-        if scheduleKind == .interval, intervalCurrentSeconds < 60 {
-            return "An interval must be at least a minute."
-        }
-        if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
-            return "Choose a real hour and minute."
-        }
-        if budgetSeconds == nil {
-            return "Enter a positive time limit, or choose No limit."
-        }
+        if let scheduleValidation { return scheduleValidation }
+        if let budgetValidation { return budgetValidation }
         return nil
     }
 
@@ -235,15 +157,10 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable {
     }
 
     static func intervalLabel(_ seconds: UInt64) -> String {
-        if seconds % 60 != 0 { return "\(seconds) seconds" }
-        return intervalPresetLabel(Int(seconds / 60))
+        JobScheduleCopy.intervalLabel(seconds)
     }
 
     static func intervalPresetLabel(_ minutes: Int) -> String {
-        if minutes >= 60, minutes % 60 == 0 {
-            let hours = minutes / 60
-            return hours == 1 ? "1 hour" : "\(hours) hours"
-        }
-        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+        JobScheduleCopy.intervalPresetLabel(minutes)
     }
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 // Compile with AutomationEditorDraft.swift AutomationEditorService.swift AutomationEditorSession.swift
-// HostScheduleClock.swift WorkbenchDraftFile.swift OriginalFileCoordination.swift WorkReference.swift.
+// JobScheduleEditing.swift HostScheduleClock.swift WorkbenchDraftFile.swift OriginalFileCoordination.swift WorkReference.swift.
 import Foundation
 
 enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {

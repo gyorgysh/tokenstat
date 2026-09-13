@@ -31,7 +31,9 @@ protocol ClientJobService: Sendable {
     func workflows(peer: String) async throws -> [WorkflowGraph]
     func workflowRuns(peer: String) async throws -> [WorkflowRunRecord]
     func runWorkflow(peer: String, id: String, input: String, workspaceID: String) async throws -> WorkflowRunRecord
+    func createWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph
     func updateWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph
+    func removeWorkflow(peer: String, id: String) async throws
     func killWorkflow(peer: String, runID: String) async throws
     func continueWorkflow(peer: String, runID: String) async throws -> WorkflowRunRecord
     func workflowTranscript(peer: String, runID: String, nodeID: String, offset: UInt64) async throws -> TranscriptChunk
@@ -133,8 +135,14 @@ struct ClientRemoteJobService: ClientJobService {
     func runWorkflow(peer: String, id: String, input: String, workspaceID: String) async throws -> WorkflowRunRecord {
         try await ClientRemote.runWorkflow(peer: peer, id: id, input: input, workspaceID: workspaceID)
     }
+    func createWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph {
+        try await ClientRemote.createWorkflow(peer: peer, graph: graph)
+    }
     func updateWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph {
         try await ClientRemote.updateWorkflow(peer: peer, graph: graph)
+    }
+    func removeWorkflow(peer: String, id: String) async throws {
+        try await ClientRemote.removeWorkflow(peer: peer, id: id)
     }
     func killWorkflow(peer: String, runID: String) async throws {
         try await ClientRemote.killWorkflow(peer: peer, runID: runID)

@@ -17,6 +17,8 @@ struct ClientWorkflowDetailView: View {
     let graphID: String
 
     @State private var session: ClientWorkflowSession
+    @State private var editor: WorkflowEditorRoute?
+    @State private var pendingDelete = false
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String, graphID: String) {
         self.peer = peer
@@ -78,6 +80,50 @@ struct ClientWorkflowDetailView: View {
         .background(Theme.background)
         .navigationTitle(session.selectedGraph?.name ?? "Workflow")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let graph = session.selectedGraph {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit", .edit) {
+                        editor = WorkflowEditorRoute(
+                            workspaceID: workspaceID, folderName: folderName, graph: graph
+                        )
+                    }
+                    .labelStyle(.iconOnly)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Delete", .delete, role: .destructive) { pendingDelete = true }
+                        .labelStyle(.iconOnly)
+                }
+            }
+        }
+        .fullScreenCover(item: $editor) { route in
+            WorkflowEditorDestination(
+                target: WorkflowEditorTarget(peer: peer),
+                workspaceID: route.workspaceID,
+                folderName: route.folderName,
+                hostName: hostName,
+                existing: route.graph
+            ) { _ in
+                await session.load()
+            }
+        }
+        .confirmationDialog(
+            "Delete \(session.selectedGraph?.name ?? "this workflow")?",
+            isPresented: $pendingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let graph = session.selectedGraph {
+                    Task { await session.remove(graph) }
+                }
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text("The graph is removed. Past runs stay on this computer.")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: WorkflowEditorSession.didChange)) { _ in
+            Task { await session.load() }
+        }
         .refreshable {
             await ClientRefresh.pull("workflow-detail-\(graphID)") { await session.load() }
         }
