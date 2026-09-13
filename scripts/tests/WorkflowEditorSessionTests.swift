@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 // Compile with WorkflowEditorDraft.swift WorkflowEditorService.swift WorkflowEditorSession.swift
-// JobScheduleEditing.swift HostScheduleClock.swift WorkbenchDraftFile.swift
-// OriginalFileCoordination.swift WorkReference.swift.
+// JobScheduleEditing.swift HostScheduleClock.swift WorkbenchDraftFile.swift OriginalFileCoordination.swift
+// WorkReference.swift WorkflowGraphValidation.swift WorkflowGraphDocument.swift.
 import Foundation
 
 enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {
@@ -26,7 +26,8 @@ enum WorkflowScope: String, Codable, Sendable, Hashable {
 }
 
 enum WorkflowNodeKind: String, Codable, Sendable, Hashable {
-    case input, agent, command
+    case input, agent, automation, http, command, gate, condition, loop, mcp
+    var label: String { rawValue }
 }
 
 enum WorkflowEdgeWhen: String, Codable, Sendable, Hashable {
@@ -43,8 +44,23 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
     var model: String? = nil
     var effort: String? = nil
     var prompt: String? = nil
-    var command: String? = nil
     var wait: String? = nil
+    var waitPattern: String? = nil
+    var automationID: String? = nil
+    var promptOverride: String? = nil
+    var method: String? = nil
+    var url: String? = nil
+    var headers: [String: String]? = nil
+    var body: String? = nil
+    var command: String? = nil
+    var test: String? = nil
+    var pattern: String? = nil
+    var times: UInt32? = nil
+    var until: String? = nil
+    var displayTitle: String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? kind.label : trimmed
+    }
 }
 
 struct WorkflowEdge: Codable, Sendable, Hashable, Identifiable {
@@ -359,6 +375,24 @@ actor FixtureWorkflows: WorkflowEditorService {
             check(await service.updates == 1, "update called")
             check(editor.saved.baseline?.name == "Review the diff", "saved name")
             check(editor.fields.nodes.count == 2, "edit keeps steps")
+        }
+
+        do {
+            let editor = createSession()
+            await editor.load()
+            editor.fields.name = "Steps"
+            editor.addStep(kind: .command)
+            check(editor.fields.nodes.map(\.id) == ["in", "n2"], "session writes steps")
+            check(editor.fields.edges.map(\.id) == ["in>n2:ok"], "session writes edges")
+            check(editor.canUndoGraph, "undo is available")
+            editor.undoGraph()
+            check(editor.fields.nodes.map(\.id) == ["in"], "undo writes fields")
+            editor.redoGraph()
+            check(editor.fields.nodes.last?.command == "echo ok", "redo restores the command")
+            editor.fields.nodes[1].backend = nil
+            editor.fields.nodes[1].kind = .agent
+            editor.fields.nodes[1].command = nil
+            check(editor.fields.validation == "An agent step needs an agent.", "save uses host rules")
         }
 
         print("WorkflowEditorSessionTests passed")

@@ -2,10 +2,11 @@
 
 import Foundation
 
-/// Graph metadata a phone or iPad can author before node editing exists.
+/// Graph metadata a phone or iPad can author.
 ///
 /// Recipes fill nodes and edges locally. They do not call Design. A blank
 /// draft is a Start card. Folder stays the workspace this editor opened in.
+/// Step edits go through `WorkflowGraphDocument` and write back here.
 struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, JobBudgetEditing {
     enum Invalid: LocalizedError {
         case fields(String)
@@ -119,11 +120,8 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
         if nodes.isEmpty {
             return "A workflow needs a Start step."
         }
-        var seen = Set<String>()
-        for node in nodes {
-            let id = node.id.trimmingCharacters(in: .whitespacesAndNewlines)
-            if id.isEmpty { return "Every step needs an id." }
-            if !seen.insert(id).inserted { return "Two steps share the id \(id)." }
+        if let issue = WorkflowGraphRules.stepsIssue(nodes: nodes, edges: edges) {
+            return issue
         }
         if let scheduleValidation { return scheduleValidation }
         if let budgetValidation { return budgetValidation }

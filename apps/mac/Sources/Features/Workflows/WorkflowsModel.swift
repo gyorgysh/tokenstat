@@ -42,21 +42,17 @@ final class WorkflowsModel {
     var isDesigning = false
 
     /// The graph open on the canvas. A copy until Save.
-    private(set) var working: WorkflowGraph?
-    private(set) var isDirty = false
-    private(set) var selectedNodeID: String?
-    private(set) var selectedEdgeID: String?
+    private var document = WorkflowGraphDocument()
     /// Automations a node can run. Same list as the Automations screen.
     private(set) var jobs: [Automation] = []
-    private var undoStack: [WorkflowGraph] = []
-    private var redoStack: [WorkflowGraph] = []
-    private let undoLimit = 30
-    /// One undo for a run of keystrokes or a live drag. `mutate` ends it.
-    private var groupingEdits = false
 
-    var isEditing: Bool { working != nil }
-    var canUndo: Bool { !undoStack.isEmpty }
-    var canRedo: Bool { !redoStack.isEmpty }
+    var working: WorkflowGraph? { document.graph }
+    var isDirty: Bool { document.isDirty }
+    var selectedNodeID: String? { document.selectedNodeID }
+    var selectedEdgeID: String? { document.selectedEdgeID }
+    var isEditing: Bool { document.isOpen }
+    var canUndo: Bool { document.canUndo }
+    var canRedo: Bool { document.canRedo }
     /// Bumped when the canvas should fit the graph (open, design, revert).
     private(set) var editorEpoch = 0
 
@@ -113,7 +109,7 @@ final class WorkflowsModel {
             hasLoaded = true
             errorMessage = nil
             if let id = working?.id, !id.isEmpty, !isDirty, let fresh = graphs.first(where: { $0.id == id }) {
-                working = fresh
+                document.reloadClean(fresh)
             }
             syncWatching()
         } catch {
@@ -270,15 +266,7 @@ final class WorkflowsModel {
     }
 
     func openEditor(_ graph: WorkflowGraph) {
-        endGroupedEdit()
-        var laid = graph
-        laid.layoutIfNeeded()
-        working = laid
-        isDirty = graph.id.isEmpty
-        selectedNodeID = laid.nodes.first?.id
-        selectedEdgeID = nil
-        undoStack = []
-        redoStack = []
+        document.open(graph, dirty: graph.id.isEmpty)
         selectedGraphID = graph.id.isEmpty ? nil : graph.id
         selectedFocus = .graph
         // A run from another graph must not keep feeding the inspector its
@@ -299,16 +287,11 @@ final class WorkflowsModel {
     }
 
     func closeEditor() {
-        endGroupedEdit()
-        if isDirty, let working {
+        document.endGroupedEdit()
+        if document.isDirty, let working = document.graph {
             draft = working
         }
-        working = nil
-        isDirty = false
-        selectedNodeID = nil
-        selectedEdgeID = nil
-        undoStack = []
-        redoStack = []
+        document.close()
     }
 
     /// Drop unsaved edits of a saved graph and reload it. A new draft is discarded.
@@ -325,15 +308,10 @@ final class WorkflowsModel {
         showNotice("Reverted to the last save.")
     }
 
-    var selectedNode: WorkflowNode? {
-        guard let selectedNodeID, let working else { return nil }
-        return working.nodes.first { $0.id == selectedNodeID }
-    }
+    var selectedNode: WorkflowNode? { document.selectedNode }
 
     func selectNode(_ id: String?) {
-        endGroupedEdit()
-        selectedNodeID = id
-        selectedEdgeID = nil
+        document.selectNode(id)
         selectedFocus = .graph
         if let id {
             selectedStepID = id
@@ -344,206 +322,95 @@ final class WorkflowsModel {
     }
 
     func selectEdge(_ id: String?) {
-        endGroupedEdit()
-        selectedEdgeID = id
-        if id != nil {
-            selectedNodeID = nil
-        }
+        document.selectEdge(id)
     }
 
     func mutate(_ body: (inout WorkflowGraph) -> Void) {
-        endGroupedEdit()
-        guard var graph = working else { return }
-        pushUndo(graph)
-        body(&graph)
-        applyWorking(graph)
+        document.mutate(body)
+        syncDraft()
     }
 
     /// Write the working copy without a new undo. Pair with `beginGroupedEdit`.
     func writeWorking(_ body: (inout WorkflowGraph) -> Void) {
-        guard var graph = working else { return }
-        body(&graph)
-        applyWorking(graph)
+        document.writeWorking(body)
+        syncDraft()
     }
 
     func beginGroupedEdit() {
-        guard !groupingEdits, let working else { return }
-        pushUndo(working)
-        groupingEdits = true
+        document.beginGroupedEdit()
     }
 
     func endGroupedEdit() {
-        groupingEdits = false
+        document.endGroupedEdit()
     }
 
-    private func applyWorking(_ graph: WorkflowGraph) {
-        working = graph
-        isDirty = true
+    private func syncDraft() {
+        guard let graph = document.graph else { return }
         if let draft, draft.id == graph.id {
             self.draft = graph
         }
     }
 
     func undo() {
-        endGroupedEdit()
-        guard let current = working, let previous = undoStack.popLast() else { return }
-        redoStack.append(current)
-        working = previous
-        isDirty = true
-        if selectedNodeID != nil, !previous.nodes.contains(where: { $0.id == selectedNodeID }) {
-            selectedNodeID = previous.nodes.first?.id
-        }
+        document.undo()
     }
 
     func redo() {
-        endGroupedEdit()
-        guard let current = working, let next = redoStack.popLast() else { return }
-        undoStack.append(current)
-        working = next
-        isDirty = true
-    }
-
-    private func pushUndo(_ graph: WorkflowGraph) {
-        undoStack.append(graph)
-        if undoStack.count > undoLimit {
-            undoStack.removeFirst(undoStack.count - undoLimit)
-        }
-        redoStack.removeAll()
+        document.redo()
     }
 
     func addNode(kind: WorkflowNodeKind, backend: String? = nil, automationID: String? = nil) {
-        mutate { graph in
-            let id = nextNodeID(in: graph)
-            let sourceID = selectedNodeID
-            let origin = nextNodeOrigin(in: graph, under: sourceID)
-            var node = WorkflowNode(id: id, kind: kind, x: origin.x, y: origin.y, title: kind.label)
-            node.backend = backend
-            node.automationID = automationID
-            if kind == .agent {
-                node.prompt = "{{input}}"
-                node.wait = "exit"
-            }
-            if kind == .http {
-                node.method = "GET"
-                node.url = "https://"
-            }
-            if kind == .command {
-                node.command = "echo ok"
-            }
-            if kind == .condition {
-                node.test = "contains"
-            }
-            if kind == .loop {
-                node.times = 3
-            }
-            graph.nodes.append(node)
-            if let sourceID, sourceID != id, graph.nodes.contains(where: { $0.id == sourceID }) {
-                graph.edges.removeAll { $0.from == sourceID && $0.to == id }
-                graph.edges.append(WorkflowEdge(from: sourceID, to: id, when: .ok))
-            }
-            selectedNodeID = id
-        }
+        document.addNode(kind: kind, backend: backend, automationID: automationID)
+        syncDraft()
     }
 
     func beginNodeMove() {
-        if let working {
-            pushUndo(working)
-        }
+        document.beginNodeMove()
     }
 
     /// Live drag. Undo was captured at `beginNodeMove`.
     func moveNode(id: String, x: Double, y: Double) {
-        guard var graph = working else { return }
-        if let idx = graph.nodes.firstIndex(where: { $0.id == id }) {
-            graph.nodes[idx].x = x
-            graph.nodes[idx].y = y
-            working = graph
-            isDirty = true
-        }
+        document.moveNode(id: id, x: x, y: y)
     }
 
     func connect(from: String, to: String, when: WorkflowEdgeWhen) {
-        guard from != to else { return }
-        mutate { graph in
-            graph.edges.removeAll { $0.from == from && $0.to == to }
-            graph.edges.append(WorkflowEdge(from: from, to: to, when: when))
-        }
+        document.connect(from: from, to: to, when: when)
+        syncDraft()
     }
 
     func deleteSelection() {
-        if let edgeID = selectedEdgeID {
-            mutate { graph in
-                graph.edges.removeAll { $0.id == edgeID }
-            }
-            selectedEdgeID = nil
-            return
-        }
-        guard let nodeID = selectedNodeID else { return }
-        mutate { graph in
-            graph.nodes.removeAll { $0.id == nodeID }
-            graph.edges.removeAll { $0.from == nodeID || $0.to == nodeID }
-        }
-        selectedNodeID = working?.nodes.first?.id
+        document.deleteSelection()
+        syncDraft()
     }
 
     func updateNode(id: String, _ body: (inout WorkflowNode) -> Void) {
-        mutate { graph in
-            if let idx = graph.nodes.firstIndex(where: { $0.id == id }) {
-                body(&graph.nodes[idx])
-            }
-        }
+        document.updateNode(id: id, body)
+        syncDraft()
     }
 
     func updateSelectedNode(_ body: (inout WorkflowNode) -> Void) {
-        guard let id = selectedNodeID else { return }
-        updateNode(id: id, body)
+        document.updateSelectedNode(body)
+        syncDraft()
     }
 
     func updateSelectedEdge(when: WorkflowEdgeWhen) {
-        guard let id = selectedEdgeID else { return }
-        mutate { graph in
-            if let idx = graph.edges.firstIndex(where: { $0.id == id }) {
-                graph.edges[idx].when = when
-                selectedEdgeID = graph.edges[idx].id
-            }
-        }
+        document.updateSelectedEdge(when: when)
+        syncDraft()
     }
 
     func renameWorking(_ name: String) {
-        mutate { $0.name = name }
+        document.rename(name)
+        syncDraft()
     }
 
     func setWorkingScope(_ scope: WorkflowScope, workspaceID: String?) {
-        mutate { graph in
-            graph.scope = scope
-            graph.workspaceID = scope == .workspace ? workspaceID : nil
-        }
+        document.setScope(scope, workspaceID: workspaceID)
+        syncDraft()
     }
 
     func setWorkingBudgetMinutes(_ minutes: UInt64) {
-        let capped = min(minutes, UInt64.max / 60)
-        mutate { $0.budgetSeconds = capped * 60 }
-    }
-
-    private func nextNodeID(in graph: WorkflowGraph) -> String {
-        var n = graph.nodes.count + 1
-        var id = "n\(n)"
-        let existing = Set(graph.nodes.map(\.id))
-        while existing.contains(id) {
-            n += 1
-            id = "n\(n)"
-        }
-        return id
-    }
-
-    private func nextNodeOrigin(in graph: WorkflowGraph, under id: String?) -> (x: Double, y: Double) {
-        if let id, let source = graph.nodes.first(where: { $0.id == id }) {
-            return (source.x, source.y + 160)
-        }
-        guard let last = graph.nodes.max(by: { $0.y < $1.y }) else {
-            return (80, 80)
-        }
-        return (last.x, last.y + 160)
+        document.setBudgetMinutes(minutes)
+        syncDraft()
     }
 
     func selectRun(_ run: WorkflowRunRecord) {
@@ -589,12 +456,7 @@ final class WorkflowsModel {
         draft = nil
         designTranscript = ""
         if editingDraft {
-            working = nil
-            isDirty = false
-            selectedNodeID = nil
-            selectedEdgeID = nil
-            undoStack = []
-            redoStack = []
+            document.close()
         }
         if selectedFocus == .graph, selectedGraphID == nil || !(graphs.contains { $0.id == selectedGraphID }) {
             selectedFocus = .none
@@ -606,17 +468,8 @@ final class WorkflowsModel {
     /// and does not run.
     func applyRecipe(_ recipe: WorkflowRecipe) {
         guard working != nil else { return }
-        mutate { graph in
-            graph.nodes = recipe.nodes
-            graph.edges = recipe.edges
-            let name = graph.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            if name.isEmpty || name == "Untitled" {
-                graph.name = recipe.name
-            }
-            graph.layoutIfNeeded()
-        }
-        selectedNodeID = working?.nodes.first?.id
-        selectedEdgeID = nil
+        document.replaceSteps(nodes: recipe.nodes, edges: recipe.edges, nameIfUntitled: recipe.name)
+        syncDraft()
         editorEpoch += 1
     }
 
@@ -664,6 +517,10 @@ final class WorkflowsModel {
             return
         }
         graph.name = name
+        if let issue = graph.stepsIssue {
+            errorMessage = issue
+            return
+        }
         do {
             let saved: WorkflowGraph
             if graph.id.isEmpty {
@@ -673,8 +530,11 @@ final class WorkflowsModel {
             }
             draft = nil
             designTranscript = ""
-            working = saved
-            isDirty = false
+            if document.isOpen {
+                document.markSaved(saved)
+            } else {
+                document.open(saved, dirty: false)
+            }
             errorMessage = nil
             showNotice("Saved \(saved.name).")
             await load()

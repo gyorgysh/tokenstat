@@ -34,6 +34,8 @@ final class WorkflowEditorSession {
     private(set) var errorMessage: String?
     private(set) var noticeMessage: String?
     private(set) var backends: [AgentBackend] = []
+    /// Working copy of steps. Metadata stays on `fields`.
+    private(set) var document = WorkflowGraphDocument()
     /// IANA name of the host scheduler clock. Empty until queue answers.
     private(set) var schedulerTimezone: String = ""
     private(set) var otherDraft: WorkbenchDraftFile<SavedWorkflowDraft>.Record?
@@ -73,7 +75,11 @@ final class WorkflowEditorSession {
         } else {
             storage = nil
         }
+        document.open(Self.graph(from: fields, saved: saved), dirty: false)
     }
+
+    var canUndoGraph: Bool { document.canUndo }
+    var canRedoGraph: Bool { document.canRedo }
 
     var isCreate: Bool { saved.graphID == nil && saved.created == nil }
     var dirty: Bool {
@@ -223,6 +229,7 @@ final class WorkflowEditorSession {
         fields = fresh
         saved = SavedWorkflowDraft(graphID: nil, baseline: nil, fields: fresh)
         restoring = false
+        adoptDocument()
         appliedDefaultBudget = false
         noticeMessage = nil
         errorMessage = nil
@@ -253,11 +260,57 @@ final class WorkflowEditorSession {
         guard isCreate, !creating else { return }
         restoring = false
         fields.applyBlank()
+        adoptDocument()
     }
 
     func applyRecipe(_ recipe: WorkflowRecipe) {
         guard isCreate, !creating else { return }
         fields.applyRecipe(recipe)
+        adoptDocument()
+    }
+
+    func addStep(kind: WorkflowNodeKind, backend: String? = nil, automationID: String? = nil) {
+        guard !creating, otherDraft == nil else { return }
+        document.addNode(kind: kind, backend: backend, automationID: automationID)
+        writeStepsFromDocument()
+    }
+
+    func connectSteps(from: String, to: String, when: WorkflowEdgeWhen) {
+        guard !creating, otherDraft == nil else { return }
+        document.connect(from: from, to: to, when: when)
+        writeStepsFromDocument()
+    }
+
+    func removeSelectedStep() {
+        guard !creating, otherDraft == nil else { return }
+        document.deleteSelection()
+        writeStepsFromDocument()
+    }
+
+    func selectStep(_ id: String?) {
+        document.selectNode(id)
+    }
+
+    func selectConnection(_ id: String?) {
+        document.selectEdge(id)
+    }
+
+    func updateSelectedStep(_ body: (inout WorkflowNode) -> Void) {
+        guard !creating, otherDraft == nil else { return }
+        document.updateSelectedNode(body)
+        writeStepsFromDocument()
+    }
+
+    func undoGraph() {
+        guard !creating, otherDraft == nil else { return }
+        document.undo()
+        writeStepsFromDocument()
+    }
+
+    func redoGraph() {
+        guard !creating, otherDraft == nil else { return }
+        document.redo()
+        writeStepsFromDocument()
     }
 
     private func lockFolderIfNeeded() {
@@ -387,6 +440,7 @@ final class WorkflowEditorSession {
         restoring = true
         fields = WorkflowEditorDraft(created)
         restoring = false
+        adoptDocument()
         errorMessage = nil
         announceCreated(created)
         _ = await persist()
@@ -409,6 +463,7 @@ final class WorkflowEditorSession {
         restoring = true
         fields = WorkflowEditorDraft(updated)
         restoring = false
+        adoptDocument()
         noticeMessage = "Saved \(updated.name)."
         _ = await persist()
         NotificationCenter.default.post(name: Self.didChange, object: target)
@@ -419,6 +474,37 @@ final class WorkflowEditorSession {
         saved = value
         fields = value.fields
         restoring = false
+        adoptDocument()
+    }
+
+    private func adoptDocument() {
+        document.open(Self.graph(from: fields, saved: saved), dirty: false)
+    }
+
+    private func writeStepsFromDocument() {
+        guard let graph = document.graph else { return }
+        restoring = true
+        fields.nodes = graph.nodes
+        fields.edges = graph.edges
+        restoring = false
+        scheduleSave()
+    }
+
+    private static func graph(from fields: WorkflowEditorDraft, saved: SavedWorkflowDraft) -> WorkflowGraph {
+        let name = fields.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return WorkflowGraph(
+            id: saved.graphID ?? saved.pendingID ?? "",
+            name: name.isEmpty ? "Untitled" : name,
+            scope: .workspace,
+            workspaceID: fields.workspaceID,
+            budgetSeconds: fields.budgetSeconds ?? 10_800,
+            schedule: fields.builtSchedule,
+            enabled: fields.builtSchedule.repeats ? fields.enabled : false,
+            nodes: fields.nodes,
+            edges: fields.edges,
+            lastRunAtMs: saved.baseline?.lastRunAtMs,
+            lastRunID: saved.baseline?.lastRunID
+        )
     }
 
     private func scheduleSave() {
