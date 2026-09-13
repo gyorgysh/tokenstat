@@ -100,12 +100,87 @@ struct WorkflowFieldsView: View {
                     }
                 )
             }
+            describe
+        }
+    }
+
+    /// Draft the steps from a prompt. The host saves nothing and runs
+    /// nothing: the result is an editable draft like an example.
+    @ViewBuilder
+    private var describe: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Or describe it")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+            TextField("Describe the run", text: $session.designPrompt, axis: .vertical)
+                .textFieldStyle(.themedMultiline)
+                .lineLimit(2...6)
+                .disabled(session.designing || session.creating)
+                .accessibilityLabel("Describe the run")
+            if !session.designAgents.isEmpty {
+                AppMenuPicker(
+                    title: "Agent",
+                    options: session.designAgents.map { (value: $0.id, label: $0.label) },
+                    selection: $session.designBackend
+                )
+                .disabled(session.designing || session.creating)
+                if let backend = session.designAgents.first(where: { $0.id == session.designBackend }) {
+                    if !backend.models.isEmpty {
+                        FavoriteModelPicker(
+                            backendID: backend.id,
+                            models: backend.models,
+                            extra: session.designModel,
+                            preservesSavedSelection: true,
+                            selection: $session.designModel
+                        )
+                        .disabled(session.designing || session.creating)
+                    }
+                    if !backend.efforts.isEmpty {
+                        AppMenuPicker(
+                            title: "Effort",
+                            options: [(value: "", label: "Default")]
+                                + backend.efforts.map { (value: $0, label: $0) },
+                            selection: $session.designEffort
+                        )
+                        .disabled(session.designing || session.creating)
+                    }
+                }
+            }
+            HStack(spacing: Theme.Space.s) {
+                if session.designing {
+                    ProgressView("Designing")
+                        .font(Theme.callout)
+                    Spacer(minLength: 0)
+                    Button("Cancel", .dismiss) { session.cancelDesign() }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                } else {
+                    Button("Design", .create) { session.design() }
+                        .buttonStyle(AccentButtonStyle(comfortable: true))
+                        .disabled(!session.canDesign)
+                }
+            }
+            if !session.designTranscript.isEmpty {
+                Text(session.designTranscript)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if session.designAgents.isEmpty, session.loaded {
+                Text("No supported agent is installed on this computer yet, so there is nothing to draft with. You can still start Blank.")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
     private var starterName: String {
         if session.fields.starterID == WorkflowEditorDraft.blankStarterID || session.fields.starterID.isEmpty {
             return "Blank"
+        }
+        if session.fields.starterID == WorkflowEditorDraft.designedStarterID {
+            return "Described"
         }
         return session.recipes.first { $0.id == session.fields.starterID }?.name ?? "Example"
     }

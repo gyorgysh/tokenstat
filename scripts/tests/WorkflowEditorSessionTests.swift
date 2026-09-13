@@ -97,6 +97,17 @@ struct WorkflowRecipe: Identifiable {
 
 enum WorkflowRecipes {
     static func recipes(from backends: [AgentBackend]) -> [WorkflowRecipe] { [] }
+    static func designAgents(from backends: [AgentBackend]) -> [AgentBackend] {
+        backends.filter { $0.id != "sh" }
+    }
+    static func defaultBackend(from backends: [AgentBackend]) -> String {
+        designAgents(from: backends).first?.id ?? ""
+    }
+}
+
+struct WorkflowDesignResult: Codable, Sendable {
+    var workflow: WorkflowGraph
+    var transcript: String
 }
 
 struct WorkflowRunRecord: Codable, Sendable {
@@ -139,6 +150,10 @@ enum Bridge {
     static func onPeer<T: Decodable & Sendable>(
         _ peer: String, _ method: String, _ params: [String: Any] = [:], as type: T.Type
     ) async throws -> T { throw FixtureError.unexpectedTransport }
+    static func onPeer<T: Decodable & Sendable>(
+        _ peer: String, _ method: String, _ params: [String: Any] = [:],
+        patience: TimeInterval = 99, as type: T.Type
+    ) async throws -> T { throw FixtureError.unexpectedTransport }
     static func createWorkflow(_ graph: WorkflowGraph) async throws -> WorkflowGraph { throw FixtureError.unexpectedTransport }
     static func updateWorkflow(_ graph: WorkflowGraph) async throws -> WorkflowGraph { throw FixtureError.unexpectedTransport }
     static func removeWorkflow(_ id: String) async throws { throw FixtureError.unexpectedTransport }
@@ -147,6 +162,10 @@ enum Bridge {
     static func automations() async throws -> [Automation] { throw FixtureError.unexpectedTransport }
     static func automationQueue() async throws -> AutomationQueue { throw FixtureError.unexpectedTransport }
     static func workflowRuns() async throws -> [WorkflowRunRecord] { throw FixtureError.unexpectedTransport }
+    static func designWorkflow(
+        prompt: String, workspaceID: String?, backend: String?,
+        model: String? = nil, effort: String? = nil
+    ) async throws -> WorkflowDesignResult { throw FixtureError.unexpectedTransport }
 }
 
 @MainActor final class WorkSessionContext {
@@ -164,6 +183,9 @@ actor FixtureWorkflows: WorkflowEditorService {
     var loseCreateBefore = false
     var loseCreateReply = false
     var running: [String] = []
+    var designResult: WorkflowDesignResult? = nil
+    var designError: FixtureError? = nil
+    var designs = 0
 
     func createWorkflow(_ graph: WorkflowGraph) async throws -> WorkflowGraph {
         if loseCreateBefore { throw FixtureError.disconnected }
@@ -202,7 +224,27 @@ actor FixtureWorkflows: WorkflowEditorService {
         loseCreateBefore = before
         loseCreateReply = after
     }
+    func setDesignError(_ error: FixtureError?) { designError = error }
     func seed(_ graph: WorkflowGraph) { graphs.append(graph) }
+
+    func designWorkflow(prompt: String, backend: String?, model: String?, effort: String?) async throws -> WorkflowDesignResult {
+        designs += 1
+        if let designError { throw designError }
+        if let designResult { return designResult }
+        return WorkflowDesignResult(
+            workflow: WorkflowGraph(
+                id: "",
+                name: "Drafted \(prompt)",
+                workspaceID: "folder",
+                nodes: [
+                    WorkflowNode(id: "in", kind: .input, title: "Start"),
+                    WorkflowNode(id: "n2", kind: .command, title: "Do it"),
+                ],
+                edges: [WorkflowEdge(from: "in", to: "n2")]
+            ),
+            transcript: "Drafted two steps."
+        )
+    }
 }
 
 @main struct WorkflowEditorSessionTests {
@@ -457,6 +499,78 @@ actor FixtureWorkflows: WorkflowEditorService {
             check(editor.selectedConnectionID == "in>n2:error", "edge id follows when")
             editor.undoGraph()
             check(editor.fields.edges.first?.when == .ok, "one undo for the retarget")
+        }
+
+        do {
+            let refused = createSession()
+            await refused.load()
+            refused.designPrompt = "   "
+            refused.design()
+            check(await service.designs == 0, "blank prompt never asks the host")
+            check(!refused.designing, "refused design is not designing")
+        }
+
+        do {
+            let before = await service.designs
+            let editor = createSession()
+            await editor.load()
+            check(editor.designBackend == "codex", "design defaults to the agent")
+            editor.designPrompt = "Nightly tidy"
+            editor.design()
+            check(editor.designing, "design starts")
+            for _ in 0..<200 {
+                if !editor.designing { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            check(!editor.designing, "design finishes")
+            check(await service.designs == before + 1, "one design call")
+            check(editor.fields.nodes.map(\.id) == ["in", "n2"], "designed steps replace blank")
+            check(editor.fields.edges.map(\.id) == ["in>n2:ok"], "designed connections")
+            check(editor.fields.starterID == "designed", "starter names the described draft")
+            check(editor.fields.name == "Drafted Nightly tidy", "blank name adopts the draft")
+            check(editor.designTranscript == "Drafted two steps.", "transcript kept")
+            check(editor.designPrompt == "Nightly tidy", "prompt kept for retry")
+        }
+
+        do {
+            let before = await service.designs
+            await service.setDesignError(FixtureError.disconnected)
+            let failed = createSession()
+            await failed.load()
+            failed.designPrompt = "Lost draft"
+            failed.design()
+            for _ in 0..<200 {
+                if !failed.designing { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            check(await service.designs == before + 1, "failed design still asked once")
+            check(failed.errorMessage != nil, "lost design says so")
+            check(failed.designPrompt == "Lost draft", "prompt survives a lost design")
+            check(failed.fields.nodes.map(\.id) == ["in"], "failed design keeps prior steps")
+            check(failed.designTranscript.isEmpty, "no transcript without a draft")
+            await service.setDesignError(nil)
+            failed.design()
+            for _ in 0..<200 {
+                if !failed.designing { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            check(failed.fields.nodes.map(\.id) == ["in", "n2"], "retry drafts with the same prompt")
+        }
+
+        do {
+            let before = await service.designs
+            let existing = WorkflowGraph(
+                id: "review",
+                name: "Review a change",
+                workspaceID: "folder",
+                nodes: [WorkflowNode(id: "in", kind: .input, title: "Start")]
+            )
+            let editor = createSession(existing: existing)
+            await editor.load()
+            editor.designPrompt = "Not a new graph"
+            editor.design()
+            check(await service.designs == before, "design is for new graphs only")
+            check(!editor.designing, "edit flow never designs")
         }
 
         print("WorkflowEditorSessionTests passed")

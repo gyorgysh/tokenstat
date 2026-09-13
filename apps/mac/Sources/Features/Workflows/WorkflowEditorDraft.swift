@@ -14,6 +14,8 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
     }
 
     static let blankStarterID = "blank"
+    /// Steps came from `workflow.design`, not Blank or an example.
+    static let designedStarterID = "designed"
 
     var name: String
     var workspaceID: String

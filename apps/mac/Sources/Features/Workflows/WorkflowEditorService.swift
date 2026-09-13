@@ -12,6 +12,9 @@ protocol WorkflowEditorService: Sendable {
     func automations() async throws -> [Automation]
     func automationQueue() async throws -> AutomationQueue
     func liveWorkflowIDs() async throws -> [String]
+    /// Draft a graph from a prompt. Side-effect-free: it saves nothing and
+    /// runs nothing, so a lost response is safely retried with the same prompt.
+    func designWorkflow(prompt: String, backend: String?, model: String?, effort: String?) async throws -> WorkflowDesignResult
 }
 
 extension WorkflowEditorService {
@@ -128,6 +131,33 @@ struct WorkflowEditorTarget: Hashable, Sendable, WorkflowEditorService {
             #endif
         }
         return Array(Set(runs.filter(\.isLive).map(\.workflowID)))
+    }
+
+    func designWorkflow(prompt: String, backend: String?, model: String?, effort: String?) async throws -> WorkflowDesignResult {
+        var params: [String: Any] = ["prompt": prompt]
+        if let backend, !backend.isEmpty { params["backend"] = backend }
+        if let model, !model.isEmpty { params["model"] = model }
+        if let effort, !effort.isEmpty { params["effort"] = effort }
+        if let peer {
+            return try await Bridge.onPeer(
+                peer,
+                "workflow.design",
+                params,
+                patience: 200,
+                as: WorkflowDesignResult.self
+            )
+        }
+        #if os(macOS)
+        return try await Bridge.designWorkflow(
+            prompt: prompt,
+            workspaceID: nil,
+            backend: backend,
+            model: model,
+            effort: effort
+        )
+        #else
+        throw CocoaError(.fileReadNoSuchFile)
+        #endif
     }
 
     private func encode(_ graph: WorkflowGraph) throws -> [String: Any] {

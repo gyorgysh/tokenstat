@@ -40,6 +40,17 @@ final class WorkflowEditorSession {
     private(set) var document = WorkflowGraphDocument()
     /// IANA name of the host scheduler clock. Empty until queue answers.
     private(set) var schedulerTimezone: String = ""
+    /// Prompt for `workflow.design`. Kept in memory: the generated steps
+    /// are the durable draft, and the prompt stays until they land.
+    var designPrompt = ""
+    var designBackend = ""
+    var designModel = ""
+    var designEffort = ""
+    private(set) var designing = false
+    /// What the designer said while drafting. Cleared when Blank or an
+    /// example replaces the steps.
+    private(set) var designTranscript = ""
+    private var designTask: Task<Void, Never>?
     private(set) var otherDraft: WorkbenchDraftFile<SavedWorkflowDraft>.Record?
     private(set) var persistedFields: WorkflowEditorDraft?
     private let service: any WorkflowEditorService
@@ -263,14 +274,90 @@ final class WorkflowEditorSession {
     func applyBlank() {
         guard isCreate, !creating else { return }
         restoring = false
+        cancelDesign()
+        designTranscript = ""
         fields.applyBlank()
         adoptDocument()
     }
 
     func applyRecipe(_ recipe: WorkflowRecipe) {
         guard isCreate, !creating else { return }
+        cancelDesign()
+        designTranscript = ""
         fields.applyRecipe(recipe)
         adoptDocument()
+    }
+
+    var designAgents: [AgentBackend] {
+        WorkflowRecipes.designAgents(from: backends)
+    }
+
+    var canDesign: Bool {
+        isCreate && loaded && !working && !designing && !creating
+            && saved.created == nil && otherDraft == nil
+            && !designPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !designAgents.isEmpty
+    }
+
+    /// Draft a graph from the prompt. The host saves nothing and runs
+    /// nothing: the result replaces the working steps as an editable draft,
+    /// and Create/Save stay explicit. Cancelling or losing the response
+    /// keeps the prompt and any steps already on screen.
+    func design() {
+        guard canDesign else { return }
+        designTask?.cancel()
+        designing = true
+        errorMessage = nil
+        let prompt = designPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let backend = designBackend.isEmpty ? nil : designBackend
+        let model = designModel.isEmpty ? nil : designModel
+        let effort = designEffort.isEmpty ? nil : designEffort
+        designTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await self.service.designWorkflow(
+                    prompt: prompt, backend: backend, model: model, effort: effort
+                )
+                await MainActor.run {
+                    self.applyDesign(result)
+                }
+            } catch is CancellationError {
+                await MainActor.run { self.designing = false }
+            } catch {
+                await MainActor.run {
+                    self.designing = false
+                    self.errorMessage = Self.display(error)
+                }
+            }
+        }
+    }
+
+    func cancelDesign() {
+        designTask?.cancel()
+        designTask = nil
+        designing = false
+    }
+
+    private func applyDesign(_ result: WorkflowDesignResult) {
+        designing = false
+        guard isCreate, !creating, saved.created == nil else { return }
+        restoring = true
+        fields.starterID = WorkflowEditorDraft.designedStarterID
+        restoring = false
+        document.replaceSteps(
+            nodes: result.workflow.nodes,
+            edges: result.workflow.edges,
+            nameIfUntitled: result.workflow.name
+        )
+        writeStepsFromDocument()
+        if fields.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            restoring = true
+            fields.name = result.workflow.name
+            restoring = false
+            scheduleSave()
+        }
+        designTranscript = result.transcript
+        noticeMessage = "Draft ready. Review the steps, then create the workflow. It will not run until you press Run."
     }
 
     func addStep(kind: WorkflowNodeKind, backend: String? = nil, automationID: String? = nil) {
@@ -380,6 +467,9 @@ final class WorkflowEditorSession {
     private func loadOptions() async {
         do {
             backends = try await service.automationBackends()
+            if designBackend.isEmpty {
+                designBackend = WorkflowRecipes.defaultBackend(from: backends)
+            }
         } catch {
             errorMessage = Self.display(error)
         }
