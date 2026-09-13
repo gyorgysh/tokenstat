@@ -13,6 +13,60 @@ at the end.
 
 ## [Unreleased]
 
+## [1.0.5]
+
+Automation graphs arrive on phone and iPad, the iOS editor gains line
+numbers with find and replace, tasks run durably across Apple clients,
+and updates and usage reporting get more careful. Not yet released.
+
+### Added
+
+- Automation graphs on phone and iPad. Create, edit and delete graphs,
+  edit steps and connections, draft a graph from a prompt, and save with
+  revision checks. Run history is kept, and undo is validated by the host.
+- An iOS editor that keeps up. Line numbers and change marks, find and
+  replace, protection against concurrent writes with save states, editing
+  from diffs, and review-all on iOS.
+- Durable tasks across Apple clients, with an adaptive host-wide task
+  board. Task results route to folder changes and history.
+- Scheduled jobs authored from phone and iPad, with complete run history,
+  host-wide queue settings, and the host timezone shown for the next run.
+- Workspace tools beside chats and terminals: a resizable browser pane
+  with a toolbar button, Auto commit started from phone and iPad, and
+  committing reviewed file selections plus pushing reviewed branches from
+  Apple clients.
+- Extended workbench shortcuts with native discovery.
+- A forwarded browser beside work on iPad, and folder expansion that
+  survives navigation. Job context is preserved across adaptive layouts
+  on iOS.
+- A monthly usage view in the CLI, machine-readable scheduler output, and
+  model values inside JSON reports.
+
+### Changed
+
+- Update checks prefer cached release metadata from tokenstat.ai and reuse
+  GitHub authentication. Downloads proceed when the host is already current.
+- Usage blocks follow the CLI timezone, and monthly sessions count distinct
+  sessions. Codex general usage shows first in limits.
+- Recent Mac builds add agent availability, notices and interface fixes.
+
+### Fixed
+
+- The updater extracts archives in a sandbox with size caps, streams
+  downloads while verifying them, matches checksums exactly, and retries
+  after a failed update instead of going quiet for a day. Claude token
+  renewal is serialized, push registration is validated, and background
+  notifications are queued instead of spawning a thread each.
+- Task stop, run and the live terminal stay honest. Concurrent automation
+  edits recover, canvas drag coordinates are stable, and scheduled sync
+  stays coordinated.
+- The CLI rejects contradictory flag pairs at parse time, the dead update
+  flag is gone, budgets reject non-numbers, and unknown export formats
+  error instead of silently emitting JSON. Wide characters no longer shift
+  table columns.
+- Usage parsing is more accurate across sources: unknown stays unknown,
+  session identity no longer collapses, and reasoning figures are clamped.
+
 ## [1.0.4] - 2026-09-12
 
 Chat opens with cached previews, iPad layouts make better use of available
