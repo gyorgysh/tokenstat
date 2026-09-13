@@ -34,6 +34,8 @@ final class WorkflowEditorSession {
     private(set) var errorMessage: String?
     private(set) var noticeMessage: String?
     private(set) var backends: [AgentBackend] = []
+    /// Automations an automation step can run. Empty until load.
+    private(set) var jobs: [Automation] = []
     /// Working copy of steps. Metadata stays on `fields`.
     private(set) var document = WorkflowGraphDocument()
     /// IANA name of the host scheduler clock. Empty until queue answers.
@@ -80,6 +82,8 @@ final class WorkflowEditorSession {
 
     var canUndoGraph: Bool { document.canUndo }
     var canRedoGraph: Bool { document.canRedo }
+    var selectedStepID: String? { document.selectedNodeID }
+    var selectedConnectionID: String? { document.selectedEdgeID }
 
     var isCreate: Bool { saved.graphID == nil && saved.created == nil }
     var dirty: Bool {
@@ -281,6 +285,18 @@ final class WorkflowEditorSession {
         writeStepsFromDocument()
     }
 
+    func replaceConnection(id: String, to: String, when: WorkflowEdgeWhen) {
+        guard !creating, otherDraft == nil else { return }
+        document.replaceConnection(id: id, to: to, when: when)
+        writeStepsFromDocument()
+    }
+
+    func removeConnection(id: String) {
+        guard !creating, otherDraft == nil else { return }
+        document.removeEdge(id: id)
+        writeStepsFromDocument()
+    }
+
     func removeSelectedStep() {
         guard !creating, otherDraft == nil else { return }
         document.deleteSelection()
@@ -299,6 +315,29 @@ final class WorkflowEditorSession {
         guard !creating, otherDraft == nil else { return }
         document.updateSelectedNode(body)
         writeStepsFromDocument()
+    }
+
+    func beginGroupedStepEdit() {
+        guard !creating, otherDraft == nil else { return }
+        document.beginGroupedEdit()
+    }
+
+    func writeSelectedStep(_ body: (inout WorkflowNode) -> Void) {
+        guard !creating, otherDraft == nil else { return }
+        guard let id = document.selectedNodeID else { return }
+        document.writeWorking { graph in
+            guard let idx = graph.nodes.firstIndex(where: { $0.id == id }) else { return }
+            body(&graph.nodes[idx])
+        }
+        writeStepsFromDocument()
+    }
+
+    func endGroupedStepEdit() {
+        document.endGroupedEdit()
+    }
+
+    func additionIssue(kind: WorkflowNodeKind) -> String? {
+        WorkflowGraphRules.additionIssue(kind: kind, nodeCount: fields.nodes.count)
     }
 
     func undoGraph() {
@@ -325,6 +364,11 @@ final class WorkflowEditorSession {
             backends = try await service.automationBackends()
         } catch {
             errorMessage = Self.display(error)
+        }
+        do {
+            jobs = try await service.automations()
+        } catch {
+            jobs = []
         }
         do {
             let running = try await service.liveWorkflowIDs()

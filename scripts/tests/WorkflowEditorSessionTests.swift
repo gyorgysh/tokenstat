@@ -113,6 +113,11 @@ struct AgentBackend: Codable, Sendable {
     var efforts: [String] = []
 }
 
+struct Automation: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var name: String
+}
+
 struct AutomationQueue: Codable, Sendable {
     var defaultBudgetSeconds: UInt64
     var maxConcurrent: UInt32 = 2
@@ -139,6 +144,7 @@ enum Bridge {
     static func removeWorkflow(_ id: String) async throws { throw FixtureError.unexpectedTransport }
     static func workflows() async throws -> [WorkflowGraph] { throw FixtureError.unexpectedTransport }
     static func automationBackends() async throws -> [AgentBackend] { throw FixtureError.unexpectedTransport }
+    static func automations() async throws -> [Automation] { throw FixtureError.unexpectedTransport }
     static func automationQueue() async throws -> AutomationQueue { throw FixtureError.unexpectedTransport }
     static func workflowRuns() async throws -> [WorkflowRunRecord] { throw FixtureError.unexpectedTransport }
 }
@@ -393,6 +399,31 @@ actor FixtureWorkflows: WorkflowEditorService {
             editor.fields.nodes[1].kind = .agent
             editor.fields.nodes[1].command = nil
             check(editor.fields.validation == "An agent step needs an agent.", "save uses host rules")
+        }
+
+        do {
+            let editor = createSession()
+            await editor.load()
+            editor.fields.name = "Branch"
+            editor.addStep(kind: .condition)
+            editor.addStep(kind: .gate)
+            editor.selectStep("n2")
+            editor.addStep(kind: .command)
+            editor.connectSteps(from: "n2", to: "n4", when: .error)
+            let outgoing = editor.fields.edges.filter { $0.from == "n2" }
+            check(outgoing.contains { $0.to == "n3" && $0.when == .ok }, "Then stays")
+            check(outgoing.contains { $0.to == "n4" && $0.when == .error }, "Else stays")
+            check(outgoing.count == 2, "If is not flattened to one next step")
+            editor.removeConnection(id: "n2>n4:error")
+            check(!editor.fields.edges.contains { $0.id == "n2>n4:error" }, "removed Else")
+            editor.selectStep("n3")
+            editor.beginGroupedStepEdit()
+            editor.writeSelectedStep { $0.title = "A" }
+            editor.writeSelectedStep { $0.title = "Ask you" }
+            editor.endGroupedStepEdit()
+            check(editor.fields.nodes.first { $0.id == "n3" }?.title == "Ask you", "grouped title")
+            editor.undoGraph()
+            check(editor.fields.nodes.first { $0.id == "n3" }?.title == "gate", "one undo for the title")
         }
 
         print("WorkflowEditorSessionTests passed")

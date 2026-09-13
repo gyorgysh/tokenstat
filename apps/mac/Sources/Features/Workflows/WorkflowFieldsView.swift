@@ -11,20 +11,17 @@ enum WorkflowFieldsSection: Hashable {
 
 /// Creation and editing use the same graph preview and settings vocabulary.
 struct WorkflowFieldsView: View {
-    @Binding var fields: WorkflowEditorDraft
-    let recipes: [WorkflowRecipe]
-    let folderName: String
-    let folderLocked: Bool
+    @Bindable var session: WorkflowEditorSession
     let wide: Bool
-    let isCreate: Bool
     let draftStatus: String
     var showValidation = true
     var hostName: String = ""
-    var timezone: String = ""
     var nextCaption: String? = nil
     var section: WorkflowFieldsSection? = nil
-    var onBlank: () -> Void = {}
-    var onRecipe: (WorkflowRecipe) -> Void = { _ in }
+    @Binding var stepPath: [String]
+    /// iPad selects a step into the inspector. Phone pushes a detail.
+    var selectsInPlace = false
+    @State private var choosingStarter = false
 
     var body: some View {
         switch section {
@@ -50,41 +47,67 @@ struct WorkflowFieldsView: View {
 
     private func graph(fills: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            TextField("Workflow name", text: $fields.name, axis: .vertical)
+            TextField("Workflow name", text: $session.fields.name, axis: .vertical)
                 .font(Theme.title3.weight(.semibold))
                 .textFieldStyle(.plain)
                 .accessibilityLabel("Workflow name")
             ThemeRule()
-            if isCreate {
-                Text("Start from")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.controlGlyph)
-                Text("Blank is a Start step. An example fills the rest.")
+            if session.isCreate {
+                starter
+            }
+            WorkflowStepListView(session: session, path: $stepPath, selectsInPlace: selectsInPlace)
+            Text(draftStatus)
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+        }
+        .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
+    }
+
+    private var starter: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start from")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.controlGlyph)
+                    Text(starterName)
+                        .font(Theme.callout.weight(.medium))
+                }
+                Spacer(minLength: Theme.Space.s)
+                Button(choosingStarter ? "Done" : "Change", choosingStarter ? .done : .edit) {
+                    choosingStarter.toggle()
+                }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .disabled(session.creating)
+            }
+            if choosingStarter {
+                Text("Blank is a Start step. An example fills the rest. You can change the steps after.")
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
                     .fixedSize(horizontal: false, vertical: true)
                 WorkflowStarterPicker(
-                    recipes: recipes,
-                    selectedID: fields.starterID,
-                    onBlank: onBlank,
-                    onRecipe: onRecipe
+                    recipes: session.recipes,
+                    selectedID: session.fields.starterID,
+                    onBlank: {
+                        session.applyBlank()
+                        stepPath = []
+                        choosingStarter = false
+                    },
+                    onRecipe: { recipe in
+                        session.applyRecipe(recipe)
+                        stepPath = []
+                        choosingStarter = false
+                    }
                 )
-            } else {
-                Text("Steps")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.controlGlyph)
-                Text("This save updates the name, schedule and budget. The steps stay as they are.")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.controlGlyph)
-                    .fixedSize(horizontal: false, vertical: true)
-                WorkflowStepStrip(nodes: fields.nodes, edges: fields.edges)
             }
-            Text(draftStatus)
-                .font(Theme.caption)
-                .foregroundStyle(Theme.controlGlyph)
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
+    }
+
+    private var starterName: String {
+        if session.fields.starterID == WorkflowEditorDraft.blankStarterID || session.fields.starterID.isEmpty {
+            return "Blank"
+        }
+        return session.recipes.first { $0.id == session.fields.starterID }?.name ?? "Example"
     }
 
     private var settings: some View {
@@ -92,12 +115,12 @@ struct WorkflowFieldsView: View {
             if section != .settings {
                 Text("Workflow settings").font(Theme.callout.weight(.semibold))
             }
-            if folderLocked {
+            if session.lockedFolder {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Folder")
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
-                    Text(folderName)
+                    Text(session.folderName)
                         .font(Theme.callout)
                     Text("This workflow runs in this folder on the connected computer.")
                         .font(Theme.caption)
@@ -106,12 +129,12 @@ struct WorkflowFieldsView: View {
             }
             ThemeRule()
             AutomationScheduleFields(
-                fields: $fields,
+                fields: $session.fields,
                 hostName: hostName,
-                timezone: timezone,
+                timezone: session.schedulerTimezone,
                 nextCaption: nextCaption
             )
-            if fields.builtSchedule.repeats {
+            if session.fields.builtSchedule.repeats {
                 HStack(spacing: Theme.Space.s) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Enabled")
@@ -124,15 +147,15 @@ struct WorkflowFieldsView: View {
                     }
                     Spacer(minLength: Theme.Space.s)
                     BrandToggleChip(
-                        title: fields.enabled ? "On" : "Off",
-                        isOn: $fields.enabled
+                        title: session.fields.enabled ? "On" : "Off",
+                        isOn: $session.fields.enabled
                     )
                     .accessibilityLabel("Enabled")
                 }
             }
             ThemeRule()
-            AutomationBudgetFields(fields: $fields)
-            if showValidation, let validation = fields.validation {
+            AutomationBudgetFields(fields: $session.fields)
+            if showValidation, let validation = session.fields.validation {
                 Text(validation)
                     .font(Theme.caption)
                     .foregroundStyle(Theme.danger)

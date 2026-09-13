@@ -450,6 +450,37 @@ struct WorkflowGraphDocumentTests {
             check(document.graph?.name == "Local", "dirty reload ignored")
         }
 
+        do {
+            check(WorkflowGraphRules.outgoingRole(kind: .condition, when: .ok) == "Then", "If Then")
+            check(WorkflowGraphRules.outgoingRole(kind: .condition, when: .error) == "Else", "If Else")
+            check(WorkflowGraphRules.outgoingRole(kind: .loop, when: .ok) == "Body", "loop body")
+            check(WorkflowGraphRules.outgoingRole(kind: .loop, when: .always) == "After last pass", "loop exit")
+            check(WorkflowGraphRules.outgoingRole(kind: .agent, when: .ok) == "Then", "agent Then")
+            check(WorkflowGraphRules.suggestedWhen(kind: .condition, outgoing: []) == .ok, "If starts with Then")
+            check(
+                WorkflowGraphRules.suggestedWhen(
+                    kind: .condition,
+                    outgoing: [WorkflowEdge(from: "a", to: "b", when: .ok)]
+                ) == .error,
+                "If second connection is Else"
+            )
+            var document = WorkflowGraphDocument()
+            document.open(WorkflowGraph.blank(name: "Branch"), dirty: true)
+            document.addNode(kind: .condition)
+            document.addNode(kind: .gate)
+            document.selectNode("n2")
+            document.addNode(kind: .command)
+            document.connect(from: "n2", to: "n4", when: .error)
+            check(document.graph?.edges.contains { $0.from == "n2" && $0.to == "n3" && $0.when == .ok } == true, "Then")
+            check(document.graph?.edges.contains { $0.from == "n2" && $0.to == "n4" && $0.when == .error } == true, "Else")
+            document.replaceConnection(id: "n2>n3:ok", to: "in", when: .ok)
+            check(document.graph?.edges.contains { $0.id == "n2>n3:ok" } != true, "old Then dropped")
+            check(document.graph?.edges.contains { $0.id == "n2>in:ok" } == true, "Then retargeted")
+            check(document.graph?.edges.contains { $0.id == "n2>n4:error" } == true, "Else kept")
+            document.removeEdge(id: "n2>n4:error")
+            check(document.graph?.edges.contains { $0.from == "n2" && $0.to == "n4" } != true, "removed")
+        }
+
         print("WorkflowGraphDocumentTests passed")
     }
 }

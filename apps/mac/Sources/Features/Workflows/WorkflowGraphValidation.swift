@@ -23,6 +23,58 @@ enum WorkflowGraphRules {
         .input, .agent, .automation, .http, .command, .gate, .condition, .loop,
     ]
 
+    /// How an outgoing connection is named on the step list and detail.
+    ///
+    /// If uses Then/Else. Loop uses Body for the repeated work and After last
+    /// pass for the way out. Other steps use Then, On error and Always.
+    static func outgoingRole(kind: WorkflowNodeKind, when: WorkflowEdgeWhen) -> String {
+        switch (kind, when) {
+        case (.condition, .ok): return "Then"
+        case (.condition, .error): return "Else"
+        case (.loop, .ok): return "Body"
+        case (.loop, .always): return "After last pass"
+        case (_, .ok): return "Then"
+        case (_, .error): return "On error"
+        case (_, .always): return "Always"
+        }
+    }
+
+    static func whenOptions(kind: WorkflowNodeKind) -> [(value: WorkflowEdgeWhen, label: String)] {
+        [WorkflowEdgeWhen.ok, .error, .always].map { ($0, outgoingRole(kind: kind, when: $0)) }
+    }
+
+    static func connectionCaption(kind: WorkflowNodeKind) -> String {
+        switch kind {
+        case .condition:
+            return "Then is success. Else is error. The test reads the previous step."
+        case .loop:
+            return "Body is the repeated work. After last pass is where the run goes when the loop is done. At most 20 passes."
+        case .gate:
+            return "The run pauses here. Continue or Stop from the run."
+        case .input:
+            return "The starting prompt fills {{input}} when you press Run."
+        default:
+            return "Then is on success. On error is the failure path. Always runs either way."
+        }
+    }
+
+    static func suggestedWhen(kind: WorkflowNodeKind, outgoing: [WorkflowEdge]) -> WorkflowEdgeWhen {
+        let used = Set(outgoing.map(\.when))
+        switch kind {
+        case .loop:
+            if !used.contains(.ok) { return .ok }
+            return .always
+        case .condition:
+            if !used.contains(.ok) { return .ok }
+            if !used.contains(.error) { return .error }
+            return .always
+        default:
+            if !used.contains(.ok) { return .ok }
+            if !used.contains(.error) { return .error }
+            return .always
+        }
+    }
+
     static func additionIssue(kind: WorkflowNodeKind, nodeCount: Int) -> String? {
         if kind == .mcp {
             return "MCP steps are not available yet."

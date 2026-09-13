@@ -64,6 +64,7 @@ struct WorkflowEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var surface: WorkflowEditorSurface = .graph
+    @State private var stepPath: [String] = []
 
     var body: some View {
         ThemedSheet(
@@ -94,11 +95,16 @@ struct WorkflowEditorView: View {
         .onDisappear { Task { await session.flush() } }
         .onChange(of: surface) { _, _ in
             Task { await session.flush() }
+            if surface != .graph { stepPath = [] }
         }
         #if WORKBENCH_QA
         .onAppear {
             if ProcessInfo.processInfo.environment["WORKBENCH_SURFACE"] == "settings" {
                 surface = .settings
+            }
+            if let step = ProcessInfo.processInfo.environment["WORKBENCH_STEP"], !step.isEmpty {
+                session.selectStep(step)
+                stepPath = [step]
             }
         }
         #endif
@@ -114,37 +120,43 @@ struct WorkflowEditorView: View {
                 }
             }
         } else if wide {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.l) {
-                    notices
-                    fields(wide: true, section: nil, showValidation: showValidation)
-                }
-            }
-            .scrollDismissesKeyboard(.interactively)
-        } else {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 notices
-                SegmentedTabs(
-                    options: WorkflowEditorSurface.allCases,
-                    selection: $surface,
-                    comfortable: true
-                )
                 if showValidation, let validation = session.fields.validation {
                     Text(validation)
                         .font(Theme.caption)
                         .foregroundStyle(Theme.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if surface == .graph {
-                    ScrollView {
-                        fields(wide: false, section: .graph, showValidation: false)
-                            .padding(.bottom, Theme.Space.xl)
+                HStack(alignment: .top, spacing: Theme.Space.l) {
+                    graphList(selectsInPlace: true)
+                    ThemeRule.vertical
+                    inspector
+                        .frame(width: 340)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                if stepPath.isEmpty {
+                    notices
+                    SegmentedTabs(
+                        options: WorkflowEditorSurface.allCases,
+                        selection: $surface,
+                        comfortable: true
+                    )
+                    if showValidation, let validation = session.fields.validation {
+                        Text(validation)
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .scrollDismissesKeyboard(.interactively)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                if surface == .graph {
+                    graphStack
                 } else {
                     ScrollView {
-                        fields(wide: false, section: .settings, showValidation: false)
+                        fields(section: .settings, showValidation: false)
                             .padding(.bottom, Theme.Space.xl)
                     }
                     .scrollDismissesKeyboard(.interactively)
@@ -155,26 +167,99 @@ struct WorkflowEditorView: View {
         }
     }
 
+    /// Phone: the list pushes a step. Back sits above the stack so it does
+    /// not scroll away with the fields.
+    private var graphStack: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            if let current = stepPath.last {
+                stepChrome(id: current)
+            }
+            NavigationStack(path: $stepPath) {
+                graphList(selectsInPlace: false)
+                    #if os(iOS)
+                    .toolbar(.hidden, for: .navigationBar)
+                    #endif
+                    .navigationDestination(for: String.self) { id in
+                        ScrollView {
+                            WorkflowStepDetailView(
+                                session: session,
+                                nodeID: id,
+                                path: $stepPath,
+                                showsBack: false
+                            )
+                            .padding(.bottom, Theme.Space.xl)
+                        }
+                        .scrollDismissesKeyboard(.interactively)
+                        #if os(iOS)
+                        .toolbar(.hidden, for: .navigationBar)
+                        #endif
+                    }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .disabled(!session.loaded || session.working || session.creating)
+    }
+
+    /// iPad keeps the list. The right pane is the selected step, or settings.
+    private func graphList(selectsInPlace: Bool) -> some View {
+        ScrollView {
+            fields(section: .graph, showValidation: false, selectsInPlace: selectsInPlace)
+                .padding(.bottom, Theme.Space.xl)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .disabled(!session.loaded || session.working || session.creating)
+    }
+
+    private var inspector: some View {
+        ScrollView {
+            if let id = stepPath.last, session.fields.nodes.contains(where: { $0.id == id }) {
+                WorkflowStepDetailView(
+                    session: session,
+                    nodeID: id,
+                    path: $stepPath,
+                    showsBack: false
+                )
+                .padding(.bottom, Theme.Space.xl)
+            } else {
+                fields(section: .settings, showValidation: false)
+                    .padding(.bottom, Theme.Space.xl)
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .disabled(!session.loaded || session.working || session.creating)
+    }
+
+    private func stepChrome(id: String) -> some View {
+        let node = session.fields.nodes.first { $0.id == id }
+        return HStack(alignment: .center, spacing: Theme.Space.s) {
+            Button("Steps", .back) {
+                session.endGroupedStepEdit()
+                if !stepPath.isEmpty { stepPath.removeLast() }
+            }
+            .buttonStyle(SecondaryButtonStyle(small: true))
+            Text(node?.displayTitle ?? "Step")
+                .font(Theme.callout.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+
     private func fields(
-        wide: Bool,
         section: WorkflowFieldsSection?,
-        showValidation: Bool
+        showValidation: Bool,
+        selectsInPlace: Bool = false
     ) -> some View {
         WorkflowFieldsView(
-            fields: $session.fields,
-            recipes: session.recipes,
-            folderName: session.folderName,
-            folderLocked: session.lockedFolder,
-            wide: wide,
-            isCreate: session.isCreate,
+            session: session,
+            wide: false,
             draftStatus: draftStatus,
             showValidation: showValidation,
             hostName: hostName,
-            timezone: session.schedulerTimezone,
             nextCaption: nextCaption,
             section: section,
-            onBlank: { session.applyBlank() },
-            onRecipe: { session.applyRecipe($0) }
+            stepPath: $stepPath,
+            selectsInPlace: selectsInPlace
         )
         .disabled(!session.loaded || session.working || session.creating)
     }

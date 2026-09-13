@@ -81,6 +81,11 @@ ALLOWED = [
     # Whole-surface blank/example cards. The step strip is the label, and the
     # selected card is the accent stroke, not a second glyph on every row.
     ("Features/Workflows/WorkflowFieldsView.swift", "Button(action: action) {"),
+    # Whole-surface step rows. The kind mark and Then/Else chips are the
+    # label, and the trailing chevron is navigation, not a second action.
+    ("Features/Workflows/WorkflowStepListView.swift", "path.append(node.id)"),
+    # Kind tiles in the add-step picker, same class as the Mac palette.
+    ("Features/Workflows/WorkflowStepListView.swift", "add(choice)"),
     ("Features/Automations/AutomationsView.swift", "Text(dayShort[bit])"),
     ("Features/Automations/AutomationsView.swift", "scheduleKind = kind"),
     ("Features/Automations/AutomationsView.swift", "intervalMinutes = String(minutes)"),

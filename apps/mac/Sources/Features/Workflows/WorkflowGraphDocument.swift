@@ -211,6 +211,30 @@ struct WorkflowGraphDocument {
         }
     }
 
+    mutating func removeEdge(id: String) {
+        guard graph?.edges.contains(where: { $0.id == id }) == true else { return }
+        mutate { graph in
+            graph.edges.removeAll { $0.id == id }
+        }
+        guard var snapshot = current, snapshot.selectedEdgeID == id else { return }
+        snapshot.selectedEdgeID = nil
+        current = snapshot
+    }
+
+    /// One undo. Changing the target of A→B to C drops A→B and any existing A→C.
+    mutating func replaceConnection(id: String, to: String, when: WorkflowEdgeWhen) {
+        guard let graph, let edge = graph.edges.first(where: { $0.id == id }) else { return }
+        let from = edge.from
+        if from == to { return }
+        let ids = Set(graph.nodes.map(\.id))
+        if !ids.contains(from) || !ids.contains(to) { return }
+        mutate { graph in
+            graph.edges.removeAll { $0.id == id }
+            graph.edges.removeAll { $0.from == from && $0.to == to }
+            graph.edges.append(WorkflowEdge(from: from, to: to, when: when))
+        }
+    }
+
     mutating func deleteSelection() {
         if let edgeID = selectedEdgeID {
             mutate { graph in

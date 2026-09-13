@@ -9,6 +9,7 @@ protocol WorkflowEditorService: Sendable {
     func workflow(id: String) async throws -> WorkflowGraph?
     func workflows() async throws -> [WorkflowGraph]
     func automationBackends() async throws -> [AgentBackend]
+    func automations() async throws -> [Automation]
     func automationQueue() async throws -> AutomationQueue
     func liveWorkflowIDs() async throws -> [String]
 }
@@ -18,6 +19,7 @@ extension WorkflowEditorService {
         try await workflows().first { $0.id == id }
     }
 
+    func automations() async throws -> [Automation] { [] }
     func liveWorkflowIDs() async throws -> [String] { [] }
 }
 
@@ -87,6 +89,17 @@ struct WorkflowEditorTarget: Hashable, Sendable, WorkflowEditorService {
         }
         #if os(macOS)
         return try await Bridge.automationBackends()
+        #else
+        throw CocoaError(.fileReadNoSuchFile)
+        #endif
+    }
+
+    func automations() async throws -> [Automation] {
+        if let peer {
+            return try await Bridge.onPeer(peer, "automation.list", [:], as: [Automation].self)
+        }
+        #if os(macOS)
+        return try await Bridge.automations()
         #else
         throw CocoaError(.fileReadNoSuchFile)
         #endif
