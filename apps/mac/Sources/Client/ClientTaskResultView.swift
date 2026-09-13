@@ -23,6 +23,10 @@ struct ClientTaskResultView: View {
     @State private var folderMissing = false
     @State private var inspectorSurface: TaskResultWorkspaceSurface = .changes
     @State private var pushedSurface: TaskResultWorkspaceSurface?
+    /// Wide iPad only: the review pane beside the run. Hiding it gives the
+    /// transcript the full width; the selection is kept, so showing it again
+    /// returns to the same Changes/History tab.
+    @State private var showsInspector = true
     @State private var attachError: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -194,6 +198,20 @@ struct ClientTaskResultView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                Button {
+                    showsInspector.toggle()
+                } label: {
+                    Image(systemName: showsInspector ? "sidebar.right" : "sidebar.right")
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(showsInspector ? Theme.accent : Theme.controlGlyph)
+                .background(Theme.controlSeat, in: Circle())
+                .overlay(Circle().strokeBorder(showsInspector ? Theme.accent.opacity(0.45) : Theme.border))
+                .contentShape(Circle())
+                .accessibilityLabel(showsInspector ? "Hide review" : "Show review")
+                .accessibilityAddTraits(.isButton)
+                .keyboardShortcut("i", modifiers: [.command, .option])
                 Button("Done", .done) { dismiss() }
                     .labelStyle(.iconOnly)
                     .foregroundStyle(Theme.controlGlyph)
@@ -210,9 +228,11 @@ struct ClientTaskResultView: View {
             ThemeRule()
             HStack(spacing: 0) {
                 resultColumn(showsFolderLinks: false, wide: true)
-                ThemeRule.vertical
-                reviewPane
-                    .frame(width: min(400, max(300, width * 0.38)))
+                if showsInspector {
+                    ThemeRule.vertical
+                    reviewPane
+                        .frame(width: min(400, max(300, width * 0.38)))
+                }
             }
         }
         .background(Theme.background)

@@ -124,7 +124,10 @@ struct ClientTaskBoard: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("New task", .create) { session.composing = true }.labelStyle(.iconOnly)
+                Button("New task", .create) { session.composing = true }
+                    .labelStyle(.iconOnly)
+                    .keyboardShortcut("n", modifiers: .command)
+                    .disabled(session.composing || session.editingTask != nil)
             }
         }
         .fullScreenCover(isPresented: $session.composing) {

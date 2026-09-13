@@ -76,6 +76,8 @@ struct ClientWorkflowWorkspace: View {
                     )
                 }
                 .labelStyle(.iconOnly)
+                .keyboardShortcut("n", modifiers: .command)
+                .disabled(editor != nil || showingHistory)
             }
         }
         .fullScreenCover(item: $editor) { route in
@@ -362,7 +364,7 @@ struct ClientWorkflowWorkspace: View {
                 Text(graph.schedule.summary)
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.controlGlyph)
-                ClientWorkflowActions(session: session)
+                ClientWorkflowActions(session: session, shortcutsEnabled: editor == nil && !showingHistory)
                 if let run = session.selectedRun {
                     StatusPill(status: run.status, text: run.endedLabel)
                     TranscriptView(

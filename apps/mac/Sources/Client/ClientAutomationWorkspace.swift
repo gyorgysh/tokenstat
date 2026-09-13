@@ -77,6 +77,8 @@ struct ClientAutomationWorkspace: View {
                     )
                 }
                 .labelStyle(.iconOnly)
+                .keyboardShortcut("n", modifiers: .command)
+                .disabled(editor != nil || showingQueue || showingHistory)
             }
         }
         .fullScreenCover(item: $editor) { route in
@@ -427,7 +429,7 @@ struct ClientAutomationWorkspace: View {
     private var runContent: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Run details").font(ClientType.sectionTitle)
-            ClientAutomationActions(session: session)
+            ClientAutomationActions(session: session, shortcutsEnabled: editor == nil && !showingHistory)
             if let run = session.selectedRun {
                 StatusPill(status: run.status, text: run.endedLabel)
                 TranscriptView(

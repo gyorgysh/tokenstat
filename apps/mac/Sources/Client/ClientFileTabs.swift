@@ -95,6 +95,37 @@ struct ClientFileTabs<Files: View>: View {
         } message: {
             Text("\(closing?.id.path ?? "This file") has edits that are not saved on the host.")
         }
+        // Next/previous match stay discoverable when the bar is hidden: the
+        // same chord opens the bar, and navigates once it is open with
+        // matches. Save and Find ride on their toolbar buttons above.
+        .clientShortcuts(findShortcuts)
+    }
+
+    /// The find chords for the open tab, routed to the same session the bar
+    /// drives. Hidden presses open the bar; open presses move the match.
+    private var findShortcuts: [ClientShortcut] {
+        let state = EditorShortcutState(
+            canNavigate: find.canNavigate,
+            findShowing: find.showing
+        )
+        return [
+            .workbench(.findNext, id: "find-next", title: "Find Next",
+                       enabled: WorkbenchShortcutPolicy.canFindNext(state)) {
+                if find.showing {
+                    find.goNext()
+                } else {
+                    find.showing = true
+                }
+            },
+            .workbench(.findPrevious, id: "find-previous", title: "Find Previous",
+                       enabled: WorkbenchShortcutPolicy.canFindPrevious(state)) {
+                if find.showing {
+                    find.goPrevious()
+                } else {
+                    find.showing = true
+                }
+            },
+        ]
     }
 
     private func editor(_ tab: ClientEditorTab) -> some View {

@@ -41,6 +41,9 @@ struct EditorView: View {
             }
         }
         .background(Theme.background)
+        #if !os(macOS)
+        .clientShortcuts(findShortcuts)
+        #endif
     }
 
     /// The editor for this platform. The only real difference between the two
@@ -157,6 +160,7 @@ struct EditorView: View {
             Button("Save", .save) {
                 Task { await model.saveText(path, in: folder.id) }
             }
+            .keyboardShortcut("s", modifiers: .command)
             .disabled(!document.isDirty)
         }
         .padding(.horizontal, Theme.Space.m)
@@ -165,6 +169,31 @@ struct EditorView: View {
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
+    }
+
+    private var findShortcuts: [ClientShortcut] {
+        let state = EditorShortcutState(
+            canNavigate: find.canNavigate,
+            findShowing: find.showing
+        )
+        return [
+            .workbench(.findNext, id: "find-next", title: "Find Next",
+                       enabled: WorkbenchShortcutPolicy.canFindNext(state)) {
+                if find.showing {
+                    find.goNext()
+                } else {
+                    find.showing = true
+                }
+            },
+            .workbench(.findPrevious, id: "find-previous", title: "Find Previous",
+                       enabled: WorkbenchShortcutPolicy.canFindPrevious(state)) {
+                if find.showing {
+                    find.goPrevious()
+                } else {
+                    find.showing = true
+                }
+            },
+        ]
     }
     #endif
 }

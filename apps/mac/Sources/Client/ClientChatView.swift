@@ -610,7 +610,7 @@ struct ClientChatThread: View {
                             label: chat?.title ?? "Chat",
                             folderName: folderName
                         )
-                        if let tools = toolsIdentity {
+                        if toolsIdentity != nil {
                             Button("Workspace tools", .source) {
                                 if sizeClass == .regular,
                                    UIDevice.current.userInterfaceIdiom == .pad {
@@ -620,6 +620,12 @@ struct ClientChatThread: View {
                                 }
                             }
                             .accessibilityLabel("Workspace files, changes and history")
+                            // The inspector chord, on the real control. Wide
+                            // iPad toggles the trailing pane; compact pushes
+                            // the same surface and Back returns to the
+                            // transcript position. Never mounted in the
+                            // terminal, so forwarded keys are untouched.
+                            .keyboardShortcut("i", modifiers: [.command, .option])
                         }
                         if model.savedCopy == nil {
                             Button("Continue on another device", .device) { showingHandoff = true }

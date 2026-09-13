@@ -57,7 +57,7 @@ struct ClientWorkflowDetailView: View {
                 if let graph = session.selectedGraph {
                     facts(graph)
                     picture(graph)
-                    ClientWorkflowActions(session: session)
+                    ClientWorkflowActions(session: session, shortcutsEnabled: editor == nil)
                         .padding(Theme.Space.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .cardSurface()

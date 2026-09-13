@@ -33,6 +33,9 @@ struct ClientWorkflowActions: View {
     var showsPrompt: Bool = true
     /// When set, only Stop / Continue for that run. Start stays on the graph page.
     var pinnedRunID: String? = nil
+    /// False while an editor, history sheet or other cover is up above this
+    /// surface. The chord then stays listed but does not fire.
+    var shortcutsEnabled = true
 
     @State private var pending: Pending?
 
@@ -112,6 +115,20 @@ struct ClientWorkflowActions: View {
         .onChange(of: session.working) { _, working in
             if !working { pending = nil }
         }
+        // Focused Run: the same confirm tapping Run opens, reachable from
+        // the keyboard and listed in discovery. Never bare Return, and never
+        // while a live run, a cover, or another start owns the surface.
+        .clientShortcuts([
+            .workbench(.run, id: "run-workflow", title: "Run Workflow",
+                       enabled: WorkbenchShortcutPolicy.canRun(JobRunShortcutState(
+                           working: session.working,
+                           hasSelection: session.selectedGraph != nil,
+                           hasLiveRun: session.liveRun != nil,
+                           modalPresented: !shortcutsEnabled || pinnedRunID != nil
+                       ))) {
+                pending = .run
+            },
+        ])
     }
 
     private var confirmPresented: Binding<Bool> {
@@ -148,6 +165,9 @@ struct ClientAutomationActions: View {
     @Bindable var session: ClientAutomationSession
     /// When set, only Stop for that run. Start stays on the job page.
     var pinnedRunID: String? = nil
+    /// False while an editor, history sheet or other cover is up above this
+    /// surface. The chord then stays listed but does not fire.
+    var shortcutsEnabled = true
 
     @State private var pending: Pending?
 
@@ -214,6 +234,22 @@ struct ClientAutomationActions: View {
         .onChange(of: session.working) { _, working in
             if !working { pending = nil }
         }
+        // Focused Run: the same confirm tapping Run now opens, reachable
+        // from the keyboard and listed in discovery. Never bare Return, and
+        // never while a live run, an unconfirmed launch, or a cover owns it.
+        .clientShortcuts([
+            .workbench(.run, id: "run-automation", title: "Run Automation",
+                       enabled: WorkbenchShortcutPolicy.canRun(JobRunShortcutState(
+                           working: session.working,
+                           hasSelection: session.selectedJob != nil,
+                           hasLiveRun: session.liveRun != nil,
+                           hasPendingLaunch: session.selectedJob
+                               .map { session.pendingLaunch(for: $0) != nil } ?? false,
+                           modalPresented: !shortcutsEnabled || pinnedRunID != nil
+                       ))) {
+                pending = .run
+            },
+        ])
     }
 
     private var confirmPresented: Binding<Bool> {

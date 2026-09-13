@@ -57,7 +57,7 @@ struct ClientAutomationDetailView: View {
                 if let job = session.selectedJob {
                     facts(job)
                     prompt(job)
-                    ClientAutomationActions(session: session)
+                    ClientAutomationActions(session: session, shortcutsEnabled: editor == nil)
                         .padding(Theme.Space.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .cardSurface()
