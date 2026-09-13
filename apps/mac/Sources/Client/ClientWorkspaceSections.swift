@@ -488,6 +488,17 @@ struct ClientWorkspaceChangesView: View {
                     Text(current.git?.branch ?? "Changes")
                         .font(ClientType.label.weight(.semibold))
                     Spacer()
+                    if files.count > 1 {
+                        NavigationLink {
+                            ClientReviewAllView(peer: peer, workspaceID: workspaceID, hostName: hostName, files: files)
+                        } label: {
+                            Text("Review all")
+                                .font(ClientType.caption.weight(.medium))
+                                .foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!session.loaded)
+                    }
                     if !files.isEmpty {
                         Button(session.draft.paths == Set(files.map(\.path)) ? "Deselect all" : "Select all", .done) {
                             session.selectAll(Set(files.map(\.path)))
@@ -572,6 +583,11 @@ struct ClientWorkspaceChangesView: View {
                 ),
                 opensDetail: true
             )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clientFileDidChange)) { note in
+            guard let change = note.object as? ClientFileChangeNotice,
+                  change.peer == peer, change.workspace == workspaceID else { return }
+            Task { await load() }
         }
         .refreshable {
             await ClientRefresh.pull("workspace-changes-\(workspaceID)") {

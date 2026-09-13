@@ -10,6 +10,19 @@ struct ClientEditorKey: Hashable {
     let path: String
 }
 
+/// Posted after an iOS editor save lands on the host, so surfaces behind
+/// the sheet (Changes, History, the file list) re-read without disturbing
+/// selections, drafts or scroll positions.
+struct ClientFileChangeNotice {
+    let peer: String
+    let workspace: String
+    let path: String
+}
+
+extension Notification.Name {
+    static let clientFileDidChange = Notification.Name("tokenstat.clientFileDidChange")
+}
+
 @Observable
 @MainActor
 final class ClientEditorTab: Identifiable {
@@ -140,6 +153,10 @@ final class ClientEditorStore {
         do {
             try await write(tab.id.peer, tab.id.workspace, tab.id.path, sent)
             tab.document.markSaved(content: sent)
+            NotificationCenter.default.post(
+                name: .clientFileDidChange,
+                object: ClientFileChangeNotice(peer: tab.id.peer, workspace: tab.id.workspace, path: tab.id.path)
+            )
         } catch {
             tab.errorMessage = error.localizedDescription
         }
@@ -159,6 +176,10 @@ final class ClientEditorStore {
             do {
                 try await write(tab.id.peer, tab.id.workspace, tab.id.path, sent)
                 tab.document.markSaved(content: sent)
+                NotificationCenter.default.post(
+                    name: .clientFileDidChange,
+                    object: ClientFileChangeNotice(peer: tab.id.peer, workspace: tab.id.workspace, path: tab.id.path)
+                )
             } catch {
                 tab.errorMessage = error.localizedDescription
             }

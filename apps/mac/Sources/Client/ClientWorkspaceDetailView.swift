@@ -1056,6 +1056,10 @@ struct ClientFileEditor: View {
             try await write(peer, workspace, path, sent)
             document.markSaved(content: sent)
             errorMessage = nil
+            NotificationCenter.default.post(
+                name: .clientFileDidChange,
+                object: ClientFileChangeNotice(peer: peer, workspace: workspace, path: path)
+            )
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1075,6 +1079,10 @@ struct ClientFileEditor: View {
                 do {
                     try await write(peer, workspace, path, sent)
                     document.markSaved(content: sent)
+                    NotificationCenter.default.post(
+                        name: .clientFileDidChange,
+                        object: ClientFileChangeNotice(peer: peer, workspace: workspace, path: path)
+                    )
                 } catch {
                     errorMessage = error.localizedDescription
                 }

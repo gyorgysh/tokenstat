@@ -26,6 +26,15 @@ struct ClientDiffView: View {
     @State private var diff: FileDiff?
     @State private var errorMessage: String?
     @State private var loaded = false
+    @State private var editorContent: EditableFile?
+    @State private var showAll = false
+    @Environment(\.fileContent) private var files
+
+    private struct EditableFile: Identifiable {
+        var path: String
+        var text: String
+        var id: String { path }
+    }
     /// The width of the screen, measured.
     ///
     /// Inside a horizontally scrolling container `maxWidth: .infinity` means
@@ -70,6 +79,25 @@ struct ClientDiffView: View {
         )
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Edit file", .edit) {
+                    Task { await openEditor() }
+                }
+                .labelStyle(.iconOnly)
+                .disabled(diff?.binary == true)
+            }
+        }
+        .sheet(item: $editorContent, onDismiss: {
+            Task { await load() }
+        }) { content in
+            ClientFileEditor(peer: peer, workspace: workspaceID, path: content.path, content: content.text)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clientFileDidChange)) { note in
+            guard let change = note.object as? ClientFileChangeNotice,
+                  change.peer == peer, change.workspace == workspaceID, change.path == file.path else { return }
+            Task { await load() }
+        }
         .refreshable {
             // Its own key. `ClientRefresh` throttles by key, so a diff sharing
             // one with the file list it was pushed from would swallow a pull.
@@ -145,11 +173,15 @@ struct ClientDiffView: View {
     /// and content widening mid-scroll is what dragged the offset back to the
     /// start. The width is known up front here instead. Capped, because eager
     /// means every row exists at once and a generated file can have oceans.
+    /// "Show all" lifts the cap for human-sized diffs; oceans stay capped
+    /// with an honest note instead of a dead end.
     private static let maxLines = 2000
+    private static let fullRenderLimit = 20_000
 
     private func hunks(of diff: FileDiff) -> some View {
         let total = diff.hunks.reduce(0) { $0 + $1.lines.count }
-        let (shown, cut) = diff.clipped(toLines: Self.maxLines)
+        let capped = showAll && total <= Self.fullRenderLimit
+        let (shown, cut) = capped ? (diff, 0) : diff.clipped(toLines: Self.maxLines)
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
             ScrollView(.horizontal, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -171,7 +203,14 @@ struct ClientDiffView: View {
             }
             .cardSurface()
             if cut > 0 {
-                note("Showing the first \(total - cut) of \(total) lines. The rest is on \(hostName.isEmpty ? "the computer" : hostName).")
+                if total <= Self.fullRenderLimit {
+                    Button("Show all \(total) lines", .reveal) {
+                        showAll = true
+                    }
+                    .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                } else {
+                    note("Showing the first \(total - cut) of \(total) lines. The rest is on \(hostName.isEmpty ? "the computer" : hostName).")
+                }
             }
         }
     }
@@ -188,7 +227,7 @@ struct ClientDiffView: View {
     private func load() async {
         let owner = WorkViewedChange.owner(folderID: workspaceID, peer: peer)
         do {
-            diff = try await ClientRemote.diff(
+            diff = try await files.diff(
                 peer: peer,
                 workspace: workspaceID,
                 path: file.path
@@ -199,6 +238,17 @@ struct ClientDiffView: View {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
         loaded = true
+    }
+
+    private func openEditor() async {
+        guard diff?.binary != true else { return }
+        do {
+            let text = try await files.read(peer: peer, workspace: workspaceID, path: file.path)
+            errorMessage = nil
+            editorContent = EditableFile(path: file.path, text: text)
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
     }
 }
 
