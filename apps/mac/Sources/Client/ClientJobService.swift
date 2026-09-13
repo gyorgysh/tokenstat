@@ -8,6 +8,11 @@ import Foundation
 protocol ClientJobService: Sendable {
     func automations(peer: String) async throws -> [Automation]
     func automationRuns(peer: String) async throws -> [RunRecord]
+    func createAutomation(peer: String, job: Automation) async throws -> Automation
+    func updateAutomation(peer: String, job: Automation) async throws -> Automation
+    func removeAutomation(peer: String, id: String) async throws
+    func automationBackends(peer: String) async throws -> [AgentBackend]
+    func automationQueue(peer: String) async throws -> AutomationQueue
     func runAutomation(peer: String, id: String) async throws -> Automation
     func setAutomation(peer: String, id: String, enabled: Bool) async throws -> Automation
     func killAutomation(peer: String, runID: String) async throws
@@ -27,6 +32,21 @@ struct ClientRemoteJobService: ClientJobService {
     }
     func automationRuns(peer: String) async throws -> [RunRecord] {
         try await ClientRemote.automationRuns(peer: peer)
+    }
+    func createAutomation(peer: String, job: Automation) async throws -> Automation {
+        try await ClientRemote.createAutomation(peer: peer, job: job)
+    }
+    func updateAutomation(peer: String, job: Automation) async throws -> Automation {
+        try await ClientRemote.updateAutomation(peer: peer, job: job)
+    }
+    func removeAutomation(peer: String, id: String) async throws {
+        try await ClientRemote.removeAutomation(peer: peer, id: id)
+    }
+    func automationBackends(peer: String) async throws -> [AgentBackend] {
+        try await ClientRemote.automationBackends(peer: peer)
+    }
+    func automationQueue(peer: String) async throws -> AutomationQueue {
+        try await ClientRemote.automationQueue(peer: peer)
     }
     func runAutomation(peer: String, id: String) async throws -> Automation {
         try await ClientRemote.runAutomation(peer: peer, id: id)

@@ -206,6 +206,10 @@ ALLOWED = [
     ("Features/Machines/SSHLiveTerminal.swift", "Button(action, icon) {"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
     ("Design/Theme.swift", "Button(title) { action() }"),
+    # Custom-schedule weekday cells. The whole surface is the day name, same
+    # as the time-limit chips: a glyph on Mo would be a second mark on a
+    # seven-wide row that is already selected by fill.
+    ("Features/Automations/AutomationFieldsView.swift", "fields.customDays &= ~(1 << bit)"),
     ("Design/Theme.swift", "selection = option.value"),
     # Composer plan / execute / ask / bypass pills. The whole surface is the
     # word, like the segmented tabs in Theme.swift. A glyph on Plan would be

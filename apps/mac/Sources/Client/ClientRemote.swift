@@ -396,6 +396,27 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "automation.runs", as: [RunRecord].self)
     }
 
+    static func createAutomation(peer: String, job: Automation) async throws -> Automation {
+        try await Bridge.onPeer(peer, "automation.create", ["job": job.payload], as: Automation.self)
+    }
+
+    static func updateAutomation(peer: String, job: Automation) async throws -> Automation {
+        try await Bridge.onPeer(peer, "automation.update", ["job": job.payload], as: Automation.self)
+    }
+
+    static func removeAutomation(peer: String, id: String) async throws {
+        struct Removed: Codable, Sendable { let removed: Bool? }
+        _ = try await Bridge.onPeer(peer, "automation.remove", ["id": id], as: Removed.self)
+    }
+
+    static func automationBackends(peer: String) async throws -> [AgentBackend] {
+        try await Bridge.onPeer(peer, "automation.backends", as: [AgentBackend].self)
+    }
+
+    static func automationQueue(peer: String) async throws -> AutomationQueue {
+        try await Bridge.onPeer(peer, "automation.queue", as: AutomationQueue.self)
+    }
+
     static func workflows(peer: String) async throws -> [WorkflowGraph] {
         try await Bridge.onPeer(peer, "workflow.list", as: [WorkflowGraph].self)
     }

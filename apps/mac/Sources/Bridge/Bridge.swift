@@ -2692,26 +2692,7 @@ extension Bridge {
     }
 }
 
-private extension Automation {
-    var payload: [String: Any] {
-        [
-            "id": id, "name": name, "backend": backend,
-            "model": model as Any, "effort": effort as Any, "workspaceId": workspaceID,
-            "prompt": prompt,
-            "schedule": [
-                "kind": schedule.kind.rawValue,
-                "everySeconds": schedule.everySeconds,
-                "hour": schedule.hour,
-                "minute": schedule.minute,
-                "weekday": schedule.weekday,
-                "weekdays": schedule.weekdays,
-            ],
-            "budgetSeconds": budgetSeconds, "enabled": enabled,
-            "lastRunAtMs": lastRunAtMs as Any, "nextRunAtMs": nextRunAtMs as Any,
-            "lastRunID": lastRunID as Any,
-        ]
-    }
-}
+
 
 private struct PtyWriteAck: Codable, Sendable { let written: Int }
 /// What the session actually became. Not always what was asked for: see

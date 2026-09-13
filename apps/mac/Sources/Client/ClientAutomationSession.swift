@@ -9,9 +9,7 @@
 import Foundation
 import Observation
 
-/// Jobs and runs for one folder on a peer. Run, pause, stop, tail.
-///
-/// Creating and editing a job stay on the Mac. This is the control surface.
+/// Jobs and runs for one folder on a peer. Create, edit, delete, run, pause, stop, tail.
 @MainActor
 @Observable
 final class ClientAutomationSession {
@@ -180,6 +178,23 @@ final class ClientAutomationSession {
         do {
             try await service.killAutomation(peer: peer, runID: run.id)
             errorMessage = nil
+            await load()
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
+    }
+
+    func remove(_ job: Automation) async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            try await service.removeAutomation(peer: peer, id: job.id)
+            errorMessage = nil
+            if selectedJobID == job.id {
+                selectedJobID = nil
+                selectedRunID = nil
+            }
             await load()
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)

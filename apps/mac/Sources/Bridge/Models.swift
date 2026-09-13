@@ -3386,8 +3386,58 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
         case budgetSeconds, enabled, lastRunAtMs, nextRunAtMs, lastRunID = "lastRunId"
     }
 
+    init(
+        id: String,
+        name: String,
+        backend: String,
+        model: String? = nil,
+        effort: String? = nil,
+        workspaceID: String,
+        prompt: String,
+        schedule: AutomationSchedule,
+        budgetSeconds: UInt64,
+        enabled: Bool,
+        lastRunAtMs: Int64? = nil,
+        nextRunAtMs: Int64? = nil,
+        lastRunID: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.backend = backend
+        self.model = model
+        self.effort = effort
+        self.workspaceID = workspaceID
+        self.prompt = prompt
+        self.schedule = schedule
+        self.budgetSeconds = budgetSeconds
+        self.enabled = enabled
+        self.lastRunAtMs = lastRunAtMs
+        self.nextRunAtMs = nextRunAtMs
+        self.lastRunID = lastRunID
+    }
+
     var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
     var nextRun: Date? { nextRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+
+    /// Wire object for `automation.create` and `automation.update`.
+    var payload: [String: Any] {
+        [
+            "id": id, "name": name, "backend": backend,
+            "model": model as Any, "effort": effort as Any, "workspaceId": workspaceID,
+            "prompt": prompt,
+            "schedule": [
+                "kind": schedule.kind.rawValue,
+                "everySeconds": schedule.everySeconds,
+                "hour": schedule.hour,
+                "minute": schedule.minute,
+                "weekday": schedule.weekday,
+                "weekdays": schedule.weekdays,
+            ],
+            "budgetSeconds": budgetSeconds, "enabled": enabled,
+            "lastRunAtMs": lastRunAtMs as Any, "nextRunAtMs": nextRunAtMs as Any,
+            "lastRunID": lastRunID as Any,
+        ]
+    }
 }
 
 /// When a job fires, as a plain struct so the form edits one field at a time.

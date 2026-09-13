@@ -17,6 +17,8 @@ struct ClientAutomationDetailView: View {
     let jobID: String
 
     @State private var session: ClientAutomationSession
+    @State private var editor: AutomationEditorRoute?
+    @State private var pendingDelete = false
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String, jobID: String) {
         self.peer = peer
@@ -78,6 +80,47 @@ struct ClientAutomationDetailView: View {
         .background(Theme.background)
         .navigationTitle(session.selectedJob?.name ?? "Automation")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let job = session.selectedJob {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit", .edit) {
+                        editor = AutomationEditorRoute(
+                            workspaceID: workspaceID, folderName: folderName, job: job
+                        )
+                    }
+                    .labelStyle(.iconOnly)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Delete", .delete, role: .destructive) { pendingDelete = true }
+                        .labelStyle(.iconOnly)
+                }
+            }
+        }
+        .fullScreenCover(item: $editor) { route in
+            AutomationEditorDestination(
+                target: AutomationEditorTarget(peer: peer),
+                workspaceID: route.workspaceID,
+                folderName: route.folderName,
+                hostName: hostName,
+                existing: route.job
+            ) { _ in
+                await session.load()
+            }
+        }
+        .confirmationDialog(
+            "Delete \(session.selectedJob?.name ?? "this job")?",
+            isPresented: $pendingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let job = session.selectedJob {
+                    Task { await session.remove(job) }
+                }
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text("The schedule goes with it. Runs it already produced stay.")
+        }
         .refreshable {
             await ClientRefresh.pull("automation-detail-\(jobID)") { await session.load() }
         }
