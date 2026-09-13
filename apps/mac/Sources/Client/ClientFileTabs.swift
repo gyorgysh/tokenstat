@@ -11,6 +11,7 @@ struct ClientFileTabs<Files: View>: View {
     @ViewBuilder var files: () -> Files
     @Environment(ClientEditorStore.self) private var editors
     @State private var closing: ClientEditorTab?
+    @State private var find = EditorFindSession()
 
     private var selected: ClientEditorTab? { editors.selected(peer: peer, workspace: workspace) }
     private var tabs: [ClientEditorTab] { editors.tabs(peer: peer, workspace: workspace) }
@@ -65,6 +66,11 @@ struct ClientFileTabs<Files: View>: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Files") { editors.showFiles(peer: peer, workspace: workspace) }
                 }
+                ToolbarItem {
+                    Button("Find in file", .search) { find.showing.toggle() }
+                        .labelStyle(.iconOnly)
+                        .keyboardShortcut("f", modifiers: .command)
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button(tab.isSaving ? "Saving…" : "Save") { Task { await editors.save(tab) } }
                         .keyboardShortcut("s", modifiers: .command)
@@ -98,7 +104,10 @@ struct ClientFileTabs<Files: View>: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Space.s)
-            IOSCodeTextView(document: tab.document)
+            if find.showing {
+                EditorFindBar(find: find)
+            }
+            IOSCodeTextView(document: tab.document, find: find)
             if let error = tab.errorMessage {
                 ClientErrorCard(message: error) { Task { await editors.save(tab) } }
                     .padding(Theme.Space.s)

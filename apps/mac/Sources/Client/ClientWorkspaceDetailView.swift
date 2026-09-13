@@ -885,24 +885,31 @@ struct ClientFileEditor: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var confirmClose = false
+    @State private var find: EditorFindSession
 
     @MainActor
-    init(peer: String, workspace: String, path: String, content: String) {
+    init(peer: String, workspace: String, path: String, content: String, find: EditorFindSession? = nil) {
         self.peer = peer
         self.workspace = workspace
         self.path = path
         _document = State(
             initialValue: EditorDocument(workspaceID: workspace, path: path, content: content)
         )
+        _find = State(initialValue: find ?? EditorFindSession())
     }
 
     var body: some View {
         NavigationStack {
-            IOSCodeTextView(document: document)
-                .background(Theme.background)
-                .navigationTitle((path as NSString).lastPathComponent)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
+            VStack(spacing: 0) {
+                if find.showing {
+                    EditorFindBar(find: find)
+                }
+                IOSCodeTextView(document: document, find: find)
+                    .background(Theme.background)
+            }
+            .navigationTitle((path as NSString).lastPathComponent)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Close") {
                             if document.isDirty {
@@ -912,6 +919,11 @@ struct ClientFileEditor: View {
                             }
                         }
                         .disabled(isSaving)
+                    }
+                    ToolbarItem {
+                        Button("Find in file", .search) { find.showing.toggle() }
+                            .labelStyle(.iconOnly)
+                            .keyboardShortcut("f", modifiers: .command)
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button(isSaving ? "Saving…" : "Save") {

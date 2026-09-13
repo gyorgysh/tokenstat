@@ -20,6 +20,7 @@ struct EditorView: View {
     @Bindable var model: WorkspacesModel
     let folder: WorkspaceFolder
     let path: String
+    @State private var find = EditorFindSession()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,7 +53,12 @@ struct EditorView: View {
             Task { await model.saveText(path, in: folder.id) }
         }
         #else
-        IOSCodeTextView(document: document)
+        VStack(spacing: 0) {
+            if find.showing {
+                EditorFindBar(find: find)
+            }
+            IOSCodeTextView(document: document, find: find)
+        }
         #endif
     }
 
@@ -145,6 +151,9 @@ struct EditorView: View {
             }
 
             Spacer()
+            Button("Find in file", .search) { find.showing.toggle() }
+                .labelStyle(.iconOnly)
+                .keyboardShortcut("f", modifiers: .command)
             Button("Save", .save) {
                 Task { await model.saveText(path, in: folder.id) }
             }

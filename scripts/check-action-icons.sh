@@ -88,6 +88,13 @@ ALLOWED = [
     ("Features/Workflows/WorkflowStepListView.swift", "add(choice)"),
     # Kind tiles in the touch canvas add sheet, same class as the list above.
     ("Features/Workflows/WorkflowTouchCanvas.swift", "add(choice.kind)"),
+    # The find bar's text controls. "Replace", "Hide replace", "Replace" and
+    # "Replace all" sit in the find bar beside the query they act on, like
+    # keys on the terminal accessory bar: a glyph beside each would be a
+    # second symbol for one control.
+    ("Features/Editor/EditorFindBar.swift", 'Button(find.replacing ? "Hide replace" : "Replace")'),
+    ("Features/Editor/EditorFindBar.swift", 'Button("Replace")'),
+    ("Features/Editor/EditorFindBar.swift", 'Button("Replace all")'),
     ("Features/Automations/AutomationsView.swift", "Text(dayShort[bit])"),
     ("Features/Automations/AutomationsView.swift", "scheduleKind = kind"),
     ("Features/Automations/AutomationsView.swift", "intervalMinutes = String(minutes)"),
