@@ -57,6 +57,7 @@ struct ClientWorkspaceSessionsView: View {
         UserDefaults.standard.object(forKey: launchTileCountKey) as? Int ?? 6
     }
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var workspaceID: String {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
@@ -83,22 +84,17 @@ struct ClientWorkspaceSessionsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if let errorMessage {
-                    ClientErrorCard(message: errorMessage) {
-                        Task { await reload() }
-                    }
+        Group {
+            if showsBrowserPane, let url = browserURL {
+                HStack(spacing: 0) {
+                    sessionsColumn
+                    ThemeRule.vertical
+                    browserPane(url: url)
+                        .frame(minWidth: 340, maxWidth: 560)
                 }
-
-                bypassCard
-                openCard
-                launchCard
-                sessionsCard
+            } else {
+                sessionsColumn
             }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.top, Theme.Space.s)
-            .padding(.bottom, 96)
         }
         .background(Theme.background)
         .navigationTitle("Sessions")
@@ -134,6 +130,14 @@ struct ClientWorkspaceSessionsView: View {
         }
         .task(id: workspaceID) {
             await chatPreview.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
+            #if WORKBENCH_QA
+            if ProcessInfo.processInfo.environment["WORKBENCH_BROWSER"] == "1", browserURL == nil {
+                // The web view's policy allows about: pages without a host.
+                // Real forwarded pages arrive over the tunnel; this proves
+                // the beside-work layout, not the tunnel.
+                browserURL = "about:blank"
+            }
+            #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await recoverAfterNetworkChange() }
@@ -204,18 +208,78 @@ struct ClientWorkspaceSessionsView: View {
             Text("The tool stays on \(hostName). You can add it again from +.")
         }
         .fullScreenCover(item: Binding(
-            get: { browserURL.map { BrowserURL(url: $0) } },
+            get: { showsBrowserPane ? nil : browserURL.map { BrowserURL(url: $0) } },
             set: { browserURL = $0?.url }
         )) { item in
             ClientBrowserScreen(url: item.url) {
-                browserURL = nil
-                if let port = forwardedPort {
-                    forwardedPort = nil
-                    Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
-                }
+                closeBrowser()
             }
         }
         .sheet(isPresented: $showPort) { browserPortSheet }
+    }
+
+    /// The forwarded browser beside the launcher on a wide iPad, instead of
+    /// over it. Compact layouts keep the full-screen browser. The URL is the
+    /// tunnel proxy's, so host localhost resolves through the tunnel and
+    /// never touches this device's own localhost. Rotation only moves the
+    /// presentation: the port forward and the URL survive it.
+    private var showsBrowserPane: Bool {
+        browserURL != nil
+            && sizeClass == .regular
+            && UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    private var sessionsColumn: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                if let errorMessage {
+                    ClientErrorCard(message: errorMessage) {
+                        Task { await reload() }
+                    }
+                }
+
+                bypassCard
+                openCard
+                launchCard
+                sessionsCard
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.top, Theme.Space.s)
+            .padding(.bottom, 96)
+        }
+    }
+
+    private func browserPane(url: String) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Browser")
+                    .font(ClientType.caption.weight(.semibold))
+                    .foregroundStyle(Theme.controlGlyph)
+                Spacer(minLength: 0)
+                Button(action: {
+                    closeBrowser()
+                }) {
+                    Image(systemName: "xmark")
+                        .frame(minWidth: 44, minHeight: 32)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.controlGlyph)
+                .accessibilityLabel("Close browser")
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.top, Theme.Space.s)
+            ClientBrowserScreen(url: url) {
+                closeBrowser()
+            }
+        }
+    }
+
+    private func closeBrowser() {
+        browserURL = nil
+        if let port = forwardedPort {
+            forwardedPort = nil
+            Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
+        }
     }
 
     /// Bypass, the switch the Mac keeps next to Launch. Branch lives on the
