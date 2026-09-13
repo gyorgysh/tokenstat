@@ -102,12 +102,14 @@ struct RateLimits<'a> {
 impl Usage {
     /// Map onto disjoint buckets, undoing the subset relationship.
     fn counters(&self) -> Counters {
-        let input = self.input_tokens.unwrap_or(0);
-        let cached = self.cached_input_tokens.unwrap_or(0);
         Counters {
             // Clamped: a vendor bug or schema change that made cached exceed
-            // input would otherwise underflow into an enormous number.
-            input_fresh: Some(input.saturating_sub(cached)),
+            // input would otherwise underflow into an enormous number. And
+            // when the vendor reported no input figure at all the fresh part
+            // is unknown, not a zero the subtraction invented.
+            input_fresh: self
+                .input_tokens
+                .map(|input| input.saturating_sub(self.cached_input_tokens.unwrap_or(0))),
             cache_read: self.cached_input_tokens,
             // Codex does not bill or report cache writes. Reporting zero would
             // claim knowledge this source does not have.
@@ -115,6 +117,18 @@ impl Usage {
             cache_write_1h: None,
             output: self.output_tokens,
         }
+    }
+
+    /// Reasoning already counted inside the output, never above it. A vendor
+    /// row that reports more reasoning than generated tokens is corrupt or a
+    /// schema change, and the reading that cannot inflate a total wins.
+    fn reasoning(&self) -> Option<u64> {
+        self.reasoning_output_tokens
+            .filter(|&r| r > 0)
+            .map(|r| match self.output_tokens {
+                Some(output) => r.min(output),
+                None => r,
+            })
     }
 }
 
@@ -189,8 +203,17 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
 
         match row.kind {
             Some("session_meta") => {
+                // The fallback below replaces the current session's rows with
+                // the vendor's own total, so the index of its first row must
+                // move exactly when the session does: on an id change. A
+                // repeated header for the same session (a rewrite that
+                // restates the meta) must not move it, or the fallback would
+                // keep earlier rows it already judged inconsistent.
                 if let Some(id) = payload.id {
-                    session = id.to_string();
+                    if session != id {
+                        session = id.to_string();
+                        first_index = out.events.len();
+                    }
                 }
                 if let Some(cwd) = payload.cwd {
                     project = cwd
@@ -199,7 +222,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
                         .unwrap_or("unknown")
                         .to_string();
                 }
-                first_index = out.events.len();
             }
             // The model can change mid-session, so it is tracked as the file is
             // walked rather than read once.
@@ -262,7 +284,7 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
             project: project.clone(),
             counters,
             extras: Extras {
-                reasoning_within_output: last.reasoning_output_tokens,
+                reasoning_within_output: last.reasoning(),
                 web_search_requests: None,
                 web_fetch_requests: None,
             },
@@ -483,5 +505,33 @@ mod tests {
         let input = format!("{META}\n{CTX}\n{}\n", tc(5, 999, 1, 5, 999, 1));
         let c = parse_file(&p(), &input).events[0].counters;
         assert_eq!(c.input_fresh, Some(0));
+    }
+
+    #[test]
+    fn reasoning_is_clamped_to_the_output_it_is_inside() {
+        let line = r#"{"type":"event_msg","timestamp":"2026-07-01T18:28:30.711Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":99},"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":99}}}}"#;
+        let input = format!("{META}\n{CTX}\n{line}\n");
+        let e = &parse_file(&p(), &input).events[0];
+        assert_eq!(e.counters.output, Some(5));
+        assert_eq!(e.extras.reasoning_within_output, Some(5));
+    }
+
+    #[test]
+    fn a_restated_session_header_does_not_narrow_the_fallback() {
+        // The file restates its own header, then understates a delta. The
+        // fallback must replace every per-request row with the vendor total,
+        // not just the rows after the repeated header.
+        let input = format!(
+            "{META}\n{CTX}\n{}\n{META}\n{}\n",
+            tc(100, 0, 10, 100, 0, 10),
+            tc(1, 0, 1, 900, 0, 90)
+        );
+        let out = parse_file(&p(), &input);
+        assert!(matches!(
+            out.warnings.as_slice(),
+            [Warning::DeltaMismatch { .. }]
+        ));
+        assert_eq!(out.events.len(), 1);
+        assert_eq!(out.events[0].counters.total(), 990);
     }
 }

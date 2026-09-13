@@ -111,11 +111,17 @@ pub fn parse_sessions_file(path: &Path, contents: &str) -> ParseOutput {
         .to_string();
 
     for (key, row) in root {
-        let input = row.input_tokens.unwrap_or(0);
-        let output = row.output_tokens.unwrap_or(0);
-        let cache_read = row.cache_read.unwrap_or(0);
-        let cache_write = row.cache_write.unwrap_or(0);
-        if input == 0 && output == 0 && cache_read == 0 && cache_write == 0 {
+        // A missing bucket is unknown, not zero: writing it down as a zero
+        // would defeat `has_unknown` and present a partial sum as complete.
+        let input = row.input_tokens;
+        let output = row.output_tokens;
+        let cache_read = row.cache_read;
+        let cache_write = row.cache_write;
+        if input.unwrap_or(0) == 0
+            && output.unwrap_or(0) == 0
+            && cache_read.unwrap_or(0) == 0
+            && cache_write.unwrap_or(0) == 0
+        {
             continue;
         }
 
@@ -143,11 +149,11 @@ pub fn parse_sessions_file(path: &Path, contents: &str) -> ParseOutput {
             session: session.clone(),
             project: agent.clone(),
             counters: Counters {
-                input_fresh: Some(input),
-                cache_read: Some(cache_read),
-                cache_write_5m: Some(cache_write),
+                input_fresh: input,
+                cache_read,
+                cache_write_5m: cache_write,
                 cache_write_1h: None,
-                output: Some(output),
+                output,
             },
             extras: Extras::default(),
             billing,
@@ -210,19 +216,25 @@ fn parse_model_completed(row: &Value, fallback_session: &str, agent: &str) -> Op
         .or_else(|| data.get("usage"))
         .or_else(|| data.get("lastCallUsage"))?;
 
-    let input = json_u64(usage.get("input").or_else(|| usage.get("inputTokens")));
-    let output = json_u64(usage.get("output").or_else(|| usage.get("outputTokens")));
-    let cache_read = json_u64(
+    // Each lookup stays an `Option`: a key the provider left out is unknown,
+    // not a measured zero, and a zero here must not clear `has_unknown`.
+    let input = json_u64_opt(usage.get("input").or_else(|| usage.get("inputTokens")));
+    let output = json_u64_opt(usage.get("output").or_else(|| usage.get("outputTokens")));
+    let cache_read = json_u64_opt(
         usage
             .get("cacheRead")
             .or_else(|| usage.get("cacheReadTokens")),
     );
-    let cache_write = json_u64(
+    let cache_write = json_u64_opt(
         usage
             .get("cacheWrite")
             .or_else(|| usage.get("cacheWriteTokens")),
     );
-    if input == 0 && output == 0 && cache_read == 0 && cache_write == 0 {
+    if input.unwrap_or(0) == 0
+        && output.unwrap_or(0) == 0
+        && cache_read.unwrap_or(0) == 0
+        && cache_write.unwrap_or(0) == 0
+    {
         return None;
     }
 
@@ -255,11 +267,11 @@ fn parse_model_completed(row: &Value, fallback_session: &str, agent: &str) -> Op
         session,
         project: agent.to_string(),
         counters: Counters {
-            input_fresh: Some(input),
-            cache_read: Some(cache_read),
-            cache_write_5m: Some(cache_write),
+            input_fresh: input,
+            cache_read,
+            cache_write_5m: cache_write,
             cache_write_1h: None,
-            output: Some(output),
+            output,
         },
         extras: Extras::default(),
         billing: billing_for_provider(provider),
@@ -275,14 +287,16 @@ fn billing_for_provider(provider: Option<&str>) -> BillingMode {
     }
 }
 
-fn json_u64(v: Option<&Value>) -> u64 {
+/// A counter the provider may not have reported. A missing key, a null, or a
+/// non-numeric value all read back as `None`: the vendor stated no figure, so
+/// the counter stays unknown rather than becoming a zero it never measured.
+fn json_u64_opt(v: Option<&Value>) -> Option<u64> {
     v.and_then(|inner| {
         inner
             .as_u64()
             .or_else(|| inner.as_i64().and_then(|n| u64::try_from(n).ok()))
             .or_else(|| inner.as_str().and_then(|t| t.parse().ok()))
     })
-    .unwrap_or(0)
 }
 
 fn parse_ts(v: Option<&Value>) -> i64 {
@@ -350,6 +364,30 @@ mod tests {
     }
 
     #[test]
+    fn sessions_json_leaves_unreported_buckets_unknown() {
+        let input = r#"{
+          "agent:main:main": {
+            "sessionId": "sess-1",
+            "inputTokens": 100,
+            "outputTokens": 20,
+            "model": "openai/gpt-oss-20b",
+            "updatedAt": 1781719897412
+          }
+        }"#;
+        let out = parse_sessions_file(
+            Path::new("/h/.openclaw/agents/main/sessions/sessions.json"),
+            input,
+        );
+        assert_eq!(out.events.len(), 1);
+        let e = &out.events[0];
+        assert_eq!(e.counters.input_fresh, Some(100));
+        assert_eq!(e.counters.output, Some(20));
+        assert_eq!(e.counters.cache_read, None);
+        assert_eq!(e.counters.cache_write_5m, None);
+        assert!(e.counters.has_unknown());
+    }
+
+    #[test]
     fn trajectory_keeps_nonzero_turn() {
         let input = r#"{"type":"model.completed","sessionId":"s","runId":"r","seq":5,"ts":"2026-06-17T18:56:37.649Z","modelId":"openai/gpt-oss-20b","provider":"openai","data":{"promptCache":{"lastCallUsage":{"input":12,"output":4,"cacheRead":2,"cacheWrite":0}}}}
 "#;
@@ -361,5 +399,22 @@ mod tests {
         assert_eq!(out.events[0].counters.input_fresh, Some(12));
         assert_eq!(out.events[0].billing, BillingMode::Metered);
         assert_eq!(out.events[0].confidence, Confidence::Exact);
+    }
+
+    #[test]
+    fn trajectory_leaves_missing_cache_keys_unknown() {
+        let input = r#"{"type":"model.completed","sessionId":"s","runId":"r","seq":5,"ts":"2026-06-17T18:56:37.649Z","modelId":"openai/gpt-oss-20b","provider":"openai","data":{"promptCache":{"lastCallUsage":{"input":12,"output":4}}}}
+"#;
+        let out = parse_trajectory_file(
+            Path::new("/h/.openclaw/agents/main/sessions/s.trajectory.jsonl"),
+            input,
+        );
+        assert_eq!(out.events.len(), 1);
+        let e = &out.events[0];
+        assert_eq!(e.counters.input_fresh, Some(12));
+        assert_eq!(e.counters.output, Some(4));
+        assert_eq!(e.counters.cache_read, None);
+        assert_eq!(e.counters.cache_write_5m, None);
+        assert!(e.counters.has_unknown());
     }
 }

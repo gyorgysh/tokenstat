@@ -250,15 +250,18 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
                 continue;
             }
         };
-        let input = row.input.unwrap_or(0).max(0) as u64;
-        let output = row.output.unwrap_or(0).max(0) as u64;
-        let cache_read = row.cache_read.unwrap_or(0).max(0) as u64;
+        // Each counter stays an `Option`: a missing metric is the vendor
+        // reporting nothing for that bucket, not a measured zero, and only a
+        // real number may clear `has_unknown`.
+        let input = row.input.map(|v| v.max(0) as u64);
+        let output = row.output.map(|v| v.max(0) as u64);
+        let cache_read = row.cache_read.map(|v| v.max(0) as u64);
         // A JSON null, a missing key or a non-numeric value all read back as
         // `None`: the vendor did not state the figure, so the counter stays
         // unknown rather than becoming a zero it never measured.
         let cache_creation = row.cache_creation.map(|v| v.max(0.0) as u64);
         // A turn that was interrupted before the model answered writes zeroes.
-        if input == 0 && output == 0 && cache_read == 0 {
+        if input.unwrap_or(0) == 0 && output.unwrap_or(0) == 0 && cache_read.unwrap_or(0) == 0 {
             continue;
         }
         out.rows_seen += 1;
@@ -274,17 +277,23 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         // to collapse into one event.
         let id = match row.request_id.as_deref() {
             Some(rid) if !rid.is_empty() => EventId::derive(&["devin", rid]),
-            _ => EventId::derive(&["devin", &row.session, &ts.to_string(), &output.to_string()]),
+            _ => EventId::derive(&[
+                "devin",
+                &row.session,
+                &ts.to_string(),
+                &output.unwrap_or(0).to_string(),
+            ]),
         };
 
         if let Some(&idx) = by_id.get(&id) {
             // Duplicate node: keep the larger counters rather than a
-            // second copy.
+            // second copy. An unknown bucket stays unknown unless the other
+            // node actually reported it.
             let kept = &mut out.events[idx].counters;
-            kept.input_fresh = kept.input_fresh.max(Some(input));
-            kept.cache_read = kept.cache_read.max(Some(cache_read));
+            kept.input_fresh = kept.input_fresh.max(input);
+            kept.cache_read = kept.cache_read.max(cache_read);
             kept.cache_write_5m = kept.cache_write_5m.max(cache_creation);
-            kept.output = kept.output.max(Some(output));
+            kept.output = kept.output.max(output);
             // Timestamp and model are stable across the pair; keep first.
             continue;
         }
@@ -306,13 +315,13 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             counters: Counters {
                 // Disjoint from the cache read: see the module comment for the
                 // vendor's own arithmetic that says so.
-                input_fresh: Some(input),
-                cache_read: Some(cache_read),
+                input_fresh: input,
+                cache_read,
                 cache_write_5m: cache_creation,
-                // One cache tier, so the hour bucket is genuinely zero rather
-                // than unreported.
-                cache_write_1h: Some(0),
-                output: Some(output),
+                // The vendor reports a single creation figure without a TTL
+                // split, so the hour bucket is unreported rather than zero.
+                cache_write_1h: None,
+                output,
             },
             extras: Extras {
                 // No reasoning split is reported.
@@ -492,6 +501,18 @@ mod tests {
             parse_db_in(&path, Some("/Users/x/git/other"), None).rows_seen,
             0
         );
+    }
+
+    #[test]
+    fn the_hour_cache_bucket_is_unknown_not_zero() {
+        // The vendor reports one creation figure with no TTL split, so the
+        // hour bucket must not clear `has_unknown` with a zero.
+        let out = parse_db(&temp_db());
+        assert!(!out.events.is_empty());
+        for e in &out.events {
+            assert_eq!(e.counters.cache_write_1h, None);
+            assert!(e.counters.has_unknown());
+        }
     }
 
     /// A database from a CLI that predates the forest says nothing rather than

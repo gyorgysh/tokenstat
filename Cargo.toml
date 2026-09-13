@@ -67,6 +67,8 @@ zstd = "0.14"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 anyhow = "1"
 flate2 = "1"
+tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.11"
 hmac = "0.13"
 getrandom = "0.4"

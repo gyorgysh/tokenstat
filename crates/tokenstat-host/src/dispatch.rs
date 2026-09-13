@@ -1091,6 +1091,7 @@ fn group_name(group: GroupBy) -> &'static str {
     match group {
         GroupBy::Day => "day",
         GroupBy::Week => "week",
+        GroupBy::Month => "month",
         GroupBy::Model => "model",
         GroupBy::Project => "project",
         GroupBy::Source => "source",

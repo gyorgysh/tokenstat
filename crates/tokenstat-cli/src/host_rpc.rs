@@ -2,75 +2,30 @@
 
 //! Local console authority, carried over the daemon's existing JSON protocol.
 
-use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
-
-const MAX_RESPONSE: u64 = 4 * 1024 * 1024;
-const TIMEOUT: Duration = Duration::from_secs(30);
+use anyhow::{Context, Result};
+use serde_json::Value;
+use tokenstat_core::host_rpc;
 
 pub fn call(socket: &Path, method: &str, params: Value) -> Result<Value> {
     let stream = UnixStream::connect(socket).with_context(|| {
         format!("Cannot reach the host at {}. Run `tokenstat host start`, or install it with `tokenstat host install`.", socket.display())
     })?;
-    exchange(stream, method, params, TIMEOUT)
+    exchange(stream, method, params, host_rpc::TIMEOUT)
 }
 
-fn exchange(
-    mut stream: UnixStream,
-    method: &str,
-    params: Value,
-    timeout: Duration,
-) -> Result<Value> {
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    let request = json!({"id": 1, "method": method, "params": params});
-    serde_json::to_writer(&mut stream, &request)?;
-    stream.write_all(b"\n")?;
-    // Limit the reader, not a buffer checked after allocation. A broken daemon
-    // must not make a console command allocate without a bound.
-    let mut response = Vec::new();
-    BufReader::new(stream)
-        .take(MAX_RESPONSE + 1)
-        .read_until(b'\n', &mut response)
-        .with_context(|| {
-            format!("The host did not finish answering {method}. Check `tokenstat host logs`.")
-        })?;
-    if response.len() as u64 > MAX_RESPONSE {
-        bail!("The host response to {method} was too large");
-    }
-    if response.last() != Some(&b'\n') {
-        bail!("The host closed the connection before answering {method}");
-    }
-    let envelope: Value = serde_json::from_slice(&response)
-        .with_context(|| format!("The host sent an invalid response to {method}"))?;
-    if envelope.get("id") != Some(&json!(1)) {
-        bail!("The host response did not match the request for {method}");
-    }
-    match envelope.get("ok").and_then(Value::as_bool) {
-        Some(true) => envelope
-            .get("result")
-            .cloned()
-            .context("The host response has no result"),
-        Some(false) => {
-            let error = &envelope["error"];
-            let message = error["message"]
-                .as_str()
-                .or_else(|| error.as_str())
-                .unwrap_or("The host refused the request");
-            bail!("{method}: {message}")
-        }
-        None => bail!("The host response has no success state"),
-    }
+fn exchange(stream: UnixStream, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+    host_rpc::exchange(stream, method, params, timeout).map_err(anyhow::Error::msg)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use std::io::{BufRead, BufReader, Write};
 
     fn reply(response: &'static [u8]) -> Result<Value> {
         let (client, server) = UnixStream::pair().unwrap();

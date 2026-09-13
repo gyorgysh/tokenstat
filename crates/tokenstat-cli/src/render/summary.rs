@@ -15,8 +15,15 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     let peak = store.peak_hour()?;
 
     if json {
+        // The headline shows what this would have cost at list rates; the
+        // machine-readable form gets the same figure or it understates value.
+        let prices = PriceTable::load_with_catalog();
+        let total_value: EquivalentValue = models
+            .iter()
+            .filter_map(|m| EquivalentValue::price(&prices, &model_label(&m.key), &m.counters))
+            .sum();
         println!(
-            r#"{{"total_tokens":{},"events":{},"sessions":{},"active_days":{},"first_date":{},"last_date":{},"top_model":{}}}"#,
+            r#"{{"total_tokens":{},"events":{},"sessions":{},"active_days":{},"first_date":{},"last_date":{},"top_model":{},"list_value_usd":{:.6}}}"#,
             totals.counters.total(),
             totals.events,
             totals.sessions,
@@ -24,6 +31,7 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
             json_opt(totals.first_date.as_deref()),
             json_opt(totals.last_date.as_deref()),
             json_opt(models.first().map(|m| m.key.as_str())),
+            total_value.dollars(),
         );
         return Ok(());
     }
@@ -112,7 +120,7 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
             .max(1);
         let w = models
             .iter()
-            .map(|m| model_label(&m.key).chars().count())
+            .map(|m| ui::display_width(&model_label(&m.key)))
             .max()
             .unwrap_or(10)
             .clamp(8, 26);

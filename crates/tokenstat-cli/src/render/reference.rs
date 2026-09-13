@@ -227,7 +227,7 @@ pub fn plans(
 
     let name_w = selected
         .iter()
-        .map(|p| p.name.chars().count())
+        .map(|p| ui::display_width(&p.name))
         .max()
         .unwrap_or(10)
         .clamp(10, 34);
@@ -326,7 +326,7 @@ pub fn models_detail(store: &Store, q: &Query, json: bool) -> Result<()> {
 
     let label_w = rows
         .iter()
-        .map(|r| model_label(&r.key).chars().count())
+        .map(|r| ui::display_width(&model_label(&r.key)))
         .max()
         .unwrap_or(10)
         .clamp(10, 30);
@@ -443,14 +443,16 @@ pub fn budget(
     } else if daily.is_some() || monthly.is_some() {
         let mut limits = BudgetLimits::load(store)?;
         if let Some(v) = daily {
-            if v < 0.0 {
-                anyhow::bail!("--daily must be >= 0");
+            // `v < 0.0` alone lets NaN through (every comparison is false),
+            // which would then be saved as a cap no status can ever meet.
+            if !v.is_finite() || v < 0.0 {
+                anyhow::bail!("--daily must be a finite number >= 0");
             }
             limits.daily_usd = if v == 0.0 { None } else { Some(v) };
         }
         if let Some(v) = monthly {
-            if v < 0.0 {
-                anyhow::bail!("--monthly must be >= 0");
+            if !v.is_finite() || v < 0.0 {
+                anyhow::bail!("--monthly must be a finite number >= 0");
             }
             limits.monthly_usd = if v == 0.0 { None } else { Some(v) };
         }

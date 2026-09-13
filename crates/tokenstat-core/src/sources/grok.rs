@@ -216,11 +216,12 @@ pub fn parse_file(
             continue;
         };
 
-        let prompt = ctx.prompt_tokens.unwrap_or(0);
-        let cached = ctx.cached_prompt_tokens.unwrap_or(0);
-        let completion = ctx.completion_tokens.unwrap_or(0);
-        let reasoning = ctx.reasoning_tokens.unwrap_or(0);
-        if prompt == 0 && completion == 0 && cached == 0 {
+        // A missing counter is unknown, not zero: writing it down as a zero
+        // would defeat `has_unknown` and present a partial sum as complete.
+        let prompt = ctx.prompt_tokens;
+        let cached = ctx.cached_prompt_tokens;
+        let completion = ctx.completion_tokens;
+        if prompt.unwrap_or(0) == 0 && completion.unwrap_or(0) == 0 && cached.unwrap_or(0) == 0 {
             continue;
         }
 
@@ -238,6 +239,21 @@ pub fn parse_file(
             .map(|t| Timestamp::from_ms(t.as_millisecond()))
             .unwrap_or(Timestamp::from_ms(0));
 
+        // The cached tokens are inside the prompt total, so the fresh part
+        // is the difference; with no prompt figure it is unknown rather than
+        // a zero the subtraction invented.
+        let input_fresh = prompt.map(|p| p.saturating_sub(cached.unwrap_or(0)));
+        // Reasoning is already inside the generated tokens, never above them:
+        // a row reporting more is corrupt or a schema change, and the reading
+        // that cannot inflate a total wins.
+        let reasoning = ctx
+            .reasoning_tokens
+            .filter(|&r| r > 0)
+            .map(|r| match completion {
+                Some(o) => r.min(o),
+                None => r,
+            });
+
         out.events.push(UsageEvent {
             id: EventId::derive(&["grok", sid, &loop_index.to_string(), ts_raw]),
             source: SourceId::Grok,
@@ -246,14 +262,14 @@ pub fn parse_file(
             session: sid.to_string(),
             project,
             counters: Counters {
-                input_fresh: Some(prompt.saturating_sub(cached)),
-                cache_read: ctx.cached_prompt_tokens,
+                input_fresh,
+                cache_read: cached,
                 cache_write_5m: None,
                 cache_write_1h: None,
-                output: Some(completion),
+                output: completion,
             },
             extras: Extras {
-                reasoning_within_output: ctx.reasoning_tokens.filter(|_| reasoning > 0),
+                reasoning_within_output: reasoning,
                 web_search_requests: None,
                 web_fetch_requests: None,
             },
@@ -381,6 +397,37 @@ mod tests {
             percent_decode_project("%2FUsers%2Fme%2Fgit%2Ftokenstat"),
             "tokenstat"
         );
+    }
+
+    #[test]
+    fn missing_counters_stay_unknown_rather_than_zero() {
+        let input = r#"{"msg":"shell.turn.inference_done","sid":"sess-1","ts":"2026-07-01T18:16:00.000Z","ctx":{"loop_index":0,"prompt_tokens":10,"completion_tokens":5}}
+"#;
+        let e = &parse_file(&p(), input, &sessions()).events[0];
+        assert_eq!(e.counters.input_fresh, Some(10));
+        assert_eq!(e.counters.output, Some(5));
+        assert_eq!(e.counters.cache_read, None);
+        assert_eq!(e.extras.reasoning_within_output, None);
+        assert!(e.counters.has_unknown());
+    }
+
+    #[test]
+    fn reasoning_is_clamped_to_the_completion_it_is_inside() {
+        let input = format!(
+            "{}\n",
+            row(
+                "sess-1",
+                0,
+                "2026-07-01T18:15:59.894Z",
+                11296,
+                10432,
+                536,
+                9999
+            )
+        );
+        let e = &parse_file(&p(), &input, &sessions()).events[0];
+        assert_eq!(e.counters.output, Some(536));
+        assert_eq!(e.extras.reasoning_within_output, Some(536));
     }
 
     #[test]

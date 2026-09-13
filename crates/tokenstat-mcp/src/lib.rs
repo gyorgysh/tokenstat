@@ -834,6 +834,10 @@ fn host_socket(engine: &Engine) -> PathBuf {
 }
 
 /// Talk to hostd over its local unix socket. Archive tools never come here.
+///
+/// Framing lives in `tokenstat_core::host_rpc::exchange`, shared with the CLI
+/// console, so the timeout, size cap and envelope stay identical in both.
+/// This only adds the MCP-side socket path and its not-running hint.
 fn host_call(engine: &Engine, method: &str, params: Value) -> Result<Value, String> {
     #[cfg(not(unix))]
     {
@@ -842,53 +846,18 @@ fn host_call(engine: &Engine, method: &str, params: Value) -> Result<Value, Stri
     }
     #[cfg(unix)]
     {
-        use std::io::{BufReader, Read};
         use std::os::unix::net::UnixStream;
-        use std::time::Duration;
-
-        // Mirrors host_rpc::exchange: a wedged helper must not park the MCP
-        // loop forever, and a broken one must not make this allocate without a
-        // bound before the check.
-        const HOST_TIMEOUT: Duration = Duration::from_secs(30);
-        const HOST_MAX_RESPONSE: u64 = 4 * 1024 * 1024;
 
         let path = host_socket(engine);
-        let mut stream = UnixStream::connect(&path).map_err(|e| {
+        let stream = UnixStream::connect(&path).map_err(|e| {
             format!("host helper is not running ({e}). Start tokenstat or tokenstat-hostd.")
         })?;
-        stream
-            .set_read_timeout(Some(HOST_TIMEOUT))
-            .and_then(|_| stream.set_write_timeout(Some(HOST_TIMEOUT)))
-            .map_err(|e| e.to_string())?;
-        let req = json!({"id": 1, "method": method, "params": params});
-        let line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-        stream
-            .write_all(line.as_bytes())
-            .and_then(|_| stream.write_all(b"\n"))
-            .map_err(|e| e.to_string())?;
-        let mut reply = Vec::new();
-        BufReader::new(stream)
-            .take(HOST_MAX_RESPONSE + 1)
-            .read_until(b'\n', &mut reply)
-            .map_err(|e| e.to_string())?;
-        if reply.len() as u64 > HOST_MAX_RESPONSE {
-            return Err(format!("the host response to {method} was too large"));
-        }
-        if reply.last() != Some(&b'\n') {
-            return Err(format!(
-                "the host helper closed the connection before answering {method}"
-            ));
-        }
-        let value: Value = serde_json::from_slice(&reply).map_err(|e| e.to_string())?;
-        if value.get("ok").and_then(Value::as_bool) == Some(true) {
-            Ok(value.get("result").cloned().unwrap_or(Value::Null))
-        } else {
-            Err(value
-                .pointer("/error/message")
-                .and_then(Value::as_str)
-                .unwrap_or("the host helper refused the request")
-                .to_string())
-        }
+        tokenstat_core::host_rpc::exchange(
+            stream,
+            method,
+            params,
+            tokenstat_core::host_rpc::TIMEOUT,
+        )
     }
 }
 

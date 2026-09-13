@@ -79,7 +79,7 @@ enum Command {
         #[arg(long, value_name = "WXYZ-1234")]
         code: Option<String>,
         /// Skip the account step entirely
-        #[arg(long)]
+        #[arg(long, conflicts_with = "code")]
         local_only: bool,
         /// Skip installing the hourly scan schedule
         #[arg(long)]
@@ -203,10 +203,10 @@ enum Command {
         #[arg(long)]
         token: Option<String>,
         /// Forget the stored token
-        #[arg(long)]
+        #[arg(long, conflicts_with = "token")]
         logout: bool,
         /// Show whether tokens are available (no secrets printed)
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["vendor", "token", "logout"])]
         status: bool,
     },
     /// Fetch Cursor usage and Antigravity IDE/quota into the archive (30m cache)
@@ -221,7 +221,7 @@ enum Command {
         #[arg(long)]
         refresh: bool,
         /// Accept rate moves greater than 50% vs the prior snapshot
-        #[arg(long)]
+        #[arg(long, requires = "refresh")]
         force: bool,
     },
     /// Model catalog from tokenstat.ai's local snapshot
@@ -256,7 +256,7 @@ enum Command {
         #[arg(long, value_name = "USD")]
         monthly: Option<f64>,
         /// Remove all budget caps
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["daily", "monthly"])]
         clear: bool,
     },
     /// Check GitHub Releases and optionally replace this binary
@@ -271,16 +271,18 @@ enum Command {
         /// Report only; do not download
         #[arg(long)]
         check: bool,
-        /// Apply even when automatic updates are off (same as a plain `update`)
-        #[arg(long)]
-        yes: bool,
         /// Turn automatic daily updates on or off (default on; `--auto off` opts
         /// out and removes the daily schedule entry)
-        #[arg(long, value_name = "on|off")]
+        #[arg(
+            long,
+            value_name = "on|off",
+            value_parser = clap::builder::PossibleValuesParser::new(["on", "off"]),
+            conflicts_with_all = ["check", "scheduled"]
+        )]
         auto: Option<String>,
         /// Run as a background job: wait a spread-out delay, skip when the user
         /// opted out, and stay quiet about it
-        #[arg(long)]
+        #[arg(long, conflicts_with = "check")]
         scheduled: bool,
     },
     /// Link this machine to a tokenstat.ai account (device login)
@@ -304,7 +306,7 @@ enum Command {
         #[arg(long, value_name = "NAME")]
         name: Option<String>,
         /// Go back to the name the system reports
-        #[arg(long)]
+        #[arg(long, conflicts_with = "name")]
         clear: bool,
         /// API origin: `sandbox`, `prod`, or an absolute http(s) URL
         #[arg(long, value_name = "URL|sandbox|prod")]
@@ -332,14 +334,14 @@ enum Command {
         #[arg(long, value_name = "FROM..TO")]
         window: Option<String>,
         /// Print account status (`GET /api/v1/me`) instead of uploading
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["prune", "window", "dry_run", "scheduled"])]
         status: bool,
         /// Print the canonical JSON payload and exit without uploading
         #[arg(long)]
         dry_run: bool,
         /// Run as a background job: wait a short spread-out delay, skip the run
         /// when the plan's interval has not elapsed, and stay quiet about both.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["prune", "dry_run"])]
         scheduled: bool,
     },
 }
@@ -359,8 +361,20 @@ struct Window {
     #[arg(long)]
     project: Option<String>,
     /// Only the last N days
-    #[arg(long, value_name = "N", conflicts_with = "since")]
+    #[arg(long, value_name = "N", conflicts_with_all = ["since", "until"], value_parser = parse_last)]
     last: Option<u32>,
+}
+
+/// `--last` counts back from today, so 0 would start tomorrow and match
+/// nothing. Reject it at parse time rather than printing an empty table.
+fn parse_last(s: &str) -> Result<u32, String> {
+    let n: u32 = s
+        .parse()
+        .map_err(|_| format!("invalid value {s:?} for --last: expected a positive integer"))?;
+    if n == 0 {
+        return Err("--last must be > 0".to_string());
+    }
+    Ok(n)
 }
 
 impl Window {
@@ -495,7 +509,6 @@ fn main() -> Result<()> {
 
     if let Command::Update {
         check,
-        yes,
         ref auto,
         scheduled,
     } = command
@@ -506,7 +519,7 @@ fn main() -> Result<()> {
         if scheduled {
             return render::self_update_scheduled(cli.json);
         }
-        return render::self_update(check, yes, cli.json);
+        return render::self_update(check, cli.json);
     }
 
     if let Command::Auth {
@@ -601,7 +614,7 @@ fn main() -> Result<()> {
         no_sync,
     } = &command
     {
-        return render::schedule(*install, *every, *sync_every, *no_sync);
+        return render::schedule(*install, *every, *sync_every, *no_sync, cli.json);
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -685,7 +698,7 @@ fn main() -> Result<()> {
         Command::Summary(w) => render::overview(&store, &tz, &w.to_query(&tz), cli.json)?,
         Command::Heatmap(w) => render::heatmap(&store, &tz, &w.to_query(&tz), cli.json)?,
         Command::Wrapped { year } => render::wrapped(&store, &tz, year, cli.json)?,
-        Command::Blocks(w) => render::blocks(&store, &w.to_query(&tz), cli.json)?,
+        Command::Blocks(w) => render::blocks(&store, &tz, &w.to_query(&tz), cli.json)?,
         Command::Export {
             window,
             format,
@@ -700,4 +713,81 @@ fn main() -> Result<()> {
         Command::Statusline { .. } | Command::Schedule { .. } => unreachable!("handled above"),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    fn parse<I, T>(args: I) -> Result<Cli, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        Cli::try_parse_from(args)
+    }
+
+    fn rejects<I, T>(args: I) -> String
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        match parse(args) {
+            Ok(_) => panic!("expected parse to fail"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    #[test]
+    fn last_defines_its_own_window() {
+        assert!(parse(["tokenstat", "daily", "--last", "7"]).is_ok());
+        for flag in ["--since", "--until"] {
+            let err = rejects(["tokenstat", "daily", "--last", "7", flag, "2026-09-01"]);
+            assert!(
+                err.contains("cannot be used with"),
+                "unexpected error for {flag}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn ignored_flag_combinations_fail_at_parse() {
+        for args in [
+            vec!["tokenstat", "pricing", "--force"],
+            vec!["tokenstat", "budget", "--clear", "--daily", "5"],
+            vec!["tokenstat", "device", "--clear", "--name", "x"],
+            vec!["tokenstat", "auth", "--status", "--token", "x"],
+            vec!["tokenstat", "auth", "cursor", "--logout", "--token", "x"],
+            vec!["tokenstat", "update", "--auto", "on", "--check"],
+            vec!["tokenstat", "update", "--scheduled", "--check"],
+            vec!["tokenstat", "setup", "--local-only", "--code", "X"],
+            vec![
+                "tokenstat",
+                "sync",
+                "--status",
+                "--window",
+                "2026-01-01..2026-02-01",
+            ],
+            vec!["tokenstat", "sync", "--scheduled", "--prune"],
+        ] {
+            let err = rejects(args.clone());
+            assert!(
+                err.contains("cannot be used with") || err.contains("required arguments"),
+                "unexpected error for {args:?}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn update_takes_only_on_or_off_for_auto_and_no_yes() {
+        assert!(parse(["tokenstat", "update", "--auto", "on"]).is_ok());
+        assert!(parse(["tokenstat", "update", "--auto", "off"]).is_ok());
+        let err = rejects(["tokenstat", "update", "--auto", "maybe"]);
+        assert!(err.contains("invalid value"), "unexpected error: {err}");
+        let err = rejects(["tokenstat", "update", "--yes"]);
+        assert!(
+            err.contains("unexpected argument"),
+            "unexpected error: {err}"
+        );
+    }
 }

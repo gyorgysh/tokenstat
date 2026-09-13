@@ -49,6 +49,7 @@ impl From<QueryDto> for Query {
 pub enum GroupByDto {
     Day,
     Week,
+    Month,
     Model,
     Project,
     Source,
@@ -60,6 +61,7 @@ impl From<GroupByDto> for GroupBy {
         match g {
             GroupByDto::Day => GroupBy::Day,
             GroupByDto::Week => GroupBy::Week,
+            GroupByDto::Month => GroupBy::Month,
             GroupByDto::Model => GroupBy::Model,
             GroupByDto::Project => GroupBy::Project,
             GroupByDto::Source => GroupBy::Source,

@@ -155,11 +155,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         let w = app
             .models
             .iter()
-            .map(|m| {
-                tokenstat_core::display_usage_model_id(&m.key)
-                    .chars()
-                    .count()
-            })
+            .map(|m| ui::display_width(&tokenstat_core::display_usage_model_id(&m.key)))
             .max()
             .unwrap_or(10)
             .clamp(8, 53);
@@ -346,11 +342,9 @@ pub(super) fn table_lines(
         .iter()
         .map(|r| {
             if price_as_model {
-                tokenstat_core::display_usage_model_id(&r.key)
-                    .chars()
-                    .count()
+                ui::display_width(&tokenstat_core::display_usage_model_id(&r.key))
             } else {
-                r.key.chars().count()
+                ui::display_width(&r.key)
             }
         })
         .max()

@@ -44,28 +44,32 @@ pub struct ParseOutput {
 #[derive(Deserialize, Default)]
 struct TokenUsage {
     #[serde(default)]
-    input_tokens: u64,
+    input_tokens: Option<u64>,
     #[serde(default)]
-    output_tokens: u64,
+    output_tokens: Option<u64>,
     #[serde(default)]
-    cache_creation_input_tokens: u64,
+    cache_creation_input_tokens: Option<u64>,
     #[serde(default)]
-    cache_read_input_tokens: u64,
+    cache_read_input_tokens: Option<u64>,
 }
 
 impl TokenUsage {
+    /// A missing field is unknown, not zero. Every check below treats it as
+    /// zero for arithmetic but the event keeps the `None`, so a partial row
+    /// still reads as a lower bound through [`Counters::has_unknown`].
     fn is_empty(&self) -> bool {
-        self.input_tokens == 0
-            && self.output_tokens == 0
-            && self.cache_creation_input_tokens == 0
-            && self.cache_read_input_tokens == 0
+        self.input_tokens.unwrap_or(0) == 0
+            && self.output_tokens.unwrap_or(0) == 0
+            && self.cache_creation_input_tokens.unwrap_or(0) == 0
+            && self.cache_read_input_tokens.unwrap_or(0) == 0
     }
 
     fn total(&self) -> u64 {
         self.input_tokens
-            .saturating_add(self.output_tokens)
-            .saturating_add(self.cache_creation_input_tokens)
-            .saturating_add(self.cache_read_input_tokens)
+            .unwrap_or(0)
+            .saturating_add(self.output_tokens.unwrap_or(0))
+            .saturating_add(self.cache_creation_input_tokens.unwrap_or(0))
+            .saturating_add(self.cache_read_input_tokens.unwrap_or(0))
     }
 }
 
@@ -180,16 +184,30 @@ pub fn parse_db(path: &Path) -> ParseOutput {
                 continue;
             }
             out.rows_seen += 1;
-            request_sum.input_tokens = request_sum.input_tokens.saturating_add(usage.input_tokens);
-            request_sum.output_tokens = request_sum
-                .output_tokens
-                .saturating_add(usage.output_tokens);
-            request_sum.cache_creation_input_tokens = request_sum
-                .cache_creation_input_tokens
-                .saturating_add(usage.cache_creation_input_tokens);
-            request_sum.cache_read_input_tokens = request_sum
-                .cache_read_input_tokens
-                .saturating_add(usage.cache_read_input_tokens);
+            request_sum.input_tokens = Some(
+                request_sum
+                    .input_tokens
+                    .unwrap_or(0)
+                    .saturating_add(usage.input_tokens.unwrap_or(0)),
+            );
+            request_sum.output_tokens = Some(
+                request_sum
+                    .output_tokens
+                    .unwrap_or(0)
+                    .saturating_add(usage.output_tokens.unwrap_or(0)),
+            );
+            request_sum.cache_creation_input_tokens = Some(
+                request_sum
+                    .cache_creation_input_tokens
+                    .unwrap_or(0)
+                    .saturating_add(usage.cache_creation_input_tokens.unwrap_or(0)),
+            );
+            request_sum.cache_read_input_tokens = Some(
+                request_sum
+                    .cache_read_input_tokens
+                    .unwrap_or(0)
+                    .saturating_add(usage.cache_read_input_tokens.unwrap_or(0)),
+            );
 
             out.events.push(event_from_usage(
                 &id,
@@ -208,15 +226,21 @@ pub fn parse_db(path: &Path) -> ParseOutput {
         }
 
         // Remainder so totals match Zed's cumulative when request map undercounts.
+        // A cumulative bucket the vendor did not report stays unknown on the
+        // remainder rather than becoming a zero the subtraction invented.
         let rem = TokenUsage {
-            input_tokens: cum.input_tokens.saturating_sub(request_sum.input_tokens),
-            output_tokens: cum.output_tokens.saturating_sub(request_sum.output_tokens),
+            input_tokens: cum
+                .input_tokens
+                .map(|v| v.saturating_sub(request_sum.input_tokens.unwrap_or(0))),
+            output_tokens: cum
+                .output_tokens
+                .map(|v| v.saturating_sub(request_sum.output_tokens.unwrap_or(0))),
             cache_creation_input_tokens: cum
                 .cache_creation_input_tokens
-                .saturating_sub(request_sum.cache_creation_input_tokens),
+                .map(|v| v.saturating_sub(request_sum.cache_creation_input_tokens.unwrap_or(0))),
             cache_read_input_tokens: cum
                 .cache_read_input_tokens
-                .saturating_sub(request_sum.cache_read_input_tokens),
+                .map(|v| v.saturating_sub(request_sum.cache_read_input_tokens.unwrap_or(0))),
         };
 
         if request_sum.is_empty() {
@@ -264,11 +288,11 @@ fn event_from_usage(
         session: thread_id.to_string(),
         project: project.to_string(),
         counters: Counters {
-            input_fresh: Some(usage.input_tokens),
-            cache_read: Some(usage.cache_read_input_tokens),
-            cache_write_5m: Some(usage.cache_creation_input_tokens),
+            input_fresh: usage.input_tokens,
+            cache_read: usage.cache_read_input_tokens,
+            cache_write_5m: usage.cache_creation_input_tokens,
             cache_write_1h: None,
-            output: Some(usage.output_tokens),
+            output: usage.output_tokens,
         },
         extras: Extras::default(),
         billing: BillingMode::Plan,
@@ -435,5 +459,35 @@ mod tests {
         assert_eq!(out.events.len(), 1);
         assert_eq!(out.events[0].confidence, Confidence::Strong);
         assert_eq!(out.events[0].counters.input_fresh, Some(7));
+    }
+
+    #[test]
+    fn a_bucket_the_vendor_did_not_report_stays_unknown() {
+        let dir = tempfile_dir();
+        let path = dir.join("threads.db");
+        write_thread_db(
+            &path,
+            r#"{
+              "model": {"model": "claude-opus-4-8"},
+              "updated_at": "2026-06-17T12:32:28Z",
+              "request_token_usage": {
+                "msg-1": {"input_tokens": 10, "output_tokens": 2}
+              },
+              "cumulative_token_usage": {"input_tokens": 30, "output_tokens": 5}
+            }"#,
+        );
+        let out = parse_db(&path);
+        assert_eq!(out.events.len(), 2);
+        for e in &out.events {
+            assert_eq!(e.counters.cache_read, None);
+            assert_eq!(e.counters.cache_write_5m, None);
+            assert!(e.counters.has_unknown());
+        }
+        let rem = out
+            .events
+            .iter()
+            .find(|e| e.confidence == Confidence::Derived)
+            .unwrap();
+        assert_eq!(rem.counters.input_fresh, Some(20));
     }
 }

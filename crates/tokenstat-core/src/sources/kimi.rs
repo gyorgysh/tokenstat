@@ -159,11 +159,17 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
         let Some(usage) = row.usage else {
             continue;
         };
-        let fresh = usage.input_other.unwrap_or(0);
-        let cache_read = usage.input_cache_read.unwrap_or(0);
-        let cache_write = usage.input_cache_creation.unwrap_or(0);
-        let output = usage.output.unwrap_or(0);
-        if fresh == 0 && cache_read == 0 && cache_write == 0 && output == 0 {
+        // A missing bucket is unknown, not zero: writing it down as a zero
+        // would defeat `has_unknown` and present a partial sum as complete.
+        let fresh = usage.input_other;
+        let cache_read = usage.input_cache_read;
+        let cache_write = usage.input_cache_creation;
+        let output = usage.output;
+        if fresh.unwrap_or(0) == 0
+            && cache_read.unwrap_or(0) == 0
+            && cache_write.unwrap_or(0) == 0
+            && output.unwrap_or(0) == 0
+        {
             continue;
         }
         out.rows_seen += 1;
@@ -179,16 +185,19 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
             .unwrap_or_else(|| path_agent.clone());
         // The wire protocol has no provider request id. All stable fields are
         // used so re-reading the same append lands on the same derived event.
+        // The line number is part of the identity: two identical usage records
+        // (same millisecond, same counters, retried request) are two calls and
+        // must not collapse onto one event. The wire is append-only, so the
+        // line of a record never moves.
+        let line_s = line_no.to_string();
+        let ts_s = ts.to_string();
+        let fresh_s = fresh.unwrap_or(0).to_string();
+        let read_s = cache_read.unwrap_or(0).to_string();
+        let write_s = cache_write.unwrap_or(0).to_string();
+        let output_s = output.unwrap_or(0).to_string();
         let id = EventId::derive(&[
-            "kimi",
-            &session,
-            &agent,
-            &ts.to_string(),
-            &model,
-            &fresh.to_string(),
-            &cache_read.to_string(),
-            &cache_write.to_string(),
-            &output.to_string(),
+            "kimi", &session, &agent, &line_s, &ts_s, &model, &fresh_s, &read_s, &write_s,
+            &output_s,
         ]);
 
         out.events.push(UsageEvent {
@@ -199,14 +208,14 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
             project: workspace.clone(),
             session: session.clone(),
             counters: Counters {
-                input_fresh: Some(fresh),
-                cache_read: Some(cache_read),
+                input_fresh: fresh,
+                cache_read,
                 // Kimi exposes one cache-creation bucket without a TTL. Keep
                 // it in the generic short-lived bucket rather than dropping
                 // real usage; pricing can still mark a missing rate incomplete.
-                cache_write_5m: Some(cache_write),
+                cache_write_5m: cache_write,
                 cache_write_1h: None,
-                output: Some(output),
+                output,
             },
             extras: Extras::default(),
             // The wire does not persist whether this historical request used
@@ -292,6 +301,31 @@ mod tests {
         let again = parse_file(path, text);
         assert_eq!(first.events[0].id, again.events[0].id);
         assert_eq!(first.events[0].session, "s2");
+    }
+
+    #[test]
+    fn a_bucket_the_wire_did_not_carry_stays_unknown() {
+        let text = r#"{"type":"usage.record","agentId":"main","model":"m","usage":{"inputOther":9,"output":3},"time":7}"#;
+        let out = parse_file(Path::new(PATH), text);
+        assert_eq!(out.events.len(), 1);
+        let e = &out.events[0];
+        assert_eq!(e.counters.input_fresh, Some(9));
+        assert_eq!(e.counters.output, Some(3));
+        assert_eq!(e.counters.cache_read, None);
+        assert_eq!(e.counters.cache_write_5m, None);
+        assert!(e.counters.has_unknown());
+    }
+
+    #[test]
+    fn two_identical_records_are_two_calls() {
+        let line = r#"{"type":"usage.record","agentId":"main","model":"m","usage":{"inputOther":1,"output":2,"inputCacheRead":0,"inputCacheCreation":0},"time":2}"#;
+        let text = format!("{line}\n{line}");
+        let out = parse_file(Path::new(PATH), &text);
+        assert_eq!(out.events.len(), 2);
+        assert_ne!(out.events[0].id, out.events[1].id);
+        let again = parse_file(Path::new(PATH), &text);
+        assert_eq!(out.events[0].id, again.events[0].id);
+        assert_eq!(out.events[1].id, again.events[1].id);
     }
 
     #[test]

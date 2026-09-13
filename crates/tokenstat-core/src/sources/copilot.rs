@@ -64,13 +64,16 @@ pub fn parse_db(path: &Path) -> ParseOutput {
         return out;
     }
 
+    // The token columns stay nullable: a NULL is the vendor reporting nothing
+    // for that bucket, not a measured zero, and coalescing it here would
+    // defeat `has_unknown` downstream.
     let sql = r#"
         SELECT u.id, u.session_id, u.turn_index, u.model,
-               COALESCE(u.input_tokens, 0),
-               COALESCE(u.output_tokens, 0),
-               COALESCE(u.cache_read_tokens, 0),
-               COALESCE(u.cache_write_tokens, 0),
-               COALESCE(u.reasoning_tokens, 0),
+               u.input_tokens,
+               u.output_tokens,
+               u.cache_read_tokens,
+               u.cache_write_tokens,
+               u.reasoning_tokens,
                u.created_at,
                COALESCE(s.cwd, ''),
                COALESCE(s.repository, '')
@@ -95,11 +98,11 @@ pub fn parse_db(path: &Path) -> ParseOutput {
             r.get::<_, String>(1)?,
             r.get::<_, Option<i64>>(2)?,
             r.get::<_, String>(3)?,
-            r.get::<_, i64>(4)?,
-            r.get::<_, i64>(5)?,
-            r.get::<_, i64>(6)?,
-            r.get::<_, i64>(7)?,
-            r.get::<_, i64>(8)?,
+            r.get::<_, Option<i64>>(4)?,
+            r.get::<_, Option<i64>>(5)?,
+            r.get::<_, Option<i64>>(6)?,
+            r.get::<_, Option<i64>>(7)?,
+            r.get::<_, Option<i64>>(8)?,
             r.get::<_, Option<String>>(9)?,
             r.get::<_, String>(10)?,
             r.get::<_, String>(11)?,
@@ -115,6 +118,7 @@ pub fn parse_db(path: &Path) -> ParseOutput {
         }
     };
 
+    let mut row_failed = false;
     for row in rows {
         let Ok((
             id,
@@ -131,16 +135,38 @@ pub fn parse_db(path: &Path) -> ParseOutput {
             repository,
         )) = row
         else {
+            // A row that cannot be read is not a reason to walk away from the
+            // rest silently: surface the first one so a truncated read is
+            // visible where the watermark cannot see it.
+            if !row_failed {
+                out.warnings.push(Warning::Unreadable {
+                    path: path.to_path_buf(),
+                    reason: "reading rows stopped: a usage row could not be decoded".to_string(),
+                });
+                row_failed = true;
+            }
             continue;
         };
 
-        let input = to_u64(input);
-        let output_text = to_u64(output);
-        let cache_read = to_u64(cache_read);
-        let cache_write = to_u64(cache_write);
-        let reasoning = to_u64(reasoning);
-        let output = output_text.saturating_add(reasoning);
-        if input == 0 && output == 0 && cache_read == 0 && cache_write == 0 {
+        // A NULL stays unknown; only a negative (corrupt data) clamps to zero.
+        let input = input.map(to_u64);
+        let output_text = output.map(to_u64);
+        let cache_read = cache_read.map(to_u64);
+        let cache_write = cache_write.map(to_u64);
+        let reasoning = reasoning.map(to_u64);
+        // Reasoning is already inside the generated tokens, so it folds into
+        // the output rather than adding a bucket beside it.
+        let output = match (output_text, reasoning) {
+            (Some(t), Some(r)) => Some(t.saturating_add(r)),
+            (Some(t), None) => Some(t),
+            (None, Some(r)) => Some(r),
+            (None, None) => None,
+        };
+        if input.unwrap_or(0) == 0
+            && output.unwrap_or(0) == 0
+            && cache_read.unwrap_or(0) == 0
+            && cache_write.unwrap_or(0) == 0
+        {
             continue;
         }
 
@@ -162,14 +188,15 @@ pub fn parse_db(path: &Path) -> ParseOutput {
             session,
             project,
             counters: Counters {
-                input_fresh: Some(input),
-                cache_read: Some(cache_read),
-                cache_write_5m: Some(cache_write),
+                input_fresh: input,
+                cache_read,
+                cache_write_5m: cache_write,
                 cache_write_1h: None,
-                output: Some(output),
+                output,
             },
             extras: Extras {
-                reasoning_within_output: (reasoning > 0).then_some(reasoning),
+                // Folded into `output` above, so it can never exceed it.
+                reasoning_within_output: reasoning.filter(|&r| r > 0),
                 ..Extras::default()
             },
             billing: BillingMode::Plan,
@@ -290,6 +317,58 @@ mod tests {
         assert_eq!(e.billing, BillingMode::Plan);
         assert_eq!(e.confidence, Confidence::Exact);
         assert!(e.ts.utc_ms > 0);
+    }
+
+    #[test]
+    fn null_buckets_stay_unknown_rather_than_zero() {
+        let dir = tempfile_dir();
+        let path = dir.join("session-store.db");
+        seed_db(&path);
+        Connection::open(&path)
+            .unwrap()
+            .execute(
+                "INSERT INTO assistant_usage_events
+              (session_id, turn_index, model, input_tokens, output_tokens,
+               cache_read_tokens, cache_write_tokens, reasoning_tokens, created_at)
+              VALUES ('sess-1', 2, 'gpt-5-mini', 40, 8, NULL, NULL, NULL,
+                      '2026-07-28T20:46:00.000Z')",
+                [],
+            )
+            .unwrap();
+        let out = parse_db(&path);
+        assert_eq!(out.events.len(), 2);
+        let e = out
+            .events
+            .iter()
+            .find(|e| e.counters.input_fresh == Some(40))
+            .unwrap();
+        assert_eq!(e.counters.output, Some(8));
+        assert_eq!(e.counters.cache_read, None);
+        assert_eq!(e.counters.cache_write_5m, None);
+        assert_eq!(e.extras.reasoning_within_output, None);
+        assert!(e.counters.has_unknown());
+    }
+
+    #[test]
+    fn an_undecodable_row_warns_without_dropping_the_rest() {
+        let dir = tempfile_dir();
+        let path = dir.join("session-store.db");
+        seed_db(&path);
+        Connection::open(&path)
+            .unwrap()
+            .execute(
+                "INSERT INTO assistant_usage_events
+              (session_id, turn_index, model, input_tokens, output_tokens,
+               cache_read_tokens, cache_write_tokens, reasoning_tokens, created_at)
+              VALUES ('sess-1', 2, 'gpt-5-mini', 'not-a-number', 8, 0, 0, 0,
+                      '2026-07-28T20:46:00.000Z')",
+                [],
+            )
+            .unwrap();
+        let out = parse_db(&path);
+        // The good row still ingests; the bad one is skipped with a warning.
+        assert_eq!(out.events.len(), 1);
+        assert_eq!(out.warnings.len(), 1);
     }
 
     #[test]

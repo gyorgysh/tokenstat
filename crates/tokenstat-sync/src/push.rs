@@ -133,6 +133,25 @@ pub fn notify(reason: Reason) -> Result<Sent, ProfileError> {
 /// a build signed for development gets a sandbox token, and sending it to the
 /// production host is answered with BadDeviceToken.
 pub fn register_device(token: &str, platform: &str, environment: &str) -> Result<(), ProfileError> {
+    // Both fields are an allowlist, the same way `Reason` is: they travel to
+    // somebody else's servers, so free text from a caller must not be able
+    // to ride along. The server rejects what it does not recognise; refusing
+    // here first keeps a bad value a local error instead of a failed request.
+    if !matches!(platform, "ios" | "ipados") {
+        return Err(ProfileError::Message(format!(
+            "unknown push platform {platform:?}: expected \"ios\" or \"ipados\""
+        )));
+    }
+    if !matches!(environment, "production" | "sandbox") {
+        return Err(ProfileError::Message(format!(
+            "unknown push environment {environment:?}: expected \"production\" or \"sandbox\""
+        )));
+    }
+    if token.is_empty() {
+        return Err(ProfileError::Message(
+            "cannot register a device without its token".into(),
+        ));
+    }
     let host = resolve_api_host(None)?;
     let bearer = keychain::load_token(&host)?
         .ok_or_else(|| ProfileError::Message("Sign in to get notifications.".into()))?;
@@ -217,10 +236,29 @@ fn capped_text(response: reqwest::blocking::Response, max: usize) -> Result<Stri
 /// For the drain thread that just watched a run end. The work that mattered is
 /// already done and recorded, so an unreachable server here is worth nothing
 /// louder than a dropped result.
+///
+/// One worker thread takes every request off a bounded queue, so a burst of
+/// runs ending together cannot grow a thread per notification. A full queue
+/// means posts are slower than runs are ending, and the excess is dropped:
+/// a notification is never worth blocking the run that triggered it.
 pub fn notify_in_background(reason: Reason) {
-    std::thread::spawn(move || {
-        let _ = notify(reason);
+    static QUEUE: std::sync::OnceLock<std::sync::mpsc::SyncSender<Reason>> =
+        std::sync::OnceLock::new();
+    let sender = QUEUE.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Reason>(8);
+        // If this fails, the receiver goes with the closure that never ran,
+        // so every `try_send` below fails and notifications are quietly
+        // skipped rather than failing the caller.
+        let _ = std::thread::Builder::new()
+            .name("tokenstat-push-notify".to_string())
+            .spawn(move || {
+                for queued in rx {
+                    let _ = notify(queued);
+                }
+            });
+        tx
     });
+    let _ = sender.try_send(reason);
 }
 
 #[cfg(test)]
@@ -235,6 +273,29 @@ mod tests {
         // A run that was stopped by hand did not fail, and telling somebody
         // their run failed when they stopped it is worse than saying nothing.
         assert_eq!(Reason::for_exit("stopped", None), Reason::RunFinished);
+    }
+
+    #[test]
+    fn register_device_refuses_anything_off_the_allowlist() {
+        // Rejected locally, before any credential is read or any request is
+        // made: free text must not be able to ride to somebody else's server.
+        let err = register_device("tok", "android", "production").unwrap_err();
+        assert!(err.to_string().contains("platform"), "{err}");
+        let err = register_device("tok", "ios", "development").unwrap_err();
+        assert!(err.to_string().contains("environment"), "{err}");
+        let err = register_device("", "ios", "production").unwrap_err();
+        assert!(err.to_string().contains("token"), "{err}");
+    }
+
+    #[test]
+    fn background_notify_never_blocks_the_caller() {
+        // Queued on one worker, not a thread per call: a burst must return
+        // promptly even while the worker is stuck on a slow server.
+        let start = std::time::Instant::now();
+        for _ in 0..64 {
+            notify_in_background(Reason::Test);
+        }
+        assert!(start.elapsed() < std::time::Duration::from_secs(10));
     }
 
     #[test]

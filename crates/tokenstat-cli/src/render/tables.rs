@@ -52,6 +52,10 @@ pub fn grouped(store: &Store, group: GroupBy, q: &Query, label: &str, json: bool
         return empty_range(json);
     }
     if json {
+        if group == GroupBy::Model {
+            let prices = PriceTable::load_with_catalog();
+            return print_json_model_buckets(&rows, &prices);
+        }
         return print_json_buckets(&rows);
     }
     // JSON keeps the stored ids. The table is a breakdown, so estimate and
@@ -133,11 +137,16 @@ fn trend_line(rows: &[Bucket], group: GroupBy) -> Option<(String, String, String
 
 fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
     // Caller already handles the empty case so the table always has a body.
-    let chronological = group == GroupBy::Day;
+    // The footer counts what the rows are: days, months, or plain rows.
+    let noun = match group {
+        GroupBy::Day => "days",
+        GroupBy::Month => "months",
+        _ => "rows",
+    };
 
     let key_w = rows
         .iter()
-        .map(|r| bucket_key_label(group, &r.key).chars().count())
+        .map(|r| ui::display_width(&bucket_key_label(group, &r.key)))
         .max()
         .unwrap_or(8)
         .clamp(label.len().max(10), 36);
@@ -185,7 +194,7 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
         ui::pad_right("", key_w),
         ui::tokens(grand),
         rows.len(),
-        if chronological { "days" } else { "rows" },
+        noun,
     );
 
     // A time series has a shape, and a column of magnitudes hides it. One line
@@ -221,40 +230,76 @@ pub fn monthly(store: &Store, q: &Query, json: bool) -> Result<()> {
             Some(m) if m.key == key => {
                 m.counters.accumulate(&d.counters);
                 m.events += d.events;
+                m.sessions += d.sessions;
             }
             _ => months.push(Bucket {
                 key,
                 counters: d.counters,
                 events: d.events,
-                sessions: 0,
+                sessions: d.sessions,
             }),
         }
     }
     if months.is_empty() {
         return empty_range(json);
     }
+    // Day buckets count distinct sessions per day, so the sum above counts a
+    // session once per midnight it spans. Replace it with the distinct count
+    // for the month, the same figure a week bucket carries, keeping the
+    // caller's model/project filters.
+    for m in &mut months {
+        let mut parts = m.key.split('-');
+        let year = parts.next().and_then(|y| y.parse::<i16>().ok());
+        let month = parts.next().and_then(|v| v.parse::<i8>().ok());
+        if let (Some(y), Some(mo)) = (year, month)
+            && (1..=12).contains(&mo)
+        {
+            let month_q = Query {
+                since: Some(format!("{y:04}-{mo:02}-01")),
+                until: Some(jiff::civil::date(y, mo, 1).last_of_month().to_string()),
+                model: q.model.clone(),
+                project: q.project.clone(),
+                ..Query::default()
+            };
+            if let Ok(totals) = store.totals(&month_q) {
+                m.sessions = totals.sessions;
+            }
+        }
+    }
     if json {
         return print_json_buckets(&months);
     }
-    print_table(&months, "Month", GroupBy::Day);
+    print_table(&months, "Month", GroupBy::Month);
     note_unmeasured_days(store, q);
     Ok(())
 }
 
 pub fn sessions(store: &Store, q: &Query, top: usize, json: bool) -> Result<()> {
-    let mut rows = store.report(GroupBy::Session, q)?;
-    rows.truncate(top);
+    let rows = store.report(GroupBy::Session, q)?;
     if rows.is_empty() {
         return empty_range(json);
     }
     if json {
-        return print_json_buckets(&rows);
+        // The array is capped at `top`, so say so: without the total a
+        // consumer cannot tell two sessions from two hundred.
+        let shown: Vec<String> = rows.iter().take(top).map(bucket_json).collect();
+        println!(
+            r#"{{"total":{},"top":{top},"rows":[{}]}}"#,
+            rows.len(),
+            shown.join(",")
+        );
+        return Ok(());
+    }
+    let mut rows = rows;
+    rows.truncate(top);
+    if rows.is_empty() {
+        return empty_range(json);
     }
     print_table(&rows, "Session", GroupBy::Session);
     Ok(())
 }
 /// Five-hour usage blocks (gap-based, Claude-style rate-limit windows).
-pub fn blocks(store: &Store, q: &Query, json: bool) -> Result<()> {
+pub fn blocks(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -> Result<()> {
     let now_ms = jiff::Timestamp::now().as_millisecond();
     let rows = store.blocks(q, now_ms)?;
     if rows.is_empty() {
@@ -288,7 +333,6 @@ pub fn blocks(store: &Store, q: &Query, json: bool) -> Result<()> {
         return Ok(());
     }
 
-    let tz = jiff::tz::TimeZone::system();
     let max = rows
         .iter()
         .map(|b| b.counters.total())
@@ -308,7 +352,7 @@ pub fn blocks(store: &Store, q: &Query, json: bool) -> Result<()> {
 
     // Newest first: the active block should be at the top.
     for b in rows.iter().rev().take(40) {
-        let start = format_block_instant(b.start_ms, &tz);
+        let start = format_block_instant(b.start_ms, tz);
         let c = &b.counters;
         let in_out = c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0);
         let frac = c.total() as f64 / max as f64;
@@ -359,6 +403,11 @@ pub fn export(
     out: Option<&Path>,
     json_flag: bool,
 ) -> Result<()> {
+    // Reject an unknown format before the --json override below, so
+    // `--format bad --json` fails instead of silently emitting JSON.
+    if format != "csv" && format != "json" {
+        anyhow::bail!("unknown export format {format:?}, use csv or json");
+    }
     let rows = store.events(q)?;
     if rows.is_empty() {
         return empty_range(json_flag || format == "json");

@@ -322,14 +322,19 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
                 println!();
                 println!("  {BOLD}History the transcripts no longer hold{BOLD:#}");
                 println!(
-                    "  {DIM}{:<28}{:>10}{:>10}{:>12}{:>12}{DIM:#}",
-                    "model", "out has", "out said", "cache has", "cache said"
+                    "  {DIM}{}{:>10}{:>10}{:>12}{:>12}{DIM:#}",
+                    ui::pad_right("model", 28),
+                    "out has",
+                    "out said",
+                    "cache has",
+                    "cache said"
                 );
                 for (model, ao, vo, ac, vc) in rows.iter().take(8) {
-                    let model = sanitize_label(model);
+                    // pad_right measures display columns, so a CJK model id no
+                    // longer shifts the numbers right of it.
                     println!(
-                        "  {:<28}{:>10}{:>10}{:>12}{:>12}",
-                        ui::truncate(&model, 27),
+                        "  {}{:>10}{:>10}{:>12}{:>12}",
+                        ui::pad_right(&sanitize_label(model), 28),
                         ui::tokens(*ao),
                         ui::tokens(*vo),
                         ui::tokens(*ac),

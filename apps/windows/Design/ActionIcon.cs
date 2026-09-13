@@ -22,9 +22,9 @@ internal enum ActionIcon
     Token, Preview, Visibility, Theme, Layout,
     Connect, Disconnect, Approve, Pair, Refresh, Revoke, Device,
     Run, Stop, History, Move, Archive, Restore, Pin, Pinned, Browser, Collapse, Commit,
-    Merge, Comment, Reopen, Checkout, Filter, Diff,
+    Merge, Comment, Reopen, Checkout, Filter, EnterFullScreen, ExitFullScreen, Diff,
     Delete,
-    External, Next, Latest, Back, More, Search, Reveal, Docs, Source, Profile, Home, Help,
+    External, Next, Latest, Back, More, Search, SearchAll, Reveal, Docs, Source, Profile, Home, Help,
     Send, Attach, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
 }
@@ -33,7 +33,7 @@ internal static class ActionIconGlyph
 {
     public static Symbol Symbol(this ActionIcon icon) => icon switch
     {
-        ActionIcon.Save or ActionIcon.CurrentPlan or ActionIcon.Done or ActionIcon.Commit
+        ActionIcon.Save or ActionIcon.CurrentPlan or ActionIcon.Done or ActionIcon.Commit or ActionIcon.Apply
             => Microsoft.UI.Xaml.Controls.Symbol.Accept,
         ActionIcon.Claim or ActionIcon.Approve => Microsoft.UI.Xaml.Controls.Symbol.Accept,
         ActionIcon.Create => Microsoft.UI.Xaml.Controls.Symbol.Add,
@@ -48,18 +48,22 @@ internal static class ActionIconGlyph
         ActionIcon.Edit => Microsoft.UI.Xaml.Controls.Symbol.Edit,
         ActionIcon.Plans => Microsoft.UI.Xaml.Controls.Symbol.Favorite,
         ActionIcon.Billing => Microsoft.UI.Xaml.Controls.Symbol.Shop,
+        ActionIcon.Token => Microsoft.UI.Xaml.Controls.Symbol.Permissions,
+        ActionIcon.AppStore or ActionIcon.External or ActionIcon.Next or ActionIcon.Move
+            => Microsoft.UI.Xaml.Controls.Symbol.Forward,
         ActionIcon.Refresh or ActionIcon.AutoRenew => Microsoft.UI.Xaml.Controls.Symbol.Refresh,
-        ActionIcon.CancelPlan or ActionIcon.Dismiss or ActionIcon.Disconnect
+        ActionIcon.CancelPlan or ActionIcon.Dismiss or ActionIcon.Disconnect or ActionIcon.Revoke
             => Microsoft.UI.Xaml.Controls.Symbol.Cancel,
         ActionIcon.HideKeyboard => Microsoft.UI.Xaml.Controls.Symbol.Down,
-        ActionIcon.Preview or ActionIcon.Visibility => Microsoft.UI.Xaml.Controls.Symbol.View,
+        ActionIcon.Preview or ActionIcon.Visibility or ActionIcon.Compare
+            => Microsoft.UI.Xaml.Controls.Symbol.View,
         ActionIcon.Theme => Microsoft.UI.Xaml.Controls.Symbol.Highlight,
         ActionIcon.Layout => Microsoft.UI.Xaml.Controls.Symbol.ViewAll,
         // Apple and the website both draw a plug for this. The Symbol enum has
         // no plug in it, and reaching for a raw Segoe glyph for one case would
         // put a second icon mechanism in this file, so Link stands in. Swap it
         // the day anything else here needs a FontIcon.
-        ActionIcon.Connect => Microsoft.UI.Xaml.Controls.Symbol.Link,
+        ActionIcon.Connect or ActionIcon.Pair => Microsoft.UI.Xaml.Controls.Symbol.Link,
         ActionIcon.Device => Microsoft.UI.Xaml.Controls.Symbol.CellPhone,
         ActionIcon.Run => Microsoft.UI.Xaml.Controls.Symbol.Play,
         ActionIcon.Stop => Microsoft.UI.Xaml.Controls.Symbol.Stop,
@@ -73,22 +77,26 @@ internal static class ActionIconGlyph
         ActionIcon.Reopen => Microsoft.UI.Xaml.Controls.Symbol.Undo,
         ActionIcon.Checkout => Microsoft.UI.Xaml.Controls.Symbol.Download,
         ActionIcon.Filter => Microsoft.UI.Xaml.Controls.Symbol.Filter,
-        ActionIcon.Diff => Microsoft.UI.Xaml.Controls.Symbol.ViewAll,
+        // The Symbol enum has no fullscreen glyph, so the pair borrows the
+        // view family (enter) and the restore arrow (exit) like Collapse does.
+        ActionIcon.EnterFullScreen => Microsoft.UI.Xaml.Controls.Symbol.ViewAll,
+        ActionIcon.ExitFullScreen => Microsoft.UI.Xaml.Controls.Symbol.Undo,
+        ActionIcon.Collapse => Microsoft.UI.Xaml.Controls.Symbol.Down,
+        ActionIcon.Diff or ActionIcon.Benchmarks => Microsoft.UI.Xaml.Controls.Symbol.ViewAll,
         ActionIcon.Browser => Microsoft.UI.Xaml.Controls.Symbol.Globe,
         ActionIcon.Delete => Microsoft.UI.Xaml.Controls.Symbol.Delete,
-        ActionIcon.External or ActionIcon.Next => Microsoft.UI.Xaml.Controls.Symbol.Forward,
-        ActionIcon.Latest => Microsoft.UI.Xaml.Controls.Symbol.Down,
+        ActionIcon.Latest or ActionIcon.Downgrade => Microsoft.UI.Xaml.Controls.Symbol.Down,
         ActionIcon.Back => Microsoft.UI.Xaml.Controls.Symbol.Back,
         ActionIcon.More => Microsoft.UI.Xaml.Controls.Symbol.More,
-        ActionIcon.Search => Microsoft.UI.Xaml.Controls.Symbol.Find,
-        ActionIcon.Reveal => Microsoft.UI.Xaml.Controls.Symbol.Folder,
+        ActionIcon.Search or ActionIcon.SearchAll => Microsoft.UI.Xaml.Controls.Symbol.Find,
+        ActionIcon.Reveal or ActionIcon.Source => Microsoft.UI.Xaml.Controls.Symbol.Folder,
         ActionIcon.Docs => Microsoft.UI.Xaml.Controls.Symbol.Library,
         ActionIcon.Home => Microsoft.UI.Xaml.Controls.Symbol.Home,
         ActionIcon.Help => Microsoft.UI.Xaml.Controls.Symbol.Help,
         ActionIcon.Send => Microsoft.UI.Xaml.Controls.Symbol.Send,
         ActionIcon.Attach => Microsoft.UI.Xaml.Controls.Symbol.Attach,
         ActionIcon.Persona => Microsoft.UI.Xaml.Controls.Symbol.Contact,
-        ActionIcon.Plan => Microsoft.UI.Xaml.Controls.Symbol.Document,
+        ActionIcon.Plan or ActionIcon.Calculate => Microsoft.UI.Xaml.Controls.Symbol.Document,
         ActionIcon.Allow => Microsoft.UI.Xaml.Controls.Symbol.Accept,
         ActionIcon.Deny => Microsoft.UI.Xaml.Controls.Symbol.Cancel,
         _ => Microsoft.UI.Xaml.Controls.Symbol.Placeholder,

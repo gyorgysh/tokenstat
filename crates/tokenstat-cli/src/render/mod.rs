@@ -142,6 +142,23 @@ pub(super) fn json_opt(v: Option<&str>) -> String {
     }
 }
 
+/// One bucket as a JSON object, without the surrounding array.
+pub(super) fn bucket_json(r: &Bucket) -> String {
+    let c = &r.counters;
+    format!(
+        r#"{{"key":{},"input_fresh":{},"cache_read":{},"cache_write_5m":{},"cache_write_1h":{},"output":{},"total":{},"events":{},"sessions":{}}}"#,
+        json_string(&r.key),
+        num(c.input_fresh),
+        num(c.cache_read),
+        num(c.cache_write_5m),
+        num(c.cache_write_1h),
+        num(c.output),
+        c.total(),
+        r.events,
+        r.sessions,
+    )
+}
+
 pub(super) fn print_json_buckets(rows: &[Bucket]) -> Result<()> {
     let mut out = std::io::stdout().lock();
     write!(out, "[")?;
@@ -149,22 +166,32 @@ pub(super) fn print_json_buckets(rows: &[Bucket]) -> Result<()> {
         if i > 0 {
             write!(out, ",")?;
         }
-        let c = &r.counters;
-        write!(
-            out,
-            r#"{{"key":{},"input_fresh":{},"cache_read":{},"cache_write_5m":{},"cache_write_1h":{},"output":{},"total":{},"events":{},"sessions":{}}}"#,
-            json_string(&r.key),
-            num(c.input_fresh),
-            num(c.cache_read),
-            num(c.cache_write_5m),
-            num(c.cache_write_1h),
-            num(c.output),
-            c.total(),
-            r.events,
-            r.sessions,
-        )?;
+        write!(out, "{}", bucket_json(r))?;
     }
     writeln!(out, "]")?;
+    Ok(())
+}
+
+/// Bucket array with the list-rate equivalent attached, for model rows.
+///
+/// The table has always had a value column and `models --detail --json` has
+/// always carried `value_usd`; plain `models --json` dropping it meant the
+/// cheapest machine-readable path was also the least informative one.
+/// `value_usd` is `null` when the model has no list price, never zero.
+pub(super) fn print_json_model_buckets(rows: &[Bucket], prices: &PriceTable) -> Result<()> {
+    use anstream::println;
+    let out: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let value = EquivalentValue::price(prices, &model_label(&r.key), &r.counters)
+                .map(|v| format!("{:.4}", v.dollars()))
+                .unwrap_or_else(|| "null".into());
+            let mut row = bucket_json(r);
+            row.pop();
+            format!(r#"{},"value_usd":{}}}"#, row, value)
+        })
+        .collect();
+    println!("[{}]", out.join(","));
     Ok(())
 }
 

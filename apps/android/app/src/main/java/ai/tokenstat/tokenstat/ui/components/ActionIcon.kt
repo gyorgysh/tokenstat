@@ -54,10 +54,11 @@ enum class ActionIcon {
     Plans, Billing, AppStore, AutoRenew, Downgrade, CancelPlan,
     Token, Preview, Visibility, Theme, Layout,
     Connect, Disconnect, Approve, Pair, Refresh, Revoke, Device,
-    Run, Stop, History, Move, Archive, Restore, Browser, Collapse, Commit,
+    Run, Stop, History, Move, Archive, Restore, Pin, Pinned, Browser, Collapse, Commit,
+    Merge, Comment, Reopen, Checkout, Filter, EnterFullScreen, ExitFullScreen,
     Delete,
-    External, Next, Back, More, Search, Reveal, Docs, Source, Profile, Home, Help,
-    Send, Apply, Calculate, Compare, Benchmarks,
+    External, Next, Latest, Back, More, Search, SearchAll, Reveal, Docs, Source, Profile, Home, Help,
+    Send, Attach, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
     ;
 
@@ -93,18 +94,34 @@ enum class ActionIcon {
             History -> Icons.Default.History
             Archive -> Icons.Default.Archive
             Restore -> Icons.Default.History
+            // A pin is a kept favourite. No pin glyph ships in the core set,
+            // so the star stands in until a verified extended-set import lands.
+            Pin, Pinned -> Icons.Default.Star
             Browser -> Icons.Default.Language
             Collapse -> Icons.Default.Close
+            Merge -> Icons.AutoMirrored.Filled.ArrowForward
+            Comment -> Icons.Default.Description
+            Reopen -> Icons.Default.History
+            Checkout -> Icons.Default.Download
+            Filter -> Icons.Default.Search
+            EnterFullScreen -> Icons.AutoMirrored.Filled.OpenInNew
+            ExitFullScreen -> Icons.Default.Close
             Delete -> Icons.Default.Delete
             Next -> Icons.AutoMirrored.Filled.ArrowForward
+            Latest -> Icons.Default.KeyboardArrowDown
             Back -> Icons.AutoMirrored.Filled.ArrowBack
             More -> Icons.Default.MoreVert
-            Search -> Icons.Default.Search
+            Search, SearchAll -> Icons.Default.Search
             Reveal, Source -> Icons.Default.Folder
             Docs -> Icons.Default.Description
             Home -> Icons.Default.Home
             Help -> Icons.AutoMirrored.Filled.HelpOutline
             Send, Apply -> Icons.AutoMirrored.Filled.Send
+            Attach -> Icons.Default.Description
+            Persona -> Icons.Default.Person
+            Plan -> Icons.Default.Description
+            Allow -> Icons.Default.Check
+            Deny -> Icons.Default.Close
             Calculate, Compare, Benchmarks -> Icons.Default.BarChart
             Scheduled -> Icons.Default.Schedule
         }

@@ -336,6 +336,26 @@ fn refresh(
     stored: &Stored,
     token: &OauthToken,
 ) -> Result<String, String> {
+    // One renewal at a time, process-wide. Two threads entering together
+    // would each spend the same refresh token; when the vendor rotates it,
+    // the loser's POST fails and can read as a signed-out login. The
+    // re-read below lets the loser adopt whatever the winner (or Claude
+    // Code itself) already wrote instead of spending a stale token.
+    static RENEWAL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = RENEWAL_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(current) = stored_credentials()
+        && current.raw != stored.raw
+        && let Some(tok) = current.token()
+        && tok
+            .expires_at
+            .is_none_or(|ms| ms > now_ms().saturating_add(60_000))
+        && !tok.access_token.is_empty()
+    {
+        return Ok(tok.access_token.clone());
+    }
+
     let refresh_token = token
         .refresh_token
         .as_deref()

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use super::json_string;
 use crate::ui::{DIM, accent, good};
 
-pub fn self_update(check_only: bool, _yes: bool, json: bool) -> Result<()> {
+pub fn self_update(check_only: bool, json: bool) -> Result<()> {
     if check_only {
         let c = tokenstat_sync::check_latest().map_err(|e| anyhow::anyhow!("{e}"))?;
         if json {

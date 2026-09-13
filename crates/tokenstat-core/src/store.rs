@@ -194,6 +194,8 @@ pub enum GroupBy {
     Day,
     /// ISO week (`YYYY-Www`), derived from `local_date`.
     Week,
+    /// Calendar month (`YYYY-MM`), derived from `local_date`.
+    Month,
     Model,
     Project,
     Source,
@@ -206,6 +208,8 @@ impl GroupBy {
             GroupBy::Day => "local_date",
             // %G/%V are ISO year and week. local_date is YYYY-MM-DD text.
             GroupBy::Week => "strftime('%G-W%V', local_date)",
+            // local_date is YYYY-MM-DD text, so the first 7 chars are YYYY-MM.
+            GroupBy::Month => "substr(local_date, 1, 7)",
             GroupBy::Model => "model",
             GroupBy::Project => "project",
             GroupBy::Source => "source",
@@ -641,7 +645,7 @@ impl Store {
     /// when grouping by day so a timeline reads left to right.
     pub fn report(&self, group: GroupBy, q: &Query) -> Result<Vec<Bucket>, CoreError> {
         let (where_sql, args) = Self::where_clause(q);
-        let order = if matches!(group, GroupBy::Day | GroupBy::Week) {
+        let order = if matches!(group, GroupBy::Day | GroupBy::Week | GroupBy::Month) {
             "ORDER BY k ASC"
         } else {
             "ORDER BY (COALESCE(SUM(input_fresh),0)+COALESCE(SUM(cache_read),0)\
@@ -696,7 +700,7 @@ impl Store {
         q: &Query,
     ) -> Result<Vec<SplitBucket>, CoreError> {
         let (where_sql, args) = Self::where_clause(q);
-        let key_order = if matches!(group, GroupBy::Day | GroupBy::Week) {
+        let key_order = if matches!(group, GroupBy::Day | GroupBy::Week | GroupBy::Month) {
             "k ASC"
         } else {
             "k DESC"
@@ -1620,6 +1624,28 @@ mod tests {
         let r = s.report(GroupBy::Model, &Query::default()).unwrap();
         assert_eq!(r[0].key, "big");
         assert_eq!(r[1].key, "small");
+    }
+
+    #[test]
+    fn grouping_by_month_rolls_days_into_calendar_months() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        s.insert_events(
+            &[
+                ev("a", 1_699_920_000_000, "m", 10), // 2023-11-14
+                ev("b", 1_700_006_400_000, "m", 20), // 2023-11-15
+                ev("c", 1_701_388_800_000, "m", 40), // 2023-12-01
+            ],
+            &tz,
+        )
+        .unwrap();
+        let r = s.report(GroupBy::Month, &Query::default()).unwrap();
+        assert_eq!(r.len(), 2);
+        // Chronological, oldest month first.
+        assert_eq!(r[0].key, "2023-11");
+        assert_eq!(r[1].key, "2023-12");
+        assert_eq!(r[0].events, 2);
+        assert_eq!(r[1].events, 1);
     }
 
     #[test]

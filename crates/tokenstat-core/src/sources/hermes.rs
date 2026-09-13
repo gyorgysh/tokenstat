@@ -133,16 +133,19 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         params.push((":since", &floor));
     }
     let rows = match stmt.query_map(params.as_slice(), |r| {
+        // The token columns stay nullable: a NULL is the vendor reporting
+        // nothing for that bucket, not a measured zero, and coalescing it
+        // here would defeat `has_unknown` downstream.
         Ok(Row {
             session: r.get::<_, String>(0)?,
             model: r.get::<_, String>(1)?,
             task: r.get::<_, String>(2).unwrap_or_default(),
             provider: r.get::<_, String>(3).unwrap_or_default(),
-            input: r.get::<_, i64>(4).unwrap_or(0),
-            output: r.get::<_, i64>(5).unwrap_or(0),
-            cache_read: r.get::<_, i64>(6).unwrap_or(0),
-            cache_write: r.get::<_, i64>(7).unwrap_or(0),
-            reasoning: r.get::<_, i64>(8).unwrap_or(0),
+            input: r.get::<_, Option<i64>>(4).unwrap_or(None),
+            output: r.get::<_, Option<i64>>(5).unwrap_or(None),
+            cache_read: r.get::<_, Option<i64>>(6).unwrap_or(None),
+            cache_write: r.get::<_, Option<i64>>(7).unwrap_or(None),
+            reasoning: r.get::<_, Option<i64>>(8).unwrap_or(None),
             estimated_cost: r.get::<_, f64>(9).unwrap_or(0.0),
             actual_cost: r.get::<_, f64>(10).unwrap_or(0.0),
             cost_status: r.get::<_, String>(11).unwrap_or_default(),
@@ -180,7 +183,11 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
                 continue;
             }
         };
-        if row.input <= 0 && row.output <= 0 && row.cache_read <= 0 && row.cache_write <= 0 {
+        if row.input.unwrap_or(0) <= 0
+            && row.output.unwrap_or(0) <= 0
+            && row.cache_read.unwrap_or(0) <= 0
+            && row.cache_write.unwrap_or(0) <= 0
+        {
             continue;
         }
         out.rows_seen += 1;
@@ -190,6 +197,18 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             .find(|s| !s.is_empty())
             .unwrap_or("unknown")
             .to_string();
+        // A negative (corrupt data) clamps to zero; a NULL stays unknown.
+        let output = row.output.map(|v| v.max(0) as u64);
+        let reasoning = row
+            .reasoning
+            .map(|v| v.max(0) as u64)
+            .filter(|&r| r > 0)
+            // Reasoning is the part of output it is, so it can never exceed
+            // the output it is reported against.
+            .map(|r| match output {
+                Some(o) => r.min(o),
+                None => r,
+            });
         out.events.push(UsageEvent {
             // The row's whole primary key, and no timestamp: the row is a
             // running total and has to land on the same event each time it is
@@ -219,17 +238,17 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             session: row.session.clone(),
             project,
             counters: Counters {
-                input_fresh: Some(row.input.max(0) as u64),
-                cache_read: Some(row.cache_read.max(0) as u64),
-                cache_write_5m: Some(row.cache_write.max(0) as u64),
+                input_fresh: row.input.map(|v| v.max(0) as u64),
+                cache_read: row.cache_read.map(|v| v.max(0) as u64),
+                cache_write_5m: row.cache_write.map(|v| v.max(0) as u64),
                 cache_write_1h: None,
-                output: Some(row.output.max(0) as u64),
+                output,
             },
             extras: Extras {
                 // Hermes counts reasoning separately from output and its own
                 // session totals do not add it in, so it is reported as the
                 // part of output it is rather than added on top.
-                reasoning_within_output: (row.reasoning > 0).then_some(row.reasoning as u64),
+                reasoning_within_output: reasoning,
                 web_search_requests: None,
                 web_fetch_requests: None,
             },
@@ -246,11 +265,13 @@ struct Row {
     model: String,
     task: String,
     provider: String,
-    input: i64,
-    output: i64,
-    cache_read: i64,
-    cache_write: i64,
-    reasoning: i64,
+    /// `None` when the vendor reported no figure for the bucket. Only a real
+    /// number may clear `has_unknown`; a missing one must not become a zero.
+    input: Option<i64>,
+    output: Option<i64>,
+    cache_read: Option<i64>,
+    cache_write: Option<i64>,
+    reasoning: Option<i64>,
     estimated_cost: f64,
     actual_cost: f64,
     cost_status: String,
@@ -442,6 +463,53 @@ mod tests {
         let same = before.events.iter().find(|e| e.id == grown.id).unwrap();
         assert_eq!(same.id, grown.id, "the archive must update, not add");
         assert!(grown.counters.input_fresh > same.counters.input_fresh);
+    }
+
+    #[test]
+    fn null_buckets_stay_unknown_rather_than_zero() {
+        let path = temp_db();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "INSERT INTO session_model_usage (session_id, model, billing_provider,
+                 billing_base_url, billing_mode, task, api_call_count, input_tokens,
+                 output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
+                 estimated_cost_usd, actual_cost_usd, cost_status, cost_source,
+                 first_seen, last_seen)
+                 VALUES ('20260819_232554_02d29e', 'm', 'xai-oauth', '', '', 'aux',
+                 1, 500, 20, NULL, NULL, NULL, 0, 0, '', 'none',
+                 1787174812.0, 1787174812.0)",
+                [],
+            )
+            .unwrap();
+        let out = parse_db(&path);
+        let e = out.events.iter().find(|e| e.model == "m").unwrap();
+        assert_eq!(e.counters.input_fresh, Some(500));
+        assert_eq!(e.counters.output, Some(20));
+        assert_eq!(e.counters.cache_read, None);
+        assert_eq!(e.counters.cache_write_5m, None);
+        assert_eq!(e.extras.reasoning_within_output, None);
+        assert!(e.counters.has_unknown());
+    }
+
+    #[test]
+    fn reasoning_is_clamped_to_the_output_it_is_inside() {
+        let path = temp_db();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE session_model_usage SET reasoning_tokens = 9999 WHERE task = ''",
+                [],
+            )
+            .unwrap();
+        let out = parse_db(&path);
+        let e = out
+            .events
+            .iter()
+            .find(|e| e.model == "grok-composer-2.5-fast" && e.counters.output == Some(78))
+            .unwrap();
+        assert_eq!(e.counters.output, Some(78));
+        assert_eq!(e.extras.reasoning_within_output, Some(78));
     }
 
     #[test]

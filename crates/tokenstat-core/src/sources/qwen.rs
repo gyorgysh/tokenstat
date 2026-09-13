@@ -305,21 +305,31 @@ pub fn parse_file(path: &Path, contents: &str, sessions: &HashMap<String, String
         // ledger read incrementally after a restart, lands on the same event.
         // An index into the slice, as this function once used, would shift
         // after a truncated tail and duplicate the month. The same fields are
-        // used that the confidence already carries, mirroring kimi.rs.
+        // used that the confidence already carries, mirroring kimi.rs. The
+        // line number joins them: two byte-identical ledger lines (a retried
+        // request at the same millisecond) are two calls and must not
+        // collapse onto one event, and the ledger is append-only so a line
+        // never moves.
         let (id, confidence) = match row.id.as_deref() {
             Some(id) if !id.is_empty() => (EventId::derive(&["qwen", id]), Confidence::Exact),
             _ => {
                 let ts_raw = row.timestamp.as_deref().unwrap_or("");
+                let line_s = i.to_string();
+                let input_s = input.to_string();
+                let cached_s = cached.to_string();
+                let output_s = output.to_string();
+                let thoughts_s = thoughts.to_string();
                 (
                     EventId::derive(&[
                         "qwen",
                         &session,
+                        &line_s,
                         ts_raw,
                         row.model.as_deref().unwrap_or(""),
-                        &input.to_string(),
-                        &cached.to_string(),
-                        &output.to_string(),
-                        &thoughts.to_string(),
+                        &input_s,
+                        &cached_s,
+                        &output_s,
+                        &thoughts_s,
                     ]),
                     Confidence::Derived,
                 )
@@ -496,6 +506,25 @@ mod tests {
         let first = parse_file(Path::new(LEDGER), &text, &index());
         let again = parse_file(Path::new(LEDGER), &text, &index());
         assert_eq!(first.events[0].id, again.events[0].id);
+    }
+
+    #[test]
+    fn two_identical_id_less_lines_are_two_calls() {
+        // Without a ledger-minted id the identity is content plus the line,
+        // so a retried request recorded twice must not collapse.
+        let one = r#"{"schemaVersion":1,"timestamp":"2026-09-02T05:13:13.827Z","sessionId":"s1","model":"qwen3-coder-plus","authType":"openai","source":"main","inputTokens":100,"outputTokens":10,"cachedTokens":0,"thoughtsTokens":0,"totalTokens":110,"apiDurationMs":5319}"#;
+        let text = format!("{one}\n{one}");
+        let out = parse_file(Path::new(LEDGER), &text, &index());
+        assert_eq!(out.events.len(), 2);
+        assert_ne!(out.events[0].id, out.events[1].id);
+        assert!(
+            out.events
+                .iter()
+                .all(|e| e.confidence == Confidence::Derived)
+        );
+        let again = parse_file(Path::new(LEDGER), &text, &index());
+        assert_eq!(out.events[0].id, again.events[0].id);
+        assert_eq!(out.events[1].id, again.events[1].id);
     }
 
     #[test]

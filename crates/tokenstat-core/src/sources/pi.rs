@@ -156,11 +156,15 @@ pub fn parse_file(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
         }
         let Some(usage) = message.usage else { continue };
 
-        let input = usage.input.unwrap_or(0);
-        let output = usage.output.unwrap_or(0);
-        let cache_read = usage.cache_read.unwrap_or(0);
-        let cache_write = usage.cache_write.unwrap_or(0);
-        if input == 0 && output == 0 && cache_read == 0 && cache_write == 0 {
+        // A missing bucket is unknown, not zero: writing it down as a zero
+        // would defeat `has_unknown` and present a partial sum as complete.
+        let input = usage.input;
+        let output = usage.output;
+        if input.unwrap_or(0) == 0
+            && output.unwrap_or(0) == 0
+            && usage.cache_read.unwrap_or(0) == 0
+            && usage.cache_write.unwrap_or(0) == 0
+        {
             continue;
         }
         out.rows_seen += 1;
@@ -191,16 +195,21 @@ pub fn parse_file(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
             session: session.clone(),
             project: project.clone(),
             counters: Counters {
-                input_fresh: Some(input),
+                input_fresh: input,
                 cache_read: usage.cache_read,
                 cache_write_5m: usage.cache_write,
                 cache_write_1h: None,
-                output: Some(output),
+                output,
             },
             extras: Extras {
                 // Already inside `output`. See the module comment for the
-                // arithmetic that shows it.
-                reasoning_within_output: usage.reasoning.filter(|&r| r > 0),
+                // arithmetic that shows it. Clamped: a row reporting more
+                // reasoning than generated tokens is corrupt or a schema
+                // change, and the reading that cannot inflate a total wins.
+                reasoning_within_output: usage.reasoning.filter(|&r| r > 0).map(|r| match output {
+                    Some(o) => r.min(o),
+                    None => r,
+                }),
                 web_search_requests: None,
                 web_fetch_requests: None,
             },
@@ -320,6 +329,27 @@ mod tests {
         let text = r#"{"type":"message","id":"m5","timestamp":"2026-08-19T21:50:01.000Z","message":{"role":"assistant","model":"m","usage":{"input":5,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":6,"cost":{"total":0.1}}}}"#;
         let out = parse_file(&path(), Path::new(ROOT), text);
         assert_eq!(out.events[0].project, "demo");
+    }
+
+    #[test]
+    fn missing_buckets_stay_unknown_rather_than_zero() {
+        let text = r#"{"type":"message","id":"m7","timestamp":"2026-08-19T21:50:01.000Z","message":{"role":"assistant","model":"m","usage":{"input":5,"output":1,"totalTokens":6,"cost":{"total":0.1}}}}"#;
+        let out = parse_file(&path(), Path::new(ROOT), text);
+        assert_eq!(out.events.len(), 1);
+        let e = &out.events[0];
+        assert_eq!(e.counters.input_fresh, Some(5));
+        assert_eq!(e.counters.output, Some(1));
+        assert_eq!(e.counters.cache_read, None);
+        assert_eq!(e.counters.cache_write_5m, None);
+        assert!(e.counters.has_unknown());
+    }
+
+    #[test]
+    fn reasoning_is_clamped_to_the_output_it_is_inside() {
+        let text = r#"{"type":"message","id":"m8","timestamp":"2026-08-19T21:50:01.000Z","message":{"role":"assistant","model":"m","usage":{"input":5,"output":1,"cacheRead":0,"cacheWrite":0,"reasoning":99,"totalTokens":6,"cost":{"total":0.1}}}}"#;
+        let e = &parse_file(&path(), Path::new(ROOT), text).events[0];
+        assert_eq!(e.counters.output, Some(1));
+        assert_eq!(e.extras.reasoning_within_output, Some(1));
     }
 
     #[test]

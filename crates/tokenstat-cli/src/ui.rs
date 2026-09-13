@@ -366,6 +366,13 @@ fn width(s: &str) -> usize {
     s.chars().map(char_width).sum()
 }
 
+/// Terminal columns `s` occupies. Column budgets must use this, not
+/// `chars().count()`: one CJK character fills two columns, so a char-counted
+/// budget truncates wide labels early and shifts every column after them.
+pub fn display_width(s: &str) -> usize {
+    width(s)
+}
+
 fn char_width(c: char) -> usize {
     let cp = c as u32;
     // Ranges that render double width in a terminal. Not exhaustive, but it
@@ -602,6 +609,13 @@ mod tests {
         assert_eq!(pad_left("ab", 4), "  ab");
         // A CJK character occupies two columns, so only one fits plus padding.
         assert_eq!(width(&pad_right("日本", 6)), 6);
+    }
+
+    #[test]
+    fn column_budgets_use_display_width() {
+        assert_eq!(display_width("ab"), 2);
+        assert_eq!(display_width("日本"), 4);
+        assert_eq!(display_width("/Users/test/日本語"), 12 + 6);
     }
 
     #[test]

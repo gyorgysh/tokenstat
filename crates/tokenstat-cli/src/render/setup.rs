@@ -339,12 +339,46 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
     Ok(())
 }
 
+/// One scheduler unit as JSON: what would run, with what args, how often.
+fn unit_json(unit: crate::schedule::Unit, interval_secs: u64) -> String {
+    let args: Vec<String> = unit.args().iter().map(|a| json_string(a)).collect();
+    format!(
+        r#"{{"label":{},"args":[{}],"interval_secs":{}}}"#,
+        json_string(unit.label()),
+        args.join(","),
+        interval_secs
+    )
+}
+
+/// The result of installing one unit as JSON, or `null` when untouched.
+fn install_report_json(report: &Option<crate::schedule::InstallReport>) -> String {
+    match report {
+        Some(rep) => {
+            let paths: Vec<String> = rep
+                .paths
+                .iter()
+                .map(|p| json_string(&p.display().to_string()))
+                .collect();
+            format!(
+                r#"{{"installed":true,"paths":[{}],"hint":{}}}"#,
+                paths.join(","),
+                rep.hint
+                    .as_deref()
+                    .map(json_string)
+                    .unwrap_or_else(|| "null".into())
+            )
+        }
+        None => "null".to_string(),
+    }
+}
+
 /// Show, or install, the scheduler entry that keeps the archive current.
 pub fn schedule(
     install: bool,
     every_mins: u64,
     sync_every_mins: Option<u64>,
     no_sync: bool,
+    json: bool,
 ) -> Result<()> {
     use crate::schedule::{self as sched, Platform, Unit};
 
@@ -367,6 +401,24 @@ pub fn schedule(
     // Default on. Opt out with `tokenstat update --auto off` (removes the unit).
     let want_update = tokenstat_sync::auto_apply_enabled();
     let update_interval = Unit::Update.default_interval();
+
+    // `--json` stays machine-readable: the same units and intervals as the
+    // text below, without the prose around them.
+    if json && !install {
+        let mut units = vec![unit_json(Unit::Scan, interval)];
+        if want_sync {
+            units.push(unit_json(Unit::Sync, sync_interval));
+        }
+        if want_update {
+            units.push(unit_json(Unit::Update, update_interval));
+        }
+        println!(
+            r#"{{"install":false,"exe":{},"units":[{}]}}"#,
+            json_string(&exe),
+            units.join(",")
+        );
+        return Ok(());
+    }
 
     if install {
         let home = directories::BaseDirs::new()
@@ -397,6 +449,22 @@ pub fn schedule(
             sched::SyncAction::Keep
         };
         let report = sched::repair(&home, &exe, interval, sync_action, want_update)?;
+
+        if json {
+            println!(
+                r#"{{"install":true,"scan":{},"sync":{},"sync_removed":{},"sync_interval_secs":{},"update":{},"update_removed":{}}}"#,
+                install_report_json(&report.scan),
+                install_report_json(&report.sync),
+                report.sync_removed,
+                report
+                    .sync_interval_secs
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "null".into()),
+                install_report_json(&report.update),
+                report.update_removed,
+            );
+            return Ok(());
+        }
 
         if let Some(report) = &report.scan {
             println!("  {g}Installed{g:#} scan every {every_mins} min");

@@ -30,6 +30,7 @@ pub mod budget;
 pub mod catalog;
 pub mod engine;
 pub mod error;
+pub mod host_rpc;
 pub mod limits;
 pub mod model;
 pub mod passphrase;

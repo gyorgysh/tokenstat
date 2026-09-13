@@ -605,19 +605,27 @@ pub fn download_app_image() -> Result<PathBuf, UpdateError> {
         .ok_or_else(|| UpdateError::Message("release is missing SHA256SUMS".into()))?;
 
     let client = client()?;
-    let bytes = download_asset(&client, url, None)?;
-    let sums_bytes = download_asset(&client, sums_url, check.sums_api_url.as_deref())?;
+    let sums_bytes = read_capped(
+        download_response(&client, sums_url, check.sums_api_url.as_deref())?,
+        "SHA256SUMS",
+        SUMS_MAX_BYTES,
+    )?;
     let expected = expected_sha256(&String::from_utf8_lossy(&sums_bytes), name)
         .ok_or_else(|| UpdateError::Message(format!("SHA256SUMS has no entry for {name}")))?;
-    let actual = hex_sha256(&bytes);
+
+    let path = tempfile_dir()?.join(name);
+    let actual = stream_to_file_capped(
+        download_response(&client, url, None)?,
+        &path,
+        name,
+        ASSET_MAX_BYTES,
+    )?;
     if actual != expected {
+        let _ = fs::remove_file(&path);
         return Err(UpdateError::Message(format!(
             "checksum mismatch for {name}: expected {expected}, got {actual}"
         )));
     }
-
-    let path = tempfile_dir()?.join(name);
-    fs::write(&path, &bytes)?;
     Ok(path)
 }
 
@@ -646,19 +654,27 @@ pub fn download_windows_app_archive() -> Result<PathBuf, UpdateError> {
         .ok_or_else(|| UpdateError::Message("release is missing SHA256SUMS".into()))?;
 
     let client = client()?;
-    let bytes = download_asset(&client, url, check.app_win_api_url.as_deref())?;
-    let sums_bytes = download_asset(&client, sums_url, check.sums_api_url.as_deref())?;
+    let sums_bytes = read_capped(
+        download_response(&client, sums_url, check.sums_api_url.as_deref())?,
+        "SHA256SUMS",
+        SUMS_MAX_BYTES,
+    )?;
     let expected = expected_sha256(&String::from_utf8_lossy(&sums_bytes), name)
         .ok_or_else(|| UpdateError::Message(format!("SHA256SUMS has no entry for {name}")))?;
-    let actual = hex_sha256(&bytes);
+
+    let path = tempfile_dir()?.join(name);
+    let actual = stream_to_file_capped(
+        download_response(&client, url, check.app_win_api_url.as_deref())?,
+        &path,
+        name,
+        ASSET_MAX_BYTES,
+    )?;
     if actual != expected {
+        let _ = fs::remove_file(&path);
         return Err(UpdateError::Message(format!(
             "checksum mismatch for {name}: expected {expected}, got {actual}"
         )));
     }
-
-    let path = tempfile_dir()?.join(name);
-    fs::write(&path, &bytes)?;
     Ok(path)
 }
 
@@ -670,7 +686,14 @@ fn github_token() -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
-/// Download a release asset.
+/// Release asset bytes are bounded: archives here are tens of megabytes, and
+/// the sums file is a few kilobytes. Anything larger is a misbehaving server
+/// or a compromised manifest, not a release, so refuse it rather than filling
+/// memory or disk.
+const ASSET_MAX_BYTES: u64 = 256 * 1024 * 1024;
+const SUMS_MAX_BYTES: u64 = 1024 * 1024;
+
+/// Open the response carrying a release asset.
 ///
 /// Without a token this is a plain GET of the browser download url, which is what
 /// a published release needs. With one, it goes through the API asset endpoint,
@@ -680,18 +703,16 @@ fn github_token() -> Option<String> {
 /// Redirects are followed by hand rather than by the client, so the token is
 /// never sent to the storage host the API redirects to. That host needs no
 /// credentials of its own: the signed url is the credential.
-fn download_asset(
+fn download_response(
     client: &reqwest::blocking::Client,
     browser_url: &str,
     api_url: Option<&str>,
-) -> Result<Vec<u8>, UpdateError> {
+) -> Result<reqwest::blocking::Response, UpdateError> {
     let Some(token) = github_token() else {
         return Ok(download_client()?
             .get(browser_url)
             .send()?
-            .error_for_status()?
-            .bytes()?
-            .to_vec());
+            .error_for_status()?);
     };
     let url = api_url.unwrap_or(browser_url);
     let resp = client
@@ -712,11 +733,77 @@ fn download_asset(
         return Ok(download_client()?
             .get(&location)
             .send()?
-            .error_for_status()?
-            .bytes()?
-            .to_vec());
+            .error_for_status()?);
     }
-    Ok(resp.error_for_status()?.bytes()?.to_vec())
+    Ok(resp.error_for_status()?)
+}
+
+fn over_limit(what: &str, max: u64) -> UpdateError {
+    UpdateError::Message(format!(
+        "{what} is larger than the {max}-byte limit; refusing to download it"
+    ))
+}
+
+/// Read a small release file (SHA256SUMS) with a size cap.
+///
+/// The `Content-Length` header is checked first so an absurd response is
+/// refused without reading it; the body is then read through a capped reader
+/// in case the header lies or is absent.
+fn read_capped(
+    resp: reqwest::blocking::Response,
+    what: &str,
+    max: u64,
+) -> Result<Vec<u8>, UpdateError> {
+    if resp.content_length().is_some_and(|len| len > max) {
+        return Err(over_limit(what, max));
+    }
+    let mut body = Vec::new();
+    resp.take(max + 1).read_to_end(&mut body)?;
+    if body.len() as u64 > max {
+        return Err(over_limit(what, max));
+    }
+    Ok(body)
+}
+
+/// Stream a release asset straight to `dest` with a size cap, returning its
+/// hex SHA-256.
+///
+/// The bytes are hashed while they are written, so a large archive never sits
+/// in memory whole, and the checksum the caller compares is over exactly what
+/// hit the disk. A partial file is removed when the download is refused.
+fn stream_to_file_capped(
+    resp: reqwest::blocking::Response,
+    dest: &Path,
+    what: &str,
+    max: u64,
+) -> Result<String, UpdateError> {
+    if resp.content_length().is_some_and(|len| len > max) {
+        return Err(over_limit(what, max));
+    }
+    let mut file = fs::File::create(dest)?;
+    let mut hasher = Sha256::new();
+    let mut total: u64 = 0;
+    let mut src = resp.take(max + 1);
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = src.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > max {
+            drop(file);
+            let _ = fs::remove_file(dest);
+            return Err(over_limit(what, max));
+        }
+        hasher.update(&buf[..n]);
+        file.write_all(&buf[..n])?;
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// Download, verify, and replace the current executable.
@@ -791,21 +878,29 @@ pub fn apply_update_to(dest: &Path) -> Result<ApplyReport, UpdateError> {
         .ok_or_else(|| UpdateError::Message("release is missing SHA256SUMS".into()))?;
 
     let client = client()?;
-    let archive_bytes = download_asset(&client, asset_url, check.asset_api_url.as_deref())?;
-    let sums_bytes = download_asset(&client, sums_url, check.sums_api_url.as_deref())?;
+    let sums_bytes = read_capped(
+        download_response(&client, sums_url, check.sums_api_url.as_deref())?,
+        "SHA256SUMS",
+        SUMS_MAX_BYTES,
+    )?;
     let sums_text = String::from_utf8_lossy(&sums_bytes).to_string();
     let expected = expected_sha256(&sums_text, asset_name)
         .ok_or_else(|| UpdateError::Message(format!("SHA256SUMS has no entry for {asset_name}")))?;
-    let actual = hex_sha256(&archive_bytes);
+
+    let tmp = tempfile_dir()?;
+    let archive_path = tmp.join(asset_name);
+    let actual = stream_to_file_capped(
+        download_response(&client, asset_url, check.asset_api_url.as_deref())?,
+        &archive_path,
+        asset_name,
+        ASSET_MAX_BYTES,
+    )?;
     if actual != expected {
+        let _ = fs::remove_file(&archive_path);
         return Err(UpdateError::Message(format!(
             "checksum mismatch for {asset_name}: expected {expected}, got {actual}"
         )));
     }
-
-    let tmp = tempfile_dir()?;
-    let archive_path = tmp.join(asset_name);
-    fs::write(&archive_path, &archive_bytes)?;
     let extracted = extract_binary(&archive_path, &tmp)?;
     if !is_safe_replace_path(dest) {
         return Err(UpdateError::Message(format!(
@@ -1229,6 +1324,16 @@ fn has_developer_id_team(path: &Path, team: &str) -> bool {
     has_team && has_dev_id
 }
 
+/// Non-macOS: intentionally a no-op, not a missed check.
+///
+/// There is no platform identity to pin a replacement to here, so integrity
+/// rests on the two gates that already run on every platform: the release's
+/// `SHA256SUMS` entry (a missing file or a mismatch is a hard error in
+/// `apply_update_to`, before anything is executed) and the
+/// `verify_candidate` probes below, which make the downloaded binary run
+/// `--version` and `--help` before it replaces anything. Keeping this stub —
+/// and calling it unconditionally — holds that ordering in one place rather
+/// than scattering `#[cfg]` through the install path.
 #[cfg(not(target_os = "macos"))]
 fn verify_signature(_candidate: &Path, _current: &Path) -> Result<(), UpdateError> {
     Ok(())
@@ -1251,14 +1356,19 @@ pub fn maybe_auto_update(auto_apply: bool) -> Result<Option<UpdateOutcome>, Upda
         return Ok(None);
     }
     let check = check_latest()?;
-    touch_check_stamp()?;
     if !check.newer {
+        touch_check_stamp()?;
         return Ok(Some(UpdateOutcome::UpToDate(check)));
     }
     if auto_apply && is_safe_replace_path(&std::env::current_exe().unwrap_or_default()) {
+        // The stamp records a successful check, so it is written only after
+        // the apply verifies: stamping first would silence the next run after
+        // a failed update left the old binary in place.
         let report = apply_update()?;
+        touch_check_stamp()?;
         return Ok(Some(UpdateOutcome::Applied(report)));
     }
+    touch_check_stamp()?;
     Ok(Some(UpdateOutcome::Available(check)))
 }
 
@@ -1339,8 +1449,8 @@ pub fn scheduled_update_to(dest: &Path) -> Result<ScheduledUpdate, UpdateError> 
     }
 
     let check = check_latest()?;
-    touch_check_stamp()?;
     if !check.newer {
+        touch_check_stamp()?;
         return Ok(ScheduledUpdate::UpToDate(check.current));
     }
     if !is_safe_replace_path(dest) {
@@ -1349,7 +1459,11 @@ pub fn scheduled_update_to(dest: &Path) -> Result<ScheduledUpdate, UpdateError> 
             path: dest.to_path_buf(),
         });
     }
+    // As above: only a verified apply counts as a check, so a failure keeps
+    // the stamp stale and the next timer tick retries instead of sleeping out
+    // the 24h window on a broken install.
     let report = apply_update_to(dest)?;
+    touch_check_stamp()?;
     Ok(ScheduledUpdate::Applied(report))
 }
 
@@ -1379,25 +1493,23 @@ fn expected_sha256(sums: &str, asset_name: &str) -> Option<String> {
         if line.is_empty() {
             continue;
         }
-        // "hash  filename" or "hash *filename"
+        // "hash  filename" or "hash *filename". A malformed line is skipped:
+        // one bad line must not hide the entry further down.
         let mut parts = line.split_whitespace();
-        let hash = parts.next()?;
-        let name = parts.next()?.trim_start_matches('*');
-        if name == asset_name || name.ends_with(asset_name) {
+        let (Some(hash), Some(raw_name)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        let name = raw_name.trim_start_matches('*');
+        // Exact filename match only. A suffix match would let
+        // `evil-tokenstat-...tar.gz` claim the checksum of the real asset, so
+        // compare the whole field, or its basename for sums files that record
+        // a relative path (`./name`, `subdir/name`).
+        let base = name.rsplit('/').next().unwrap_or(name);
+        if name == asset_name || base == asset_name {
             return Some(hash.to_ascii_lowercase());
         }
     }
     None
-}
-
-fn hex_sha256(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
 }
 
 /// A fresh private directory for one update transaction.
@@ -1431,45 +1543,206 @@ fn tempfile_dir() -> Result<PathBuf, UpdateError> {
     Ok(base)
 }
 
+/// Caps for one extracted archive: enough for a CLI plus its daemon, small
+/// enough that a malicious archive cannot fill the disk.
+const EXTRACT_MAX_FILES: u64 = 1024;
+const EXTRACT_MAX_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Unpack `archive` and return the extracted CLI binary.
+///
+/// Extraction is in-process, never a shell: the previous `tar -xzf` / PowerShell
+/// `Expand-Archive` calls both ran an external tool over attacker-shaped paths
+/// (the PowerShell one interpolated them into a `-Command` string), and neither
+/// contained traversal. Every entry is checked before it is written: absolute
+/// paths, `..`, links, and anything that is not a file or directory are
+/// refused, and the write is capped in files and bytes. Entries land in a fresh
+/// `extract/` sandbox under the private staging dir, so a hostile name cannot
+/// collide with the archive sitting beside it.
 fn extract_binary(archive: &Path, dest_dir: &Path) -> Result<PathBuf, UpdateError> {
     let name = archive.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    #[cfg(windows)]
-    {
-        let _ = name;
-        let status = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                &format!(
-                    "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
-                    archive.display(),
-                    dest_dir.display()
-                ),
-            ])
-            .status()?;
-        if !status.success() {
-            return Err(UpdateError::Message("failed to extract zip".into()));
+    let sandbox = dest_dir.join("extract");
+    fs::create_dir(&sandbox).map_err(|e| {
+        UpdateError::Message(format!(
+            "could not create extraction sandbox {}: {e}",
+            sandbox.display()
+        ))
+    })?;
+    if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+        extract_tar_gz(archive, &sandbox)?;
+    } else if name.ends_with(".zip") {
+        extract_zip(archive, &sandbox)?;
+    } else {
+        return Err(UpdateError::Message(format!(
+            "unsupported archive format: {name}"
+        )));
+    }
+    find_binary(&sandbox)
+}
+
+/// Reject any archive path that could write outside the sandbox.
+///
+/// Absolute paths and `..` are refused outright; the caller additionally joins
+/// what passes onto the sandbox, so the result stays inside by construction.
+fn reject_unsafe_archive_path(path: &Path) -> Result<(), UpdateError> {
+    if path.as_os_str().is_empty() {
+        return Err(UpdateError::Message(
+            "archive contains an entry with an empty path".into(),
+        ));
+    }
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(_) | std::path::Component::CurDir => {}
+            _ => {
+                return Err(UpdateError::Message(format!(
+                    "archive entry escapes its directory: {}",
+                    path.display()
+                )));
+            }
         }
     }
-    #[cfg(not(windows))]
-    {
-        if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
-            let status = Command::new("tar")
-                .args(["-xzf"])
-                .arg(archive)
-                .arg("-C")
-                .arg(dest_dir)
-                .status()?;
-            if !status.success() {
-                return Err(UpdateError::Message("failed to extract tar.gz".into()));
-            }
-        } else {
+    Ok(())
+}
+
+/// Copy at most `remaining` bytes, accounting them against the archive total.
+///
+/// The reader is capped one byte past `remaining` so an over-cap entry is
+/// detected rather than silently truncated: reading that extra byte means the
+/// entry is bigger than allowed. Callers pass what is left of the archive
+/// budget, which keeps the on-disk total under the limit by construction.
+fn copy_capped<R: Read>(
+    src: R,
+    dest: &mut fs::File,
+    remaining: u64,
+    total: &mut u64,
+    what: &str,
+) -> Result<(), UpdateError> {
+    let mut capped = src.take(remaining + 1);
+    let mut buf = [0u8; 8192];
+    let mut written: u64 = 0;
+    loop {
+        let n = capped.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        written = written.saturating_add(n as u64);
+        if written > remaining {
             return Err(UpdateError::Message(format!(
-                "unsupported archive format: {name}"
+                "{what} exceeds the {EXTRACT_MAX_BYTES}-byte extraction limit"
             )));
         }
+        *total = total.saturating_add(n as u64);
+        dest.write_all(&buf[..n])?;
     }
-    find_binary(dest_dir)
+    Ok(())
+}
+
+fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
+    let file = fs::File::open(archive)?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut tar = tar::Archive::new(gz);
+    let mut files: u64 = 0;
+    let mut total: u64 = 0;
+    for entry in tar.entries()? {
+        let mut entry = entry?;
+        let kind = entry.header().entry_type();
+        // Links are never followed or recreated: a symlink pointing outside
+        // the sandbox would turn a later entry (or the candidate search) into
+        // a write or exec outside it. Devices and fifos have no place here.
+        if kind.is_symlink() || kind.is_hard_link() {
+            return Err(UpdateError::Message(
+                "archive contains a link; refusing to extract".into(),
+            ));
+        }
+        if !kind.is_file() && !kind.is_dir() {
+            return Err(UpdateError::Message(format!(
+                "archive contains an unsupported entry of type {kind:?}; refusing to extract"
+            )));
+        }
+        let path = entry.path()?.into_owned();
+        reject_unsafe_archive_path(&path)?;
+        let out = dest.join(&path);
+        if kind.is_dir() {
+            fs::create_dir_all(&out)?;
+            continue;
+        }
+        files += 1;
+        if files > EXTRACT_MAX_FILES {
+            return Err(UpdateError::Message(format!(
+                "archive contains more than {EXTRACT_MAX_FILES} files; refusing to extract"
+            )));
+        }
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        // Default permissions, never the archive's mode: nothing extracted
+        // here should arrive executable or setuid on its own say-so.
+        let mut out_file = fs::File::create(&out)?;
+        let remaining = EXTRACT_MAX_BYTES.saturating_sub(total);
+        if let Err(e) = copy_capped(&mut entry, &mut out_file, remaining, &mut total, "archive") {
+            let _ = fs::remove_file(&out);
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+fn extract_zip(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
+    let file = fs::File::open(archive)?;
+    let mut zip = zip::ZipArchive::new(file)
+        .map_err(|e| UpdateError::Message(format!("could not read zip archive: {e}")))?;
+    if zip.len() as u64 > EXTRACT_MAX_FILES {
+        return Err(UpdateError::Message(format!(
+            "archive contains more than {EXTRACT_MAX_FILES} files; refusing to extract"
+        )));
+    }
+    let mut files: u64 = 0;
+    let mut total: u64 = 0;
+    for index in 0..zip.len() {
+        let mut entry = zip
+            .by_index(index)
+            .map_err(|e| UpdateError::Message(format!("could not read zip entry: {e}")))?;
+        // `enclosed_name` returns None for absolute paths and `..`: the same
+        // traversal refusal as the tar path, from the crate itself.
+        let name = entry
+            .enclosed_name()
+            .ok_or_else(|| {
+                UpdateError::Message("zip entry escapes its directory; refusing to extract".into())
+            })?
+            .to_path_buf();
+        reject_unsafe_archive_path(&name)?;
+        // A symlink stored as a regular file would pass the traversal check
+        // and then be skipped by the candidate search; refuse it up front so a
+        // hostile archive cannot plant one for a later step to follow.
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170_000 == 0o120_000)
+        {
+            return Err(UpdateError::Message(
+                "archive contains a link; refusing to extract".into(),
+            ));
+        }
+        let out = dest.join(&name);
+        if entry.is_dir() {
+            fs::create_dir_all(&out)?;
+            continue;
+        }
+        files += 1;
+        if files > EXTRACT_MAX_FILES {
+            return Err(UpdateError::Message(format!(
+                "archive contains more than {EXTRACT_MAX_FILES} files; refusing to extract"
+            )));
+        }
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut out_file = fs::File::create(&out)?;
+        let remaining = EXTRACT_MAX_BYTES.saturating_sub(total);
+        if let Err(e) = copy_capped(&mut entry, &mut out_file, remaining, &mut total, "archive") {
+            let _ = fs::remove_file(&out);
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
 fn find_binary(dir: &Path) -> Result<PathBuf, UpdateError> {
@@ -1832,6 +2105,230 @@ mod tests {
             expected_sha256(sums, "tokenstat-0.1.0-aarch64-apple-darwin.tar.gz").as_deref(),
             Some("abc123")
         );
+    }
+
+    #[test]
+    fn sums_matching_is_exact_not_suffix() {
+        let asset = "tokenstat-0.1.0-aarch64-apple-darwin.tar.gz";
+        // A longer name ending in the asset's must not claim its checksum.
+        let evil = format!("abc123  evil-{asset}\n");
+        assert_eq!(expected_sha256(&evil, asset), None);
+        // Relative paths recorded by sha256sum still resolve to the file.
+        for line in [
+            format!("abc123  ./{asset}\n"),
+            format!("abc123 *{asset}\n"),
+            format!("abc123  subdir/{asset}\n"),
+        ] {
+            assert_eq!(
+                expected_sha256(&line, asset).as_deref(),
+                Some("abc123"),
+                "{line}"
+            );
+        }
+        // A malformed line is skipped, not fatal to the lines after it.
+        let mixed = format!("not-a-line\nabc123  {asset}\n");
+        assert_eq!(expected_sha256(&mixed, asset).as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn archive_paths_cannot_escape_the_sandbox() {
+        use std::path::Path;
+        assert!(reject_unsafe_archive_path(Path::new("tokenstat")).is_ok());
+        assert!(reject_unsafe_archive_path(Path::new("dir/tokenstat")).is_ok());
+        for bad in ["../evil", "dir/../../evil", "/etc/passwd", "/tmp/x", ""] {
+            assert!(
+                reject_unsafe_archive_path(Path::new(bad)).is_err(),
+                "{bad} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn over_cap_copies_are_refused() {
+        let dir = scratch("copy-cap");
+        let dest = dir.join("out.bin");
+        let mut file = fs::File::create(&dest).unwrap();
+        let mut total = 0u64;
+        let data = [0u8; 100];
+        let err = copy_capped(&data[..], &mut file, 10, &mut total, "probe")
+            .expect_err("over-cap copy must fail");
+        assert!(err.to_string().contains("extraction limit"), "{err}");
+        drop(file);
+        let mut file = fs::File::create(&dest).unwrap();
+        let mut total = 0u64;
+        copy_capped(&data[..], &mut file, 1000, &mut total, "probe").unwrap();
+        assert_eq!(total, 100);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    type TarTestEntry<'a> = (&'a str, Option<&'a [u8]>, Option<&'a str>);
+
+    #[cfg(unix)]
+    fn write_tar_gz(path: &Path, entries: &[TarTestEntry<'_>]) {
+        // (name, file bytes or None for symlink, link target for symlinks)
+        let file = fs::File::create(path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        for (name, data, link) in entries {
+            let mut header = tar::Header::new_gnu();
+            if let Some(target) = link {
+                header.set_entry_type(tar::EntryType::Symlink);
+                header.set_link_name(target).unwrap();
+                header.set_size(0);
+                header.set_cksum();
+                builder.append_data(&mut header, name, &[][..]).unwrap();
+            } else {
+                let bytes = data.unwrap_or(&[]);
+                header.set_size(bytes.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder.append_data(&mut header, name, bytes).unwrap();
+            }
+        }
+        builder.into_inner().unwrap().finish().unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_good_tar_gz_extracts_to_the_sandbox() {
+        let dir = scratch("tar-good");
+        let archive = dir.join("rel.tar.gz");
+        write_tar_gz(&archive, &[("inner/tokenstat", Some(b"binary"), None)]);
+        let found = extract_binary(&archive, &dir).unwrap();
+        assert_eq!(found, dir.join("extract").join("inner").join("tokenstat"));
+        assert!(found.is_file());
+        // The archive beside the sandbox is untouched and nothing leaked out.
+        assert!(archive.is_file());
+        assert!(!dir.join("tokenstat").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    fn write_raw_tar_gz(path: &Path, name: &[u8], data: &[u8]) {
+        // One hand-built tar entry: the `tar` builder refuses `..` and
+        // absolute paths itself, so a hostile archive has to be raw bytes.
+        use std::io::Write;
+        let mut block = [0u8; 512];
+        block[..name.len()].copy_from_slice(name);
+        block[100..108].copy_from_slice(b"0000777\0");
+        let size = format!("{:011o}\0", data.len());
+        block[124..136].copy_from_slice(size.as_bytes());
+        block[156] = b'0';
+        block[257..262].copy_from_slice(b"ustar");
+        block[263..265].copy_from_slice(b"00");
+        block[148..156].copy_from_slice(b"        ");
+        let sum: u32 = block.iter().map(|b| *b as u32).sum();
+        let check = format!("{sum:06o}\0 ");
+        block[148..156].copy_from_slice(check.as_bytes());
+        let file = fs::File::create(path).unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        encoder.write_all(&block).unwrap();
+        encoder.write_all(data).unwrap();
+        let pad = (512 - data.len() % 512) % 512;
+        encoder.write_all(&vec![0u8; pad]).unwrap();
+        encoder.write_all(&[0u8; 1024]).unwrap();
+        encoder.finish().unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_hostile_tar_gz_is_refused() {
+        for (tag, raw_name) in [
+            ("tar-dotdot", b"../evil".as_slice()),
+            ("tar-absolute", b"/tmp/tokenstat-evil".as_slice()),
+        ] {
+            let dir = scratch(tag);
+            let archive = dir.join("rel.tar.gz");
+            write_raw_tar_gz(&archive, raw_name, b"x");
+            let err = extract_binary(&archive, &dir).expect_err(&format!("{tag} must fail"));
+            assert!(err.to_string().contains("escapes"), "{tag}: {err}");
+            assert!(
+                !dir.join("evil").exists(),
+                "{tag} wrote outside the sandbox"
+            );
+            let _ = fs::remove_dir_all(&dir);
+        }
+        // A symlink pointing outside the sandbox is refused, not followed.
+        let dir = scratch("tar-link");
+        let archive = dir.join("rel.tar.gz");
+        write_tar_gz(&archive, &[("tokenstat", None, Some("/etc/passwd"))]);
+        let err = extract_binary(&archive, &dir).expect_err("tar-link must fail");
+        assert!(err.to_string().contains("link"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_hostile_zip_is_refused() {
+        use std::io::Write;
+        for (tag, name) in [
+            ("zip-dotdot", "../evil"),
+            ("zip-absolute", "/tmp/tokenstat-evil"),
+        ] {
+            let dir = scratch(tag);
+            let archive = dir.join("rel.zip");
+            let file = fs::File::create(&archive).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            writer.start_file(name, options).unwrap();
+            writer.write_all(b"x").unwrap();
+            writer.finish().unwrap();
+            let err = extract_binary(&archive, &dir).expect_err(&format!("{tag} must fail"));
+            assert!(
+                err.to_string().contains("escapes") || err.to_string().contains("directory"),
+                "{tag}: {err}"
+            );
+            let _ = fs::remove_dir_all(&dir);
+        }
+        // A symlink entry is refused, not written. The writer masks
+        // permissions to 0o777, so the link bit is patched into the central
+        // directory the way a Unix zip tool would have written it.
+        let dir = scratch("zip-link");
+        let archive = dir.join("rel.zip");
+        let file = fs::File::create(&archive).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("tokenstat", options).unwrap();
+        writer.write_all(b"/etc/passwd").unwrap();
+        writer.finish().unwrap();
+        let mut bytes = fs::read(&archive).unwrap();
+        let at = bytes
+            .windows(4)
+            .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
+            .unwrap();
+        bytes[at + 5] = 3; // made by Unix
+        let attrs = (0o120777u32) << 16;
+        bytes[at + 38..at + 42].copy_from_slice(&attrs.to_le_bytes());
+        fs::write(&archive, &bytes).unwrap();
+        let err = extract_binary(&archive, &dir).expect_err("zip-link must fail");
+        assert!(err.to_string().contains("link"), "{err}");
+        assert!(
+            !dir.join("extract").join("tokenstat").exists(),
+            "the link must not be written"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_good_zip_extracts_to_the_sandbox() {
+        use std::io::Write;
+        let dir = scratch("zip-good");
+        let archive = dir.join("rel.zip");
+        let file = fs::File::create(&archive).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("tokenstat", options).unwrap();
+        writer.write_all(b"binary").unwrap();
+        writer.finish().unwrap();
+        let found = extract_binary(&archive, &dir).unwrap();
+        assert_eq!(found, dir.join("extract").join("tokenstat"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

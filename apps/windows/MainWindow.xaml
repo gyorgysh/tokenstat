@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: LicenseRef-tokenstat-source-available -->
 <Window
     x:Class="Tokenstat.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
