@@ -448,7 +448,9 @@ struct ClientWorkspaceChangesView: View {
     @State private var live: WorkspaceFolder?
     @State private var errorMessage: String?
     @State private var session: GitCommitSession
+    @State private var autoCommit: AutoCommitSession
     @State private var showingComposer = false
+    @State private var openedRun: AutoCommitRunRoute?
 
     init(
         peer: String,
@@ -456,6 +458,7 @@ struct ClientWorkspaceChangesView: View {
         folder: WorkspaceFolder,
         hostName: String,
         session: GitCommitSession? = nil,
+        autoCommit: AutoCommitSession? = nil,
         showsNavigationTitle: Bool = true
     ) {
         self.peer = peer
@@ -464,6 +467,15 @@ struct ClientWorkspaceChangesView: View {
         self.hostName = hostName
         self.showsNavigationTitle = showsNavigationTitle
         _session = State(initialValue: session ?? GitCommitSessions.session(target: GitCommitTarget(peer: peer, workspaceID: workspaceID)))
+        _autoCommit = State(initialValue: autoCommit ?? AutoCommitSession(
+            peer: peer,
+            workspaceID: workspaceID,
+            folderName: folder.name,
+            hostName: hostName,
+            scope: WorkSessionContext.shared.scope,
+            hostIdentity: peer,
+            service: RemoteAutoCommitService(peer: peer)
+        ))
     }
 
     private var current: WorkspaceFolder { live ?? folder }
@@ -496,6 +508,7 @@ struct ClientWorkspaceChangesView: View {
                         message: "Every file in this folder matches the last commit."
                     )
                 } else {
+                    ClientAutoCommitCard(session: autoCommit) { openedRun = $0 }
                     ForEach(files) { file in
                         HStack(spacing: Theme.Space.xs) {
                             Toggle("Select \(file.path)", isOn: Binding(
@@ -547,8 +560,26 @@ struct ClientWorkspaceChangesView: View {
         .fullScreenCover(isPresented: $showingComposer) {
             GitCommitComposer(session: session, folderName: current.name, hostName: hostName, onCommitted: { await load() })
         }
-        .refreshable { await ClientRefresh.pull("workspace-changes-\(workspaceID)") { await load() } }
-        .task { await session.load(); await load() }
+        .navigationDestination(item: $openedRun) { route in
+            ClientAutomationWorkspace(
+                session: ClientAutomationSession(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    hostName: hostName,
+                    folderName: current.name,
+                    jobID: route.jobID,
+                    runID: route.runID
+                ),
+                opensDetail: true
+            )
+        }
+        .refreshable {
+            await ClientRefresh.pull("workspace-changes-\(workspaceID)") {
+                await load()
+                await autoCommit.load()
+            }
+        }
+        .task { await session.load(); await autoCommit.load(); await load() }
         .onChange(of: session.draft) { _, _ in Task { await session.persist() } }
     }
 

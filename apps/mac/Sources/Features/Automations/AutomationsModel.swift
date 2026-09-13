@@ -150,7 +150,7 @@ final class AutomationsModel {
     }
 
     /// Display name of the once-job the Changes pane starts.
-    static let autoCommitName = "Auto commit"
+    static var autoCommitName: String { AutoCommitJob.name }
 
     /// The reusable Auto commit job for a folder, if one exists.
     ///
@@ -158,7 +158,7 @@ final class AutomationsModel {
     /// job. A later start with a different agent edits that job.
     func autoCommitJobs(in workspaceID: String) -> [Automation] {
         jobs.filter {
-            $0.workspaceID == workspaceID && Self.isAutoCommitName($0.name)
+            $0.workspaceID == workspaceID && AutoCommitJob.isName($0.name)
         }
     }
 
@@ -171,8 +171,7 @@ final class AutomationsModel {
     }
 
     static func isAutoCommitName(_ name: String) -> Bool {
-        name.compare(autoCommitName, options: [.caseInsensitive, .diacriticInsensitive])
-            == .orderedSame
+        AutoCommitJob.isName(name)
     }
 
     /// True while this folder's Auto commit run is queued or live.
@@ -517,9 +516,6 @@ final class AutomationsModel {
         backend: String,
         model: String?
     ) async {
-        let name = Self.autoCommitName
-        let prompt = Self.autoCommitPrompt(workspaceName: workspaceName)
-        let schedule = AutomationSchedule(kind: .once)
         if var existing = autoCommitJob(in: workspaceID) {
             if lastRun(for: existing)?.isRunning == true {
                 selectJob(existing.id)
@@ -528,21 +524,25 @@ final class AutomationsModel {
                 }
                 return
             }
-            existing.backend = backend
-            existing.model = model
-            existing.prompt = prompt
-            existing.enabled = true
+            existing = AutoCommitJob.job(
+                in: workspaceID,
+                workspaceName: workspaceName,
+                backend: backend,
+                model: model,
+                existing: existing
+            )
             await update(existing, announce: false)
+            if errorMessage != nil { return }
             guard let job = jobs.first(where: { $0.id == existing.id }) else { return }
             selectJob(job.id)
             await run(job)
             return
         }
-        let draft = Automation(
-            id: "", name: name, backend: backend, model: model, effort: nil,
-            workspaceID: workspaceID, prompt: prompt,
-            schedule: schedule, budgetSeconds: 900, enabled: true,
-            lastRunAtMs: nil, nextRunAtMs: nil, lastRunID: nil
+        let draft = AutoCommitJob.job(
+            in: workspaceID,
+            workspaceName: workspaceName,
+            backend: backend,
+            model: model
         )
         do {
             let created = try await Bridge.createAutomation(draft)
@@ -602,25 +602,7 @@ final class AutomationsModel {
     }
 
     static func autoCommitPrompt(workspaceName: String) -> String {
-        """
-        Commit the pending work in this git repository (\(workspaceName)).
-
-        Inspect the working tree (git status and git diff). Group the changes \
-        into one or more commits by concern. One concern per commit. A single \
-        concern is one commit.
-
-        Write messages that match this repository's existing style:
-        1. Follow the most recent commit subjects.
-        2. If CONTRIBUTING.md, a commitlint config, or .gitmessage exists, \
-        follow those rules.
-        3. Otherwise use Conventional Commits: lowercase type, optional scope, \
-        imperative subject, English.
-
-        Do not push. Do not force. Do not amend. Do not change files except to \
-        commit them. If there is nothing to commit, say so and stop.
-
-        After you finish, list the commits you made.
-        """
+        AutoCommitJob.prompt(workspaceName: workspaceName)
     }
 
     /// Ship a version: bump, push, wait for CI, then tag. A once-job you run
