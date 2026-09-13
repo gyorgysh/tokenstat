@@ -614,10 +614,11 @@ struct ChatAgentPanel: View {
                 }
                 Spacer(minLength: 0)
                 Button("Retry", .refresh) { Task { await model.reloadBackends() } }
+                    .disabled(installing != nil || locked)
             }
             .font(Theme.caption)
             .padding(Theme.Space.s)
-            .disabled(installing != nil || locked)
+            .disabled(locked)
         }
     }
 

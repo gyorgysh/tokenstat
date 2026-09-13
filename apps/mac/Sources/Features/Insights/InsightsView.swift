@@ -402,6 +402,7 @@ private struct BreakdownRow: View {
                     .font(Theme.numeric(12))
                     .lineLimit(1)
                     .frame(width: 88, alignment: .trailing)
+                    .help("Value at list rates, not billed")
             }
         }
         .padding(.horizontal, Theme.Space.m)

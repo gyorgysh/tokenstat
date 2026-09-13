@@ -19,6 +19,46 @@ struct TaskRunSubmission: Codable, Equatable, Sendable {
         case cardID = "cardId"
         case revision
         case placement
+        /// Drafts written before the rename used the property spelling.
+        case operationIDLegacy = "operationID"
+        case cardIDLegacy = "cardID"
+    }
+
+    /// Reads either key spelling and writes the new one, so an in-flight run
+    /// survives an update that lands between launch and receipt.
+    init(operationID: String, cardID: String, revision: UInt64, placement: TaskRunPlacement) {
+        self.operationID = operationID
+        self.cardID = cardID
+        self.revision = revision
+        self.placement = placement
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard let operationID = try c.decodeIfPresent(String.self, forKey: .operationID)
+            ?? c.decodeIfPresent(String.self, forKey: .operationIDLegacy) else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.operationID,
+                DecodingError.Context(codingPath: c.codingPath, debugDescription: "Missing operationId"))
+        }
+        guard let cardID = try c.decodeIfPresent(String.self, forKey: .cardID)
+            ?? c.decodeIfPresent(String.self, forKey: .cardIDLegacy) else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.cardID,
+                DecodingError.Context(codingPath: c.codingPath, debugDescription: "Missing cardId"))
+        }
+        self.operationID = operationID
+        self.cardID = cardID
+        revision = try c.decode(UInt64.self, forKey: .revision)
+        placement = try c.decode(TaskRunPlacement.self, forKey: .placement)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(operationID, forKey: .operationID)
+        try c.encode(cardID, forKey: .cardID)
+        try c.encode(revision, forKey: .revision)
+        try c.encode(placement, forKey: .placement)
     }
 }
 
@@ -30,6 +70,38 @@ struct TaskLiveTerminal: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case runID = "runId"
         case ptyID = "ptyId"
+        /// Drafts written before the rename used the property spelling.
+        case runIDLegacy = "runID"
+        case ptyIDLegacy = "ptyID"
+    }
+
+    init(runID: String, ptyID: String) {
+        self.runID = runID
+        self.ptyID = ptyID
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard let runID = try c.decodeIfPresent(String.self, forKey: .runID)
+            ?? c.decodeIfPresent(String.self, forKey: .runIDLegacy) else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.runID,
+                DecodingError.Context(codingPath: c.codingPath, debugDescription: "Missing runId"))
+        }
+        guard let ptyID = try c.decodeIfPresent(String.self, forKey: .ptyID)
+            ?? c.decodeIfPresent(String.self, forKey: .ptyIDLegacy) else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.ptyID,
+                DecodingError.Context(codingPath: c.codingPath, debugDescription: "Missing ptyId"))
+        }
+        self.runID = runID
+        self.ptyID = ptyID
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(runID, forKey: .runID)
+        try c.encode(ptyID, forKey: .ptyID)
     }
 }
 

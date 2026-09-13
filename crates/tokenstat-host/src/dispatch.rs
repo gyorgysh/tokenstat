@@ -4606,7 +4606,10 @@ mod tests {
         // and cannot wait behind that. If a method moves off this list, typing
         // in a terminal starts stalling whenever anything else runs, and the
         // symptom looks nothing like the cause.
-        for method in [
+        // Terminals only exist with `local-host`: without the feature there is
+        // no pty manager behind these, so the entries join the list there.
+        #[cfg(feature = "local-host")]
+        let terminal_methods = [
             "pty.list",
             "pty.info",
             "pty.read",
@@ -4615,6 +4618,10 @@ mod tests {
             "pty.detach",
             "pty.kill",
             "pty.close",
+        ];
+        #[cfg(not(feature = "local-host"))]
+        let terminal_methods: [&str; 0] = [];
+        for method in terminal_methods.into_iter().chain([
             // The editor re-highlights on a keystroke debounce, so it is on the
             // same footing as the terminal. It is also a pure function of the
             // text the caller sent, so it has nothing to ask the session about.
@@ -4629,7 +4636,7 @@ mod tests {
             // The Machines screen has to answer on a machine whose archive
             // will not open, because that is when somebody goes looking at it.
             "machine.peers",
-        ] {
+        ]) {
             let out = call_sessionless(method, r#"{"id":"pty-none"}"#)
                 .unwrap_or_else(|| panic!("{method} must be answerable without a session"));
             let v: Value = serde_json::from_str(&out)
@@ -5393,6 +5400,9 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(&bad).unwrap()["ok"], false);
     }
 
+    // Without `local-host` these answer "unknown method", so the tests that
+    // exercise them are gated like the summary pair below.
+    #[cfg(feature = "local-host")]
     #[test]
     fn workspaces_start_empty_and_survive_a_round_trip() {
         let mut s = session();
@@ -5403,6 +5413,7 @@ mod tests {
         assert!(v["result"].is_array());
     }
 
+    #[cfg(feature = "local-host")]
     #[test]
     fn adding_a_workspace_reports_its_git_state() {
         let mut s = session();
@@ -5445,6 +5456,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(&out).unwrap()["ok"], false);
     }
 
+    #[cfg(feature = "local-host")]
     #[test]
     fn status_for_an_unknown_workspace_says_so() {
         let mut s = session();

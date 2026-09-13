@@ -281,6 +281,23 @@ actor FixtureTasks: TaskEditorService, TaskRunService {
         await gap.load()
         assert(!gap.canRun)
         assert(gap.runReadiness?.contains("folder") == true, "An uncategorized task must not pretend it can run")
+        // Drafts written before the id keys were renamed still decode, and a
+        // fresh encode uses the new spelling, so an in-flight run survives.
+        let legacySubmission = try JSONDecoder().decode(TaskRunSubmission.self, from: Data(
+            #"{"operationID":"op","cardID":"card","revision":3,"placement":"background"}"#.utf8))
+        assert(legacySubmission.operationID == "op" && legacySubmission.cardID == "card")
+        let newSubmission = try JSONDecoder().decode(TaskRunSubmission.self, from: Data(
+            #"{"operationId":"op","cardId":"card","revision":3,"placement":"background"}"#.utf8))
+        assert(newSubmission == legacySubmission)
+        let encoded = try JSONEncoder().encode(newSubmission)
+        assert(String(data: encoded, encoding: .utf8)?.contains("operationId") == true)
+        assert(String(data: encoded, encoding: .utf8)?.contains("operationID") == false)
+        let legacyTerminal = try JSONDecoder().decode(TaskLiveTerminal.self, from: Data(
+            #"{"runID":"run","ptyID":"pty"}"#.utf8))
+        assert(legacyTerminal.runID == "run" && legacyTerminal.ptyID == "pty")
+        let newTerminal = try JSONDecoder().decode(TaskLiveTerminal.self, from: Data(
+            #"{"runId":"run","ptyId":"pty"}"#.utf8))
+        assert(newTerminal == legacyTerminal)
         print("Task editing: exact budgets, durable drafts, host conflicts, lost-reply recovery, stale-window comparison and deletion preservation passed")
     }
 }

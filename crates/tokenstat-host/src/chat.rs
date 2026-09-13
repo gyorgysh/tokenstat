@@ -3583,7 +3583,7 @@ pub fn backends(force: bool) -> Vec<Value> {
                     .find(|profile| profile["id"].as_str() == Some(launcher_profile_id(&id)))
             }) {
                 backend["installed"] = profile["installed"].clone();
-                backend["launcherID"] = profile["id"].clone();
+                backend["launcherId"] = profile["id"].clone();
                 backend["canInstall"] = json!(
                     profile["installCommand"]
                         .as_str()
@@ -6100,7 +6100,7 @@ mod tests {
                 .find(|profile| profile["id"] == launcher_profile_id(id))
                 .unwrap();
             assert_eq!(backend["installed"], profile["installed"], "{id}");
-            assert_eq!(backend["launcherID"], profile["id"], "{id}");
+            assert_eq!(backend["launcherId"], profile["id"], "{id}");
             if backend["installed"] == false {
                 assert_eq!(
                     backend["models"],
