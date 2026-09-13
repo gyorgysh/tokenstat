@@ -2,6 +2,13 @@
 
 import SwiftUI
 
+/// Which half of the editor is on screen. Phone uses one at a time. iPad
+/// shows both.
+enum AutomationFieldsSection: Hashable {
+    case writing
+    case settings
+}
+
 /// Creation and editing use the same writing space and settings vocabulary.
 struct AutomationFieldsView: View {
     @Binding var fields: AutomationEditorDraft
@@ -16,23 +23,31 @@ struct AutomationFieldsView: View {
     var hostName: String = ""
     var timezone: String = ""
     var nextCaption: String? = nil
+    var section: AutomationFieldsSection? = nil
 
     var body: some View {
-        if wide {
-            HStack(alignment: .top, spacing: Theme.Space.l) {
-                writing(minimumHeight: minimumHeight)
-                ThemeRule.vertical
-                settings.frame(width: 280)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                writing(minimumHeight: minimumHeight)
-                settings
+        switch section {
+        case .writing:
+            writing(minimumHeight: minimumHeight, fills: true)
+        case .settings:
+            settings
+        case nil:
+            if wide {
+                HStack(alignment: .top, spacing: Theme.Space.l) {
+                    writing(minimumHeight: minimumHeight, fills: false)
+                    ThemeRule.vertical
+                    settings.frame(width: 280)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                    writing(minimumHeight: minimumHeight, fills: false)
+                    settings
+                }
             }
         }
     }
 
-    private func writing(minimumHeight: CGFloat) -> some View {
+    private func writing(minimumHeight: CGFloat, fills: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             TextField("Job name", text: $fields.name, axis: .vertical)
                 .font(Theme.title3.weight(.semibold))
@@ -45,23 +60,26 @@ struct AutomationFieldsView: View {
             TextEditor(text: $fields.prompt)
                 .font(Theme.callout)
                 .scrollContentBackground(.hidden)
-                .frame(minHeight: minimumHeight)
+                .frame(minHeight: fills ? nil : minimumHeight)
+                .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
                 .accessibilityLabel(fields.backend == "sh" ? "Job command" : "Job prompt")
             Text(draftStatus)
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
     }
 
     private var settings: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("Job settings").font(Theme.callout.weight(.semibold))
+            if section != .settings {
+                Text("Job settings").font(Theme.callout.weight(.semibold))
+            }
             if folderLocked {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Folder")
                         .font(Theme.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.controlGlyph)
                     Text(folderName)
                         .font(Theme.callout)
                     Text("This job runs in this folder on the connected computer.")
@@ -162,7 +180,7 @@ struct AutomationScheduleFields: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Frequency")
                 .font(Theme.sectionHeader)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.controlGlyph)
                 .padding(.bottom, Theme.Space.xs)
 
             VStack(spacing: 0) {
@@ -366,7 +384,7 @@ struct AutomationBudgetFields: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Time limit")
                 .font(Theme.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.controlGlyph)
             TimeLimitChips(minutesText: $fields.budgetMinutes, noLimit: $fields.noTimeLimit)
             if !fields.noTimeLimit, !isPreset {
                 TextField("Minutes", text: $fields.budgetMinutes)

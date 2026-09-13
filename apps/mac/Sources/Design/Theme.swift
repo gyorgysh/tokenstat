@@ -1923,6 +1923,8 @@ struct SegmentedTabs<Value: Hashable>: View {
     @Binding var selection: Value
     /// What to write on each tab.
     let title: (Value) -> String
+    /// Phone editors use the comfortable row so each tab is a 44-point target.
+    var comfortable = false
 
     @Namespace private var slide
 
@@ -1942,9 +1944,9 @@ struct SegmentedTabs<Value: Hashable>: View {
                         #else
                         .font(.system(.subheadline, weight: isSelected ? .semibold : .regular))
                         #endif
-                        .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
+                        .foregroundStyle(isSelected ? Theme.accent : Theme.controlGlyph)
                         .frame(maxWidth: .infinity)
-                        .frame(height: Theme.Control.height)
+                        .frame(height: comfortable ? Theme.Control.heightComfortable : Theme.Control.height)
                         .background {
                             if isSelected {
                                 RoundedRectangle(cornerRadius: 7)
@@ -1972,8 +1974,8 @@ struct SegmentedTabs<Value: Hashable>: View {
 
 extension SegmentedTabs where Value: RawRepresentable, Value.RawValue == String {
     /// The common case: an enum whose raw value is already the label.
-    init(options: [Value], selection: Binding<Value>) {
-        self.init(options: options, selection: selection) { $0.rawValue }
+    init(options: [Value], selection: Binding<Value>, comfortable: Bool = false) {
+        self.init(options: options, selection: selection, title: { $0.rawValue }, comfortable: comfortable)
     }
 }
 
@@ -2082,7 +2084,7 @@ private struct SegmentButton: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.9)
             }
-            .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
+            .foregroundStyle(isSelected ? Theme.accent : Theme.controlGlyph)
             .padding(.horizontal, symbol.isEmpty ? 10 : 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity)
@@ -2133,7 +2135,7 @@ struct AppMenuPicker<Option: Hashable>: View {
             if !title.isEmpty {
                 Text(title)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.controlGlyph)
             }
             if usesPanel {
                 panel

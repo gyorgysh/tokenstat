@@ -293,6 +293,24 @@ actor FixtureAutomations: AutomationEditorService {
         check(editor.saved.baseline?.prompt == "Read the recent changes and note regressions.", "saved prompt")
         check(editor.saved.baseline?.enabled == true, "enabled is not an editor field")
 
+        editor.fields.prompt = "Draft kept while inspecting history."
+        editor.fields.model = "gpt-5.3-codex"
+        await editor.flush()
+        let afterHistory = AutomationEditorSession(
+            target: AutomationEditorTarget(peer: "computer"),
+            workspaceID: "folder",
+            folderName: "Website",
+            existing: editor.saved.baseline,
+            lockedFolder: true,
+            scope: .local(installationID: "fixture"),
+            hostIdentity: "edit",
+            service: service,
+            draftDirectory: directory.appendingPathComponent("edit")
+        )
+        await afterHistory.load()
+        check(afterHistory.fields.prompt == "Draft kept while inspecting history.", "draft survives leaving the editor")
+        check(afterHistory.fields.model == "gpt-5.3-codex", "model draft survives a picker")
+
         await service.delete("daily")
         let gone = AutomationEditorSession(
             target: AutomationEditorTarget(peer: "computer"),

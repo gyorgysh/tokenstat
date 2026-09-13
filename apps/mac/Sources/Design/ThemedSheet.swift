@@ -17,6 +17,11 @@ struct ThemedSheet<Content: View, Actions: View>: View {
     let subtitle: String
     let icon: ActionIcon?
     let scrolls: Bool
+    /// Occupy the sheet body from the top, instead of sitting between spacers.
+    ///
+    /// Editors that need the remaining height for a prompt use this. Short
+    /// confirmations keep the default, which centres a small stack.
+    let fills: Bool
     let embedded: Bool
     let onClose: () -> Void
     @ViewBuilder let content: () -> Content
@@ -27,6 +32,7 @@ struct ThemedSheet<Content: View, Actions: View>: View {
         subtitle: String,
         icon: ActionIcon? = nil,
         scrolls: Bool = false,
+        fills: Bool = false,
         embedded: Bool = false,
         onClose: @escaping () -> Void,
         @ViewBuilder content: @escaping () -> Content,
@@ -36,6 +42,7 @@ struct ThemedSheet<Content: View, Actions: View>: View {
         self.subtitle = subtitle
         self.icon = icon
         self.scrolls = scrolls
+        self.fills = fills
         self.embedded = embedded
         self.onClose = onClose
         self.content = content
@@ -94,6 +101,10 @@ struct ThemedSheet<Content: View, Actions: View>: View {
                     .padding(embedded ? Theme.Space.m : Theme.Modal.bodyPadding)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+        } else if fills {
+            content()
+                .padding(embedded ? Theme.Space.m : Theme.Modal.bodyPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)

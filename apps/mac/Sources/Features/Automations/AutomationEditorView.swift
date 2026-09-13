@@ -52,18 +52,25 @@ struct AutomationEditorDestination: View {
     }
 }
 
+private enum AutomationEditorSurface: String, CaseIterable, Hashable {
+    case writing = "Writing"
+    case settings = "Settings"
+}
+
 struct AutomationEditorView: View {
     @Bindable var session: AutomationEditorSession
     let hostName: String
     var onFinished: (Automation?) async -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var surface: AutomationEditorSurface = .writing
 
     var body: some View {
         ThemedSheet(
             title: title,
             subtitle: hostName,
             icon: session.isCreate ? .create : .edit,
+            fills: true,
             onClose: {
                 Task {
                     await session.flush()
@@ -74,33 +81,7 @@ struct AutomationEditorView: View {
         ) {
             GeometryReader { geometry in
                 let wide = geometry.size.width >= 760 && !typeSize.isAccessibilitySize
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Space.l) {
-                        notices
-                        if session.saved.created != nil {
-                            confirmation
-                        } else {
-                            AutomationFieldsView(
-                                fields: $session.fields,
-                                backends: session.pickerBackends(),
-                                folderName: session.folderName,
-                                folderLocked: session.lockedFolder,
-                                folders: [],
-                                wide: wide,
-                                minimumHeight: wide
-                                    ? max(320, geometry.size.height - 120)
-                                    : max(160, geometry.size.height * 0.30),
-                                draftStatus: draftStatus,
-                                showValidation: !session.fields.name.isEmpty || !session.fields.prompt.isEmpty,
-                                hostName: hostName,
-                                timezone: session.schedulerTimezone,
-                                nextCaption: nextCaption
-                            )
-                            .disabled(!session.loaded || session.working || session.saved.pendingCreate)
-                        }
-                    }
-                }
-                .scrollDismissesKeyboard(.interactively)
+                editorBody(wide: wide, height: geometry.size.height)
             }
         } actions: {
             footer
@@ -108,6 +89,91 @@ struct AutomationEditorView: View {
         .interactiveDismissDisabled(session.working)
         .task { await session.load() }
         .onDisappear { Task { await session.flush() } }
+        .onChange(of: surface) { _, _ in
+            Task { await session.flush() }
+        }
+        #if WORKBENCH_QA
+        .onAppear {
+            if ProcessInfo.processInfo.environment["WORKBENCH_SURFACE"] == "settings" {
+                surface = .settings
+            }
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private func editorBody(wide: Bool, height: CGFloat) -> some View {
+        if session.saved.created != nil {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                    notices
+                    confirmation
+                }
+            }
+        } else if wide {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                    notices
+                    fields(
+                        wide: true,
+                        section: nil,
+                        minimumHeight: max(320, height - 120),
+                        showValidation: showValidation
+                    )
+                }
+            }
+            .scrollDismissesKeyboard(.interactively)
+        } else {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                notices
+                SegmentedTabs(
+                    options: AutomationEditorSurface.allCases,
+                    selection: $surface,
+                    comfortable: true
+                )
+                if showValidation, let validation = session.fields.validation {
+                    Text(validation)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if surface == .writing {
+                    fields(wide: false, section: .writing, minimumHeight: 0, showValidation: false)
+                } else {
+                    ScrollView {
+                        fields(wide: false, section: .settings, minimumHeight: 0, showValidation: false)
+                            .padding(.bottom, Theme.Space.xl)
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private func fields(
+        wide: Bool,
+        section: AutomationFieldsSection?,
+        minimumHeight: CGFloat,
+        showValidation: Bool
+    ) -> some View {
+        AutomationFieldsView(
+            fields: $session.fields,
+            backends: session.pickerBackends(),
+            folderName: session.folderName,
+            folderLocked: session.lockedFolder,
+            folders: [],
+            wide: wide,
+            minimumHeight: minimumHeight,
+            draftStatus: draftStatus,
+            showValidation: showValidation,
+            hostName: hostName,
+            timezone: session.schedulerTimezone,
+            nextCaption: nextCaption,
+            section: section
+        )
+        .disabled(!session.loaded || session.working || session.saved.pendingCreate)
     }
 
     private var title: String {
@@ -120,11 +186,13 @@ struct AutomationEditorView: View {
         return "Saving draft on this device…"
     }
 
+    private var showValidation: Bool {
+        !session.fields.name.isEmpty || !session.fields.prompt.isEmpty
+    }
+
     private var nextCaption: String? {
         if session.fields.scheduleKind == .once { return nil }
-        if session.isCreate || session.dirty {
-            return "The next run is set on the connected computer when you save."
-        }
+        if session.isCreate || session.dirty { return nil }
         let job = session.current ?? session.saved.baseline
         if job?.enabled == false {
             return "Paused. It will not fire on its own."
