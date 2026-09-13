@@ -77,7 +77,7 @@ struct RootView: View {
     @State private var browserLiveWidth: Double?
     @State private var browserCursorPushed = false
     @State private var browserWorkspaceID: String?
-    @State private var chatBrowserURLs: [String: String] = [:]
+    @State private var workspaceBrowserURLs: [String: String] = [:]
     /// Explicit sidebar preference, preserved when a narrow window uses a peek.
     @State private var columnVisibilityChoice: NavigationSplitViewVisibility = .all
     /// Whether the window is wide enough to carry the inspector at all.
@@ -391,7 +391,7 @@ struct RootView: View {
             HeatmapPopoverOverlay(model: home, hover: heatmapHover, windowSize: windowSize)
         }
         .task(id: WorkSessionContext.shared.scope) {
-            chatBrowserURLs = [:]
+            workspaceBrowserURLs = [:]
             browserWorkspaceID = nil
             await BridgeLaunch.wait()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
@@ -672,7 +672,7 @@ struct RootView: View {
             guard route.workspaceSection == .chat, opensChatLinksInBrowser,
                   ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
                   let id = route.workspaceID else { return .systemAction }
-            chatBrowserURLs[id] = url.absoluteString
+            workspaceBrowserURLs[id] = url.absoluteString
             browserWorkspaceID = id
             return .handled
         })
@@ -706,18 +706,18 @@ struct RootView: View {
     /// Trailing inspector mark for the detail toolbar.
     private var rightInspectorToolbarButton: some View {
         HStack(spacing: Theme.Space.xs) {
-        if route.workspaceSection == .chat {
-            ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside chat", isAccent: showsChatBrowser) {
-                if showsChatBrowser { browserWorkspaceID = nil }
+        if supportsWorkspaceBrowser {
+            ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside this workspace", isAccent: showsWorkspaceBrowser) {
+                if showsWorkspaceBrowser { browserWorkspaceID = nil }
                 else { browserWorkspaceID = route.workspaceID }
             }
             .accessibilityLabel("Browser")
         }
         SidebarToggleButton(
             edge: .trailing,
-            isOpen: isRightSidebarOpen && !showsChatBrowser,
+            isOpen: isRightSidebarOpen && !showsWorkspaceBrowser,
             action: toggleRightSidebar,
-            help: showsChatBrowser ? "Show Inspector" : isRightSidebarOpen
+            help: showsWorkspaceBrowser ? "Show Inspector" : isRightSidebarOpen
                 ? "Hide Inspector (⌥⌘B)"
                 : (inspectorFits
                     ? "Show Inspector (⌥⌘B)"
@@ -792,7 +792,7 @@ struct RootView: View {
     /// not.
     private func toggleRightSidebar() {
         guard route.hasInspector else { return }
-        if showsChatBrowser {
+        if showsWorkspaceBrowser {
             browserWorkspaceID = nil
             isInspectorPresented = true
             if !inspectorFits { isOverlayVisible = true; overlayHeldByPress = true }
@@ -1147,12 +1147,12 @@ struct RootView: View {
             detail
                 .background(Theme.background)
                 .frame(minWidth: Self.detailMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
-            if showsChatBrowser && browserFitsBesideChat {
+            if showsWorkspaceBrowser && browserFitsBesideWorkspace {
                 browserResizeHandle
-                chatBrowserPane
+                workspaceBrowserPane
                 .frame(width: fittedBrowserWidth)
                 .frame(maxHeight: .infinity)
-            } else if showsInspector && !showsChatBrowser {
+            } else if showsInspector && !showsWorkspaceBrowser {
                 Rectangle().fill(Theme.border).frame(width: 1)
                 boundedInspector { inspectorContent }
                     .frame(width: DisplayFit.box(400))
@@ -1172,8 +1172,8 @@ struct RootView: View {
             .overlay(alignment: .leading) { sidebarFloatLayer }
             .overlay(alignment: .trailing) { inspectorFloatLayer }
             .overlay(alignment: .trailing) {
-                if showsChatBrowser && !browserFitsBesideChat {
-                    chatBrowserPane
+                if showsWorkspaceBrowser && !browserFitsBesideWorkspace {
+                    workspaceBrowserPane
                         .frame(width: min(fittedBrowserWidth, max(320, windowContentWidth - 32)))
                         .background(Theme.background)
                         .shadow(color: Theme.shadow(0.2), radius: 12, x: -5)
@@ -1189,23 +1189,27 @@ struct RootView: View {
             )
     }
 
-    private var showsChatBrowser: Bool {
-        route.workspaceSection == .chat && route.workspaceID != nil && browserWorkspaceID == route.workspaceID
+    private var supportsWorkspaceBrowser: Bool {
+        route.workspaceSection == .chat || route.workspaceSection == .sessions
     }
 
-    private var browserFitsBesideChat: Bool {
+    private var showsWorkspaceBrowser: Bool {
+        supportsWorkspaceBrowser && route.workspaceID != nil && browserWorkspaceID == route.workspaceID
+    }
+
+    private var browserFitsBesideWorkspace: Bool {
         windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0) >= Self.detailMinimumWidth + 325
     }
 
-    @ViewBuilder private var chatBrowserPane: some View {
+    @ViewBuilder private var workspaceBrowserPane: some View {
         if let id = route.workspaceID {
             VStack(spacing: 0) {
                 InspectorChromeBar(onClose: { browserWorkspaceID = nil }, closeLabel: "Close browser") {
                     InspectorTitle(title: "Browser", symbol: "globe")
                     Spacer(minLength: 0)
                 }
-                BrowserView(url: chatBrowserURLs[id] ?? "", allowsExternalNavigation: true) {
-                    chatBrowserURLs[id] = $0
+                BrowserView(url: workspaceBrowserURLs[id] ?? "", allowsExternalNavigation: true) {
+                    workspaceBrowserURLs[id] = $0
                 }
                 .id(id)
             }
@@ -1281,7 +1285,7 @@ struct RootView: View {
     /// left. Same non-overlapping hit model as the sidebar float.
     @ViewBuilder
     private var inspectorFloatLayer: some View {
-        if showsOverlayInspector && !showsChatBrowser {
+        if showsOverlayInspector && !showsWorkspaceBrowser {
             HStack(spacing: 0) {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
