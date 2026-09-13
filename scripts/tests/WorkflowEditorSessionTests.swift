@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 // Compile with WorkflowEditorDraft.swift WorkflowEditorService.swift WorkflowEditorSession.swift
 // JobScheduleEditing.swift HostScheduleClock.swift WorkbenchDraftFile.swift OriginalFileCoordination.swift
-// WorkReference.swift WorkflowGraphValidation.swift WorkflowGraphDocument.swift.
+// WorkReference.swift WorkflowGraphValidation.swift WorkflowGraphDocument.swift JSONValue.swift.
 import Foundation
 
 enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {
@@ -84,6 +84,7 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     var nextRunAtMs: Int64? = nil
     var lastRunID: String? = nil
     var revision: UInt64 = 0
+    var extraFields: [String: JSONValue] = [:]
     mutating func layoutIfNeeded() {}
 }
 
@@ -717,6 +718,34 @@ actor FixtureWorkflows: WorkflowEditorService {
             editor.design()
             check(await service.designs == before, "design is for new graphs only")
             check(!editor.designing, "edit flow never designs")
+        }
+
+        do {
+            var custom = AutomationSchedule(kind: .custom, hour: 9, minute: 30)
+            custom.weekdays = 0b0001_1111
+            let graph = WorkflowGraph(
+                id: "roundtrip",
+                name: "Custom schedule",
+                workspaceID: "folder",
+                budgetSeconds: 1800,
+                schedule: custom,
+                enabled: true,
+                nodes: [WorkflowNode(id: "in", kind: .input, title: "Start")]
+            )
+            let draft = WorkflowEditorDraft(graph)
+            check(draft.matches(graph), "custom schedule round-trips through the draft")
+            check(draft.budgetMinutes == "30", "budget round-trips through the draft")
+            var weekly = AutomationSchedule(kind: .weekly, hour: 10)
+            weekly.weekday = 1
+            var weeklyGraph = graph
+            weeklyGraph.schedule = weekly
+            check(WorkflowEditorDraft(weeklyGraph).matches(weeklyGraph), "weekly schedule round-trips")
+            var futureGraph = graph
+            futureGraph.extraFields = ["futureNote": .string("keep me")]
+            let futureDraft = WorkflowEditorDraft(futureGraph)
+            check(futureDraft.matches(futureGraph), "unknown graph fields match")
+            let futureMade = try futureDraft.makeGraph(id: "roundtrip")
+            check(futureMade.extraFields == ["futureNote": .string("keep me")], "unknown graph fields survive makeGraph")
         }
 
         print("WorkflowEditorSessionTests passed")

@@ -186,13 +186,24 @@ struct ClientWorkflowDetailView: View {
 
     @ViewBuilder
     private func runs(of graph: WorkflowGraph) -> some View {
-        let history = session.runs(of: graph).prefix(6)
+        let all = session.runs(of: graph)
+        let history = AutomationRunHistory.preview(
+            all, id: \.id, startedAtMs: \.startedAtMs, isLive: \.isLive
+        )
         if !history.isEmpty {
             Text("Recent runs")
                 .font(ClientType.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
                 .padding(.top, Theme.Space.xs)
-            ForEach(Array(history)) { run in
+            if AutomationRunHistory.showsAllRuns(all.count) {
+                NavigationLink {
+                    ClientWorkflowHistoryView(session: session, graphID: graph.id)
+                } label: {
+                    ClientAllRunsRow(count: all.count)
+                }
+                .buttonStyle(.plain)
+            }
+            ForEach(history) { run in
                 NavigationLink {
                     ClientWorkflowRunView(session: session, runID: run.id)
                 } label: {
@@ -200,7 +211,9 @@ struct ClientWorkflowDetailView: View {
                         title: run.name,
                         status: run.status,
                         label: run.endedLabel,
-                        started: run.startedAt
+                        started: run.startedAt,
+                        timezone: session.schedulerTimezone,
+                        showsChevron: true
                     )
                 }
                 .buttonStyle(.plain)

@@ -3679,8 +3679,12 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     var lastRunID: String?
     /// Missing on hosts before protocol 22, and on cached copies from then.
     var revision: UInt64 = 0
+    /// Fields the host sent that this client does not name. Never shown,
+    /// never edited, written back untouched so a round trip cannot delete
+    /// them.
+    var extraFields: [String: JSONValue] = [:]
 
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case id, name, scope, workspaceID = "workspaceId"
         case budgetSeconds, schedule, enabled, nodes, edges
         case lastRunAtMs, nextRunAtMs, lastRunID = "lastRunId", revision
@@ -3731,6 +3735,10 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
         nextRunAtMs = try c.decodeIfPresent(Int64.self, forKey: .nextRunAtMs)
         lastRunID = try c.decodeIfPresent(String.self, forKey: .lastRunID)
         revision = try c.decodeIfPresent(UInt64.self, forKey: .revision) ?? 0
+        extraFields = try UnknownFields.decode(
+            from: decoder,
+            known: Set(CodingKeys.allCases.map(\.stringValue))
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -3748,6 +3756,7 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
         try c.encodeIfPresent(nextRunAtMs, forKey: .nextRunAtMs)
         try c.encodeIfPresent(lastRunID, forKey: .lastRunID)
         try c.encode(revision, forKey: .revision)
+        try UnknownFields.encode(extraFields, to: encoder)
     }
 
     var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
@@ -3905,8 +3914,12 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
     var pattern: String?
     var times: UInt32?
     var until: String?
+    /// Fields the host sent that this client does not name. Never shown,
+    /// never edited, written back untouched so a round trip cannot delete
+    /// them.
+    var extraFields: [String: JSONValue] = [:]
 
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case id, kind, x, y, title, backend, model, effort, prompt, wait
         case waitPattern, automationID = "automationId", promptOverride
         case method, url, headers, body, command, test, pattern, times, until
@@ -3984,6 +3997,10 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
         pattern = try c.decodeIfPresent(String.self, forKey: .pattern)
         times = try c.decodeIfPresent(UInt32.self, forKey: .times)
         until = try c.decodeIfPresent(String.self, forKey: .until)
+        extraFields = try UnknownFields.decode(
+            from: decoder,
+            known: Set(CodingKeys.allCases.map(\.stringValue))
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -4010,6 +4027,7 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
         try c.encodeIfPresent(pattern, forKey: .pattern)
         try c.encodeIfPresent(times, forKey: .times)
         try c.encodeIfPresent(until, forKey: .until)
+        try UnknownFields.encode(extraFields, to: encoder)
     }
 
     var displayTitle: String {

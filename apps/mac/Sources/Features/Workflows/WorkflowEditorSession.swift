@@ -398,6 +398,7 @@ final class WorkflowEditorSession {
         guard isCreate, !creating, saved.created == nil else { return }
         restoring = true
         fields.starterID = WorkflowEditorDraft.designedStarterID
+        fields.graphExtraFields = result.workflow.extraFields
         restoring = false
         document.replaceSteps(
             nodes: result.workflow.nodes,

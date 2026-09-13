@@ -21,6 +21,7 @@ struct ClientWorkflowWorkspace: View {
     @State private var navigation = ClientJobNavigation()
     @State private var editor: WorkflowEditorRoute?
     @State private var pendingDelete: WorkflowGraph?
+    @State private var showingHistory = false
     @Environment(\.dynamicTypeSize) private var typeSize
     private let opensDetailWhenReady: Bool
 
@@ -89,6 +90,14 @@ struct ClientWorkflowWorkspace: View {
                 if let created { session.selectGraph(created.id) }
             }
         }
+        .sheet(isPresented: $showingHistory) {
+            if let graph = session.selectedGraph {
+                ClientWorkflowHistorySheet(session: session, graphID: graph.id) { run in
+                    session.selectRun(run)
+                }
+                .modifier(HistorySheetPresentation())
+            }
+        }
         .confirmationDialog(
             "Delete \(pendingDelete?.name ?? "this workflow")?",
             isPresented: Binding(
@@ -113,6 +122,11 @@ struct ClientWorkflowWorkspace: View {
         .task {
             await session.appeared()
             if opensDetailWhenReady { navigation.openDetail() }
+            #if WORKBENCH_QA
+            if ProcessInfo.processInfo.environment["WORKBENCH_HISTORY"] == "1" {
+                showingHistory = true
+            }
+            #endif
         }
         .onDisappear { session.disappeared() }
         .onChange(of: session.input) { _, _ in navigation.openDetail() }
@@ -356,13 +370,24 @@ struct ClientWorkflowWorkspace: View {
                         empty: run.isLive ? "Waiting for output…" : "No readable output."
                     )
                 }
-                let history = session.runs(of: graph).prefix(5)
+                let history = AutomationRunHistory.preview(
+                    session.runs(of: graph),
+                    id: \.id, startedAtMs: \.startedAtMs, isLive: \.isLive
+                )
                 if !history.isEmpty {
                     Text("Recent runs")
                         .font(ClientType.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                         .padding(.top, Theme.Space.xs)
-                    ForEach(Array(history)) { run in
+                    if AutomationRunHistory.showsAllRuns(session.runs(of: graph).count) {
+                        Button {
+                            showingHistory = true
+                        } label: {
+                            ClientAllRunsRow(count: session.runs(of: graph).count)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    ForEach(history) { run in
                         Button {
                             session.selectRun(run)
                             navigation.openDetail()
@@ -371,7 +396,9 @@ struct ClientWorkflowWorkspace: View {
                                 title: run.name,
                                 status: run.status,
                                 label: run.endedLabel,
-                                started: run.startedAt
+                                started: run.startedAt,
+                                timezone: session.schedulerTimezone,
+                                isSelected: session.selectedRunID == run.id
                             )
                         }
                         .buttonStyle(.plain)

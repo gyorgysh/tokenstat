@@ -35,12 +35,16 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
     var customDays: Int
     var budgetMinutes: String
     var noTimeLimit: Bool
+    /// Graph-level fields the host sent that this client does not name.
+    /// Nodes and edges carry their own. Saved with the draft so a round
+    /// trip through this device cannot delete them.
+    var graphExtraFields: [String: JSONValue] = [:]
 
     enum CodingKeys: String, CodingKey {
         case name, starterID = "starterId", enabled, nodes, edges, scheduleKind
         case intervalMinutes, intervalSeconds, intervalTouched, hour, minute
         case weekday, weeklyDays, weeklyDayEdited, customDays, budgetMinutes, noTimeLimit
-        case workspaceID = "workspaceId"
+        case workspaceID = "workspaceId", graphExtraFields
     }
 
     init(workspaceID: String, budgetSeconds: UInt64 = 10_800) {
@@ -71,6 +75,7 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
         enabled = graph.enabled
         nodes = graph.nodes
         edges = graph.edges
+        graphExtraFields = graph.extraFields
         scheduleKind = .once
         intervalMinutes = "60"
         intervalSeconds = 0
@@ -97,12 +102,14 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
         starterID = Self.blankStarterID
         nodes = Self.blankNodes
         edges = []
+        graphExtraFields = [:]
     }
 
     mutating func applyRecipe(_ recipe: WorkflowRecipe) {
         starterID = recipe.id
         nodes = recipe.nodes
         edges = recipe.edges
+        graphExtraFields = [:]
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty || trimmed == "Untitled" {
             name = recipe.name
@@ -138,6 +145,7 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
             && (builtSchedule.repeats ? enabled : false) == graph.enabled
             && nodes == graph.nodes
             && edges == graph.edges
+            && graphExtraFields == graph.extraFields
     }
 
     func makeGraph(
@@ -161,6 +169,7 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
             lastRunAtMs: lastRunAtMs,
             lastRunID: lastRunID
         )
+        graph.extraFields = graphExtraFields
         graph.layoutIfNeeded()
         return graph
     }
