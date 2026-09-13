@@ -1991,6 +1991,11 @@ impl Store {
         {
             return Err("this chat is already responding".into());
         }
+        // Lease before install. Another instance holding the runner is the
+        // sharper truth than "agent not installed" on a machine that does
+        // not have this backend on PATH, and CI runners often have none.
+        let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
+            .ok_or("This conversation is already running in another instance of tokenstat.")?;
         if crate::launcher::profile_installed(launcher_profile_id(&chat.backend)) == Some(false) {
             return Err(DispatchError::new(
                 "agent_not_installed",
@@ -2000,8 +2005,6 @@ impl Store {
                 ),
             ));
         }
-        let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
-            .ok_or("This conversation is already running in another instance of tokenstat.")?;
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.prepare_response_output_dir(id)?;
         let resume_token = chat

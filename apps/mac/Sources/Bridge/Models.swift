@@ -1328,17 +1328,12 @@ struct Money: Sendable, Hashable {
             ?? String(format: "$%.2f", dollars)
         // A floor reads as "at least this much", an estimate as "about this
         // much". Both must survive truncation, so they are never dropped.
+        // Do not add a separate caveat caption or tooltip for estimated /
+        // incomplete list-rate figures. The + / ~ marker already says it on
+        // the number itself; a prose line under Insights only crowds the UI.
         if !complete { return "\(amount)+" }
         if estimated { return "~\(amount)" }
         return amount
-    }
-
-    /// Additional context for estimated figures, for a tooltip.
-    var caveat: String? {
-        if estimated {
-            return "Estimated from the model catalog, because the price book has no rate for this model."
-        }
-        return nil
     }
 }
 
@@ -2928,7 +2923,9 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     var gateTier: String
 
     enum CodingKeys: String, CodingKey {
-        case id, label, name, command, models, efforts, gateTier, modelListStatus, installed, launcherID, canInstall, readiness
+        case id, label, name, command, models, efforts, gateTier, modelListStatus, installed
+        case launcherID = "launcherId"
+        case canInstall, readiness
     }
 
     init(from decoder: Decoder) throws {

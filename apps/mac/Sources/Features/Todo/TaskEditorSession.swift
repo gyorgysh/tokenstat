@@ -13,12 +13,24 @@ struct TaskRunSubmission: Codable, Equatable, Sendable {
     let cardID: String
     let revision: UInt64
     let placement: TaskRunPlacement
+
+    enum CodingKeys: String, CodingKey {
+        case operationID = "operationId"
+        case cardID = "cardId"
+        case revision
+        case placement
+    }
 }
 
 /// Enough to reopen the same host terminal after the editor is dismissed.
 struct TaskLiveTerminal: Codable, Equatable, Sendable {
     var runID: String
     var ptyID: String
+
+    enum CodingKeys: String, CodingKey {
+        case runID = "runId"
+        case ptyID = "ptyId"
+    }
 }
 
 struct SavedTaskDraft: Codable, Equatable, Sendable {

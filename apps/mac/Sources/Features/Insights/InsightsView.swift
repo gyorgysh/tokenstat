@@ -171,15 +171,12 @@ struct InsightsView: View {
                                   detail: "Including reported cache usage", symbol: "chart.bar.fill")
                     InsightMetric(title: "List-rate value", value: model.periodValue.formatted,
                                   detail: "Token valuation · not billed", symbol: "dollarsign.circle")
-                        .help(model.periodValue.caveat ?? "Value at published model rates, not actual spending.")
+                        .help("Value at published model rates, not actual spending.")
                     InsightMetric(title: "Sessions", value: totals.sessions.formatted(),
                                   detail: "\(totals.events.formatted()) recorded events", symbol: "bubble.left.and.bubble.right")
                     InsightMetric(title: "Active days", value: totals.days.formatted(),
                                   detail: "\(formatTokens(totals.days > 0 ? totals.counters.total / totals.days : 0)) tokens / active day", symbol: "calendar")
                 }
-                }
-                if let caveat = model.periodValue.caveat {
-                    Text(caveat).font(Theme.caption).foregroundStyle(.secondary)
                 }
             }
             Card(title: "Usage over time", subtitle: "Daily tokens · cache included", mark: "mark_insights") {
@@ -405,7 +402,6 @@ private struct BreakdownRow: View {
                     .font(Theme.numeric(12))
                     .lineLimit(1)
                     .frame(width: 88, alignment: .trailing)
-                    .help(row.value.caveat ?? "")
             }
         }
         .padding(.horizontal, Theme.Space.m)
@@ -481,7 +477,7 @@ private struct InsightRanking: View {
                             HStack {
                                 Text("\(row.sessions.formatted()) sessions")
                                 Spacer()
-                                if showsValue { Text("\(row.value.formatted) at list rates").help(row.value.caveat ?? "") }
+                                if showsValue { Text("\(row.value.formatted) at list rates") }
                             }.font(Theme.caption2).foregroundStyle(.secondary)
                         }
                         .contentShape(Rectangle())
@@ -628,7 +624,7 @@ private struct DailyChart: View {
                 .font(Theme.caption2)
                 .foregroundStyle(.secondary)
             Text(row.value.formatted)
-                .help(row.value.caveat ?? "Value at list rates, not billed")
+                .help("Value at list rates, not billed")
                 .font(Theme.numeric(10, weight: .medium))
                 .foregroundStyle(Theme.accent)
         }

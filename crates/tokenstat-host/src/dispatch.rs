@@ -5151,6 +5151,7 @@ mod tests {
         assert!(v["result"]["note"].is_string(), "{unknown}");
     }
 
+    #[cfg(feature = "local-host")]
     #[test]
     fn a_workspace_can_be_listed_diffed_and_committed() {
         let mut s = session();

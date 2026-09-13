@@ -609,11 +609,11 @@ struct ChatAgentPanel: View {
                     .padding(.horizontal, Theme.Space.s)
             }
             HStack {
-                Button(showingSetup ? "Back to agent choices" : "Set up another agent…") {
+                Button(showingSetup ? "Back to agent choices" : "Set up another agent…", showingSetup ? .back : .create) {
                     showingSetup.toggle()
                 }
                 Spacer(minLength: 0)
-                Button("Retry") { Task { await model.reloadBackends() } }
+                Button("Retry", .refresh) { Task { await model.reloadBackends() } }
             }
             .font(Theme.caption)
             .padding(Theme.Space.s)
@@ -638,7 +638,7 @@ struct ChatAgentPanel: View {
                         }
                         Spacer()
                         if backend.installed == false && backend.canInstall {
-                            Button(installing == backend.id ? "Installing…" : "Install") {
+                            Button(installing == backend.id ? "Installing…" : "Install", .download) {
                                 install(backend)
                             }
                             .disabled(installing != nil || locked)
@@ -813,7 +813,7 @@ struct ChatAgentAvailabilityNotice: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("\(model.backend(for: chat.backend)?.label ?? chat.backend) isn’t installed on this host.")
                 .font(Theme.caption).foregroundStyle(Theme.warning)
-            Button("Set up or choose another agent") { showingOptions = true }
+            Button("Set up or choose another agent", .create) { showingOptions = true }
                 .font(Theme.caption)
         }
         .pickerPanelSurface(title: "Agent options", isPresented: $showingOptions) {

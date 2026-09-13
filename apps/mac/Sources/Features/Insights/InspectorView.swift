@@ -8,10 +8,6 @@
 import SwiftUI
 
 /// The right pane: what the period adds up to, and what the selected row is.
-///
-/// Deliberately the only place that shows the caveats in full. A table cell has
-/// room for a `+` and nothing else, so the reason behind it lives here rather
-/// than in a tooltip nobody hovers.
 struct InspectorView: View {
     var model: InsightsModel
     /// Dismisses the pane. Owned by the root view, which is the only place the
@@ -92,12 +88,6 @@ struct InspectorView: View {
                 size: DisplayFit.factor < 1 ? 22 : 26
             )
 
-            if let caveat = model.periodValue.caveat {
-                Text(caveat)
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             // Side by side where the pane is wide enough, stacked when the
             // inspector is squeezed by a small window. A fixed pair of rows
             // was what ran past the pane's edge at a low effective resolution.
@@ -157,11 +147,6 @@ struct InspectorView: View {
                 .lineLimit(3)
 
             Stat(label: "Value", value: row.value.formatted, size: 18)
-            if let caveat = row.value.caveat {
-                Text(caveat)
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-            }
 
             // Counters split out one by one. This is the view where the
             // difference between "not reported" and "zero" is visible, and a

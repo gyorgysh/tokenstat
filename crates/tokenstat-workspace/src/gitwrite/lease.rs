@@ -5,7 +5,9 @@ use std::path::Path;
 
 /// Unlike Git's index lock, the process lease releases on a crash. Recovery
 /// can distinguish an interrupted operation from a commit still running hooks.
-pub(super) struct Lease(File);
+/// The file handle is the lock: Drop closes it. On Windows nothing else reads
+/// the field, so keep it marked used for the lint that only counts reads.
+pub(super) struct Lease(#[allow(dead_code)] File);
 
 pub(super) fn identity(file: &File) -> Result<[u64; 2], String> {
     #[cfg(unix)]
