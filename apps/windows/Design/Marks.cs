@@ -260,11 +260,11 @@ internal static class Marks
         var grid = new Grid { Width = size, Height = size };
         grid.Children.Add(bubble);
         grid.Children.Add(face);
-        // UIElement.Clip takes a RectangleGeometry, so the circle is a
-        // square rect with fully rounded corners rather than an ellipse.
-        grid.Clip = new RectangleGeometry
+        // WinUI RectangleGeometry carries only a Rect: the WPF corner radii
+        // do not exist on it, so the circle is an EllipseGeometry instead.
+        grid.Clip = new EllipseGeometry
         {
-            Rect = new Rect(0, 0, size, size),
+            Center = new Point(size / 2, size / 2),
             RadiusX = size / 2,
             RadiusY = size / 2,
         };

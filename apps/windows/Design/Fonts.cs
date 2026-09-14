@@ -120,7 +120,9 @@ internal static class Fonts
     /// </summary>
     public static TextBlock Tabular(TextBlock block)
     {
-        Typography.SetNumeralAlignment(block, Windows.UI.Text.FontNumeralAlignment.Tabular);
+        // The enum lives in Microsoft.UI.Xaml in WinUI 3 (Windows.UI.Text
+        // is the UWP-era home and carries no numeral alignment type).
+        Typography.SetNumeralAlignment(block, Microsoft.UI.Xaml.FontNumeralAlignment.Tabular);
         return block;
     }
 }
