@@ -343,6 +343,8 @@ internal sealed class PullsPage : Page
                 Theme.Accent,
                 Symbol.Contact));
             _loginPoll = new CancellationTokenSource();
+            _root.Children.Insert(2, ActionIconGlyph.Button(
+                "Cancel sign-in", ActionIcon.Dismiss, async (_, _) => await CancelLoginAsync()));
             var token = _loginPoll.Token;
             while (!token.IsCancellationRequested)
             {
@@ -363,6 +365,23 @@ internal sealed class PullsPage : Page
         {
             _root.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
         }
+    }
+
+    /// <summary>
+    /// The device flow holds server state, so leaving it cancels the wait
+    /// rather than leaving a code the page forgot about.
+    /// </summary>
+    private async Task CancelLoginAsync()
+    {
+        _loginPoll?.Cancel();
+        try
+        {
+            await AppServices.Host.CallAsync("pulls.cancelSignIn", new JsonObject());
+        }
+        catch
+        {
+        }
+        await LoadAsync();
     }
 
     private async Task ShowDetailAsync(long number, bool refresh = false)

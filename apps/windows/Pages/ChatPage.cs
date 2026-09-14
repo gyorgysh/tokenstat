@@ -412,7 +412,92 @@ internal sealed class ChatPage : Page
         {
             _ = UpdateAsync(new JsonObject { ["autonomy"] = "bypass" });
         }
+        body.Children.Add(InstructionsCard(
+            Format.Text(chat, "systemPrompt"),
+            Format.Text(backend, "label", "This agent"),
+            running));
         return Card("Setup", body);
+    }
+
+    /// <summary>
+    /// What a conversation tells its agent before it hears the person. The
+    /// brief belongs to the person and is editable here; the one rule
+    /// tokenstat adds is readable under it rather than described.
+    /// </summary>
+    private UIElement InstructionsCard(string systemPrompt, string agent, bool running)
+    {
+        var chatId = _openId;
+        var stack = new StackPanel { Spacing = Theme.SpaceS };
+        stack.Children.Add(Chrome.SectionLabel("Instructions"));
+        var brief = new TextBox
+        {
+            PlaceholderText = "How should this agent behave?",
+            Text = systemPrompt,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 76,
+            IsEnabled = !running,
+        };
+        stack.Children.Add(brief);
+        var note = Muted("Sent as an instruction, never as part of your message.");
+        stack.Children.Add(note);
+        var save = ActionIconGlyph.PrimaryButton("Save", ActionIcon.Save, async (_, _) =>
+        {
+            await UpdateAsync(new JsonObject { ["systemPrompt"] = brief.Text ?? "" });
+            save.Visibility = Visibility.Collapsed;
+        });
+        save.Visibility = Visibility.Collapsed;
+        brief.TextChanged += (_, _) =>
+        {
+            save.Visibility = brief.Text != systemPrompt ? Visibility.Visible : Visibility.Collapsed;
+        };
+        stack.Children.Add(save);
+        var added = new TextBlock
+        {
+            FontFamily = Fonts.Mono,
+            FontSize = 11,
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            Visibility = Visibility.Collapsed,
+        };
+        var toggle = ActionIconGlyph.Button(
+            "What tokenstat adds", ActionIcon.More, (_, _) =>
+            {
+                added.Visibility = added.Visibility == Visibility.Visible
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+            });
+        stack.Children.Add(toggle);
+        stack.Children.Add(added);
+        if (chatId is not null)
+        {
+            _ = LoadInstructionsAsync(chatId, agent, note, added);
+        }
+        return stack;
+    }
+
+    private async Task LoadInstructionsAsync(string chatId, string agent, TextBlock note, TextBlock added)
+    {
+        JsonNode answer;
+        try
+        {
+            answer = await AppServices.Host.CallAsync(
+                "chat.instructions", new JsonObject { ["id"] = chatId });
+        }
+        catch
+        {
+            return;
+        }
+        if (_openId != chatId)
+        {
+            return;
+        }
+        var text = Format.Text(answer, "added");
+        added.Text = string.IsNullOrEmpty(text) ? "Not available on this computer." : text;
+        note.Text = Format.Text(answer, "channel") == "systemPrompt"
+            ? $"{agent} takes this as a system prompt, so it is never part of your message."
+            : $"{agent} has no system-prompt flag, so this is sent once, ahead of your message.";
     }
 
     private UIElement AgentPicker(string current, bool disabled)
