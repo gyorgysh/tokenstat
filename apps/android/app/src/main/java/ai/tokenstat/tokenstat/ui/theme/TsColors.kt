@@ -41,6 +41,11 @@ data class TsColors(
     /// reads as "nothing here"; upper levels run violet into fuchsia.
     val heat: List<Color>,
     /// Text colours standing in for SwiftUI's `.primary/.secondary/.tertiary`.
+    /// The Apple client never gives these a hex: body text is `.primary`
+    /// (opaque black or white) and supporting text the hierarchical
+    /// `.secondary` and `.tertiary` styles, which are that same black or
+    /// white at 60% and 30% alpha. These transcribe that behaviour, not a
+    /// brand value, so they stay readable if the background ever moves.
     val textPrimary: Color,
     val textSecondary: Color,
     val textTertiary: Color,
@@ -82,9 +87,9 @@ val LightColors: TsColors = TsColors(
         hex(0x7C4DFF),
         hex(0xC026D3),
     ),
-    textPrimary = hex(0x1C1B22),
-    textSecondary = hex(0x5F5D69),
-    textTertiary = hex(0x8A8894),
+    textPrimary = Color.Black,
+    textSecondary = Color.Black.copy(alpha = 0.6f),
+    textTertiary = Color.Black.copy(alpha = 0.3f),
 )
 
 val DarkColors: TsColors = TsColors(
@@ -116,15 +121,50 @@ val DarkColors: TsColors = TsColors(
         hex(0x8B5CF6),
         hex(0xE879F9),
     ),
-    textPrimary = hex(0xF0EFF5),
-    textSecondary = hex(0xA8A5B5),
-    textTertiary = hex(0x6E6A80),
+    textPrimary = Color.White,
+    textSecondary = Color.White.copy(alpha = 0.6f),
+    textTertiary = Color.White.copy(alpha = 0.3f),
 )
 
 val LocalTsColors = staticCompositionLocalOf { DarkColors }
 
 /// The accent tinted at card strength; success is deliberately the accent.
 val TsColors.rowSelected: Color get() = hexWithAlpha(0.18f, if (isDark) 0x8B5CF6 else 0x6A3DFF)
+
+/// Highlight kind, mirroring the core table the Apple client reads. A kind
+/// this build does not know decodes as Unknown and renders as plain text.
+enum class SyntaxKind {
+    Keyword, String, Number, Comment, Type, Function, Constant, Attribute,
+    Property, Variable, Operator, Punctuation, Markup, Unknown,
+}
+
+/// Colour for a syntax kind.
+///
+/// The whole palette in one place, transcribed hex-for-hex from the Apple
+/// client's `Sources/Design/Theme.swift`, which is the only place the app
+/// decides what a keyword looks like. Variables, operators and punctuation
+/// stay the text colour: colouring every token is how a file ends up
+/// unreadable, so most of it must not be coloured.
+fun TsColors.syntax(kind: SyntaxKind): Color = when (kind) {
+    SyntaxKind.Keyword -> accent
+    SyntaxKind.String ->
+        if (isDark) hex(0xD8A657) else hex(0x8F5C1E)
+    SyntaxKind.Number, SyntaxKind.Constant ->
+        if (isDark) hex(0x7FD1B9) else hex(0x1F6F5C)
+    SyntaxKind.Comment ->
+        if (isDark) hex(0x6B6B76) else hex(0x8A8A93)
+    SyntaxKind.Type -> secondary
+    SyntaxKind.Function ->
+        if (isDark) hex(0x89B4FA) else hex(0x2D62C4)
+    SyntaxKind.Attribute ->
+        if (isDark) hex(0xC79BF0) else hex(0x9A5CC4)
+    SyntaxKind.Property ->
+        if (isDark) hex(0x9CC5E0) else hex(0x1F5F8F)
+    SyntaxKind.Markup ->
+        if (isDark) hex(0x8FD6BE) else hex(0x1F6F5C)
+    SyntaxKind.Variable, SyntaxKind.Operator, SyntaxKind.Punctuation, SyntaxKind.Unknown ->
+        textPrimary
+}
 
 /// A drop shadow weighted for the appearance it lands on: dark mode takes the
 /// full weight, light mode a little under half.
