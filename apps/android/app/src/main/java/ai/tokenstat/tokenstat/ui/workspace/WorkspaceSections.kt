@@ -141,7 +141,7 @@ fun WorkspaceSection(
         "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel)
         "Changes" -> ChangesSection(model, peer, workspace, modifier, folderName, hostLabel, protocol, onChanged = reload)
         "History" -> HistorySection(model, peer, workspace, modifier, folderName, hostLabel)
-        "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier, folderName, hostLabel, onOpenSection)
+        "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier, folderName, hostLabel, onOpenSection, protocol, onOpenTerminal)
         "Notes" -> NotesSection(model, peer, workspace, modifier, folderName, hostLabel)
         "Workflows" -> WorkflowsSection(model, peer, workspace, data, error, loading, reload, modifier)
         "Automations" -> AutomationsSection(model, peer, data, error, loading, reload, modifier)
@@ -235,11 +235,15 @@ private fun TodoSection(
     folderName: String = "",
     hostLabel: String = "",
     onOpenSection: (String) -> Unit = {},
+    protocol: Long? = null,
+    onOpenTerminal: (String?) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val cards = asObjects(data).filter { (it.str("kind") ?: "task") == if (kindTask) "task" else "note" }
     var composer by remember { mutableStateOf(false) }
     var resultCard by remember { mutableStateOf<JsonObject?>(null) }
+    var boardFolder by remember { mutableStateOf<String?>(null) }
+    var boardAll by remember { mutableStateOf(false) }
 
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
@@ -251,6 +255,14 @@ private fun TodoSection(
                     small = true,
                     onClick = { composer = true },
                 )
+            }
+        }
+        if (kindTask) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    TsSecondaryButton(label = "Open board", small = true, onClick = { boardFolder = workspace })
+                    TsSecondaryButton(label = "All tasks", small = true, onClick = { boardAll = true })
+                }
             }
         }
         if (!loading && cards.isEmpty()) {
@@ -353,6 +365,20 @@ private fun TodoSection(
                     onChanged()
                 }
             },
+        )
+    }
+    val openFolder = boardFolder
+    if (openFolder != null || boardAll) {
+        ai.tokenstat.tokenstat.ui.tasks.TaskBoardDialog(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            fixedFolder = if (boardAll) null else openFolder,
+            folderName = folderName,
+            onOpenTerminal = { onOpenTerminal(it) },
+            onOpenSection = { onOpenSection(it); boardFolder = null; boardAll = false },
+            onDismiss = { boardFolder = null; boardAll = false },
         )
     }
 }
