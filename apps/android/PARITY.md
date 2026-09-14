@@ -12,8 +12,9 @@ components, motion). Android ports those definitions 1:1 into
 `ui/marks/`; it never invents its own colours, spacing, radii, or timing.
 Validation is the mapping table below: every Apple source has a named Android
 counterpart or an explicit gap. Pure logic that both platforms must answer
-identically (greeting pool, token compaction, tunnel copy) is pinned by unit
-tests in `PortedLogicTest.kt`.
+identically (greeting pool, token compaction, tunnel copy, recents ranking,
+recent places, pin shelf, home arrangement, device sentences, limit ordering
+and severity, stats readings) is pinned by unit tests in `PortedLogicTest.kt`.
 
 | Capability | Rust contract | Apple | Android |
 | --- | --- | --- | --- |
@@ -67,13 +68,25 @@ tests in `PortedLogicTest.kt`.
 | Onboarding (10 pages) + art | `auth/Onboarding.kt` + `OnboardingArt.kt` scenes | heatmap wave 2.8s landing on 0.35, spend spring 0.7/0.78 staggered 0.1s, remaining sweep gradient with easeOut 0.9s, sessions typewriter 280ms with easeOut 0.2s reveal, device tiles spring 0.55/0.78, privacy lock spring 0.55/0.7 closing after 280ms, control rows spring 0.5/0.84 staggered 0.08s; every scene lands on its last frame under Reduce Motion. Gaps: no Agents scene (Apple has one; Android flow has no agents page), Intro keeps the mark-plus-wordmark lockup rather than Apple's tiles, Devices labels read Mac/Tablet/Phone, progress is a single fill bar rather than per-page capsules | done with noted gaps |
 | Login | LogoMark rise-and-land, Wordmark, `TsAccentButton` / `TsSecondaryButton` | done |
 | Root chrome (avatar leading, wordmark centre) | Themed TopAppBar / NavigationBar from `TsColors` including light; door fade 280ms | done |
-| DevicesView (rows, awake dot, detail) | `TsCard` rows; online dot is accent (`success`), not green | done |
-| HomeView (greeting, totals, heatmap card, limits, lock banner) | `HomeScreen` with `HomeGreeting` port, Stat tiles, Canvas heatmap, lock banner, skeleton→Arrive | done |
+| DevicesView (rows, awake dot, detail) | `TsCard` rows; online dot is accent (`success`), not green; `DeviceCopy` names and status lines; rename over `account.renameMachine`; reach copy with the Always-on sentence; stats bar with failure state and direct/relay route mark | done |
+| HomeView (greeting, totals, heatmap card, limits, lock banner) | `HomeScreen` draws the arranged sections in phone balanced order (usage, continue, machines, pinned, activity, limits) with the Apple copy; continue/pinned shelves over `HomeStores` with pin toggles; awake-hosts machines section; `Customize Home` editor with presets, reorder, hide, reset; offline/empty/error status with getting-started card; limits sorted closest-to-full-first with severity gauges and observed dates | done |
+| `ClientRecentChatsRanking` (3 newest + 5 by priority) | `logic/HomeLogic.kt` `RecentChatsRanking`, pinned by tests; no per-host Recents row in Workspaces yet (needs host-level chat aggregation plus read receipts) | logic done, UI gap |
+| `ClientRecentPlaces` (continue shelf, 20, account scope) | `logic/HomeLogic.kt` `RecentPlaces` + `home/HomeStores.kt` (SharedPreferences); scope is handle-only, the account payload carries no host name; records folder opens, chat/terminal opens not yet recorded | done with noted gaps |
+| `PinnedWork` (pin shelf, 8, refused with words) | `logic/HomeLogic.kt` `PinnedWork` + `HomeStores.togglePin`; shelf-full refusal reads "The shelf holds eight pins" | done |
+| `HomeLayout`/`HomePreset`/`ClientHomeEditor` | `logic/HomeLogic.kt` (`HomeSection`, `HomePreset`, `normalizeHomeLayout`) + `home/HomeSections.kt` `HomeEditor`; presets Balanced/Work first/Usage first, up/down moves, reset with undo | done |
+| `ClientGettingStarted` (phone first run) | `home/HomeSections.kt` `GettingStartedCard`; "Set up a machine" lands on Devices (no setup wizard on Android); no ghost grid | done with noted gaps |
+| `ClientLimitsCard` (sort, severity, observed) | `LimitCard` sorts closest-to-full-first, gauges read the host severity over the `limits.rs` 90/70 scale, observed dates with stale prefix; resets line not rendered (`RelativeClock` is past-oriented) | done with noted gap |
+| `DeviceCopy` (names, status, reach) | `logic/HomeLogic.kt` `DeviceCopy` ported word-for-word, pinned by tests | done |
+| `HostStatsFormat` (power/CPU/RAM words) | `logic/HomeLogic.kt` `HostStatsFormat`; bar shows failure `n/a`, direct/relay route from `remote.status`, same tunnel footnote | done (no CPU/RAM meter bars) |
+| Saved-work library (`ClientSavedWorkView`) | no Android work-cache bridge (`cache.list` and friends do not exist), so no screen and no data | gap |
+| Launch tiles (`ClientLaunchTile`) | tiles live in the workspace launcher, not Home; Android `WorkspaceDetail` has no launcher row yet | gap |
+| App places (`ClientAppPlaces`) | no work search on Android, so no searchable places catalogue | gap |
+| Host-sent scope notice (`NoticeCard`) | `account.status` carries no scope notice on Android, so nothing to render | gap |
 | PhoneHeatmap (fixed cell, scroll-to-latest-week, month marks, locked alpha, press focus) + DayDetailSheet | `heatmap/Heatmap.kt` YearHeatmap (Canvas, pointer press-focus ring, tap sheet) | done |
 | InsightsView (Models/Tools/Days cuts, search) | rebuilt with SegmentedCapsulePicker, search, accent share bars animating in | done |
 | Workspace sections (Sessions list, Changes w/ DiffView, Tasks composer/archive, Notes, Workflows board, Automations, Files tree) | `workspace/WorkspaceSections.kt` real renderers replacing the JSON dump | run/stop, file edit, browser |
 | TerminalSession + accessory keys | `terminal/TerminalScreen.kt` + bundled xterm.js WebView, pty spawn/read/write/resize/detach, long-poll loop, accessory key row | done |
-| AccountSheet (tier badge, products, sign out) | AccountDialog: TierMark, notify toggle, legal/delete URLs, PaywallSheet | done |
-| Paywall (gradient tier marks, tier-switch spring) | `billing/PaywallSheet.kt` wraps Play Billing | done (no spring) |
+| AccountSheet (tier badge, products, sign out) | AccountDialog: TierMark, notify toggle ("or a chat" copy), Sync privacy card, legal URLs, "Delete on website…" with the permanence copy, PaywallSheet | done |
+| Paywall (gradient tier marks, tier-switch spring) | `billing/PaywallSheet.kt` wraps Play Billing; feats and summaries match `ClientStore` word-for-word with relay allowances as Apple captions; "Your current plan" marker; Play renew note (Google Play wording where Apple says App Store) | done (no spring; no trial, Play trial state is not exposed) |
 | WebBrowser sheet (progress bar animation) | `browser/PortBrowser.kt` | progress bar |
 | ConnectionChip | `chrome/ConnectionChip.kt` in the top bar | done |
