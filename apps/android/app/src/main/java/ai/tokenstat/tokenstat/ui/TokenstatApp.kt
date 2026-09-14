@@ -89,8 +89,10 @@ import ai.tokenstat.tokenstat.ui.logic.compactTokens
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
 import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
+import ai.tokenstat.tokenstat.ui.setup.SetupWizard
 import ai.tokenstat.tokenstat.ui.terminal.SshTerminalScreen
 import ai.tokenstat.tokenstat.ui.terminal.TerminalScreen
+import ai.tokenstat.tokenstat.ui.workspace.CloneRepositoryScreen
 import ai.tokenstat.tokenstat.ui.workspace.WorkspaceSection
 import ai.tokenstat.tokenstat.ui.chrome.ConnectionChip
 import ai.tokenstat.tokenstat.ui.chrome.TsRefresh
@@ -280,6 +282,8 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var pendingWorkHostId by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingWorkFolderId by rememberSaveable { mutableStateOf<String?>(null) }
     var accountOpen by remember { mutableStateOf(false) }
+    var wizardOpen by remember { mutableStateOf(false) }
+    var sshSignal by remember { mutableStateOf(0) }
     val context = LocalContext.current
     val homeStores = remember { HomeStores(context) }
     val billing = remember { PlayBillingManager(context) }
@@ -387,6 +391,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                             selected = Destination.Workspaces
                         },
                         onOpenDevices = { selected = Destination.Devices },
+                        onSetupWizard = { wizardOpen = true },
                     )
                     Destination.Workspaces -> if (state.canRemote) {
                         WorkspacesScreen(
@@ -413,12 +418,32 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                             pendingWorkHostId = id
                             selected = Destination.Workspaces
                         },
+                        onSetupWizard = { wizardOpen = true },
+                        sshOpenSignal = sshSignal,
                     )
                 }
             }
         }
     }
     if (accountOpen) AccountDialog(state, model, billing, onDismiss = { accountOpen = false })
+    if (wizardOpen) {
+        SetupWizard(
+            model = model,
+            state = state,
+            onClose = { wizardOpen = false },
+            onOpenSsh = {
+                wizardOpen = false
+                selected = Destination.Devices
+                sshSignal += 1
+            },
+            onOpenWork = { hostId, folderId ->
+                wizardOpen = false
+                pendingWorkHostId = hostId
+                pendingWorkFolderId = folderId
+                selected = Destination.Workspaces
+            },
+        )
+    }
 }
 
 @Composable
@@ -448,6 +473,7 @@ private fun HomeScreen(
     stores: HomeStores,
     onOpenWork: (hostId: String, folderId: String?) -> Unit,
     onOpenDevices: () -> Unit,
+    onSetupWizard: (() -> Unit)? = null,
 ) {
     val calendar = state.home
     val rows = calendar?.get("rows") as? JsonArray
@@ -554,7 +580,7 @@ private fun HomeScreen(
                     val phoneName = machines.firstOrNull { it.string("kind") == "client" }?.let {
                         DeviceCopy.displayName(it.string("label"), it.string("platform"), false)
                     }
-                    GettingStartedCard(phoneName = phoneName, onSetup = onOpenDevices)
+                    GettingStartedCard(phoneName = phoneName, onSetup = onSetupWizard ?: onOpenDevices)
                 }
             } else {
                 item { HomeStatusBlock(state.error, state.connection.offline, onRetry = ::retry) }
@@ -892,9 +918,14 @@ private fun DevicesScreen(
     state: ClientState,
     onPlans: () -> Unit,
     onOpenWork: (String) -> Unit,
+    onSetupWizard: () -> Unit = {},
+    sshOpenSignal: Int = 0,
 ) {
     var sshOpen by rememberSaveable { mutableStateOf(false) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(sshOpenSignal) {
+        if (sshOpenSignal > 0) sshOpen = true
+    }
     val machines = state.account?.get("machines") as? JsonArray ?: JsonArray(emptyList())
     val selected = machines.map { it.jsonObject }.find { it.string("id") == selectedId }
     val thisId = state.account?.string("thisMachineId")
@@ -922,6 +953,14 @@ private fun DevicesScreen(
                     "Devices",
                     style = MaterialTheme.typography.headlineSmall,
                     color = LocalTsColors.current.textPrimary,
+                )
+            }
+            item {
+                TsAccentButton(
+                    label = "Set up a machine",
+                    icon = ActionIcon.Next.vector,
+                    onClick = onSetupWizard,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
             item {
@@ -1743,6 +1782,9 @@ private fun WorkspacesScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var terminalSession by remember { mutableStateOf<WorkspaceTerminalRequest?>(null) }
     var browser by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var cloning by remember { mutableStateOf(false) }
+    var folderRefresh by remember { mutableStateOf(0) }
+    var pendingSelectFolderId by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(host, folders, pendingFolderId) {
         val folderId = pendingFolderId ?: return@LaunchedEffect
         val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == folderId }
@@ -1763,7 +1805,14 @@ private fun WorkspacesScreen(
         val handle = state.account?.string("handle") ?: state.account?.string("displayName") ?: ""
         record.recordPlace(handle, peer, id, folderName ?: "Workspace", RecentPlaces.Kind.WORKSPACE)
     }
-    LaunchedEffect(host) {
+    LaunchedEffect(folders, pendingSelectFolderId) {
+        val id = pendingSelectFolderId ?: return@LaunchedEffect
+        val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == id }
+            ?: return@LaunchedEffect
+        selectedFolder = match
+        pendingSelectFolderId = null
+    }
+    LaunchedEffect(host, folderRefresh) {
         val key = host?.string("publicIdentity")
         if (host != null && key == null) {
             folders = JsonArray(emptyList())
@@ -1785,7 +1834,19 @@ private fun WorkspacesScreen(
     val boundFolder = selectedFolder
     val request = terminalSession
     val browsing = browser
-    if (request != null && boundFolder != null && boundHost != null) {
+    if (cloning && boundHost != null) {
+        CloneRepositoryScreen(
+            model = model,
+            peer = boundHost.string("publicIdentity") ?: "",
+            hostLabel = boundHost.string("label") ?: "Host",
+            onClose = { cloning = false },
+            onCloned = { id ->
+                cloning = false
+                pendingSelectFolderId = id
+                folderRefresh += 1
+            },
+        )
+    } else if (request != null && boundFolder != null && boundHost != null) {
         TerminalScreen(
             model = model,
             peer = boundHost.string("publicIdentity") ?: "",
@@ -1804,7 +1865,7 @@ private fun WorkspacesScreen(
         )
     } else if (expanded && boundFolder != null && boundHost != null) {
         Row(Modifier.fillMaxSize()) {
-            WorkspaceList(hosts, boundHost, folders, { host = it }, { selectedFolder = it }, Modifier.width(340.dp))
+            WorkspaceList(hosts, boundHost, folders, { host = it }, { selectedFolder = it }, Modifier.width(340.dp), onClone = { cloning = true })
             VerticalDivider()
             WorkspaceDetail(
                 model, boundHost, boundFolder, Modifier.weight(1f),
@@ -1821,7 +1882,10 @@ private fun WorkspacesScreen(
             onOpenBrowser = { url, port -> browser = url to port },
         )
     } else {
-        WorkspaceList(hosts, host, folders, { host = it }, { selectedFolder = it }, Modifier.fillMaxSize(), error)
+        WorkspaceList(
+            hosts, host, folders, { host = it }, { selectedFolder = it }, Modifier.fillMaxSize(), error,
+            onClone = if (host != null) ({ cloning = true }) else null,
+        )
     }
 }
 
@@ -1832,9 +1896,20 @@ private fun WorkspaceList(
     hosts: List<JsonObject>, selectedHost: JsonObject?, folders: JsonArray,
     onHost: (JsonObject) -> Unit, onFolder: (JsonObject) -> Unit,
     modifier: Modifier, error: String? = null,
+    onClone: (() -> Unit)? = null,
 ) {
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text("Workspaces", style = MaterialTheme.typography.headlineSmall) }
+        if (selectedHost != null && onClone != null) {
+            item {
+                TsSecondaryButton(
+                    label = "Clone a repository",
+                    icon = ActionIcon.Download.vector,
+                    onClick = onClone,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
         item {
             // A fourth machine must not become unreachable just because a
             // segmented row was drawn for three, so the row scrolls.
