@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <link rel="stylesheet" href="xterm.css">
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; background: #08070D; }
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("fonts/JetBrainsMono-Variable.ttf");
+  }
+  html, body { margin: 0; padding: 0; height: 100%; background: #0A0A0B; }
   #term { width: 100%; height: 100%; }
 </style>
 </head>
@@ -14,27 +18,52 @@
 <script src="xterm.js"></script>
 <script src="xterm-fit.js"></script>
 <script>
-  // The dark theme colours come from the shared token system
-  // (Theme.background / textPrimary / accent / accentSoft).
+  // The terminal palette is TerminalPalette (Design/TerminalPalette.swift):
+  // dark 0x0A0A0B / 0xDCDCE0, light 0xF7F7F8 / 0x1C1C1F, caret is the brand
+  // accent, selection is accentSoft. The face is JetBrains Mono, the same
+  // variable face the native UI reads character by character.
+  var DARK = {
+    background: "#0A0A0B",
+    foreground: "#DCDCE0",
+    cursor: "#8B5CF6",
+    cursorAccent: "#0A0A0B",
+    selectionBackground: "#1B1430"
+  };
+  var LIGHT = {
+    background: "#F7F7F8",
+    foreground: "#1C1C1F",
+    cursor: "#6A3DFF",
+    cursorAccent: "#F7F7F8",
+    selectionBackground: "#F0ECFF"
+  };
   var term = new Terminal({
-    fontFamily: "Menlo, monospace",
+    fontFamily: "'JetBrains Mono', monospace",
     fontSize: 12,
-    theme: {
-      background: "#08070D",
-      foreground: "#F0EFF5",
-      cursor: "#8B5CF6",
-      cursorAccent: "#08070D",
-      selectionBackground: "#3B2A6B"
-    },
-    scrollback: 5000
+    theme: DARK,
+    // Same 4,000 line scrollback as the Apple client's SwiftTerm view.
+    scrollback: 4000
   });
   var fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(document.getElementById("term"));
   try { fit.fit(); } catch (e) {}
 
+  // Paint for the system appearance, the way the Apple client repaints its
+  // terminal view. Kotlin calls this once the page loads and again when the
+  // appearance changes.
+  function termSetTheme(dark) {
+    term.options.theme = dark ? DARK : LIGHT;
+    document.body.style.background = dark ? DARK.background : LIGHT.background;
+  }
+
+  var lastRows = -1;
+  var lastCols = -1;
   function pushSize() {
-    if (window.TermBridge) TermBridge.onResize(term.rows, term.cols);
+    if (window.TermBridge && (term.rows !== lastRows || term.cols !== lastCols)) {
+      lastRows = term.rows;
+      lastCols = term.cols;
+      TermBridge.onResize(term.rows, term.cols);
+    }
   }
 
   term.onData(function (data) {
@@ -43,8 +72,39 @@
     }
   });
 
+  // A selection in the emulator leaves the emulator for the system clipboard,
+  // the same direction the Apple client's clipboardCopy delegate carries it.
+  term.onSelectionChange(function () {
+    if (window.TermBridge) {
+      var text = term.getSelection();
+      if (text) TermBridge.onCopy(text);
+    }
+  });
+
+  // Scrolls mode: a drag or wheel scrolls the buffer instead of reaching the
+  // program, for an agent that holds mouse reporting on. Matches the Apple
+  // key bar's scroll toggle, which flips allowMouseReporting on its view.
+  var scrollsHandler = null;
+  function termSetScrolls(on) {
+    if (on && !scrollsHandler) {
+      scrollsHandler = function (event) {
+        var el = term.element;
+        if (!el) return true;
+        var delta = event.deltaY || event.detail || 0;
+        term.scrollLines(delta > 0 ? 3 : -3);
+        event.preventDefault();
+        return false;
+      };
+      term.attachCustomWheelEventHandler(scrollsHandler);
+    } else if (!on && scrollsHandler) {
+      term.attachCustomWheelEventHandler(function () { return true; });
+      scrollsHandler = null;
+    }
+  }
+
   window.addEventListener("resize", function () {
     try { fit.fit(); } catch (e) {}
+    pushSize();
   });
 
   // Kotlin hands us base64 so no escaping can corrupt the byte stream.
