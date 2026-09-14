@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.logic
 
+import ai.tokenstat.tokenstat.ui.logic.DeviceCopy
 import ai.tokenstat.tokenstat.ui.logic.HomeGreeting
+import ai.tokenstat.tokenstat.ui.logic.HomePreset
+import ai.tokenstat.tokenstat.ui.logic.HomeSection
+import ai.tokenstat.tokenstat.ui.logic.HostStatsFormat
+import ai.tokenstat.tokenstat.ui.logic.LimitLogic
+import ai.tokenstat.tokenstat.ui.logic.PinnedWork
+import ai.tokenstat.tokenstat.ui.logic.RecentChatsRanking
+import ai.tokenstat.tokenstat.ui.logic.RecentPlaces
 import ai.tokenstat.tokenstat.ui.logic.RelativeClock
+import ai.tokenstat.tokenstat.ui.logic.normalizeHomeLayout
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
@@ -272,6 +281,190 @@ class PortedLogicTest {
         assertEquals("Took 45s", durationLabel(45.0))
         assertEquals("Took 2m", durationLabel(150.0))
         assertEquals("Took 1.5h", durationLabel(5400.0))
+    }
+
+    // RecentChatsRanking.visible — three newest by time stay on top, five
+    // more follow ranked by what needs a look, from ClientRecentChatsRanking.
+    @Test
+    fun rankingKeepsThreeNewestOnTop() {
+        val now = 1_700_000_000_000L
+        // A chat just left sits above older unread replies.
+        val chats = listOf(
+            RecentChatsRanking.Item("old-unread", now - 50_000, running = false, needsAttention = false, unread = true),
+            RecentChatsRanking.Item("older-unread", now - 60_000, running = false, needsAttention = false, unread = true),
+            RecentChatsRanking.Item("just-left", now - 1_000, running = false, needsAttention = false, unread = false),
+        )
+        val shown = RecentChatsRanking.visible(chats, now)
+        assertEquals("just-left", shown.first().id)
+    }
+
+    @Test
+    fun rankingOrdersTheTailByPriorityThenTime() {
+        val now = 1_700_000_000_000L
+        fun item(id: String, ageMs: Long, running: Boolean = false, needsAttention: Boolean = false, unread: Boolean = false) =
+            RecentChatsRanking.Item(id, now - ageMs, running, needsAttention, unread)
+        val head = listOf(item("n1", 1_000), item("n2", 2_000), item("n3", 3_000))
+        val tail = listOf(
+            item("plain", 4_000),
+            item("running", 9_000, running = true),
+            item("unread", 8_000, unread = true),
+            item("approval", 10_000, needsAttention = true),
+        )
+        val shown = RecentChatsRanking.visible(head + tail, now).map { it.id }
+        assertEquals(listOf("n1", "n2", "n3", "approval", "unread", "running", "plain"), shown)
+        assertEquals(3, RecentChatsRanking.priority(RecentChatsRanking.Item("a", 0, running = false, needsAttention = true, unread = true)))
+        assertEquals(2, RecentChatsRanking.priority(RecentChatsRanking.Item("a", 0, running = true, needsAttention = false, unread = true)))
+        assertEquals(1, RecentChatsRanking.priority(RecentChatsRanking.Item("a", 0, running = true, needsAttention = false, unread = false)))
+        assertEquals(0, RecentChatsRanking.priority(RecentChatsRanking.Item("a", 0, running = false, needsAttention = false, unread = false)))
+    }
+
+    @Test
+    fun rankingDropsOldQuietChatsAndCapsAtEight() {
+        val now = 1_700_000_000_000L
+        val old = now - RecentChatsRanking.WINDOW_MS - 1_000
+        val chats = (0 until 12).map {
+            RecentChatsRanking.Item("chat$it", now - it * 1_000L, running = false, needsAttention = false, unread = false)
+        } + RecentChatsRanking.Item("ancient", old, running = false, needsAttention = false, unread = false)
+        val shown = RecentChatsRanking.visible(chats, now)
+        assertEquals(8, shown.size)
+        assertEquals(false, shown.any { it.id == "ancient" })
+        // An old approval still counts: attention outlives the window.
+        val kept = RecentChatsRanking.visible(
+            listOf(RecentChatsRanking.Item("old-approval", old, running = false, needsAttention = true, unread = false)),
+            now,
+        )
+        assertEquals(listOf("old-approval"), kept.map { it.id })
+    }
+
+    // RecentPlaces — newest first, capped at twenty, invalid rows dropped.
+    @Test
+    fun recentPlacesRecordAndTrim() {
+        val scope = RecentPlaces.scopeKey("", "ada")
+        assertEquals("client.recentPlaces.v1.0:3:ada", scope)
+        var stored: List<RecentPlaces.Place> = emptyList()
+        stored = RecentPlaces.record(stored, "peer1", "ws1", "My folder", RecentPlaces.Kind.WORKSPACE, null, 1000L)
+        stored = RecentPlaces.record(stored, "peer1", "ws1", "My folder", RecentPlaces.Kind.WORKSPACE, null, 2000L)
+        assertEquals(1, stored.size)
+        assertEquals(2000L, stored.first().openedAtMs)
+        assertEquals("My folder", RecentPlaces.title(stored.first()))
+        val chat = RecentPlaces.record(emptyList(), "peer1", "ws1", "My folder", RecentPlaces.Kind.CHAT, "c1", 1000L)
+        assertEquals("Chat in My folder", RecentPlaces.title(chat.first()))
+        val term = RecentPlaces.record(emptyList(), "peer1", null, "My folder", RecentPlaces.Kind.TERMINAL, "t1", 1000L)
+        assertEquals("Terminal", RecentPlaces.title(term.first()))
+        val termIn = RecentPlaces.record(emptyList(), "peer1", "ws1", "My folder", RecentPlaces.Kind.TERMINAL, "t1", 1000L)
+        assertEquals("Terminal in My folder", RecentPlaces.title(termIn.first()))
+        // Path-shaped names never land in the store.
+        val bad = RecentPlaces.record(emptyList(), "peer1", "ws1", "/tmp/evil", RecentPlaces.Kind.WORKSPACE, null, 1000L)
+        assertEquals("Workspace", bad.first().workspaceName)
+        // A chat without an item id is not a place.
+        assertEquals(0, RecentPlaces.record(emptyList(), "peer1", "ws1", "X", RecentPlaces.Kind.CHAT, null, 1000L).size)
+        // Twenty at most, newest first.
+        var many: List<RecentPlaces.Place> = emptyList()
+        for (i in 0 until 25) {
+            many = RecentPlaces.record(many, "peer", "ws$i", "Folder $i", RecentPlaces.Kind.WORKSPACE, null, i.toLong())
+        }
+        assertEquals(20, many.size)
+        assertEquals("ws24", many.first().id.workspaceId)
+    }
+
+    // PinnedWork — eight pins, newest first, full shelf refuses.
+    @Test
+    fun pinsKeepEightAndRefuseTheNinth() {
+        val scope = "account|host|ada"
+        var stored: List<PinnedWork.Pin> = emptyList()
+        for (i in 0 until 8) {
+            val (next, ok) = PinnedWork.pin(stored, scope, "peer", "ws$i", PinnedWork.Kind.WORKSPACE, null, "Folder $i", "Folder $i", i.toLong())
+            stored = next
+            assertEquals(true, ok)
+        }
+        val (_, refused) = PinnedWork.pin(stored, scope, "peer", "ws8", PinnedWork.Kind.WORKSPACE, null, "Folder 8", "Folder 8", 100L)
+        assertEquals(false, refused)
+        assertEquals(8, PinnedWork.pins(stored, scope).size)
+        // Re-pinning moves to the top and refreshes the label.
+        val (moved, ok) = PinnedWork.pin(stored, scope, "peer", "ws0", PinnedWork.Kind.WORKSPACE, null, "Renamed", "Folder 0", 100L)
+        assertEquals(true, ok)
+        assertEquals("ws0", moved.first().workspaceId)
+        assertEquals("Renamed", moved.first().label)
+        assertEquals(true, PinnedWork.isPinned(moved, scope, "peer", "ws0", PinnedWork.Kind.WORKSPACE, null))
+        val dropped = PinnedWork.unpin(moved, scope, "peer", "ws0", PinnedWork.Kind.WORKSPACE, null)
+        assertEquals(false, PinnedWork.isPinned(dropped, scope, "peer", "ws0", PinnedWork.Kind.WORKSPACE, null))
+        // A conversation pin names the item, not the folder.
+        val key = PinnedWork.pinKey(scope, "peer", "ws", PinnedWork.Kind.CONVERSATION, "chat1")
+        assertEquals(true, key?.startsWith("conversation|") == true)
+        assertEquals(null, PinnedWork.pinKey(scope, "peer", "ws", PinnedWork.Kind.WORKSPACE, "chat1"))
+        assertEquals("Pinned work", PinnedWork.safeLabel("  "))
+    }
+
+    // HomeLayout — stored orders survive new sections; unknown names drop.
+    @Test
+    fun homeLayoutNormalizeKeepsChosenOrder() {
+        val (order, hidden) = normalizeHomeLayout(null, emptySet())
+        assertEquals(HomePreset.BALANCED.order, order)
+        assertEquals(
+            listOf(HomeSection.USAGE, HomeSection.CONTINUE, HomeSection.MACHINES, HomeSection.PINNED, HomeSection.ACTIVITY, HomeSection.LIMITS),
+            HomePreset.BALANCED.order,
+        )
+        val stored = listOf(HomeSection.LIMITS, HomeSection.USAGE, HomeSection.LIMITS)
+        val (kept, keptHidden) = normalizeHomeLayout(stored, setOf(HomeSection.USAGE, HomeSection.ACTIVITY))
+        assertEquals(HomeSection.LIMITS, kept.first())
+        assertEquals(HomeSection.USAGE, kept[1])
+        assertEquals(6, kept.size)
+        // The hidden set is intersected with the order, and appended
+        // sections are in the order, so both survive.
+        assertEquals(setOf(HomeSection.USAGE, HomeSection.ACTIVITY), keptHidden)
+        assertEquals(HomeSection.CONTINUE, HomeSection.of("continue"))
+        assertEquals(null, HomeSection.of("nope"))
+    }
+
+    // DeviceCopy — the list and the detail cannot describe a machine
+    // differently.
+    @Test
+    fun deviceCopyNamesAndStatuses() {
+        assertEquals("Studio", DeviceCopy.displayName("Studio", "macOS", true))
+        assertEquals("Linux computer", DeviceCopy.displayName(null, "Linux · x86_64", true))
+        assertEquals("iPhone device", DeviceCopy.displayName("", "iPhone", false))
+        assertEquals("Unnamed device", DeviceCopy.displayName(null, null, true))
+        assertEquals("Awake now", DeviceCopy.statusLine(false, true, true, true, null))
+        assertEquals("Awake now", DeviceCopy.statusLine(true, false, false, false, null))
+        assertEquals("Asleep · last seen yesterday", DeviceCopy.statusLine(false, false, true, true, "yesterday"))
+        assertEquals("Asleep", DeviceCopy.statusLine(false, false, true, true, null))
+        assertEquals("Not set up for remote", DeviceCopy.statusLine(false, false, true, false, null))
+        assertEquals("Not set up for remote", DeviceCopy.statusLine(false, null, true, false, null))
+        assertEquals("Last seen yesterday", DeviceCopy.statusLine(false, false, false, false, "yesterday"))
+        assertEquals("Has not reported in yet", DeviceCopy.statusLine(false, null, false, false, null))
+        assertEquals("m_c982…872c", DeviceCopy.shortId("m_c9821234872c"))
+        assertEquals("short", DeviceCopy.shortId("short"))
+        assertEquals("This is the device you are holding.", DeviceCopy.reach(true, false, false))
+        assertEquals(true, DeviceCopy.reach(false, true, true).startsWith("Awake and reachable"))
+        assertEquals(true, DeviceCopy.reach(false, false, true).contains("Always-on host"))
+        assertEquals(true, DeviceCopy.reach(false, false, false).contains("Reach devices from anywhere"))
+    }
+
+    // LimitLogic — closest to full first, core thresholds for severity.
+    @Test
+    fun limitProvidersSortClosestToFullFirst() {
+        val rows = listOf("a" to 12.0, "b" to 91.0, "c" to 70.0)
+        val sorted = LimitLogic.closestToFullFirst(rows) { it.second }
+        assertEquals(listOf("b", "c", "a"), sorted.map { it.first })
+        assertEquals(LimitLogic.Severity.CRITICAL, LimitLogic.severityOf(null, 90.0))
+        assertEquals(LimitLogic.Severity.WARNING, LimitLogic.severityOf(null, 70.0))
+        assertEquals(LimitLogic.Severity.NORMAL, LimitLogic.severityOf(null, 69.9))
+        assertEquals(LimitLogic.Severity.CRITICAL, LimitLogic.severityOf("Critical", 3.0))
+        assertEquals(91.0, LimitLogic.peakPercent(listOf(12.0, 91.0)), 0.0)
+    }
+
+    // HostStatsFormat — missing readings stay missing, never zero.
+    @Test
+    fun statsReadingsMatchAppleWords() {
+        assertEquals("…", HostStatsFormat.powerLabel(false, null, null, false, false))
+        assertEquals("n/a", HostStatsFormat.powerLabel(false, null, null, true, false))
+        assertEquals("42%", HostStatsFormat.powerLabel(true, 42, "battery", false, true))
+        assertEquals("Plugged in", HostStatsFormat.powerLabel(false, null, "ac", false, true))
+        assertEquals("On battery", HostStatsFormat.powerLabel(false, null, "battery", false, true))
+        assertEquals("n/a", HostStatsFormat.powerLabel(false, null, null, false, true))
+        assertEquals("24 / 32 GB", HostStatsFormat.ramLabel(24L * 1024 * 1024 * 1024, 32L * 1024 * 1024 * 1024))
+        assertEquals("3.5 / 8.0 GB", HostStatsFormat.ramLabel((3.5 * 1024 * 1024 * 1024).toLong(), 8L * 1024 * 1024 * 1024))
+        assertEquals("42%", HostStatsFormat.cpuLabel(0.42))
     }
 
     // RunHistoryStrip trimming and summary.

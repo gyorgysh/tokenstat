@@ -35,6 +35,7 @@ data class ClientState(
     val account: JsonObject? = null,
     val home: JsonObject? = null,
     val limits: JsonArray = JsonArray(emptyList()),
+    val limitsError: String? = null,
     val insights: JsonElement? = null,
     val error: String? = null,
     val connection: ConnectionUi = ConnectionUi(),
@@ -115,9 +116,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { calendar.await() }.onSuccess {
             mutableState.value = mutableState.value.copy(home = (it as? JsonObject))
         }
-        runCatching { limits.await() }.onSuccess {
-            mutableState.value = mutableState.value.copy(limits = it as? JsonArray ?: JsonArray(emptyList()))
-        }
+        runCatching { limits.await() }
+            .onSuccess {
+                mutableState.value = mutableState.value.copy(
+                    limits = it as? JsonArray ?: JsonArray(emptyList()),
+                    limitsError = null,
+                )
+            }
+            .onFailure {
+                mutableState.value = mutableState.value.copy(limitsError = it.message)
+            }
         runCatching { report.await() }.onSuccess {
             mutableState.value = mutableState.value.copy(insights = it)
         }
