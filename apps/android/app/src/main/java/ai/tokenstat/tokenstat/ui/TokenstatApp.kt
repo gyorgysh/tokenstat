@@ -1941,7 +1941,7 @@ private fun AccountDialog(
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
     var paywall by remember { mutableStateOf(false) }
-    var notifyOn by remember { mutableStateOf(PushRegistrar.registered()) }
+    var notifyOn by remember { mutableStateOf(PushRegistrar.isOn()) }
     var notifyError by remember { mutableStateOf<String?>(null) }
     fun open(url: String) {
         runCatching { CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) }
@@ -1992,8 +1992,8 @@ private fun AccountDialog(
                     onCheckedChange = { on ->
                         scope.launch {
                             runCatching {
-                                if (on) PushRegistrar.refresh() else PushRegistrar.unregister()
-                            }.onSuccess { notifyOn = on; notifyError = null }
+                                if (on) PushRegistrar.enable() else PushRegistrar.disable()
+                            }.onSuccess { notifyOn = PushRegistrar.isOn(); notifyError = null }
                                 .onFailure { notifyError = it.message }
                         }
                     },
@@ -2003,7 +2003,13 @@ private fun AccountDialog(
                 TsSecondaryButton(
                     label = "Send a test",
                     small = true,
-                    onClick = { scope.launch { runCatching { PushRegistrar.test() }.onFailure { notifyError = it.message } } },
+                    onClick = {
+                        scope.launch {
+                            runCatching { PushRegistrar.test() }
+                                .onSuccess { notifyError = it }
+                                .onFailure { notifyError = it.message }
+                        }
+                    },
                 )
             }
             notifyError?.let { Text(it, color = colors.warning) }

@@ -34,6 +34,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+        // A notification tap carries the push reason plus the machine id and
+        // nothing else. The destination resolves after this refresh reads the
+        // directory, the way the Apple client's NotificationOpen waits for
+        // the dial: the id here is a key, not a screen.
         model.refresh()
     }
 }
