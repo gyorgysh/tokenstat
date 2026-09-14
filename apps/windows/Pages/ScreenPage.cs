@@ -89,7 +89,7 @@ internal sealed class ScreenPage : Page
 
     private string? _sessionId;
     private CancellationTokenSource? _poll;
-    private DispatcherQueueTimer? _heartbeat;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _heartbeat;
     private bool _closed;
     private int _reconnects;
     private DateTime _connectedSince;

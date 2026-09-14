@@ -65,7 +65,7 @@ internal sealed class TodoPage : Page
     private TextBox? _dBudget;
     private ComboBox? _dUnit;
     private CheckBox? _dNoLimit;
-    private DispatcherQueueTimer? _poll;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _poll;
 
     /// <summary>
     /// The user's unsent field values. Kept across a conflict reload so Save

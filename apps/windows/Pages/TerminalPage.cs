@@ -65,7 +65,7 @@ internal sealed class TerminalPage : Page
         FontFamily = Fonts.Mono,
     };
 
-    private readonly DispatcherQueueTimer _resizeTimer;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _resizeTimer;
     private bool _muted;
     private bool _loaded;
 
