@@ -18,11 +18,14 @@ namespace Tokenstat.Pages;
 internal sealed class AccountPage : Page
 {
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
-    private CancellationTokenSource? _poll;
+    private readonly StackPanel _signSlot = new() { Spacing = Theme.SpaceL };
+    private readonly StackPanel _content = new() { Spacing = Theme.SpaceL };
     private CancellationTokenSource? _pullPoll;
 
     public AccountPage()
     {
+        _root.Children.Add(_signSlot);
+        _root.Children.Add(_content);
         Content = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
@@ -31,7 +34,6 @@ internal sealed class AccountPage : Page
         Loaded += async (_, _) => await LoadAsync();
         Unloaded += (_, _) =>
         {
-            _poll?.Cancel();
             _pullPoll?.Cancel();
         };
         AppServices.Update.Changed += () =>
@@ -42,7 +44,7 @@ internal sealed class AccountPage : Page
 
     private async Task LoadAsync()
     {
-        _root.Children.Clear();
+        _content.Children.Clear();
         JsonNode account;
         try
         {
@@ -50,65 +52,283 @@ internal sealed class AccountPage : Page
         }
         catch (Exception ex)
         {
-            _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
-            _root.Children.Add(UpdateCard());
+            _content.Children.Add(Chrome.Banner(
+                FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+            _content.Children.Add(UpdateCard());
             return;
         }
 
         var signedIn = account["signedIn"]?.GetValue<bool>() ?? false;
         if (!signedIn)
         {
-            _root.Children.Add(Chrome.Empty(
-                "Not signed in",
-                "Link an account to sync aggregates and see every device.",
-                Symbol.Contact,
-                ActionIconGlyph.Button("Sign in", ActionIcon.SignIn, async (_, _) => await StartLoginAsync())));
+            _content.Children.Add(SignedOutCard());
         }
         else
         {
-            var handle = Format.Text(account, "handle", "");
-            var name = Format.Text(account, "displayName", handle);
-            var tier = Format.Text(account, "tier", "");
-            var body = new StackPanel { Spacing = Theme.SpaceS };
-            body.Children.Add(new TextBlock { Text = name, FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            if (!string.IsNullOrEmpty(handle))
-            {
-                body.Children.Add(new TextBlock { Text = "@" + handle, Opacity = 0.7 });
-            }
-            if (!string.IsNullOrEmpty(tier))
-            {
-                body.Children.Add(Chrome.TierBadge(tier));
-            }
-            body.Children.Add(ActionIconGlyph.Button("Sync", ActionIcon.Refresh, async (_, _) =>
-            {
-                try
-                {
-                    await AppServices.Host.CallAsync(
-                        "sync.run",
-                        new JsonObject(),
-                        TimeSpan.FromMinutes(5));
-                }
-                catch (Exception ex)
-                {
-                    _root.Children.Insert(0, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
-                    return;
-                }
-                await LoadAsync();
-            }));
-            body.Children.Add(ActionIconGlyph.Button("Sign out", ActionIcon.SignOut, async (_, _) =>
-            {
-                try { await AppServices.Host.CallAsync("account.logout"); }
-                catch { /* stay on the page */ }
-                await LoadAsync();
-            }));
-            _root.Children.Add(Chrome.Card("Account", body));
-            _root.Children.Add(RelayUsageCard(account));
+            _content.Children.Add(IdentityCard(account));
+            _content.Children.Add(SyncCard(account));
+            _content.Children.Add(DevicesSummaryCard(account));
+            _content.Children.Add(await PlanLimitsCardAsync());
+            _content.Children.Add(RelayUsageCard(account));
         }
 
-        _root.Children.Add(await LocalTrafficCardAsync());
-        _root.Children.Add(await PullConnectionCardAsync());
-        _root.Children.Add(UpdateCard());
-        _root.Children.Add(AboutBlurb());
+        _content.Children.Add(await LocalTrafficCardAsync());
+        _content.Children.Add(await PullConnectionCardAsync());
+        _content.Children.Add(UpdateCard());
+        _content.Children.Add(PrivacyNote());
+        _content.Children.Add(AboutBlurb());
+    }
+
+    /// <summary>
+    /// Everything works without an account. Signing in only adds the option
+    /// to publish: a profile page, and usage from all machines in one place.
+    /// </summary>
+    private UIElement SignedOutCard()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        body.Children.Add(new TextBlock
+        {
+            Text = "An account lets you publish a profile page and see usage from "
+                + "all your machines in one place. Only aggregate counters are "
+                + "eligible to be sent.",
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        body.Children.Add(ActionIconGlyph.PrimaryButton(
+            "Sign in to tokenstat.ai", ActionIcon.SignIn,
+            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, LoadAsync)));
+        return Chrome.Card(
+            "Not signed in",
+            body,
+            "Everything works without an account. Signing in only adds the option to publish.");
+    }
+
+    /// <summary>Who you are, at the size a profile deserves.</summary>
+    private static UIElement IdentityCard(JsonNode account)
+    {
+        var handle = Format.Text(account, "handle", "");
+        var name = Format.Text(account, "displayName", handle);
+        if (string.IsNullOrEmpty(name))
+        {
+            name = "Signed in";
+        }
+        var tier = Format.Text(account, "tier", "");
+        var host = Format.Text(account, "host");
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        nameRow.Children.Add(new TextBlock
+        {
+            Text = name,
+            FontSize = 22,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        if (!string.IsNullOrEmpty(tier))
+        {
+            nameRow.Children.Add(Chrome.TierBadge(tier));
+        }
+        body.Children.Add(nameRow);
+        if (!string.IsNullOrEmpty(handle))
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "@" + handle,
+                Opacity = 0.7,
+                IsTextSelectionEnabled = true,
+            });
+        }
+        if (!string.IsNullOrEmpty(host))
+        {
+            body.Children.Add(new TextBlock { Text = host, Opacity = 0.55, FontSize = 12 });
+        }
+        return Chrome.Card("Account", body);
+    }
+
+    /// <summary>
+    /// Sync is a desktop act: it uploads this PC's archive. Last sync, a
+    /// button, and the way out.
+    /// </summary>
+    private UIElement SyncCard(JsonNode account)
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
+        var last = Format.Text(account, "lastSyncAt");
+        row.Children.Add(new TextBlock { Text = "Last sync", Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(new TextBlock
+        {
+            Text = string.IsNullOrEmpty(last) ? "Never" : Format.Relative(last),
+            FontFamily = Fonts.Mono,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        row.Children.Add(ActionIconGlyph.Button("Sync now", ActionIcon.Refresh, async (_, _) =>
+        {
+            try
+            {
+                await AppServices.Host.CallAsync(
+                    "sync.run",
+                    new JsonObject(),
+                    TimeSpan.FromMinutes(5));
+            }
+            catch (Exception ex)
+            {
+                _content.Children.Insert(0, Chrome.Banner(
+                    FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+                return;
+            }
+            await LoadAsync();
+        }));
+        body.Children.Add(row);
+        body.Children.Add(ActionIconGlyph.Button("Sign out", ActionIcon.SignOut, async (_, _) =>
+        {
+            try { await AppServices.Host.CallAsync("account.logout"); }
+            catch { /* stay on the page */ }
+            await LoadAsync();
+        }));
+        return Chrome.Card("Sync", body, "Only aggregate counters are eligible");
+    }
+
+    private static UIElement DevicesSummaryCard(JsonNode account)
+    {
+        var machines = account["machines"] as JsonArray;
+        var used = machines?.Count ?? 0;
+        var limitNode = account["machineLimit"];
+        var subtitle = "Every device that has synced to this account";
+        if (machines is not null && used > 0)
+        {
+            if (limitNode is not null)
+            {
+                subtitle = $"{used} of {Format.Long(account, "machineLimit")} devices";
+                if (!(account["canRemote"]?.GetValue<bool>() ?? true))
+                {
+                    subtitle += ". No remote control on this plan.";
+                }
+            }
+            else
+            {
+                subtitle = $"{used} linked";
+            }
+        }
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(new TextBlock
+        {
+            Text = used == 0
+                ? "Nothing linked yet. Sync now to put this PC on the account."
+                : "Rename, reach, or remove a device on the Devices page.",
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        return Chrome.Card("Devices", body, subtitle);
+    }
+
+    /// <summary>
+    /// Opt-in posting of vendor quota windows. The master switch is the
+    /// privacy gate, off by default: percentages and reset times only, never
+    /// a credential.
+    /// </summary>
+    private async Task<UIElement> PlanLimitsCardAsync()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        var enabled = false;
+        var providers = new List<(string Source, string Detail)>();
+        try
+        {
+            var state = await AppServices.Host.CallAsync(
+                "config.limitsSync", new JsonObject());
+            enabled = state["enabled"]?.GetValue<bool>() ?? false;
+            if (state["providers"] is JsonArray list)
+            {
+                foreach (var provider in list)
+                {
+                    var source = Format.Text(provider, "source", "Plan");
+                    var plan = Format.Text(provider, "plan");
+                    var note = Format.Text(provider, "note");
+                    var detail = string.IsNullOrEmpty(plan) ? note : plan;
+                    providers.Add((source, detail));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            body.Children.Add(Chrome.Banner(
+                FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
+            return Chrome.Card("Plan limits", body);
+        }
+        body.Children.Add(new TextBlock
+        {
+            Text = "Posts how full each window is, so your other devices can show "
+                + "what is left while this PC is asleep. Percentages and reset "
+                + "times only, never a credential. Turning a vendor off below "
+                + "also stops tracking it on this PC.",
+            Opacity = 0.7,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var isOn = enabled;
+        body.Children.Add(Chrome.ToggleChip("Share with my devices", isOn, async on =>
+        {
+            try
+            {
+                await AppServices.Host.CallAsync(
+                    "config.limitsSync",
+                    new JsonObject { ["enabled"] = on });
+            }
+            catch (Exception ex)
+            {
+                _content.Children.Insert(0, Chrome.Banner(
+                    FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
+                return;
+            }
+            await LoadAsync();
+        }));
+        if (providers.Count == 0)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "No readings yet. Open Home, or wait for the hourly pass, then come back.",
+                Opacity = 0.7,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        else
+        {
+            foreach (var (source, detail) in providers)
+            {
+                var row = new StackPanel { Spacing = 2 };
+                row.Children.Add(new TextBlock { Text = source });
+                if (!string.IsNullOrEmpty(detail))
+                {
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = detail,
+                        Opacity = 0.7,
+                        FontSize = 12,
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                }
+                body.Children.Add(row);
+            }
+        }
+        return Chrome.Card(
+            "Plan limits",
+            body,
+            "Track vendor quota windows. Off means this PC does not read that vendor and does not show it on Home.");
+    }
+
+    /// <summary>
+    /// The claim, stated where someone is deciding whether to connect an
+    /// account. This is the moment it matters.
+    /// </summary>
+    private static UIElement PrivacyNote()
+    {
+        return Chrome.Card("What syncing sends", new TextBlock
+        {
+            Text = "Aggregate counts per day, tool and model, and project names replaced "
+                + "by salted hashes. Prompts, replies, file contents, file paths and "
+                + "session ids are never eligible.",
+            Opacity = 0.7,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        });
     }
 
     private UIElement RelayUsageCard(JsonNode? account)
@@ -283,7 +503,7 @@ internal sealed class AccountPage : Page
         }
         catch (Exception ex)
         {
-            body.Children.Add(Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
+            body.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
         }
         body.Children.Add(ActionIconGlyph.Button("Refresh traffic", ActionIcon.Refresh, async (_, _) => await LoadAsync()));
         return Chrome.Card("This device", body, "How connections leave this machine");
@@ -373,7 +593,7 @@ internal sealed class AccountPage : Page
                     }
                     catch (Exception ex)
                     {
-                        _root.Children.Insert(0, Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
+                        _content.Children.Insert(0, Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
                     }
                 }));
             }
@@ -386,7 +606,7 @@ internal sealed class AccountPage : Page
         {
             return Chrome.Card(
                 "GitHub pull requests",
-                Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important),
+                Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important),
                 "The connection could not be checked");
         }
     }
@@ -489,7 +709,7 @@ internal sealed class AccountPage : Page
         }
         catch (Exception ex)
         {
-            _root.Children.Insert(0, Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
+            _content.Children.Insert(0, Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
         }
     }
 
@@ -539,55 +759,6 @@ internal sealed class AccountPage : Page
         body.Children.Add(new TextBlock { Text = AppInfo.Copyright, Opacity = 0.8 });
         body.Children.Add(ActionIconGlyph.Button(AppInfo.WebsiteLabel, ActionIcon.External, (_, _) => Open(AppInfo.Website)));
         return Chrome.Card("tokenstat", body, AppInfo.Company);
-    }
-
-    private async Task StartLoginAsync()
-    {
-        _poll?.Cancel();
-        JsonNode started;
-        try
-        {
-            started = await AppServices.Host.CallAsync("account.deviceStart");
-        }
-        catch (Exception ex)
-        {
-            _root.Children.Insert(0, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
-            return;
-        }
-        var url = Format.Text(started, "openUrl");
-        var code = Format.Text(started, "userCode");
-        if (!string.IsNullOrEmpty(url))
-        {
-            Open(url);
-        }
-        _root.Children.Insert(0, Chrome.Banner(
-            string.IsNullOrEmpty(code) ? "Complete sign-in in the browser." : $"Enter code {code} if the browser did not fill it.",
-            Theme.Accent,
-            Symbol.Contact));
-        _poll = new CancellationTokenSource();
-        var token = _poll.Token;
-        _ = Task.Run(async () =>
-        {
-            while (!token.IsCancellationRequested)
-            {
-                try
-                {
-                    var poll = await AppServices.Host.CallAsync("account.devicePoll");
-                    var state = Format.Text(poll, "state");
-                    if (state == "confirmed")
-                    {
-                        DispatcherQueue.TryEnqueue(() => _ = LoadAsync());
-                        return;
-                    }
-                    var interval = Format.Long(poll, "interval");
-                    await Task.Delay(TimeSpan.FromSeconds(interval > 0 ? interval : 5), token);
-                }
-                catch
-                {
-                    return;
-                }
-            }
-        }, token);
     }
 
     private static void Open(string url)
