@@ -203,13 +203,14 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
     var pendingLogin by remember { mutableStateOf(false) }
     var loginError by remember { mutableStateOf<String?>(null) }
     val colors = LocalTsColors.current
+    val reduceMotion = rememberReduceMotion()
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // The mark rising once and landing: an intro page, not a spinner.
-        LogoMark(size = 44, animated = true, loops = false)
+        LogoMark(size = 44, animated = !reduceMotion, loops = false)
         Spacer(Modifier.height(Space.s))
         Wordmark(size = 22, showsMark = false)
         Spacer(Modifier.height(12.dp))

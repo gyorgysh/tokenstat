@@ -2,9 +2,13 @@
 package ai.tokenstat.tokenstat.ui.components
 
 import ai.tokenstat.tokenstat.ui.marks.SLOT_GAUGE_MAX_TILES
+import ai.tokenstat.tokenstat.ui.marks.TierKind
+import ai.tokenstat.tokenstat.ui.marks.avatarSlot
 import ai.tokenstat.tokenstat.ui.marks.countdownFraction
+import ai.tokenstat.tokenstat.ui.marks.scheduleFires
 import ai.tokenstat.tokenstat.ui.marks.slotGaugeDrawn
 import ai.tokenstat.tokenstat.ui.marks.slotGaugeLabel
+import ai.tokenstat.tokenstat.ui.marks.tierKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -94,5 +98,48 @@ class SharedComponentsTest {
         assertEquals(false, saveBarShowsActions(FieldSaveState.Saving))
         assertEquals(false, saveBarShowsActions(FieldSaveState.Saved))
         assertEquals(true, saveBarShowsActions(FieldSaveState.Failed))
+    }
+
+    @Test
+    fun tierKindsMatchAppleBadges() {
+        assertEquals(TierKind.Crown, tierKind("legend"))
+        assertEquals(TierKind.Crown, tierKind("Legend"))
+        assertEquals(TierKind.Shield, tierKind("patron"))
+        assertEquals(TierKind.Star, tierKind("supporter"))
+        assertEquals(TierKind.None, tierKind("free"))
+        assertEquals(TierKind.None, tierKind(""))
+        assertEquals(TierKind.Seal, tierKind("enterprise"))
+    }
+
+    @Test
+    fun avatarSlotsAreStableAcrossCase() {
+        // djb2("ada") mod 5: the same seat on both platforms.
+        assertEquals(2, avatarSlot("Ada", 5))
+        assertEquals(2, avatarSlot("ADA", 5))
+        assertEquals(2, avatarSlot("ada", 5))
+        for (name in listOf("Ada", "bob smith", "Zoe", "?")) {
+            val slot = avatarSlot(name, 5)
+            assertEquals(true, slot in 0 until 5)
+        }
+    }
+
+    @Test
+    fun scheduleRingFiresLikeApple() {
+        for (day in 0 until 7) {
+            assertEquals(true, scheduleFires("daily", 0, 0, day))
+        }
+        for (day in 0 until 7) {
+            assertEquals(day < 5, scheduleFires("weekdays", 0, 0, day))
+        }
+        // Weekly prefers the bitset when it carries days.
+        assertEquals(true, scheduleFires("weekly", 0b00011111, 6, 0))
+        assertEquals(false, scheduleFires("weekly", 0b00011111, 6, 5))
+        // Zero bitset falls back to the single weekday.
+        assertEquals(true, scheduleFires("weekly", 0, 2, 2))
+        assertEquals(false, scheduleFires("weekly", 0, 2, 3))
+        assertEquals(true, scheduleFires("custom", 0b00001010, 0, 1))
+        assertEquals(false, scheduleFires("custom", 0b00001010, 0, 2))
+        assertEquals(false, scheduleFires("once", 0, 0, 0))
+        assertEquals(false, scheduleFires("interval", 0, 0, 0))
     }
 }

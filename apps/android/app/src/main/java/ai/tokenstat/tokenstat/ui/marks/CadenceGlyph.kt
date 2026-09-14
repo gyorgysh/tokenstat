@@ -3,36 +3,89 @@ package ai.tokenstat.tokenstat.ui.marks
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
-/// Compact clock from `CadenceGlyph.swift`: a ring and a hand, not a sentence.
-@Composable
-fun CadenceGlyph(cadence: String, modifier: Modifier = Modifier) {
-    val colors = LocalTsColors.current
-    val angle = when {
-        cadence.contains("hour", ignoreCase = true) -> 90f
-        cadence.contains("day", ignoreCase = true) -> 180f
-        cadence.contains("week", ignoreCase = true) -> 240f
-        else -> 45f
+/// Whether a weekday dot fires, with Monday as day 0, matching the host
+/// `weekdays` bitset and Apple's `CadenceGlyph.fires`. Weekly prefers the
+/// bitset when it carries days and falls back to the single `weekday`, the
+/// same choice the schedule summary makes, so the ring cannot contradict it.
+fun scheduleFires(kind: String, weekdays: Int, weekday: Int, day: Int): Boolean =
+    when (kind.lowercase()) {
+        "daily" -> true
+        "weekdays" -> day < 5
+        "weekly" ->
+            if (weekdays and 0x7F != 0) weekdays and (1 shl day) != 0
+            else day == weekday
+        "custom" -> weekdays and (1 shl day) != 0
+        else -> false
     }
-    Canvas(modifier.size(18.dp)) {
-        val stroke = Stroke(width = 2.4f, cap = StrokeCap.Round)
-        val c = Offset(size.width / 2f, size.height / 2f)
-        val r = size.minDimension / 2f - 2f
-        drawCircle(colors.border, r, c, style = stroke)
-        val rad = Math.toRadians((angle - 90).toDouble())
-        drawLine(
-            colors.accent,
-            c,
-            Offset(c.x + (r * 0.62f * kotlin.math.cos(rad)).toFloat(), c.y + (r * 0.62f * kotlin.math.sin(rad)).toFloat()),
-            strokeWidth = 2.4f,
-            cap = StrokeCap.Round,
+
+/// A schedule as a shape rather than a sentence, from `CadenceGlyph.swift`.
+/// Seven dots around a ring, Monday at the top running clockwise, the live
+/// ones filled. A paused job draws in the idle tint: it still has a rhythm,
+/// it just is not keeping it. Once and interval jobs are symbols, not rings.
+@Composable
+fun CadenceGlyph(
+    kind: String,
+    weekdays: Int = 0,
+    weekday: Int = 0,
+    enabled: Boolean = true,
+    summary: String = "",
+    glyphSize: Int = 22,
+) {
+    val colors = LocalTsColors.current
+    val tint = if (enabled) colors.accent else colors.stateIdle
+    val label = summary.ifBlank { kind.ifBlank { "schedule" } }
+    when (kind.lowercase()) {
+        "once" -> Icon(
+            Icons.Default.PlayArrow,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(glyphSize.dp),
         )
+        "interval" -> Icon(
+            Icons.Default.Refresh,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(glyphSize.dp),
+        )
+        else -> Canvas(
+            Modifier
+                .size(glyphSize.dp)
+                .semantics { contentDescription = label },
+        ) {
+            val side = size.minDimension
+            val dot = maxOf(3f, side * 0.19f)
+            val radius = (side - dot) / 2f
+            val center = Offset(size.width / 2f, size.height / 2f)
+            drawCircle(colors.border, radius, center, style = Stroke(width = 1.dp.toPx()))
+            for (day in 0 until 7) {
+                val angle = day / 7f * 2f * PI.toFloat()
+                val at = Offset(
+                    center.x + radius * sin(angle),
+                    center.y - radius * cos(angle),
+                )
+                drawCircle(
+                    if (scheduleFires(kind, weekdays, weekday, day)) tint
+                    else colors.stateIdle.copy(alpha = 0.28f),
+                    dot / 2f,
+                    at,
+                )
+            }
+        }
     }
 }

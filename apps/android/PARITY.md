@@ -43,15 +43,15 @@ tests in `PortedLogicTest.kt`.
 | `AccentButtonStyle` / `SecondaryButtonStyle` | `TsAccentButton` / `TsSecondaryButton` (pressed fills/strokes ported) | done |
 | `SegmentedCapsulePicker` | `SegmentedCapsulePicker` | done |
 | `TransientToast` | `TransientToast` (slide-from-trailing + fade, snappy 250ms) | done |
-| `Skeleton.Bar/Rows/CardPlaceholder` + phase-staggered pulse (0.95s autoreverse) | `components/Skeleton.kt` (infiniteTransition, StartOffset phases) | done |
+| `Skeleton.Bar/Rows/CardPlaceholder` + phase-staggered pulse (0.95s autoreverse) | `components/Skeleton.kt` (infiniteTransition, StartOffset phases; static full-strength bar under Reduce Motion) | done |
 | `smoothIn` content arrival (opacity + 4pt rise; fade under Reduce Motion) | `theme/smoothEnter` + `Arrive` wrapper | done |
 | Reduce Motion | `rememberReduceMotion()` (animator duration scale == 0) | done |
-| `Marks.swift`: LogoMark bars (rise loop 0.62s staggered 0.14s, refresh pulse), Wordmark (`token` + accent `stat`), Avatar | `marks/Marks.kt`; Wordmark splits the accent the same way; LogoMark one-shot lands over 1.2s | done |
-| App icon (three bars on dark paper) | Adaptive `mipmap/ic_launcher` + `drawable/app_icon.xml` from `store/play-icon.svg`; notification glyph is the bars, not a T | done |
+| `Marks.swift`: LogoMark bars (rise loop 0.62s staggered 0.14s, one-shot 1.2s staggered 0.15s, refresh pulse 0.26s staggered 0.07s with 0.35 dip), Wordmark (`token` + accent `stat`), Avatar, TierMark | `marks/Marks.kt` (loop/one-shot/pulse timings verified; loops land static under Reduce Motion; listener unsubscribes), Wordmark splits the accent the same way; Avatar uses djb2 over the heat-minus-greys plus warning/danger ramp with the vertical tint gradient; `marks/TierMark.kt` transcribes the exact 24-unit crown/star/shield paths with the 8B5CF6 to C026D3 gradient, free renders nothing, unknown renders the seal | done (source verified; on-device rendering is an open device check) |
+| App icon (three bars on dark paper) | Adaptive `mipmap/ic_launcher` + `drawable/app_icon.xml` from `store/play-icon.svg`; notification glyph is the bars, not a T; launch `windowBackground` is Theme paper in light and night; splash is paper with the looping LogoMark rise plus Wordmark, no skeleton or spinner on the first frame | done in source (install icon, splash frame, and notification rendering need a physical device) |
 | `RelativeTimeText.swift` single shared 15s tick | `components/RelativeTime.kt` `RelativeTick` + `RelativeTimeText` over `RelativeClock.label`; chat event times tick | done |
 | `MiniGraph`, `WorkflowStepStrip`, layering | step-capsule FlowRow reading of workflows (`workspace/WorkspaceSections.kt`) | simplified |
 | `RunVisuals` outcome tints, RunHistoryStrip, DurationBar | `marks/RunVisuals.kt`: `RunOutcome`, `RunHistoryStrip` (8 slots), `DurationBar` | done |
-| `CadenceGlyph`, `CountdownRing`, `NextRunBadge`, `SlotGauge` | `marks/CadenceGlyph.kt` (ring + hand) + `marks/RunGauges.kt` (fraction math, 12-tile bound, No cap words) | done |
+| `CadenceGlyph`, `CountdownRing`, `NextRunBadge`, `SlotGauge` | `marks/CadenceGlyph.kt` (seven-dot week ring from the host `schedule` struct with Monday on top, idle tint when paused, play/refresh symbols for once/interval; pinned by `scheduleRingFiresLikeApple`) + `marks/RunGauges.kt` (fraction math, 12-tile bound, No cap words) | done (source verified; automation rows previously read a `cadence` key the host never sends, so no glyph ever rendered) |
 | `FriendlyError.swift` translation table | `logic/TsLogic.kt` `friendlyError` (full table, same order and copy) | done |
 | `HistoryLockBanner` | `TokenstatApp.HistoryLockBanner` (same copy, opens pricing) | done |
 | `ActionIcon` (77 glyphs) | `components/ActionIcon.kt` enum, same case names, Material mapping | done |
@@ -64,7 +64,7 @@ tests in `PortedLogicTest.kt`.
 
 | Apple screen | Android counterpart | Motion parity |
 | --- | --- | --- |
-| Onboarding (10 pages) + art | `auth/Onboarding.kt` + `OnboardingArt.kt` scenes | heatmap wave, spend springs, sessions typewriter, privacy lock; Reduce Motion lands on last frame |
+| Onboarding (10 pages) + art | `auth/Onboarding.kt` + `OnboardingArt.kt` scenes | heatmap wave 2.8s landing on 0.35, spend spring 0.7/0.78 staggered 0.1s, remaining sweep gradient with easeOut 0.9s, sessions typewriter 280ms with easeOut 0.2s reveal, device tiles spring 0.55/0.78, privacy lock spring 0.55/0.7 closing after 280ms, control rows spring 0.5/0.84 staggered 0.08s; every scene lands on its last frame under Reduce Motion. Gaps: no Agents scene (Apple has one; Android flow has no agents page), Intro keeps the mark-plus-wordmark lockup rather than Apple's tiles, Devices labels read Mac/Tablet/Phone, progress is a single fill bar rather than per-page capsules | done with noted gaps |
 | Login | LogoMark rise-and-land, Wordmark, `TsAccentButton` / `TsSecondaryButton` | done |
 | Root chrome (avatar leading, wordmark centre) | Themed TopAppBar / NavigationBar from `TsColors` including light; door fade 280ms | done |
 | DevicesView (rows, awake dot, detail) | `TsCard` rows; online dot is accent (`success`), not green | done |

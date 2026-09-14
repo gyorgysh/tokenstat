@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -77,6 +78,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
@@ -636,7 +638,13 @@ private fun AutomationsSection(
             val colors = LocalTsColors.current
             val enabled = automation.bol("enabled")
             val id = automation.str("id") ?: return@itemsIndexed
-            val cadence = automation.str("cadence").orEmpty()
+            // The host sends the structured schedule from `ScheduleSpec`
+            // (kind, weekday, weekdays); the ring reads those, like Apple's
+            // `CadenceGlyph`, rather than a summary string the host never sends.
+            val schedule = automation["schedule"] as? JsonObject
+            val scheduleKind = schedule?.str("kind").orEmpty()
+            val scheduleWeekday = schedule?.get("weekdays")?.jsonPrimitive?.intOrNull ?: 0
+            val scheduleDay = schedule?.get("weekday")?.jsonPrimitive?.intOrNull ?: 0
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -646,6 +654,15 @@ private fun AutomationsSection(
                 verticalArrangement = Arrangement.spacedBy(Space.xs),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (schedule != null) {
+                        CadenceGlyph(
+                            kind = scheduleKind,
+                            weekdays = scheduleWeekday,
+                            weekday = scheduleDay,
+                            enabled = enabled,
+                        )
+                        Spacer(Modifier.width(Space.s))
+                    }
                     Text(
                         automation.str("label") ?: automation.str("name") ?: "Automation",
                         style = TextStyle(fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
@@ -675,12 +692,6 @@ private fun AutomationsSection(
                             style = TextStyle(fontSize = 9.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
                             color = if (enabled) colors.accent else colors.controlGlyph,
                         )
-                    }
-                }
-                if (cadence.isNotBlank()) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        CadenceGlyph(cadence)
-                        Text(cadence, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
                     }
                 }
                 TsAccentButton(
