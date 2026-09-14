@@ -23,12 +23,12 @@ and severity, stats readings) is pinned by unit tests in `PortedLogicTest.kt`.
 | Device and remote workspace directory | built | built | built |
 | Sessions, changes, tasks, notes | built | built | built (real renderers; diff/tasks/notes/actions wired) |
 | Workflows, automations, files | built | built | built (run/stop, enable, tree drill, file edit) |
-| Interactive terminal emulator | built | built | built (xterm.js WebView over pty.*; accessory key row) |
-| Port-forwarded browser | built | built | built (`proxy.listen` + WebView) |
+| Interactive terminal emulator | built | built | built (xterm.js WebView over pty.*; nextOffset resume with backoff and liveness, dropped/paused banners, TerminalPalette and JetBrains Mono, selection copy, Close/Done) |
+| Port-forwarded browser | built | built | built (`proxy.listen` + WebView; address bar, reload, URL policy, unlisten on leave) |
 | Store subscription activation | Apple + Google built | built | built; custom pitch wraps Play Billing |
 | Push registration and delivery | built | built | built; FCM configuration required |
-| SSH connect + key import | built | built | built (password/key, generate/import) |
-| Screen viewer (Legend) | built | built | built (JPEG blit; H.264 status) |
+| SSH connect + key import | built | built | built (password/key, generate/import; live session with Done/End, snippets, vault; no session tabs or suggest palette) |
+| Screen viewer (Legend) | built | built | built (MediaCodec H.264 with JPEG fallback, touch input, control flip, heartbeat, reconnect, viewing notice; no keyboard row, display picker, clipboard sync, audio, or quality switch in control mode) |
 
 ## Component map (Apple → Android)
 
@@ -85,8 +85,8 @@ and severity, stats readings) is pinned by unit tests in `PortedLogicTest.kt`.
 | PhoneHeatmap (fixed cell, scroll-to-latest-week, month marks, locked alpha, press focus) + DayDetailSheet | `heatmap/Heatmap.kt` YearHeatmap (Canvas, pointer press-focus ring, tap sheet) | done |
 | InsightsView (Models/Tools/Days cuts, search) | rebuilt with SegmentedCapsulePicker, search, accent share bars animating in | done |
 | Workspace sections (Sessions list, Changes w/ DiffView, Tasks composer/archive, Notes, Workflows board, Automations, Files tree) | `workspace/WorkspaceSections.kt` + `WorkspaceFiles.kt` (per-type icons, breadcrumb drill, single-file editor with return context) + `WorkspaceNotes.kt` (quick capture, search, newest/A-Z sort, archive toggle, optimistic rows, edit sheet, delete confirm, make-a-task) + `WorkspaceChanges.kt` (local selection with counts, review composer, Review All, branch switch) + `WorkspaceCommitState.kt` (P1 submit/check/retry, draft preservation) + `WorkspaceCommit.kt` (composer, push with upstream tracking, review-all dialog) + `WorkspaceHistory.kt` (log, commit detail) + `WorkspaceAutoCommit.kt` (agent auto commit over automation.*) + `WorkspaceTaskResult.kt` (Changes/History links) + `ChatPullsSections.kt` (chat by event kind with approvals, attachments, setup/personas, confirmed send; pulls availability, scope/state filters, detail); pure rules in `ui/logic/WorkspaceLogic.kt` pinned by `WorkspaceLogicTest` | run/stop, file edit, browser |
-| TerminalSession + accessory keys | `terminal/TerminalScreen.kt` + bundled xterm.js WebView, pty spawn/read/write/resize/detach, long-poll loop, accessory key row | done |
+| TerminalSession + accessory keys | `terminal/TerminalScreen.kt` + bundled xterm.js WebView, pty spawn/read/write/resize/detach/close, long-poll loop with backoff and liveness, dropped/paused/transport banners, TerminalPalette theme plus JetBrains Mono, selection copy, accessory key row with snippets leading slot | done |
 | AccountSheet (tier badge, products, sign out) | AccountDialog: TierMark, notify toggle ("or a chat" copy), Sync privacy card, legal URLs, "Delete on website…" with the permanence copy, PaywallSheet | done |
 | Paywall (gradient tier marks, tier-switch spring) | `billing/PaywallSheet.kt` wraps Play Billing; feats and summaries match `ClientStore` word-for-word with relay allowances as Apple captions; "Your current plan" marker; Play renew note (Google Play wording where Apple says App Store) | done (no spring; no trial, Play trial state is not exposed) |
-| WebBrowser sheet (progress bar animation) | `browser/PortBrowser.kt` | progress bar |
+| WebBrowser sheet (progress bar animation) | `browser/PortBrowser.kt` + `BrowserPolicy.kt` (Apple allows-table port, pinned by tests): address bar, reload, load errors, progress bar, unlisten on leave | done |
 | ConnectionChip | `chrome/ConnectionChip.kt` in the top bar | done |

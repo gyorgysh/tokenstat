@@ -10,6 +10,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -264,6 +265,10 @@ private fun bridgeSubtitle(bridge: TerminalBridge): String {
 }
 
 /// An SSH session on this phone: same xterm surface, local `ssh.session.*`.
+///
+/// Done leaves the session running on the server, End session stops it,
+/// with the same confirm the Apple screen asks. A session that has ended
+/// keeps its last screenful and says so.
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -271,6 +276,7 @@ fun SshTerminalScreen(
     model: AppViewModel,
     sessionId: String,
     hostLabel: String,
+    snippets: kotlinx.serialization.json.JsonArray = kotlinx.serialization.json.JsonArray(emptyList()),
     onClose: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -281,17 +287,58 @@ fun SshTerminalScreen(
             it.onCopy = { text -> copyToClipboard(context, text) }
         }
     }
+    var tick by remember { mutableIntStateOf(0) }
+    bridge.onProgress = { tick++ }
+    var confirmEnd by remember { mutableStateOf(false) }
+    var filling by remember { mutableStateOf<JsonObject?>(null) }
+
+    fun runSnippet(item: JsonObject) {
+        val command = (item["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return
+        if (ai.tokenstat.tokenstat.ui.ssh.SnippetRun.placeholders(command).isEmpty()) {
+            bridge.sendBytes(ai.tokenstat.tokenstat.ui.ssh.SnippetRun.runBytes(command))
+        } else {
+            filling = item
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text(hostLabel) },
+            title = {
+                key(tick) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(hostLabel)
+                        if (bridge.ended) {
+                            Text(
+                                "ended",
+                                color = LocalTsColors.current.textSecondary,
+                                modifier = Modifier.padding(start = Space.s),
+                            )
+                        }
+                    }
+                }
+            },
             navigationIcon = {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             },
+            actions = {
+                TextButton(onClick = { confirmEnd = true }) { Text("End session") }
+                // Done leaves it running, which is why it is not Close.
+                TextButton(onClick = onClose) { Text("Done") }
+            },
         )
+        key(tick) {
+            bridge.transportError?.let { error ->
+                Text(
+                    error,
+                    color = LocalTsColors.current.danger,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s),
+                )
+            }
+        }
         AndroidView(
             modifier = Modifier.weight(1f).fillMaxSize(),
-            factory = { context ->
-                WebView(context).apply {
+            factory = { ctx ->
+                WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
@@ -311,9 +358,12 @@ fun SshTerminalScreen(
             },
             onRelease = { view ->
                 bridge.alive = false
-                scope.launch {
-                    runCatching {
-                        model.core("ssh.session.close", buildJsonObject { put("id", sessionId) })
+                // Done only stops watching. Only an ended session closes.
+                if (bridge.killed) {
+                    scope.launch {
+                        runCatching {
+                            model.core("ssh.session.close", buildJsonObject { put("id", sessionId) })
+                        }
                     }
                 }
                 view.removeJavascriptInterface("TermBridge")
@@ -324,8 +374,132 @@ fun SshTerminalScreen(
             onSend = { bytes -> bridge.sendBytes(bytes) },
             onToggleKeyboard = { bridge.toggleKeyboard() },
             onScrolls = { bridge.setScrolls(it) },
+            leading = {
+                if (snippets.isNotEmpty()) {
+                    SnippetKey(snippets, onRun = ::runSnippet)
+                }
+            },
         )
     }
+    if (confirmEnd) {
+        AlertDialog(
+            onDismissRequest = { confirmEnd = false },
+            title = { Text("End this session?") },
+            text = { Text("Whatever is running in it stops. Nothing else on the server changes.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmEnd = false
+                    scope.launch {
+                        runCatching {
+                            model.core("ssh.session.close", buildJsonObject { put("id", sessionId) })
+                        }
+                        bridge.killed = true
+                        onClose()
+                    }
+                }) { Text("End session") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmEnd = false }) { Text("Cancel") }
+            },
+        )
+    }
+    filling?.let { item ->
+        SnippetFillSheet(
+            item = item,
+            onDismiss = { filling = null },
+            onRun = { command ->
+                filling = null
+                bridge.sendBytes(ai.tokenstat.tokenstat.ui.ssh.SnippetRun.runBytes(command))
+            },
+        )
+    }
+}
+
+/// Saved commands as one key. Nothing when there is nothing to offer,
+/// because a menu that opens on an empty list is a key that does nothing.
+@Composable
+private fun SnippetKey(
+    snippets: kotlinx.serialization.json.JsonArray,
+    onRun: (JsonObject) -> Unit,
+) {
+    val colors = LocalTsColors.current
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Text(
+            "snip",
+            style = TextStyle(fontSize = 13.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+            color = colors.textPrimary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .padding(end = 6.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(colors.panel)
+                .clickable { open = true }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+        androidx.compose.material3.DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+        ) {
+            snippets.filterIsInstance<JsonObject>().forEach { item ->
+                val title = (item["title"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                    ?: (item["label"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                    ?: "Snippet"
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(title) },
+                    onClick = {
+                        open = false
+                        onRun(item)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/// Fill in a snippet's placeholders before it is typed into the terminal.
+/// Values are asked for every time and never stored.
+@Composable
+private fun SnippetFillSheet(
+    item: JsonObject,
+    onDismiss: () -> Unit,
+    onRun: (String) -> Unit,
+) {
+    val command = (item["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+    val names = remember(command) { ai.tokenstat.tokenstat.ui.ssh.SnippetRun.placeholders(command) }
+    val values = remember(command) { mutableMapOf<String, String>().apply { names.forEach { put(it, "") } } }
+    var tick by remember { mutableIntStateOf(0) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                (item["title"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "Run snippet",
+            )
+        },
+        text = {
+            key(tick) {
+                Column {
+                    names.forEach { name ->
+                        androidx.compose.material3.OutlinedTextField(
+                            value = values[name].orEmpty(),
+                            onValueChange = { values[name] = it; tick++ },
+                            label = { Text(name) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onRun(ai.tokenstat.tokenstat.ui.ssh.SnippetRun.fill(command, values.toMap()))
+            }) { Text("Run") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 /// The WebView ↔ tunnel plumbing: JS hands us input bytes, we hand JS output
@@ -510,24 +684,49 @@ class TerminalBridge {
         }
     }
 
+    /// Set when the host reports the session closed. The screen shows it
+    /// rather than pretending the shell is still there.
+    @Volatile var ended = false
+
     fun startSshLoop(model: AppViewModel, id: String, scope: CoroutineScope) {
         scope.launch {
             var offset = 0L
+            var backoffMs = 50L
             while (alive) {
                 val chunk = runCatching {
                     model.core("ssh.session.read", buildJsonObject {
-                        put("id", id); put("offset", offset); put("waitMs", 400)
+                        put("id", id); put("offset", offset); put("waitMs", 250)
                     })
-                }.getOrNull() ?: break
+                }.getOrNull()
+                if (chunk == null) {
+                    // A failed read is a transport outage, not proof the
+                    // session ended. Back off and keep polling.
+                    if (transportError == null) {
+                        transportError = "Connection lost. Retrying…"
+                        onProgress()
+                    }
+                    delay(backoffMs)
+                    backoffMs = minOf(backoffMs * 2, 2_000)
+                    continue
+                }
+                backoffMs = 50
                 val obj = chunk as? JsonObject ?: continue
-                if (obj["closed"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content } == "true") break
+                if (transportError != null) {
+                    transportError = null
+                    onProgress()
+                }
+                if ((obj["closed"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true") {
+                    ended = true
+                    onProgress()
+                    break
+                }
                 val data = obj["data"] as? kotlinx.serialization.json.JsonArray
                 if (data != null && data.size > 0) {
                     writeBase64(ai.tokenstat.tokenstat.ui.ssh.bytesToBase64(data))
                 }
                 val next = (obj["nextOffset"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull()
                 if (next != null && next > offset) offset = next
-                if (data == null || data.size == 0) kotlinx.coroutines.delay(40)
+                if (data == null || data.size == 0) delay(40)
             }
         }
     }

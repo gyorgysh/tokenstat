@@ -1289,6 +1289,7 @@ private fun AndroidSSHScreen(
             model = model,
             sessionId = live.first,
             hostLabel = live.second,
+            snippets = snippets,
             onClose = { sshSession = null },
         )
         return
