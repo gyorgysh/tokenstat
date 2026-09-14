@@ -315,7 +315,7 @@ internal sealed class WorkspacePage : Page
                     ["paths"] = paths,
                 });
             }));
-            actions.Children.Add(ActionIconGlyph.Button("Diff", ActionIcon.Diff, async (_, _) =>
+            actions.Children.Add(ActionIconGlyph.Button("Diff", ActionIcon.Compare, async (_, _) =>
             {
                 await ShowDiffAsync(filePath);
             }));
