@@ -94,6 +94,8 @@ public sealed partial class MainWindow : Window
             _nav.SelectedItem = first;
         }
 
+        // First frame is the brand on paper, before the helper has answered.
+        ShowHostSplash(null);
         _ = LoadWorkspacesAsync();
         AppServices.Update.Changed += () => DispatcherQueue.TryEnqueue(RefreshUpdateBadge);
     }
@@ -118,12 +120,17 @@ public sealed partial class MainWindow : Window
                 listed = await AppServices.Host.CallAsync("workspace.list");
                 break;
             }
-            catch
+            catch (Exception ex)
             {
-                DispatcherQueue.TryEnqueue(ShowHostSplash);
+                var info = FriendlyError.From(ex.Message);
+                DispatcherQueue.TryEnqueue(() => ShowHostSplash(info));
+                // Try again shortens the wait. One loop only: the button
+                // wakes this wait rather than starting a second loop.
+                _hostWake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var wake = _hostWake.Task;
                 try
                 {
-                    await Task.Delay(1000);
+                    await Task.WhenAny(Task.Delay(2000), wake);
                 }
                 catch
                 {
@@ -188,19 +195,31 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private void ShowHostSplash()
+    private TaskCompletionSource? _hostWake;
+    private string _hostSplashKey = "";
+
+    private void ShowHostSplash(FriendlyErrorInfo? error)
     {
+        // Dismissed once the helper answered: a late retry must not drag the
+        // splash back over the first page.
         if (_hostSplash is not null && _frame.Content != _hostSplash)
         {
             return;
         }
-        _hostSplash = new ScrollViewer
+        var state = error is null
+            ? HostSplashState.Starting
+            : error.Title == "No connection" ? HostSplashState.Offline : HostSplashState.Error;
+        var key = state + "|" + (error?.Title ?? "");
+        // Same state already on screen: rebuilding would restart the rise.
+        if (_hostSplash is not null && _hostSplashKey == key)
         {
-            Padding = new Thickness(Theme.SpaceL),
-            Content = Chrome.Banner("Host is starting…", Theme.Accent, Symbol.Refresh),
-        };
-        _frame.Content = _hostSplash;
-        Motion.PlayDoor(_hostSplash);
+            return;
+        }
+        _hostSplashKey = key;
+        var splash = HostSplash.View(state, error, () => { _hostWake?.TrySetResult(); });
+        _hostSplash = splash;
+        _frame.Content = splash;
+        Motion.PlayDoor(splash);
     }
 
     /// <summary>
