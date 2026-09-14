@@ -77,20 +77,7 @@ internal sealed class AccountPage : Page
             }
             if (!string.IsNullOrEmpty(tier))
             {
-                body.Children.Add(new Border
-                {
-                    Background = Theme.AccentSoftBrush,
-                    CornerRadius = new CornerRadius(999),
-                    Padding = new Thickness(8, 3, 8, 3),
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    Child = new TextBlock
-                    {
-                        Text = tier.ToUpperInvariant(),
-                        FontSize = 10,
-                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                        Foreground = Theme.AccentBrush,
-                    },
-                });
+                body.Children.Add(Chrome.TierBadge(tier));
             }
             body.Children.Add(ActionIconGlyph.Button("Sync", ActionIcon.Refresh, async (_, _) =>
             {

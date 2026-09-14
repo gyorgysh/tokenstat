@@ -68,20 +68,56 @@ internal sealed class AutomationsPage : Page
                 var name = Format.Text(job, "name", Format.Text(job, "label", "Automation"));
                 var enabled = Format.Flag(job, "enabled");
                 var cadence = Format.Cadence(job);
+                var schedule = job?["schedule"] ?? job;
 
                 var body = new StackPanel { Spacing = Theme.SpaceS };
-                body.Children.Add(new TextBlock
+                var line = new Grid { ColumnSpacing = Theme.SpaceS };
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                var glyph = Chrome.CadenceGlyph(
+                    Format.Text(schedule, "kind", "once"),
+                    Format.Long(schedule, "weekdays"),
+                    (int)Format.Long(schedule, "weekday"),
+                    enabled,
+                    summary: cadence);
+                glyph.VerticalAlignment = VerticalAlignment.Top;
+                line.Children.Add(glyph);
+                var texts = new StackPanel { Spacing = Theme.SpaceXs };
+                texts.Children.Add(new TextBlock
                 {
                     Text = name,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     TextWrapping = TextWrapping.Wrap,
                 });
-                body.Children.Add(new TextBlock
+                var status = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = Theme.SpaceXs,
+                };
+                status.Children.Add(new TextBlock
                 {
                     Text = (enabled ? "on" : "off") + " · " + cadence,
                     Opacity = 0.7,
                     TextWrapping = TextWrapping.Wrap,
+                    VerticalAlignment = VerticalAlignment.Center,
                 });
+                if (enabled
+                    && job?["nextRunAtMs"] is JsonValue next
+                    && next.TryGetValue<long>(out var nextMs)
+                    && nextMs > 0)
+                {
+                    long? lastMs = job?["lastRunAtMs"] is JsonValue last
+                        && last.TryGetValue<long>(out var lastValue)
+                        ? lastValue
+                        : null;
+                    var ring = Chrome.CountdownRing(lastMs, nextMs, label: "Next run");
+                    ring.VerticalAlignment = VerticalAlignment.Center;
+                    status.Children.Add(ring);
+                }
+                texts.Children.Add(status);
+                Grid.SetColumn(texts, 1);
+                line.Children.Add(texts);
+                body.Children.Add(line);
                 var actions = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,

@@ -349,7 +349,7 @@ internal sealed class ChatPage : Page
             _setupExpanded = false;
             PaintConversation();
         }));
-        body.Children.Add(Caption("How this chat should work"));
+        body.Children.Add(Chrome.SectionLabel("How this chat should work"));
         body.Children.Add(Muted("Agent, model and mode also live on the composer. Personas stay here."));
 
         body.Children.Add(Labeled("Agent", AgentPicker(backendId, running)));
@@ -519,34 +519,15 @@ internal sealed class ChatPage : Page
 
     private UIElement ModePills(string mode, bool enabled)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        row.Children.Add(ModePill("Plan", "plan", mode, enabled));
-        row.Children.Add(ModePill("Execute", "execute", mode, enabled));
-        return row;
-    }
-
-    private UIElement ModePill(string label, string value, string current, bool enabled)
-    {
-        var selected = value == current;
-        var button = new Button
-        {
-            Content = label,
-            IsEnabled = enabled,
-            Background = selected ? Theme.AccentBrush : Theme.AccentSoftBrush,
-            Foreground = selected
-                ? new SolidColorBrush(Colors.White)
-                : Theme.AccentBrush,
-            BorderBrush = Theme.Brush(Theme.Accent),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-        };
-        button.Click += async (_, _) =>
-        {
-            if (value == current) return;
-            await UpdateAsync(new JsonObject { ["mode"] = value });
-            PaintConversation();
-        };
-        return button;
+        return Chrome.Segmented(
+            [("plan", "Plan"), ("execute", "Execute")],
+            mode,
+            async value =>
+            {
+                await UpdateAsync(new JsonObject { ["mode"] = value });
+                PaintConversation();
+            },
+            enabled: enabled);
     }
 
     private static string ItemContentKey(DisplayItem item) => item.Kind switch
@@ -1859,18 +1840,10 @@ internal sealed class ChatPage : Page
     private static UIElement Labeled(string label, UIElement control)
     {
         var stack = new StackPanel { Spacing = Theme.SpaceXs };
-        stack.Children.Add(Caption(label));
+        stack.Children.Add(Chrome.SectionLabel(label));
         stack.Children.Add(control);
         return stack;
     }
-
-    private static TextBlock Caption(string text) => new()
-    {
-        Text = text.ToUpperInvariant(),
-        FontSize = 11,
-        FontWeight = FontWeights.SemiBold,
-        Opacity = 0.58,
-    };
 
     private static TextBlock Muted(string text) => new()
     {
