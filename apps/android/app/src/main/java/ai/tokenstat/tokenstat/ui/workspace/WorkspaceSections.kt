@@ -109,6 +109,7 @@ fun WorkspaceSection(
     folderName: String = "",
     onOpenTerminal: (String?) -> Unit,
     onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
+    onOpenSection: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var data by remember(section) { mutableStateOf<JsonElement?>(null) }
@@ -138,8 +139,9 @@ fun WorkspaceSection(
         "Sessions" -> SessionsSection(data, error, loading, onOpenTerminal, reload, modifier)
         "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier)
         "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier)
-        "Changes" -> ChangesSection(model, peer, workspace, data, error, loading, modifier)
-        "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier)
+        "Changes" -> ChangesSection(model, peer, workspace, modifier, folderName, hostLabel, protocol, onChanged = reload)
+        "History" -> HistorySection(model, peer, workspace, modifier, folderName, hostLabel)
+        "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier, folderName, hostLabel, onOpenSection)
         "Notes" -> NotesSection(model, peer, workspace, modifier, folderName, hostLabel)
         "Workflows" -> WorkflowsSection(model, peer, workspace, data, error, loading, reload, modifier)
         "Automations" -> AutomationsSection(model, peer, data, error, loading, reload, modifier)
@@ -154,6 +156,7 @@ private fun methodFor(section: String): String = when (section) {
     "Chat" -> "chat.list"
     "Pulls" -> "pulls.list"
     "Changes" -> "workspace.status"
+    "History" -> "workspace.log"
     "Tasks", "Notes" -> "todo.list"
     "Workflows" -> "workflow.list"
     "Automations" -> "automation.list"
@@ -218,134 +221,6 @@ private fun SessionsSection(
     }
 }
 
-private fun index(o: JsonObject): Int = o.hashCode()
-
-/// Read-only diff rendering: added/removed line rows in the Theme diff pair —
-/// green and red because a diff is the one place those two colours are not a
-/// traffic light (`ClientDiffView.swift`).
-@Composable
-fun DiffView(patch: String, modifier: Modifier = Modifier) {
-    val colors = LocalTsColors.current
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(cardRadiusDp))
-            .background(colors.background),
-    ) {
-        patch.lines().forEachIndexed { index, line ->
-            val bg = when {
-                line.startsWith("+") && !line.startsWith("+++") -> colors.diffAdded.copy(alpha = 0.14f)
-                line.startsWith("-") && !line.startsWith("---") -> colors.diffRemoved.copy(alpha = 0.14f)
-                line.startsWith("@@") -> colors.accentSoft
-                else -> Color.Transparent
-            }
-            val fg = when {
-                line.startsWith("+") && !line.startsWith("+++") -> colors.diffAdded
-                line.startsWith("-") && !line.startsWith("---") -> colors.diffRemoved
-                else -> colors.textPrimary
-            }
-            Text(
-                line.ifBlank { " " },
-                style = TsType.mono(11),
-                color = fg,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(bg)
-                    .padding(horizontal = Space.s, vertical = 1.dp),
-                maxLines = 8,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ChangesSection(
-    model: AppViewModel,
-    peer: String,
-    workspace: String,
-    data: JsonElement?,
-    error: String?,
-    loading: Boolean,
-    modifier: Modifier,
-) {
-    val files = asObjects(data).ifEmpty { asObjects((data as? JsonObject)?.get("files")) }
-    var openPath by remember { mutableStateOf<String?>(null) }
-    var openPatch by remember { mutableStateOf("") }
-    LaunchedEffect(openPath) {
-        val path = openPath ?: return@LaunchedEffect
-        runCatching {
-            model.workspaceSection(peer, "workspace.diff", buildJsonObject {
-                put("id", workspace); put("path", path)
-            })
-        }.onSuccess { element ->
-            val obj = element as? JsonObject
-            openPatch = obj?.get("patch")?.jsonPrimitive?.contentOrNull
-                ?: obj?.get("diff")?.jsonPrimitive?.contentOrNull
-                ?: element.toString()
-        }.onFailure { openPatch = it.message ?: "" }
-    }
-    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        if (error != null) item { SectionError(error) }
-        if (!loading && files.isEmpty()) {
-            item {
-                EmptyState(
-                    Icons.Default.Difference,
-                    "A clean tree",
-                    "No uncommitted changes on this folder right now.",
-                    art = { EmptyArt(EmptyArtKind.Changes) },
-                )
-            }
-        }
-        itemsIndexed(files) { _, file ->
-            val path = file.str("path") ?: file.str("name") ?: return@itemsIndexed
-            val status = file.str("status") ?: file.str("index") ?: ""
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(cardRadiusDp))
-                    .background(LocalTsColors.current.panel)
-                    .padding(Space.m),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        path,
-                        style = TsType.mono(12),
-                        color = LocalTsColors.current.textPrimary,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 2,
-                    )
-                    if (status.isNotBlank()) Text(
-                        status.uppercase(),
-                        style = TextStyle(fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                        color = LocalTsColors.current.accent,
-                    )
-                }
-                TsSecondaryButton(
-                    label = "View diff",
-                    small = true,
-                    modifier = Modifier.padding(top = Space.xs),
-                    onClick = { openPath = path },
-                )
-            }
-        }
-    }
-    if (openPath != null) {
-        AlertDialog(
-            onDismissRequest = { openPath = null },
-            title = { Text(openPath.orEmpty(), style = TsType.mono(13)) },
-            text = {
-                LazyColumn(Modifier.height(420.dp)) {
-                    item {
-                        if (openPatch.isBlank()) Text("Loading…", color = LocalTsColors.current.textSecondary)
-                        else DiffView(openPatch)
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { openPath = null }) { Text("Close") } },
-        )
-    }
-}
-
 @Composable
 private fun TodoSection(
     model: AppViewModel,
@@ -357,10 +232,14 @@ private fun TodoSection(
     kindTask: Boolean,
     onChanged: () -> Unit,
     modifier: Modifier,
+    folderName: String = "",
+    hostLabel: String = "",
+    onOpenSection: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val cards = asObjects(data).filter { (it.str("kind") ?: "task") == if (kindTask) "task" else "note" }
     var composer by remember { mutableStateOf(false) }
+    var resultCard by remember { mutableStateOf<JsonObject?>(null) }
 
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
@@ -416,6 +295,9 @@ private fun TodoSection(
                         color = LocalTsColors.current.accent,
                     )
                     Spacer(Modifier.weight(1f))
+                    if (kindTask) {
+                        TextButton(onClick = { resultCard = card }) { Text("View result") }
+                    }
                     IconButton(onClick = {
                         scope.launch {
                             runCatching {
@@ -432,6 +314,21 @@ private fun TodoSection(
                 }
             }
         }
+    }
+    val opened = resultCard
+    if (opened != null) {
+        TaskResultDialog(
+            model = model,
+            peer = peer,
+            workspace = workspace,
+            title = opened.str("title") ?: "",
+            backend = opened.str("backend") ?: "",
+            column = (opened.str("column") ?: "").replaceFirstChar(Char::uppercase),
+            folderName = folderName,
+            hostLabel = hostLabel,
+            onOpenSection = { resultCard = null; onOpenSection(it) },
+            onDismiss = { resultCard = null },
+        )
     }
     if (composer) {
         ComposerDialog(

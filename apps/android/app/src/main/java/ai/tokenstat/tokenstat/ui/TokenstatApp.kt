@@ -1870,6 +1870,7 @@ private val workspaceParts = listOf(
     WorkspacePart("Chat", "chat.list", Icons.Default.ChatBubble),
     WorkspacePart("Pulls", "pulls.list", Icons.Default.MergeType),
     WorkspacePart("Changes", "workspace.status", Icons.Default.Difference),
+    WorkspacePart("History", "workspace.log", Icons.Default.History),
     WorkspacePart("Tasks", "todo.list", Icons.Default.Checklist),
     // Notes share the todo board's method; the Apple client filters the same
     // answer down to note cards, so the tab is not a second Tasks.
@@ -1922,6 +1923,7 @@ private fun WorkspaceDetail(
             modifier = Modifier.verticalScroll(rememberScrollState()),
             onOpenTerminal = onOpenTerminal,
             onOpenBrowser = onOpenBrowser,
+            onOpenSection = { section = it },
         )
     }
 }

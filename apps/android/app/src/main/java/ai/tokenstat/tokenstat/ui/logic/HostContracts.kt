@@ -22,6 +22,17 @@ object HostContracts {
 
     fun supportsPulls(protocol: Long?): Boolean =
         protocol == null || protocol >= PULLS_MIN_PROTOCOL
+
+    /// Version 15 added reviewed selected-file commits and outcome
+    /// recovery. Version 16 added reviewed branch push and recovery.
+    const val SELECTED_COMMIT_MIN_PROTOCOL = 15
+    const val REVIEWED_PUSH_MIN_PROTOCOL = 16
+
+    fun supportsSelectedCommit(protocol: Long?): Boolean =
+        protocol == null || protocol >= SELECTED_COMMIT_MIN_PROTOCOL
+
+    fun supportsReviewedPush(protocol: Long?): Boolean =
+        protocol == null || protocol >= REVIEWED_PUSH_MIN_PROTOCOL
 }
 
 /// Relative time, port of Apple `RelativeTimeText.swift` (single 15s tick).
