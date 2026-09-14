@@ -228,7 +228,7 @@ internal sealed class AccountPage : Page
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var name = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap };
-        var value = new TextBlock { Text = Format.DataSize(bytes), FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas") };
+        var value = new TextBlock { Text = Format.DataSize(bytes), FontFamily = Fonts.Mono };
         Grid.SetColumn(value, 1);
         row.Children.Add(name);
         row.Children.Add(value);
@@ -443,7 +443,7 @@ internal sealed class AccountPage : Page
                 Child = new TextBlock
                 {
                     Text = code,
-                    FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+                    FontFamily = Fonts.Mono,
                     FontSize = 25,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     CharacterSpacing = 120,

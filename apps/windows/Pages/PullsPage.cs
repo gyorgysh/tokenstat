@@ -265,12 +265,12 @@ internal sealed class PullsPage : Page
             Opacity = 0.68,
             TextWrapping = TextWrapping.Wrap,
         });
-        body.Children.Add(new TextBlock
+        body.Children.Add(Fonts.Tabular(new TextBlock
         {
             Text = $"+{Format.Long(pull, "additions")}   −{Format.Long(pull, "deletions")}   {Format.Long(pull, "changedFiles")} files   {Format.Long(pull, "comments")} comments",
             FontSize = 11,
             Foreground = Theme.Brush(tint),
-        });
+        }));
         var card = new Border
         {
             Background = Theme.PanelBrush,
@@ -587,7 +587,7 @@ internal sealed class PullsPage : Page
         Child = new TextBlock
         {
             Text = text,
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = Fonts.Mono,
             FontSize = 12,
             IsTextSelectionEnabled = true,
         },

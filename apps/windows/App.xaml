@@ -20,6 +20,15 @@
             <Color x:Key="SystemAccentColorDark1">#5930DC</Color>
             <Color x:Key="SystemAccentColorDark2">#4724B8</Color>
             <Color x:Key="SystemAccentColorDark3">#351A8D</Color>
+            <!-- Bundled typefaces, loaded from the app folder, never installed
+                 into the person's fonts. Overriding ContentControlThemeFontFamily
+                 puts Manrope on every control that uses the default WinUI styles,
+                 which is the whole app: no view names Segoe UI anywhere. The same
+                 two faces live in code in Design/Fonts, the one place that knows
+                 their file paths. -->
+            <FontFamily x:Key="InterfaceFontFamily">ms-appx:///Assets/Fonts/Manrope-Variable.ttf#Manrope</FontFamily>
+            <FontFamily x:Key="MonoFontFamily">ms-appx:///Assets/Fonts/JetBrainsMono-Variable.ttf#JetBrains Mono</FontFamily>
+            <FontFamily x:Key="ContentControlThemeFontFamily">ms-appx:///Assets/Fonts/Manrope-Variable.ttf#Manrope</FontFamily>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

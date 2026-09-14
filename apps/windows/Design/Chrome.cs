@@ -60,13 +60,9 @@ internal static class Chrome
             Opacity = 0.55,
         });
         var figures = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceXs };
-        figures.Children.Add(new TextBlock
-        {
-            Text = value,
-            FontSize = 22,
-            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
-            FontFamily = new FontFamily("Segoe UI"),
-        });
+        // A headline number in Manrope with tabular figures, matching the Mac
+        // stat tile (26 semibold). Not the terminal face: this is a headline.
+        figures.Children.Add(Fonts.Numeric(value));
         if (!string.IsNullOrEmpty(note))
         {
             figures.Children.Add(new TextBlock

@@ -739,7 +739,7 @@ internal sealed class ChatPage : Page
                 Content = new TextBlock
                 {
                     Text = code,
-                    FontFamily = new FontFamily("Consolas"),
+                    FontFamily = Fonts.Mono,
                     FontSize = 12,
                     IsTextSelectionEnabled = true,
                 },
@@ -766,7 +766,7 @@ internal sealed class ChatPage : Page
             body.Children.Add(new TextBlock
             {
                 Text = item.Detail,
-                FontFamily = new FontFamily("Consolas"),
+                FontFamily = Fonts.Mono,
                 FontSize = 12,
                 Opacity = 0.78,
                 IsTextSelectionEnabled = true,
@@ -782,25 +782,26 @@ internal sealed class ChatPage : Page
         heading.Children.Add(new TextBlock
         {
             Text = item.Path,
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = Fonts.Mono,
             FontSize = 12,
             Opacity = 0.78,
             TextWrapping = TextWrapping.Wrap,
         });
-        heading.Children.Add(new TextBlock
+        // Diff counts stay steady as they update: tabular figures.
+        heading.Children.Add(Fonts.Tabular(new TextBlock
         {
             Text = "+" + item.Added,
             Foreground = Theme.Brush(Theme.DiffAdded),
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
-        });
-        heading.Children.Add(new TextBlock
+        }));
+        heading.Children.Add(Fonts.Tabular(new TextBlock
         {
             Text = "−" + item.Removed,
             Foreground = Theme.Brush(Theme.DiffRemoved),
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
-        });
+        }));
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(heading);
         if (!string.IsNullOrEmpty(item.Patch))
@@ -820,7 +821,7 @@ internal sealed class ChatPage : Page
                     Child = new TextBlock
                     {
                         Text = line,
-                        FontFamily = new FontFamily("Consolas"),
+                        FontFamily = Fonts.Mono,
                         FontSize = 12,
                         IsTextSelectionEnabled = true,
                     },
@@ -845,7 +846,7 @@ internal sealed class ChatPage : Page
         body.Children.Add(new TextBlock
         {
             Text = Format.Text(approval, "preview"),
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = Fonts.Mono,
             FontSize = 12,
             IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
@@ -972,17 +973,17 @@ internal sealed class ChatPage : Page
         track.Children.Add(split);
         body.Children.Add(track);
         var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
-        legend.Children.Add(new TextBlock { Text = $"In {input:N0}", FontSize = 12 });
-        legend.Children.Add(new TextBlock { Text = $"Out {output:N0}", FontSize = 12 });
+        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = $"In {input:N0}", FontSize = 12 }));
+        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = $"Out {output:N0}", FontSize = 12 }));
         if (cost > 0)
         {
-            legend.Children.Add(new TextBlock
+            legend.Children.Add(Fonts.Tabular(new TextBlock
             {
                 Text = cost.ToString("C2", CultureInfo.GetCultureInfo("en-US")),
                 Foreground = Theme.AccentBrush,
                 FontWeight = FontWeights.SemiBold,
                 FontSize = 12,
-            });
+            }));
         }
         body.Children.Add(legend);
         if (cache > 0) body.Children.Add(Muted($"{cache:N0} cached"));

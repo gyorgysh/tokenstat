@@ -168,7 +168,7 @@ internal sealed class WorkspacePage : Page
             Text = shown,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = Fonts.Mono,
             IsReadOnly = huge,
             Height = 420,
             MinWidth = 640,
@@ -354,7 +354,7 @@ internal sealed class WorkspacePage : Page
                 Content = new TextBlock
                 {
                     Text = text,
-                    FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+                    FontFamily = Fonts.Mono,
                     TextWrapping = TextWrapping.Wrap,
                     IsTextSelectionEnabled = true,
                 },

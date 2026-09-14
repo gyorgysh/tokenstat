@@ -26,7 +26,7 @@ internal sealed class SshPage : Page
     private readonly StackPanel _status = new() { Spacing = Theme.SpaceS };
     private readonly TextBlock _view = new()
     {
-        FontFamily = new FontFamily("Consolas"),
+        FontFamily = Fonts.Mono,
         FontSize = 13,
         Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255)),
         TextWrapping = TextWrapping.Wrap,
@@ -40,7 +40,7 @@ internal sealed class SshPage : Page
     private readonly TextBox _input = new()
     {
         PlaceholderText = "Type, then Enter",
-        FontFamily = new FontFamily("Consolas"),
+        FontFamily = Fonts.Mono,
     };
 
     private string? _sessionId;
