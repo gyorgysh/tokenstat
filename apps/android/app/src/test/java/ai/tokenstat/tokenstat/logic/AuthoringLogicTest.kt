@@ -26,6 +26,18 @@ import ai.tokenstat.tokenstat.ui.automations.JobScheduleCopy
 import ai.tokenstat.tokenstat.ui.automations.QueueValidation
 import ai.tokenstat.tokenstat.ui.automations.ScheduleFields
 import ai.tokenstat.tokenstat.ui.automations.ScheduleKind
+import ai.tokenstat.tokenstat.ui.workflows.AgentBackend
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowEdge
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowEdgeWhen
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowEditorDraft
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowGraph
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowGraphRules
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowModelPick
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowNode
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowNodeKind
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowRecipes
+import ai.tokenstat.tokenstat.ui.workflows.WorkflowRunRecord
+import ai.tokenstat.tokenstat.ui.workflows.workflowContentMatches
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -326,6 +338,131 @@ class AuthoringLogicTest {
             "This time is on the connected computer, not this device.",
             HostScheduleClock.timeCaption("", null),
         )
+    }
+
+    @Test
+    fun workflowConnectionRoles() {
+        assertEquals("Then", WorkflowGraphRules.outgoingRole(WorkflowNodeKind.AGENT, WorkflowEdgeWhen.OK))
+        assertEquals("On error", WorkflowGraphRules.outgoingRole(WorkflowNodeKind.AGENT, WorkflowEdgeWhen.ERROR))
+        assertEquals("Always", WorkflowGraphRules.outgoingRole(WorkflowNodeKind.AGENT, WorkflowEdgeWhen.ALWAYS))
+        assertEquals("Then", WorkflowGraphRules.outgoingRole(WorkflowNodeKind.CONDITION, WorkflowEdgeWhen.OK))
+        assertEquals("Else", WorkflowGraphRules.outgoingRole(WorkflowNodeKind.CONDITION, WorkflowEdgeWhen.ERROR))
+        assertEquals("Body", WorkflowGraphRules.outgoingRole(WorkflowNodeKind.LOOP, WorkflowEdgeWhen.OK))
+        assertEquals("After last pass", WorkflowGraphRules.outgoingRole(WorkflowNodeKind.LOOP, WorkflowEdgeWhen.ALWAYS))
+        assertEquals(
+            WorkflowEdgeWhen.ERROR,
+            WorkflowGraphRules.suggestedWhen(WorkflowNodeKind.AGENT, listOf(WorkflowEdge("a", "b", WorkflowEdgeWhen.OK))),
+        )
+        assertEquals(
+            WorkflowEdgeWhen.ALWAYS,
+            WorkflowGraphRules.suggestedWhen(WorkflowNodeKind.LOOP, listOf(WorkflowEdge("a", "b", WorkflowEdgeWhen.OK))),
+        )
+    }
+
+    @Test
+    fun workflowGraphIssues() {
+        val start = WorkflowNode(id = "in", kind = WorkflowNodeKind.INPUT, title = "Start")
+        val agent = WorkflowNode(id = "n2", kind = WorkflowNodeKind.AGENT, title = "Build", backend = "codex")
+        assertNull(WorkflowGraphRules.stepsIssue(listOf(start, agent), listOf(WorkflowEdge("in", "n2"))))
+        assertEquals(
+            "A step cannot connect to itself.",
+            WorkflowGraphRules.connectionIssue("a", "a", listOf(start), emptyList()),
+        )
+        assertEquals(
+            "Two steps share the id n2.",
+            WorkflowGraphRules.stepsIssue(listOf(start, agent, agent.copy()), listOf(WorkflowEdge("in", "n2"))),
+        )
+        // A cycle without a Loop step is illegal; through a loop it is fine.
+        val a = WorkflowNode(id = "a", kind = WorkflowNodeKind.AGENT, backend = "codex")
+        val b = WorkflowNode(id = "b", kind = WorkflowNodeKind.AGENT, backend = "codex")
+        assertEquals(
+            "This graph loops without a Loop step.",
+            WorkflowGraphRules.stepsIssue(listOf(a, b), listOf(WorkflowEdge("a", "b"), WorkflowEdge("b", "a"))),
+        )
+        val loop = WorkflowNode(id = "loop", kind = WorkflowNodeKind.LOOP, times = 3)
+        assertNull(WorkflowGraphRules.stepsIssue(listOf(a, loop), listOf(WorkflowEdge("a", "loop"), WorkflowEdge("loop", "a"))))
+        assertEquals(
+            "Loop Loop needs a body connection.",
+            WorkflowGraphRules.stepsIssue(
+                listOf(loop, a),
+                listOf(WorkflowEdge("loop", "a", WorkflowEdgeWhen.ERROR)),
+            ),
+        )
+        assertEquals(
+            "An agent step needs an agent.",
+            WorkflowGraphRules.nodeIssue(WorkflowNode(id = "x", kind = WorkflowNodeKind.AGENT)),
+        )
+        assertEquals(
+            "An HTTP URL must start with http:// or https://.",
+            WorkflowGraphRules.nodeIssue(WorkflowNode(id = "x", kind = WorkflowNodeKind.HTTP, url = "ftp://x")),
+        )
+        assertEquals(
+            "A command step needs a command.",
+            WorkflowGraphRules.nodeIssue(WorkflowNode(id = "x", kind = WorkflowNodeKind.COMMAND)),
+        )
+        assertEquals("MCP steps are not available yet.", WorkflowGraphRules.additionIssue(WorkflowNodeKind.MCP, 0))
+        assertTrue(WorkflowGraphRules.isPathSafeID("n12-ok_x"))
+        assertTrue(!WorkflowGraphRules.isPathSafeID("has space"))
+        assertEquals("n3", WorkflowGraphRules.nextNodeID(listOf(start, agent)))
+        val made = WorkflowGraphRules.makeNode(WorkflowNodeKind.AGENT, "n9", backend = "codex")
+        assertEquals("{{input}}", made.prompt)
+        assertEquals("exit", made.wait)
+    }
+
+    @Test
+    fun workflowDraftValidation() {
+        val blank = WorkflowEditorDraft.blank("w1")
+        assertEquals("Give this workflow a name.", blank.copy(name = "").validation)
+        assertEquals("Choose a folder for this workflow.", blank.copy(name = "W", workspaceID = "").validation)
+        assertNull(blank.copy(name = "W").validation)
+        val graph = WorkflowGraph.blank("W", "w1").copy(
+            revision = 7,
+            schedule = ai.tokenstat.tokenstat.ui.automations.AutomationSchedule(
+                ai.tokenstat.tokenstat.ui.automations.ScheduleKind.ONCE,
+            ),
+        )
+        val draft = WorkflowEditorDraft.fromGraph(graph)
+        assertTrue(draft.matches(graph))
+        assertTrue(!draft.copy(name = "Other").matches(graph))
+        val made = draft.copy(name = "W").makeGraph("wf-1")
+        assertEquals("wf-1", made.id)
+        assertEquals(WorkflowEditorDraft.BLANK_STARTER_ID, WorkflowEditorDraft.blank("w1").starterID)
+    }
+
+    @Test
+    fun workflowRecipesAndPicks() {
+        val backends = listOf(
+            AgentBackend("codex", "Codex", listOf("gpt-5-mini", "gpt-5"), listOf("low", "high")),
+            AgentBackend("claude", "Claude", listOf("haiku", "opus"), listOf("low", "high")),
+        )
+        assertEquals("gpt-5-mini", WorkflowModelPick.cheapestModel("codex", backends[0].models))
+        assertEquals("low", WorkflowModelPick.lowestEffort(backends[0].efforts))
+        assertEquals("high", WorkflowModelPick.highestEffort(backends[0].efforts))
+        val recipes = WorkflowRecipes.recipes(backends)
+        assertEquals(2, recipes.size)
+        assertEquals("Plan, build, review", recipes[0].name)
+        assertEquals("Plan then build", recipes[1].name)
+        assertTrue(recipes[0].nodes.any { it.kind == WorkflowNodeKind.CONDITION } .not())
+        assertTrue(WorkflowRecipes.designAgents(backends).isNotEmpty())
+        assertTrue(recipes[0].label.contains("Start") && recipes[0].label.contains("Done"))
+    }
+
+    @Test
+    fun workflowLayoutAndContentMatch() {
+        val graph = WorkflowGraph(
+            name = "W",
+            nodes = listOf(
+                WorkflowNode(id = "in", kind = WorkflowNodeKind.INPUT),
+                WorkflowNode(id = "n2", kind = WorkflowNodeKind.AGENT),
+            ),
+            edges = listOf(WorkflowEdge("in", "n2")),
+        )
+        val laid = graph.layoutIfNeeded()
+        assertTrue(laid.nodes[1].y > laid.nodes[0].y)
+        assertTrue(workflowContentMatches(graph, graph.copy(revision = 9, lastRunID = "r")))
+        assertTrue(!workflowContentMatches(graph, graph.copy(name = "Other")))
+        assertEquals("Needs attention", WorkflowRunRecord.label("waiting"))
+        assertEquals("Working", WorkflowRunRecord.label("running"))
     }
 
     @Test

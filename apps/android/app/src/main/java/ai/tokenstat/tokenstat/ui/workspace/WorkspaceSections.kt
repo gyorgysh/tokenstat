@@ -143,7 +143,7 @@ fun WorkspaceSection(
         "History" -> HistorySection(model, peer, workspace, modifier, folderName, hostLabel)
         "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier, folderName, hostLabel, onOpenSection, protocol, onOpenTerminal)
         "Notes" -> NotesSection(model, peer, workspace, modifier, folderName, hostLabel)
-        "Workflows" -> WorkflowsSection(model, peer, workspace, data, error, loading, reload, modifier)
+        "Workflows" -> WorkflowsSection(model, peer, workspace, data, error, loading, reload, modifier, folderName, hostLabel, protocol)
         "Automations" -> AutomationsSection(model, peer, workspace, data, error, loading, reload, modifier, folderName, hostLabel, protocol)
         "Files" -> FilesSection(model, peer, workspace, modifier, folderName, hostLabel)
         "Browser" -> BrowserSection(model, peer, onOpenBrowser, modifier)
@@ -405,12 +405,19 @@ private fun WorkflowsSection(
     loading: Boolean,
     onChanged: () -> Unit,
     modifier: Modifier,
+    folderName: String = "",
+    hostLabel: String = "",
+    protocol: Long? = null,
 ) {
     val scope = rememberCoroutineScope()
     val workflows = asObjects(data)
     var transcript by remember { mutableStateOf<String?>(null) }
+    var workbench by remember { mutableStateOf(false) }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
+        item {
+            TsSecondaryButton(label = "Open workflows", small = true, onClick = { workbench = true })
+        }
         if (!loading && workflows.isEmpty()) {
             item {
                 EmptyState(
@@ -466,6 +473,17 @@ private fun WorkflowsSection(
             title = { Text("Transcript") },
             text = { Text(transcript.orEmpty(), style = TsType.mono(11)) },
             confirmButton = { TextButton(onClick = { transcript = null }) { Text("Close") } },
+        )
+    }
+    if (workbench) {
+        ai.tokenstat.tokenstat.ui.workflows.WorkflowsDialog(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            workspaceID = workspace,
+            folderName = folderName,
+            onDismiss = { workbench = false; onChanged() },
         )
     }
 }
