@@ -63,7 +63,7 @@ internal static class Fonts
     public static TextBlock Text(
         string text,
         double size = Body,
-        FontWeight? weight = null,
+        Windows.UI.Text.FontWeight? weight = null,
         double opacity = 1)
     {
         var block = new TextBlock
@@ -86,7 +86,7 @@ internal static class Fonts
     public static TextBlock Code(
         string text,
         double size = ChatCode,
-        FontWeight? weight = null,
+        Windows.UI.Text.FontWeight? weight = null,
         double opacity = 1)
     {
         var block = Text(text, size, weight, opacity);
@@ -103,7 +103,7 @@ internal static class Fonts
     public static TextBlock Numeric(
         string text,
         double size = StatValue,
-        FontWeight? weight = null)
+        Windows.UI.Text.FontWeight? weight = null)
     {
         var block = Text(text, size, weight ?? FontWeights.SemiBold);
         return Tabular(block);
