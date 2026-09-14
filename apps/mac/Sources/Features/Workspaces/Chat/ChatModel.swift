@@ -593,7 +593,7 @@ final class ChatModel {
                 let key = prefix + WorkReferenceKey.encode(chat.id)
                 if !recentMessages.messages(for: key).isEmpty { continue }
                 let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
-                    limit: Self.openPageEvents, peer: route.peer)
+                    limit: ChatPaging.previewPageEvents, peer: route.peer)
                 guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
                 let rows = ChatDisplayItem.coalesce(page.events,
                     defaultBackend: chat.backend, running: chat.running)
@@ -629,7 +629,7 @@ final class ChatModel {
                 guard self.recentMessages.messages(for: key).isEmpty else { continue }
                 do {
                     let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
-                        limit: Self.openPageEvents, peer: peer)
+                        limit: ChatPaging.previewPageEvents, peer: peer)
                     guard !Task.isCancelled, self.folderID == folderID,
                           WorkSessionContext.shared.scope == owner.scope,
                           self.selected?.id != chat.id else { return }
@@ -2338,7 +2338,7 @@ final class ChatModel {
         let requestedRevision = selected?.sendRevision
         do {
             let page = try await Bridge.chatEventPage(
-                id: id, cursor: nil, limit: Self.openPageEvents, peer: peer
+                id: id, cursor: nil, limit: ChatPaging.openPageEvents, peer: peer
             )
             guard selectionMatches(id: id, generation: generation) else { return false }
             if let requestedRevision { contextRevision = max(contextRevision ?? 0, requestedRevision) }
@@ -2405,7 +2405,7 @@ final class ChatModel {
         }
         do {
             let page = try await Bridge.chatEventPage(
-                id: id, cursor: cursor, limit: Self.pageEvents, peer: peer
+                id: id, cursor: cursor, limit: ChatPaging.pageEvents, peer: peer
             )
             guard selectionMatches(id: id, generation: generation) else { return }
             if page.reset {
@@ -2463,26 +2463,6 @@ final class ChatModel {
         return false
     }
 
-    /// How many records a conversation opens on. Records, not rows: streamed
-    /// text arrives in many pieces and becomes one paragraph.
-    ///
-    /// Large, and it used to be small for a reason that turned out to be
-    /// backwards. The cost that hurts is not the number of rows, it is the
-    /// number of *insertions*: each one changes the content height, and a
-    /// changed content height makes the lazy stack resolve estimates for the
-    /// rows in between, which means building them and measuring their text.
-    /// So a page that reads four times as much history costs one of those
-    /// walks where four small pages cost four. Five hundred is the host's own
-    /// ceiling on `chat.eventPage`, so asking for more only asks for this.
-    private static let openPageEvents = 500
-    /// How many records each older page carries.
-    ///
-    /// Nearly as large as the opening page, for the same reason. A backend
-    /// that streams spends hundreds of records on a handful of paragraphs,
-    /// and pulling fifty of them at a time meant a chat of any length was
-    /// read back in dozens of insertions, each one a walk over the rows and a
-    /// correction of the reader's place.
-    private static let pageEvents = 400
     @discardableResult
     private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }

@@ -28,12 +28,16 @@ const EVENTS_CAP: u64 = 1024 * 1024;
 const PAGE_EVENTS: usize = 300;
 /// The most a client may ask for in one page. A client that wants more than
 /// this wants the whole archive, which is what the cap exists to prevent.
+/// `ChatPaging.hostPageEventsMax` in the Apple client mirrors this. Move
+/// both together.
 const PAGE_EVENTS_MAX: usize = 2_000;
 /// How much is read from disk at a time while walking backwards.
 const PAGE_CHUNK: u64 = 64 * 1024;
 /// The most one page may weigh, whatever its event count. A conversation full
-/// of long patches reaches this long before it reaches `PAGE_EVENTS`.
-const PAGE_BYTES: u64 = 256 * 1024;
+/// of long patches reaches this long before it reaches `PAGE_EVENTS_MAX`, so
+/// this moves with the client's page sizes: triple those and leave this, and
+/// dense pages stop where they always did.
+const PAGE_BYTES: u64 = 768 * 1024;
 /// The most that will be read to find a single record's beginning. A record
 /// longer than this is one nothing can display anyway, and the read stops
 /// rather than pulling the whole archive into memory looking for a newline.
@@ -4189,6 +4193,71 @@ mod tests {
         assert_eq!(seen, 21);
         assert_eq!(long, 1, "the long record arrives whole, exactly once");
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_page_carries_the_full_opening_window_the_client_asks_for() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "opening-window");
+        store.save().unwrap();
+        for n in 0..1500 {
+            store
+                .append(
+                    "opening-window",
+                    &StoredEvent::User {
+                        text: format!("hello {n}"),
+                        at_ms: n as i64,
+                    },
+                )
+                .unwrap();
+        }
+        let page = store.event_page("opening-window", None, 1500).unwrap();
+        assert_eq!(page.events.len(), 1500);
+        assert!(
+            !page.has_earlier,
+            "small records must not stop a page early"
+        );
+        assert_eq!(page.events[0]["text"], "hello 0");
+        assert_eq!(page.events[1499]["text"], "hello 1499");
+    }
+
+    #[test]
+    fn a_page_weighs_three_quarters_of_a_megabyte_before_it_stops() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "heavy-window");
+        store.save().unwrap();
+        for n in 0..70 {
+            store
+                .append(
+                    "heavy-window",
+                    &StoredEvent::User {
+                        text: format!("{:04}:{}\n", n, "x".repeat(12 * 1024)),
+                        at_ms: n as i64,
+                    },
+                )
+                .unwrap();
+        }
+        let page = store
+            .event_page("heavy-window", None, PAGE_EVENTS_MAX)
+            .unwrap();
+        assert!(page.has_earlier, "weight still bounds a page");
+        assert!(page.start > 0);
+        // The old quarter-megabyte bound could hold at most 26 of these
+        // records. Carrying at least 50 proves the bound moved with the
+        // tripled client pages, while stopping short of all 70 proves a
+        // bound is still there.
+        assert!(
+            (50..70).contains(&page.events.len()),
+            "expected most but not all of the heavy records, got {}",
+            page.events.len()
+        );
+        let newest = page.events.last().unwrap()["text"].as_str().unwrap();
+        assert!(
+            newest.starts_with("0069:"),
+            "the page holds the newest records"
+        );
     }
 
     #[test]
