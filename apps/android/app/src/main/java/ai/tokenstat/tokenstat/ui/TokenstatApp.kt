@@ -140,7 +140,7 @@ fun TokenstatApp(model: AppViewModel) {
     }
     TsTheme {
         val colors = LocalTsColors.current
-        MaterialTheme(colorScheme = colors.toColorScheme()) {
+        MaterialTheme(colorScheme = colors.toColorScheme(), typography = TsType.typography) {
             Surface(Modifier.fillMaxSize(), color = colors.background) {
                 val door = when {
                     state.signedIn -> Door.SignedIn
