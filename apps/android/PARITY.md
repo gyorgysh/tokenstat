@@ -48,11 +48,11 @@ tests in `PortedLogicTest.kt`.
 | Reduce Motion | `rememberReduceMotion()` (animator duration scale == 0) | done |
 | `Marks.swift`: LogoMark bars (rise loop 0.62s staggered 0.14s, refresh pulse), Wordmark (`token` + accent `stat`), Avatar | `marks/Marks.kt`; Wordmark splits the accent the same way; LogoMark one-shot lands over 1.2s | done |
 | App icon (three bars on dark paper) | Adaptive `mipmap/ic_launcher` + `drawable/app_icon.xml` from `store/play-icon.svg`; notification glyph is the bars, not a T | done |
-| `RelativeTimeText.swift` single shared 15s tick | pending (`RelativeClock` equivalent not yet needed on-screen) | gap |
+| `RelativeTimeText.swift` single shared 15s tick | `components/RelativeTime.kt` `RelativeTick` + `RelativeTimeText` over `RelativeClock.label`; chat event times tick | done |
 | `MiniGraph`, `WorkflowStepStrip`, layering | step-capsule FlowRow reading of workflows (`workspace/WorkspaceSections.kt`) | simplified |
-| `RunVisuals` outcome tints, RunHistoryStrip, DurationBar | pending (needed with workflow runs UI) | gap |
+| `RunVisuals` outcome tints, RunHistoryStrip, DurationBar | `marks/RunVisuals.kt`: `RunOutcome`, `RunHistoryStrip` (8 slots), `DurationBar` | done |
 | `CadenceGlyph`, `CountdownRing`, `SlotGauge` | `marks/CadenceGlyph.kt` (ring + hand) | simplified |
-| `FriendlyError.swift` translation table | `logic/TsLogic.kt` `friendlyError` (core rows only) | partial |
+| `FriendlyError.swift` translation table | `logic/TsLogic.kt` `friendlyError` (full table, same order and copy) | done |
 | `HistoryLockBanner` | `TokenstatApp.HistoryLockBanner` (same copy, opens pricing) | done |
 | `ActionIcon` (~55 glyphs) | `components/ActionIcon.kt` enum, same case names, Material mapping | done |
 

@@ -42,11 +42,3 @@ object RelativeClock {
     }
 }
 
-/// Run outcome tints, port of Apple `RunVisuals` (outcome tints only;
-/// history strip and duration bar remain simplified).
-object RunVisuals {
-    fun succeeded(status: String?): Boolean =
-        status.equals("succeeded", true) || status.equals("ok", true) || status.equals("done", true)
-    fun failed(status: String?): Boolean =
-        status.equals("failed", true) || status.equals("error", true)
-}

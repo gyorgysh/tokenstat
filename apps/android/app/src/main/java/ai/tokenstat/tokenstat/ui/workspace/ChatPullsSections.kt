@@ -10,10 +10,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.EmptyState
+import ai.tokenstat.tokenstat.ui.components.RelativeTimeText
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
-import ai.tokenstat.tokenstat.ui.logic.RelativeClock
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
@@ -122,13 +122,16 @@ fun ChatSection(
                         ?: ev.str("body")
                         ?: ""
                     val timeMs = ev["atMs"]?.jsonPrimitive?.longOrNull
-                    val timeLabel = timeMs?.let { RelativeClock.label(it) } ?: ""
                     Card {
                         Column(Modifier.padding(10.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(kind, style = MaterialTheme.typography.labelSmall)
-                                if (timeLabel.isNotEmpty()) {
-                                    Text(timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                if (timeMs != null) {
+                                    RelativeTimeText(
+                                        timeMs,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                    )
                                 }
                             }
                             if (text.isNotEmpty()) {
