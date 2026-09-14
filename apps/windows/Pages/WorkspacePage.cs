@@ -22,7 +22,6 @@ internal sealed class WorkspacePage : Page
     private readonly WorkspaceSection _section;
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private string _path = "";
-    private string _commitDraft = "";
 
     public WorkspacePage(string id, WorkspaceSection section)
     {
@@ -237,28 +236,57 @@ internal sealed class WorkspacePage : Page
             _root.Children.Add(await BranchBarAsync(branch));
         }
 
-        var commitBox = new TextBox
+        var session = WorkspaceCommitSession.For(_id);
+        var available = new List<string>();
+        if (array is not null)
         {
-            PlaceholderText = "Commit message",
-            Text = _commitDraft,
-            MinWidth = 280,
-        };
-        commitBox.TextChanged += (_, _) => _commitDraft = commitBox.Text;
-        var commitRow = new StackPanel
+            foreach (var entry in array)
+            {
+                var availablePath = Format.Text(entry, "path", Format.Text(entry, "name"));
+                if (!string.IsNullOrEmpty(availablePath))
+                {
+                    available.Add(availablePath);
+                }
+            }
+        }
+        session.Reconcile(available);
+
+        var selectionRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = Theme.SpaceS,
         };
-        commitRow.Children.Add(commitBox);
-        commitRow.Children.Add(ActionIconGlyph.Button("Commit", ActionIcon.Commit, async (_, _) =>
+        selectionRow.Children.Add(new TextBlock
         {
-            await GitwriteAsync("workspace.commit", new JsonObject
-            {
-                ["id"] = _id,
-                ["message"] = _commitDraft,
-            });
+            Text = $"{session.SelectedCount} of {available.Count} selected",
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0.7,
+        });
+        selectionRow.Children.Add(ActionIconGlyph.Button("Select all", ActionIcon.Apply, async (_, _) =>
+        {
+            session.SetAll(available);
+            await LoadAsync();
         }));
-        _root.Children.Add(commitRow);
+        selectionRow.Children.Add(ActionIconGlyph.Button("Clear", ActionIcon.Dismiss, async (_, _) =>
+        {
+            session.ClearSelection();
+            await LoadAsync();
+        }));
+        selectionRow.Children.Add(ActionIconGlyph.Button("Review and commit", ActionIcon.Commit, async (_, _) =>
+        {
+            if (session.SelectedCount == 0)
+            {
+                _root.Children.Insert(1, Chrome.Banner(
+                    "Select at least one file to review.",
+                    Theme.Warning,
+                    Symbol.Important));
+                return;
+            }
+            var folderName = await FolderNameAsync();
+            await WorkspaceCommitComposer.ShowAsync(this, _id, folderName, branch);
+            await LoadAsync();
+        }));
+        _root.Children.Add(selectionRow);
 
         if (array is null || array.Count == 0)
         {
@@ -284,14 +312,34 @@ internal sealed class WorkspacePage : Page
             }
             var filePath = path;
             var line = new Grid();
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            line.Children.Add(new TextBlock
+            var check = new CheckBox
             {
-                Text = string.IsNullOrEmpty(kind) ? path : $"{kind} {path}",
+                IsChecked = session.Paths.Contains(filePath),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            ToolTipService.SetToolTip(check, "Include in the next commit");
+            check.Checked += async (_, _) =>
+            {
+                session.Select(filePath);
+                await LoadAsync();
+            };
+            check.Unchecked += async (_, _) =>
+            {
+                session.Select(filePath);
+                await LoadAsync();
+            };
+            line.Children.Add(check);
+            var label = new TextBlock
+            {
+                Text = string.IsNullOrEmpty(kind) ? path : $"{WorkspaceGit.KindLabel(kind)} · {path}",
                 TextWrapping = TextWrapping.Wrap,
                 VerticalAlignment = VerticalAlignment.Center,
-            });
+            };
+            Grid.SetColumn(label, 1);
+            line.Children.Add(label);
             var actions = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -319,7 +367,7 @@ internal sealed class WorkspacePage : Page
             {
                 await ShowDiffAsync(filePath);
             }));
-            Grid.SetColumn(actions, 1);
+            Grid.SetColumn(actions, 2);
             line.Children.Add(actions);
             list.Children.Add(line);
         }
@@ -448,10 +496,6 @@ internal sealed class WorkspacePage : Page
             {
                 _root.Children.Insert(1, Chrome.Banner(message, Theme.Danger, Symbol.Important));
                 return;
-            }
-            if (method == "workspace.commit")
-            {
-                _commitDraft = "";
             }
         }
         catch (Exception ex)
@@ -638,6 +682,29 @@ internal sealed class WorkspacePage : Page
             return;
         }
         _root.Children.Add(Chrome.Card("Tasks", list));
+    }
+
+    private async Task<string> FolderNameAsync()
+    {
+        try
+        {
+            var listed = await AppServices.Host.CallAsync("workspace.list");
+            var array = listed as JsonArray ?? listed["workspaces"] as JsonArray;
+            if (array is not null)
+            {
+                foreach (var folder in array)
+                {
+                    if (Format.Text(folder, "id") == _id)
+                    {
+                        return Format.Text(folder, "name", Format.Text(folder, "path", _id));
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+        return _id;
     }
 
     private static bool OutcomeOk(JsonNode outcome, out string message)
