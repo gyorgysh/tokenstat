@@ -98,6 +98,7 @@ public sealed partial class MainWindow : Window
             {
                 SetContent(section switch
                 {
+                    WorkspaceSection.Files => new EditorPage(workspaceId),
                     WorkspaceSection.Notes => new NotesPage(workspaceId),
                     WorkspaceSection.Workflows => new WorkflowsPage(workspaceId),
                     WorkspaceSection.Automations => new AutomationsPage(workspaceId),
@@ -321,6 +322,7 @@ public sealed partial class MainWindow : Window
                 var id = rest[..i];
                 Page page = section switch
                 {
+                    WorkspaceSection.Files => new EditorPage(id),
                     WorkspaceSection.Notes => new NotesPage(id),
                     WorkspaceSection.Workflows => new WorkflowsPage(id),
                     WorkspaceSection.Automations => new AutomationsPage(id),
