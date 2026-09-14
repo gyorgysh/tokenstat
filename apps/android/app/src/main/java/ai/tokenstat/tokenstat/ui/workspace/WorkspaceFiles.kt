@@ -77,7 +77,7 @@ fun FilesSection(
     var entries by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var editing by remember { mutableStateOf<EditTarget?>(null) }
+    var editor by remember { mutableStateOf<List<ai.tokenstat.tokenstat.ui.editor.EditorOpen>?>(null) }
 
     suspend fun load(at: String) {
         loading = true
@@ -125,17 +125,7 @@ fun FilesSection(
                             if (dir) {
                                 path = child
                             } else {
-                                scope.launch {
-                                    runCatching {
-                                        val read = model.workspaceSection(peer, "workspace.read", buildJsonObject {
-                                            put("id", workspace); put("path", child)
-                                        }) as? JsonObject
-                                        editing = EditTarget(
-                                            path = child,
-                                            body = read?.str("content") ?: "",
-                                        )
-                                    }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
-                                }
+                                editor = listOf(ai.tokenstat.tokenstat.ui.editor.EditorOpen(child))
                             }
                         }
                         .padding(vertical = Space.xs),
@@ -162,29 +152,20 @@ fun FilesSection(
             }
         }
     }
-    val target = editing
-    if (target != null) {
-        FileEditorDialog(
-            target = target,
+    val open = editor
+    if (open != null) {
+        ai.tokenstat.tokenstat.ui.editor.EditorDialog(
+            model = model,
+            peer = peer,
+            workspace = workspace,
             folderName = folderName,
-            onDismiss = { editing = null },
-            onSave = { body ->
-                scope.launch {
-                    runCatching {
-                        model.workspaceSection(peer, "workspace.write", buildJsonObject {
-                            put("id", workspace)
-                            put("path", target.path)
-                            put("content", body)
-                        })
-                    }.onSuccess { editing = null }
-                        .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
-                }
-            },
+            hostLabel = hostLabel,
+            initial = open,
+            onSavedFile = { scope.launch { load(path) } },
+            onDismiss = { editor = null },
         )
     }
 }
-
-private data class EditTarget(val path: String, val body: String)
 
 private fun fileIcon(name: String, isDir: Boolean): ImageVector {
     if (isDir) return Icons.Default.Folder
@@ -221,88 +202,5 @@ private fun Breadcrumb(root: String, path: String, onJump: (String) -> Unit) {
                 )
             }
         }
-    }
-}
-
-/// One file to read and write, with the way back named. Save stays disabled
-/// until the text differs from what the host sent, and closing with edits
-/// asks first, like `ClientFileEditor` ("Discard changes?").
-@Composable
-private fun FileEditorDialog(
-    target: EditTarget,
-    folderName: String,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
-) {
-    var body by remember(target.path) { mutableStateOf(target.body) }
-    var saving by remember { mutableStateOf(false) }
-    var confirmClose by remember { mutableStateOf(false) }
-    val dirty = body != target.body
-    val fileName = target.path.substringAfterLast('/')
-    val parent = target.path.substringBeforeLast('/', "")
-
-    fun close() {
-        if (dirty) confirmClose = true else onDismiss()
-    }
-
-    Dialog(onDismissRequest = ::close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(Space.m),
-            verticalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(fileName, style = TsType.mono(13), color = LocalTsColors.current.textPrimary, maxLines = 1)
-                    Text(
-                        listOfNotNull(
-                            folderName.takeIf { it.isNotBlank() }?.let { "Back to $it" },
-                            parent.takeIf { it.isNotBlank() },
-                        ).joinToString(" · ").ifBlank { "Back" },
-                        style = TextStyle(fontSize = 11.sp),
-                        color = LocalTsColors.current.accent,
-                        maxLines = 1,
-                    )
-                }
-                if (dirty) {
-                    Text("Unsaved", style = TextStyle(fontSize = 11.sp), color = LocalTsColors.current.warning)
-                }
-            }
-            OutlinedTextField(
-                body,
-                { body = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                textStyle = TsType.mono(12),
-                minLines = 12,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsSecondaryButton(label = "Close", small = true, onClick = ::close)
-                TsAccentButton(
-                    label = if (saving) "Saving…" else "Save",
-                    small = true,
-                    enabled = dirty && !saving,
-                    onClick = {
-                        saving = true
-                        onSave(body)
-                    },
-                )
-            }
-        }
-    }
-    if (confirmClose) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { confirmClose = false },
-            title = { Text("Discard changes?") },
-            text = { Text("${target.path} has edits that are not saved on the host.") },
-            confirmButton = {
-                TextButton(onClick = { confirmClose = false; onDismiss() }) { Text("Discard") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClose = false }) { Text("Keep editing") }
-            },
-        )
     }
 }

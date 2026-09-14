@@ -39,6 +39,7 @@ import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.BrandCheckbox
 import ai.tokenstat.tokenstat.ui.components.EmptyState
+import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
@@ -83,6 +84,7 @@ fun ChangesSection(
     var showingComposer by remember { mutableStateOf(false) }
     var showingReviewAll by remember { mutableStateOf(false) }
     var diffPath by remember { mutableStateOf<String?>(null) }
+    var editPath by remember { mutableStateOf<String?>(null) }
 
     suspend fun load() {
         state.restore(context)
@@ -239,7 +241,21 @@ fun ChangesSection(
             workspace = workspace,
             hostLabel = hostLabel,
             path = open,
+            onEdit = { editPath = open },
             onDismiss = { diffPath = null },
+        )
+    }
+    val editing = editPath
+    if (editing != null) {
+        ai.tokenstat.tokenstat.ui.editor.EditorDialog(
+            model = model,
+            peer = peer,
+            workspace = workspace,
+            folderName = folderName,
+            hostLabel = hostLabel,
+            initial = listOf(ai.tokenstat.tokenstat.ui.editor.EditorOpen(editing)),
+            onSavedFile = { scope.launch { load() } },
+            onDismiss = { editPath = null },
         )
     }
 }
@@ -313,6 +329,7 @@ fun FileDiffDialog(
     workspace: String,
     hostLabel: String,
     path: String,
+    onEdit: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     var diff by remember(path) { mutableStateOf<JsonObject?>(null) }
@@ -344,7 +361,12 @@ fun FileDiffDialog(
             } else if (error == null) {
                 Text("That file is not in this folder any more.", color = LocalTsColors.current.textSecondary)
             }
-            TsSecondaryButton(label = "Close", small = true, onClick = onDismiss)
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                if (onEdit != null && diff != null && !diff!!.bol("binary")) {
+                    TsAccentButton(label = "Edit", small = true, onClick = { onDismiss(); onEdit() })
+                }
+                TsSecondaryButton(label = "Close", small = true, onClick = onDismiss)
+            }
         }
     }
 }

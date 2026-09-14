@@ -38,6 +38,16 @@ import ai.tokenstat.tokenstat.ui.workflows.WorkflowNodeKind
 import ai.tokenstat.tokenstat.ui.workflows.WorkflowRecipes
 import ai.tokenstat.tokenstat.ui.workflows.WorkflowRunRecord
 import ai.tokenstat.tokenstat.ui.workflows.workflowContentMatches
+import ai.tokenstat.tokenstat.ui.editor.EditorFind
+import ai.tokenstat.tokenstat.ui.editor.EditorGutterMap
+import ai.tokenstat.tokenstat.ui.editor.SyntaxSpan
+import ai.tokenstat.tokenstat.ui.editor.changedLinesFromDiff
+import ai.tokenstat.tokenstat.ui.editor.firstDifference
+import ai.tokenstat.tokenstat.ui.theme.SyntaxKind
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -463,6 +473,87 @@ class AuthoringLogicTest {
         assertTrue(!workflowContentMatches(graph, graph.copy(name = "Other")))
         assertEquals("Needs attention", WorkflowRunRecord.label("waiting"))
         assertEquals("Working", WorkflowRunRecord.label("running"))
+    }
+
+    @Test
+    fun editorFindSession() {
+        val find = EditorFind()
+        find.query = "hello"
+        find.refresh("say hello, HELLO again")
+        assertEquals(2, find.matchCount)
+        assertEquals("1 of 2", find.countLabel)
+        assertTrue(find.canNavigate)
+        assertTrue(find.canReplace)
+        find.goNext()
+        assertEquals("2 of 2", find.countLabel)
+        find.goNext()
+        assertEquals("1 of 2", find.countLabel)
+        find.goPrevious()
+        assertEquals("2 of 2", find.countLabel)
+        find.replaceText = "hi"
+        val replaced = find.replaceCurrent("say hello, HELLO again")
+        assertEquals("say hello, hi again", replaced)
+        val cleared = EditorFind()
+        cleared.query = "hello"
+        cleared.replaceText = "hi"
+        cleared.refresh("hello hello")
+        assertEquals("hi hi", cleared.replaceAll("hello hello"))
+        val empty = EditorFind()
+        empty.refresh("text")
+        assertNull(empty.countLabel)
+        empty.query = "missing"
+        empty.refresh("text")
+        assertEquals("No results", empty.countLabel)
+        assertTrue(!empty.canNavigate && !empty.canReplace)
+        val flood = EditorFind()
+        flood.query = "a"
+        flood.refresh("a".repeat(3000))
+        assertEquals(2000, flood.matchCount)
+        assertEquals("1 of 2000+", flood.countLabel)
+    }
+
+    @Test
+    fun editorGutterMath() {
+        val starts = EditorGutterMap.lineStarts("ab\nc\n")
+        assertEquals(listOf(0, 3, 5), starts)
+        assertEquals(1, EditorGutterMap.paragraph(0, starts))
+        assertEquals(2, EditorGutterMap.paragraph(3, starts))
+        assertEquals(3, EditorGutterMap.paragraph(5, starts))
+        assertNull(firstDifference("same", "same"))
+        assertEquals(2, firstDifference("a\nb\n", "a\nc\n"))
+        assertEquals(3, firstDifference("a\nb", "a\nb\nc"))
+    }
+
+    @Test
+    fun editorSyntaxAndDiff() {
+        assertEquals(SyntaxKind.Keyword, SyntaxSpan.syntaxKindOf("keyword"))
+        assertEquals(SyntaxKind.Unknown, SyntaxSpan.syntaxKindOf("frobnicator"))
+        assertEquals(SyntaxKind.Unknown, SyntaxSpan.syntaxKindOf(null))
+        val span = SyntaxSpan(8, 10, SyntaxKind.String)
+        assertEquals(SyntaxSpan(8, 2, SyntaxKind.String), span.clamped(10))
+        assertNull(SyntaxSpan(12, 3, SyntaxKind.String).clamped(10))
+        val diff = buildJsonObject {
+            put("hunks", JsonArray(listOf(buildJsonObject {
+                put("lines", JsonArray(listOf(
+                    buildJsonObject {
+                        put("kind", "context")
+                        put("oldLine", 1)
+                        put("newLine", 1)
+                    },
+                    buildJsonObject {
+                        put("kind", "added")
+                        put("newLine", 3)
+                    },
+                    buildJsonObject {
+                        put("kind", "removed")
+                        put("oldLine", 4)
+                    },
+                )))
+            })))
+        }
+        assertEquals(setOf(3), changedLinesFromDiff(diff))
+        assertEquals(emptySet<Int>(), changedLinesFromDiff(null))
+        assertEquals(emptySet<Int>(), changedLinesFromDiff(JsonObject(emptyMap())))
     }
 
     @Test
