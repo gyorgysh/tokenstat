@@ -92,6 +92,21 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() => ShowOnboarding(firstRun: false));
         };
+        AppServices.OpenWorkspace = (workspaceId, section) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                SetContent(section switch
+                {
+                    WorkspaceSection.Notes => new NotesPage(workspaceId),
+                    WorkspaceSection.Workflows => new WorkflowsPage(workspaceId),
+                    WorkspaceSection.Automations => new AutomationsPage(workspaceId),
+                    WorkspaceSection.Pulls => new PullsPage(workspaceId),
+                    WorkspaceSection.Chat => new ChatPage(workspaceId),
+                    _ => new WorkspacePage(workspaceId, section),
+                });
+            });
+        };
 
         if (_nav.MenuItems[0] is NavigationViewItem first)
         {
@@ -283,6 +298,7 @@ public sealed partial class MainWindow : Window
                     GlobalSection.Insights => new InsightsPage(),
                     GlobalSection.Machines => new MachinesPage(),
                     GlobalSection.Ssh => new SshPage(),
+                    GlobalSection.Search => new WorkSearchPage(),
                     GlobalSection.Todo => new TodoPage(),
                     GlobalSection.Notes => new NotesPage(),
                     GlobalSection.Workflows => new WorkflowsPage(),

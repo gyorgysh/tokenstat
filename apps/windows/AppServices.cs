@@ -7,6 +7,7 @@
 
 using Tokenstat.Host;
 using Tokenstat.Install;
+using Tokenstat.Navigation;
 
 namespace Tokenstat;
 
@@ -38,4 +39,10 @@ internal static class AppServices
     /// called from About so the tour can be re-opened after onboarding.
     /// </summary>
     public static Action? OpenOnboarding { get; set; }
+
+    /// <summary>
+    /// Open a folder section from a search hit. Workspace id, then section.
+    /// Set from MainWindow so results return to the folder they live in.
+    /// </summary>
+    public static Action<string, WorkspaceSection>? OpenWorkspace { get; set; }
 }

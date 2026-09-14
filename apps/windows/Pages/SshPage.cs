@@ -42,8 +42,10 @@ internal sealed class SshPage : Page
         PlaceholderText = "Type, then Enter",
         FontFamily = Fonts.Mono,
     };
+    private readonly StackPanel _suggestRoot = new() { Spacing = Theme.SpaceS };
 
     private string? _sessionId;
+    private string? _sessionHostId;
     private long _offset;
     private CancellationTokenSource? _poll;
 
@@ -56,6 +58,7 @@ internal sealed class SshPage : Page
         };
 
         _scroll.Content = _view;
+        _sessionGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _sessionGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _sessionGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         _sessionGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -71,10 +74,16 @@ internal sealed class SshPage : Page
             ShowList();
             await LoadAsync();
         }));
+        sessionChrome.Children.Add(ActionIconGlyph.Button("Suggest", ActionIcon.Search, async (_, _) =>
+        {
+            await SuggestAsync();
+        }));
         sessionChrome.Children.Add(_status);
-        Grid.SetRow(_scroll, 1);
-        Grid.SetRow(_input, 2);
+        Grid.SetRow(_suggestRoot, 1);
+        Grid.SetRow(_scroll, 2);
+        Grid.SetRow(_input, 3);
         _sessionGrid.Children.Add(sessionChrome);
+        _sessionGrid.Children.Add(_suggestRoot);
         _sessionGrid.Children.Add(_scroll);
         _sessionGrid.Children.Add(_input);
         _input.KeyDown += InputOnKeyDown;
@@ -133,7 +142,7 @@ internal sealed class SshPage : Page
         {
             _listRoot.Children.Add(EmptyState.View(
                 "No saved hosts",
-                "Save a server on a Mac, then connect from here with a password or a key.",
+                "Add a host below, then connect with a password or a key.",
                 EmptyArtKind.WorkspaceAccess));
         }
         else
@@ -171,12 +180,36 @@ internal sealed class SshPage : Page
                 };
                 var record = host;
                 open.Click += async (_, _) => await ConnectAsync(record);
-                list.Children.Add(open);
+                var row = new Grid();
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                Grid.SetColumn(open, 0);
+                row.Children.Add(open);
+                var tools = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = Theme.SpaceS,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                tools.Children.Add(ActionIconGlyph.Button(
+                    "Edit", ActionIcon.Edit, async (_, _) => await EditHostAsync(record)));
+                tools.Children.Add(ActionIconGlyph.Button(
+                    "Delete", ActionIcon.Delete, async (_, _) => await DeleteHostAsync(record)));
+                Grid.SetColumn(tools, 1);
+                row.Children.Add(tools);
+                list.Children.Add(row);
             }
             _listRoot.Children.Add(Chrome.Card("Hosts", list));
         }
+        _listRoot.Children.Add(ActionIconGlyph.Button(
+            "Add host", ActionIcon.Create, async (_, _) => await EditHostAsync(null)));
 
         await LoadKeysAsync(keys);
+        await LoadSessionsAsync();
+        await LoadSnippetsAsync();
+        await LoadFoldersAsync();
+        await LoadKnownHostsAsync();
+        await LoadConfigAsync();
     }
 
     /// <summary>
@@ -606,6 +639,7 @@ internal sealed class SshPage : Page
         }
 
         _sessionId = Format.Text(opened, "id");
+        _sessionHostId = Format.Text(record, "id");
         if (string.IsNullOrEmpty(_sessionId))
         {
             _listRoot.Children.Insert(1, Chrome.Banner(
@@ -621,6 +655,130 @@ internal sealed class SshPage : Page
         _poll?.Cancel();
         _poll = new CancellationTokenSource();
         _ = PollAsync(_poll.Token);
+    }
+
+    /// <summary>
+    /// Add a host, or edit the label, address, user, and starting directory
+    /// of a saved one. Keys, secrets, and fingerprints stay where they are:
+    /// this form never shows private material.
+    /// </summary>
+    private async Task EditHostAsync(JsonNode? host)
+    {
+        var editing = host is JsonObject;
+        var savedPort = Format.Long(host, "port");
+        var labelBox = new TextBox
+        {
+            PlaceholderText = "Label",
+            Text = Format.Text(host, "label"),
+            MinWidth = 360,
+        };
+        var hostnameBox = new TextBox
+        {
+            PlaceholderText = "Hostname",
+            Text = Format.Text(host, "hostname"),
+            MinWidth = 360,
+        };
+        var portBox = new TextBox
+        {
+            PlaceholderText = "Port",
+            Text = savedPort > 0 ? savedPort.ToString() : "22",
+            MinWidth = 120,
+        };
+        var usernameBox = new TextBox
+        {
+            PlaceholderText = "Username",
+            Text = Format.Text(host, "username"),
+            MinWidth = 360,
+        };
+        var directoryBox = new TextBox
+        {
+            PlaceholderText = "Starting directory, for example ~",
+            Text = Format.Text(host, "initialDirectory", "~"),
+            MinWidth = 360,
+        };
+        var form = new StackPanel { Spacing = Theme.SpaceS, MinWidth = 360 };
+        form.Children.Add(labelBox);
+        form.Children.Add(hostnameBox);
+        form.Children.Add(portBox);
+        form.Children.Add(usernameBox);
+        form.Children.Add(directoryBox);
+        var dialog = new ContentDialog
+        {
+            Title = editing ? "Edit host" : "Add host",
+            Content = form,
+            PrimaryButtonText = editing ? "Save" : "Add",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        if (!ushort.TryParse(portBox.Text.Trim(), out var port) || port == 0)
+        {
+            LibraryBanner("Port must be between 1 and 65535.");
+            return;
+        }
+        try
+        {
+            var payload = new JsonObject
+            {
+                ["label"] = labelBox.Text.Trim(),
+                ["hostname"] = hostnameBox.Text.Trim(),
+                ["port"] = port,
+                ["username"] = usernameBox.Text.Trim(),
+                ["initialDirectory"] = directoryBox.Text.Trim(),
+            };
+            if (host is JsonObject existing)
+            {
+                foreach (var (key, value) in existing)
+                {
+                    if (!payload.ContainsKey(key))
+                    {
+                        payload[key] = value?.DeepClone();
+                    }
+                }
+            }
+            await AppServices.Host.CallAsync("ssh.host.save", payload);
+        }
+        catch (Exception ex)
+        {
+            LibraryBanner(ex.Message);
+            return;
+        }
+        await LoadAsync();
+    }
+
+    private async Task DeleteHostAsync(JsonNode? host)
+    {
+        var id = Format.Text(host, "id");
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+        var label = Format.Text(host, "label", Format.Text(host, "hostname", "this host"));
+        var dialog = new ContentDialog
+        {
+            Title = "Delete host",
+            Content = $"Delete {label}? Saved snippets stay.",
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        try
+        {
+            await AppServices.Host.CallAsync("ssh.host.delete", new JsonObject { ["id"] = id });
+        }
+        catch (Exception ex)
+        {
+            LibraryBanner(ex.Message);
+            return;
+        }
+        await LoadAsync();
     }
 
     private static string HostKeyId(JsonNode? host) =>
@@ -682,6 +840,771 @@ internal sealed class SshPage : Page
             }
         }
         return copy;
+    }
+
+    /// <summary>
+    /// Sessions this host is still holding, so a relaunched app adopts what
+    /// it left running instead of showing an empty screen over live shells.
+    /// </summary>
+    private async Task LoadSessionsAsync()
+    {
+        JsonArray? sessions;
+        try
+        {
+            sessions = Format.Items(await AppServices.Host.CallAsync("ssh.session.list"));
+        }
+        catch (Exception ex)
+        {
+            _listRoot.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            return;
+        }
+        if (sessions is null || sessions.Count == 0)
+        {
+            return;
+        }
+        var list = new StackPanel { Spacing = Theme.SpaceS };
+        foreach (var session in sessions)
+        {
+            if (session is null)
+            {
+                continue;
+            }
+            var id = Format.Text(session, "id");
+            var label = Format.Text(session, "label", "Shell");
+            var alive = Format.Flag(session, "alive");
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var name = new TextBlock
+            {
+                Text = alive ? label : $"{label} · closed",
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+            };
+            Grid.SetColumn(name, 0);
+            row.Children.Add(name);
+            if (!string.IsNullOrEmpty(id) && alive)
+            {
+                var adopt = ActionIconGlyph.Button(
+                    "Open", ActionIcon.Next, async (_, _) => await AdoptSessionAsync(id));
+                Grid.SetColumn(adopt, 1);
+                row.Children.Add(adopt);
+            }
+            list.Children.Add(row);
+        }
+        _listRoot.Children.Add(Chrome.Card(
+            "Running sessions",
+            list,
+            "Shells this PC left open. Opening one picks up where it left off."));
+    }
+
+    private async Task AdoptSessionAsync(string id)
+    {
+        _sessionId = id;
+        _sessionHostId = null;
+        _offset = 0;
+        _view.Text = "";
+        _status.Children.Clear();
+        _suggestRoot.Children.Clear();
+        ShowSession();
+        _poll?.Cancel();
+        _poll = new CancellationTokenSource();
+        _ = PollAsync(_poll.Token);
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// What to offer part-way through a command: saved snippets first, then
+    /// names the server itself reported. Tapping a row types its text,
+    /// rubbing out the characters it stands in for first.
+    /// </summary>
+    private async Task SuggestAsync()
+    {
+        var id = _sessionId;
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+        _suggestRoot.Children.Clear();
+        JsonNode answer;
+        try
+        {
+            answer = await AppServices.Host.CallAsync(
+                "ssh.session.suggest",
+                new JsonObject
+                {
+                    ["id"] = id,
+                    ["fragment"] = _input.Text ?? "",
+                });
+        }
+        catch (Exception ex)
+        {
+            SessionBanner(ex.Message);
+            return;
+        }
+        var rows = answer["rows"] as JsonArray;
+        if (rows is null || rows.Count == 0)
+        {
+            _suggestRoot.Children.Add(new TextBlock
+            {
+                Text = Format.Flag(answer, "pending")
+                    ? "Asking the server for names. Type on and try again."
+                    : "Nothing saved matches this line.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return;
+        }
+        var list = new StackPanel { Spacing = Theme.SpaceXs };
+        foreach (var row in rows)
+        {
+            if (row is null)
+            {
+                continue;
+            }
+            var title = Format.Text(row, "title");
+            var detail = Format.Text(row, "detail");
+            var record = row;
+            var pick = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Content = new StackPanel
+                {
+                    Spacing = 2,
+                    Children =
+                    {
+                        new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                        new TextBlock
+                        {
+                            Text = detail,
+                            Opacity = 0.7,
+                            TextWrapping = TextWrapping.Wrap,
+                            Visibility = string.IsNullOrEmpty(detail) ? Visibility.Collapsed : Visibility.Visible,
+                        },
+                    },
+                },
+            };
+            pick.Click += (_, _) => InsertSuggestion(record);
+            list.Children.Add(pick);
+        }
+        _suggestRoot.Children.Add(Chrome.Card("Suggestions", list));
+        if (Format.Flag(answer, "pending"))
+        {
+            _suggestRoot.Children.Add(new TextBlock
+            {
+                Text = "Still asking the server for names. These are the saved ones.",
+                Opacity = 0.7,
+            });
+        }
+    }
+
+    private void InsertSuggestion(JsonNode row)
+    {
+        var insert = Format.Text(row, "insert");
+        if (string.IsNullOrEmpty(insert))
+        {
+            return;
+        }
+        var replace = (int)Math.Min(Format.Long(row, "replace"), (_input.Text ?? "").Length);
+        var fragment = _input.Text ?? "";
+        _input.Text = fragment[..(fragment.Length - replace)] + insert;
+        _suggestRoot.Children.Clear();
+    }
+
+    /// <summary>
+    /// True when a snippet is saved against the server the open session is
+    /// on. Those lead, because somebody scoped them on purpose.
+    /// </summary>
+    private bool IsScopedToSession(JsonNode snippet)
+    {
+        if (string.IsNullOrEmpty(_sessionHostId))
+        {
+            return false;
+        }
+        if (snippet["hostIds"] is JsonArray scoped)
+        {
+            foreach (var held in scoped)
+            {
+                if (held?.GetValueKind() == System.Text.Json.JsonValueKind.String
+                    && held.GetValue<string>() == _sessionHostId)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Saved commands, runnable in the open session. A value for a
+    /// {{placeholder}} is asked for at run time and never stored, because
+    /// the useful ones are hostnames, ticket numbers, and passwords.
+    /// </summary>
+    private async Task LoadSnippetsAsync()
+    {
+        JsonArray? snippets;
+        try
+        {
+            snippets = Format.Items(await AppServices.Host.CallAsync("ssh.snippet.list"));
+        }
+        catch (Exception ex)
+        {
+            _listRoot.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            return;
+        }
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(ActionIconGlyph.Button(
+            "Add snippet", ActionIcon.Create, async (_, _) => await EditSnippetAsync(null)));
+        var sessionOpen = !string.IsNullOrEmpty(_sessionId);
+        var ordered = new List<(JsonNode Node, bool Scoped)>();
+        if (snippets is not null)
+        {
+            foreach (var snippet in snippets)
+            {
+                if (snippet is null)
+                {
+                    continue;
+                }
+                ordered.Add((snippet, IsScopedToSession(snippet)));
+            }
+            // Scoped first: somebody scoped them on purpose.
+            ordered.Sort((a, b) => b.Scoped.CompareTo(a.Scoped));
+        }
+        foreach (var (snippet, scoped) in ordered)
+        {
+            var title = Format.Text(snippet, "title", "Snippet");
+            if (scoped)
+            {
+                title += " · for this server";
+            }
+            var command = Format.Text(snippet, "command");
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var name = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            name.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            name.Children.Add(new TextBlock
+            {
+                Text = command,
+                FontFamily = Fonts.Mono,
+                FontSize = 12,
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            Grid.SetColumn(name, 0);
+            row.Children.Add(name);
+            var tools = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = Theme.SpaceS,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var record = snippet;
+            if (sessionOpen && !string.IsNullOrEmpty(command))
+            {
+                tools.Children.Add(ActionIconGlyph.Button(
+                    "Run", ActionIcon.Run, async (_, _) => await SendSnippetAsync(record)));
+            }
+            tools.Children.Add(ActionIconGlyph.Button(
+                "Edit", ActionIcon.Edit, async (_, _) => await EditSnippetAsync(record)));
+            tools.Children.Add(ActionIconGlyph.Button(
+                "Delete", ActionIcon.Delete, async (_, _) => await DeleteSnippetAsync(record)));
+            Grid.SetColumn(tools, 1);
+            row.Children.Add(tools);
+            body.Children.Add(row);
+        }
+        if (body.Children.Count == 1)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "No snippets yet. Save the commands you retype.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        _listRoot.Children.Add(Chrome.Card(
+            "Snippets",
+            body,
+            sessionOpen ? "Run types a snippet into the open session." : "Open a session to run a snippet."));
+    }
+
+    private async Task EditSnippetAsync(JsonNode? snippet)
+    {
+        var titleBox = new TextBox
+        {
+            PlaceholderText = "Title",
+            Text = Format.Text(snippet, "title"),
+            MinWidth = 360,
+        };
+        var commandBox = new TextBox
+        {
+            PlaceholderText = "Command, with {{placeholders}} for values asked at run time",
+            Text = Format.Text(snippet, "command"),
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = Fonts.Mono,
+            MinHeight = 96,
+            MinWidth = 360,
+        };
+        var tagsBox = new TextBox
+        {
+            PlaceholderText = "Tags, comma separated",
+            Text = TagsText(snippet?["tags"]),
+            MinWidth = 360,
+        };
+        var form = new StackPanel { Spacing = Theme.SpaceS, MinWidth = 360 };
+        form.Children.Add(titleBox);
+        form.Children.Add(commandBox);
+        form.Children.Add(tagsBox);
+        var dialog = new ContentDialog
+        {
+            Title = snippet is null ? "Add snippet" : "Edit snippet",
+            Content = form,
+            PrimaryButtonText = snippet is null ? "Add" : "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        try
+        {
+            var payload = new JsonObject
+            {
+                ["title"] = titleBox.Text.Trim(),
+                ["command"] = commandBox.Text,
+                ["tags"] = TagsArray(tagsBox.Text),
+            };
+            if (snippet is JsonObject existing)
+            {
+                foreach (var (key, value) in existing)
+                {
+                    if (!payload.ContainsKey(key))
+                    {
+                        payload[key] = value?.DeepClone();
+                    }
+                }
+            }
+            await AppServices.Host.CallAsync("ssh.snippet.save", payload);
+        }
+        catch (Exception ex)
+        {
+            LibraryBanner(ex.Message);
+            return;
+        }
+        await LoadAsync();
+    }
+
+    private async Task DeleteSnippetAsync(JsonNode? snippet)
+    {
+        var id = Format.Text(snippet, "id");
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+        var dialog = new ContentDialog
+        {
+            Title = "Delete snippet",
+            Content = $"Delete {Format.Text(snippet, "title", "this snippet")}?",
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        try
+        {
+            await AppServices.Host.CallAsync("ssh.snippet.delete", new JsonObject { ["id"] = id });
+        }
+        catch (Exception ex)
+        {
+            LibraryBanner(ex.Message);
+            return;
+        }
+        await LoadAsync();
+    }
+
+    private async Task SendSnippetAsync(JsonNode snippet)
+    {
+        var id = _sessionId;
+        if (string.IsNullOrEmpty(id))
+        {
+            LibraryBanner("Open a session first, then run the snippet into it.");
+            return;
+        }
+        var command = Format.Text(snippet, "command");
+        var names = Placeholders(command);
+        if (names.Count > 0)
+        {
+            var boxes = new Dictionary<string, TextBox>();
+            var form = new StackPanel { Spacing = Theme.SpaceS, MinWidth = 320 };
+            foreach (var name in names)
+            {
+                var box = new TextBox { PlaceholderText = name, MinWidth = 320 };
+                boxes[name] = box;
+                form.Children.Add(box);
+            }
+            var dialog = new ContentDialog
+            {
+                Title = Format.Text(snippet, "title", "Run snippet"),
+                Content = form,
+                PrimaryButtonText = "Run",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+            };
+            if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+            {
+                return;
+            }
+            foreach (var (name, box) in boxes)
+            {
+                command = command.Replace("{{" + name + "}}", box.Text, StringComparison.Ordinal);
+            }
+        }
+        try
+        {
+            await AppServices.Host.CallAsync(
+                "ssh.session.write",
+                new JsonObject
+                {
+                    ["id"] = id,
+                    ["data"] = Format.ByteArray(Encoding.UTF8.GetBytes(command + "\r\n")),
+                });
+        }
+        catch (Exception ex)
+        {
+            LibraryBanner(ex.Message);
+            return;
+        }
+        ShowSession();
+    }
+
+    private static List<string> Placeholders(string command)
+    {
+        var names = new List<string>();
+        var at = 0;
+        while (at < command.Length)
+        {
+            var open = command.IndexOf("{{", at, StringComparison.Ordinal);
+            if (open < 0)
+            {
+                break;
+            }
+            var shut = command.IndexOf("}}", open + 2, StringComparison.Ordinal);
+            if (shut < 0)
+            {
+                break;
+            }
+            var name = command[(open + 2)..shut].Trim();
+            if (name.Length > 0 && !names.Contains(name, StringComparer.Ordinal))
+            {
+                names.Add(name);
+            }
+            at = shut + 2;
+        }
+        return names;
+    }
+
+    private static string TagsText(JsonNode? node)
+    {
+        if (node is not JsonArray array)
+        {
+            return "";
+        }
+        var parts = new List<string>();
+        foreach (var item in array)
+        {
+            var text = item?.GetValueKind() == System.Text.Json.JsonValueKind.String
+                ? item.GetValue<string>()
+                : null;
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                parts.Add(text.Trim());
+            }
+        }
+        return string.Join(", ", parts);
+    }
+
+    private static JsonArray TagsArray(string raw)
+    {
+        var array = new JsonArray();
+        foreach (var part in raw.Split(','))
+        {
+            var tag = part.Trim();
+            if (tag.Length > 0)
+            {
+                array.Add(JsonValue.Create(tag));
+            }
+        }
+        return array;
+    }
+
+    /// <summary>
+    /// Folders group hosts in the library. Deleting one never deletes what
+    /// is in it: children move up one level, which is recoverable, where a
+    /// cascade is not.
+    /// </summary>
+    private async Task LoadFoldersAsync()
+    {
+        JsonArray? folders;
+        try
+        {
+            folders = Format.Items(await AppServices.Host.CallAsync("ssh.folder.list"));
+        }
+        catch (Exception ex)
+        {
+            _listRoot.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            return;
+        }
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(ActionIconGlyph.Button(
+            "Add folder", ActionIcon.Create, async (_, _) => await AddFolderAsync()));
+        if (folders is not null)
+        {
+            foreach (var folder in folders)
+            {
+                if (folder is null)
+                {
+                    continue;
+                }
+                var id = Format.Text(folder, "id");
+                var row = new Grid();
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var name = new TextBlock
+                {
+                    Text = Format.Text(folder, "name", "Folder"),
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(name, 0);
+                row.Children.Add(name);
+                if (!string.IsNullOrEmpty(id))
+                {
+                    var remove = ActionIconGlyph.Button(
+                        "Delete", ActionIcon.Delete, async (_, _) => await DeleteFolderAsync(id));
+                    Grid.SetColumn(remove, 1);
+                    row.Children.Add(remove);
+                }
+                body.Children.Add(row);
+            }
+        }
+        _listRoot.Children.Add(Chrome.Card("Folders", body));
+    }
+
+    private async Task AddFolderAsync()
+    {
+        var nameBox = new TextBox { PlaceholderText = "Folder name", MinWidth = 320 };
+        var dialog = new ContentDialog
+        {
+            Title = "Add folder",
+            Content = nameBox,
+            PrimaryButtonText = "Add",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        try
+        {
+            await AppServices.Host.CallAsync(
+                "ssh.folder.save",
+                new JsonObject { ["name"] = nameBox.Text.Trim() });
+        }
+        catch (Exception ex)
+        {
+            LibraryBanner(ex.Message);
+            return;
+        }
+        await LoadAsync();
+    }
+
+    private async Task DeleteFolderAsync(string id)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Delete folder",
+            Content = "Delete this folder? Hosts inside it move up one level.",
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        try
+        {
+            await AppServices.Host.CallAsync("ssh.folder.delete", new JsonObject { ["id"] = id });
+        }
+        catch (Exception ex)
+        {
+            LibraryBanner(ex.Message);
+            return;
+        }
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Which servers this machine has decided to trust, and how to take it
+    /// back. Forgetting is what makes the next connection ask again, which
+    /// is the only honest answer to a changed server key.
+    /// </summary>
+    private async Task LoadKnownHostsAsync()
+    {
+        JsonArray? rows;
+        try
+        {
+            rows = Format.Items(await AppServices.Host.CallAsync("ssh.knownhost.list"));
+        }
+        catch (Exception ex)
+        {
+            _listRoot.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            return;
+        }
+        if (rows is null || rows.Count == 0)
+        {
+            return;
+        }
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        foreach (var row in rows)
+        {
+            if (row is null)
+            {
+                continue;
+            }
+            var hostId = Format.Text(row, "hostId");
+            var label = Format.Text(row, "label", Format.Text(row, "hostname", "Server"));
+            var prints = row["fingerprints"] as JsonArray;
+            var detail = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            detail.Children.Add(new TextBlock { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            if (prints is not null)
+            {
+                foreach (var print in prints)
+                {
+                    var text = print?.GetValueKind() == System.Text.Json.JsonValueKind.String
+                        ? print.GetValue<string>()
+                        : "";
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        detail.Children.Add(new TextBlock
+                        {
+                            Text = text,
+                            FontFamily = Fonts.Mono,
+                            FontSize = 12,
+                            Opacity = 0.7,
+                            TextWrapping = TextWrapping.Wrap,
+                        });
+                    }
+                }
+            }
+            var line = new Grid();
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(detail, 0);
+            line.Children.Add(detail);
+            if (!string.IsNullOrEmpty(hostId))
+            {
+                var forget = ActionIconGlyph.Button(
+                    "Forget", ActionIcon.Delete, async (_, _) => await ForgetKnownHostAsync(hostId));
+                Grid.SetColumn(forget, 1);
+                line.Children.Add(forget);
+            }
+            body.Children.Add(line);
+        }
+        _listRoot.Children.Add(Chrome.Card(
+            "Known servers",
+            body,
+            "Forgetting a server asks about its key on the next connection."));
+    }
+
+    private async Task ForgetKnownHostAsync(string hostId)
+    {
+        try
+        {
+            await AppServices.Host.CallAsync("ssh.knownhost.forget", new JsonObject { ["id"] = hostId });
+        }
+        catch (Exception ex)
+        {
+            LibraryBanner(ex.Message);
+            return;
+        }
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Hosts already in ~/.ssh/config, offered for import. Saved ones are
+    /// skipped, so importing twice changes nothing.
+    /// </summary>
+    private async Task LoadConfigAsync()
+    {
+        JsonArray? candidates;
+        try
+        {
+            candidates = Format.Items(await AppServices.Host.CallAsync("ssh.config.preview"), "candidates");
+        }
+        catch
+        {
+            return;
+        }
+        var fresh = 0;
+        if (candidates is not null)
+        {
+            foreach (var candidate in candidates)
+            {
+                if (candidate is not null && !Format.Flag(candidate, "alreadySaved"))
+                {
+                    fresh++;
+                }
+            }
+        }
+        if (fresh == 0)
+        {
+            return;
+        }
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(new TextBlock
+        {
+            Text = $"{fresh} host{(fresh == 1 ? "" : "s")} in the SSH config {(fresh == 1 ? "is" : "are")} not saved here yet.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.8,
+        });
+        body.Children.Add(ActionIconGlyph.Button(
+            "Import from SSH config", ActionIcon.Download, async (_, _) => await ImportConfigAsync()));
+        _listRoot.Children.Add(Chrome.Card("SSH config", body));
+    }
+
+    private async Task ImportConfigAsync()
+    {
+        try
+        {
+            var imported = await AppServices.Host.CallAsync("ssh.config.import", new JsonObject());
+            _listRoot.Children.Insert(1, Chrome.Banner(
+                $"Imported {Format.Long(imported, "imported")} hosts from the SSH config.",
+                Theme.Success,
+                Symbol.Accept));
+        }
+        catch (Exception ex)
+        {
+            LibraryBanner(ex.Message);
+            return;
+        }
+        await LoadAsync();
+    }
+
+    private void LibraryBanner(string text)
+    {
+        _listRoot.Children.Insert(1, Chrome.Banner(text, Theme.Danger, Symbol.Important));
     }
 
     private async Task PollAsync(CancellationToken token)
