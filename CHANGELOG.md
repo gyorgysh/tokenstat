@@ -13,11 +13,21 @@ at the end.
 
 ## [Unreleased]
 
-## [1.0.5]
+## [1.0.6] - 2026-09-15
+
+### Fixed
+
+- An account that has not claimed a handle yet works everywhere. Chat,
+  pins, recent places, search history, saved work, biometric vault
+  unlock, and sign-out cleanup previously needed a handle and silently
+  did nothing without one. They now use the account itself as the
+  identity, and the login output no longer invents one.
+
+## [1.0.5] - 2026-09-14
 
 Automation graphs arrive on phone and iPad, the iOS editor gains line
 numbers with find and replace, tasks run durably across Apple clients,
-and updates and usage reporting get more careful. Not yet released.
+and updates and usage reporting get more careful.
 
 ### Added
 
