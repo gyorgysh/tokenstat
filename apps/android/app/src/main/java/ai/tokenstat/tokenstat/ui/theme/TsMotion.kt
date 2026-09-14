@@ -63,6 +63,17 @@ object TsMotion {
         stiffness = Spring.StiffnessLow,
         visibilityThreshold = null,
     )
+
+    /// One member of that family with Apple's exact numbers: SwiftUI
+    /// `.spring(response:dampingFraction:)` runs at unit mass, so the Compose
+    /// stiffness for a response in seconds is (2 pi / response) squared.
+    /// Stagger comes from gating each item's target, since a spring spec
+    /// carries no delay of its own.
+    fun <T> tunedSpring(responseSecs: Float, dampingRatio: Float) = spring<T>(
+        dampingRatio = dampingRatio,
+        stiffness = (2f * kotlin.math.PI.toFloat() / responseSecs).let { it * it },
+        visibilityThreshold = null,
+    )
 }
 
 /// Whether the user has asked the system for reduced motion (the accessibility

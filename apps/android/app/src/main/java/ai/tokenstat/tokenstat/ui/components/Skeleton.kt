@@ -45,24 +45,31 @@ private val barShape = RoundedCornerShape(4.dp)
 fun SkeletonBar(width: Dp? = null, height: Dp = 12.dp, phaseMillis: Int = 0) {
     val colors = LocalTsColors.current
     val reduceMotion = rememberReduceMotion()
-    val transition = rememberInfiniteTransition(label = "skeleton")
-    val alpha by transition.animateFloat(
-        initialValue = 0.52f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(TsMotion.pulseMillis, easing = TsMotion.easeInOut),
-            repeatMode = RepeatMode.Reverse,
-            initialStartOffset = StartOffset(phaseMillis),
-        ),
-        label = "skeletonPulse",
-    )
+    // Reduce Motion holds the bar still at full strength, like Apple's nil
+    // animation, rather than running a loop nobody sees.
+    val alpha = if (reduceMotion) {
+        1f
+    } else {
+        val transition = rememberInfiniteTransition(label = "skeleton")
+        val pulse by transition.animateFloat(
+            initialValue = 0.52f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(TsMotion.pulseMillis, easing = TsMotion.easeInOut),
+                repeatMode = RepeatMode.Reverse,
+                initialStartOffset = StartOffset(phaseMillis),
+            ),
+            label = "skeletonPulse",
+        )
+        pulse
+    }
     Box(
         Modifier
             .then(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth())
             .height(height)
             .clip(barShape)
             .background(colors.border)
-            .then(if (reduceMotion) Modifier else Modifier.alpha(alpha)),
+            .alpha(alpha),
     )
 }
 

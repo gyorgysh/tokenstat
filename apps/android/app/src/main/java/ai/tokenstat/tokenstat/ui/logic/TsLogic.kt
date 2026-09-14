@@ -85,53 +85,296 @@ object TunnelCopy {
         if (isAbsent(message)) waiting(host) else message
 }
 
-/// Substring translation of raw core errors into friendly copy, mirroring the
-/// shape of `FriendlyError.swift` (title + message + retry suggestion). The
-/// Apple table is longer; these are the rows the phone's screens hit.
+/// Substring translation of raw core errors into friendly copy, ported row for
+/// row from `FriendlyError.swift` (title + message + retry suggestion).
+/// Matching is on substrings on purpose: these strings cross a JSON boundary
+/// from Rust, where they are deliberately human sentences and not a code
+/// enum. A new phrasing that falls through lands in the default, which is
+/// honest, rather than being mapped to the wrong advice. Order matters: rows
+/// are checked in the same order as the Apple client, so both platforms
+/// answer identically.
 data class FriendlyError(val title: String, val message: String, val canRetry: Boolean)
 
 fun friendlyError(raw: String?): FriendlyError {
-    val lower = raw?.lowercase().orEmpty()
-    return when {
-        raw == null -> FriendlyError("Something went wrong", "The request could not be completed.", true)
-        lower.contains("offline") || lower.contains("no_such_peer") || lower.contains("not on the tunnel") ->
-            FriendlyError("The computer is unreachable", TunnelCopy.waiting(null), true)
-        lower.contains("timeout") || lower.contains("host_timeout") ->
-            FriendlyError("That took too long", "The machine did not answer in time. Try again.", true)
-        lower.contains("unauthorized") || lower.contains("forbidden") ->
-            FriendlyError("Not allowed", "This account or device does not have access to that.", false)
-        lower.contains("unknown method") || lower.contains("unknown_method") ->
-            FriendlyError(
-                "Helper is out of date",
-                "The background helper on this machine is older than the app and does not know this yet. Restart the app to replace it, then try again.",
-                true,
-            )
-        lower.contains("session_time_limit") || lower.contains("idle") ->
-            FriendlyError("Session ended", "The session reached its time limit or went idle.", true)
-        lower.contains("screen_already_open") || lower.contains("already open") ->
-            FriendlyError("Already open", "That screen session is already open on the host.", false)
-        lower.contains("quota_exceeded") ->
-            FriendlyError(
-                "Relay allowance used up",
-                "Check relay usage in Account to see when older traffic leaves the window. Direct connections do not use this allowance.",
-                false,
-            )
-        lower.contains("quota") || lower.contains("429") || lower.contains("rate") ->
-            FriendlyError("Rate limited", "The service asked us to slow down. Wait a moment and try again.", true)
-        lower.contains("vault") || lower.contains("not enrolled") || lower.contains("machine_required") ->
-            FriendlyError("Vault needed", "Unlock the vault on the host to continue.", false)
-        lower.contains("not approved") || lower.contains("not approved") ->
-            FriendlyError("Not approved", "The host has not approved this device yet.", false)
-        lower.contains("paid-plan") || lower.contains("paid plan") || lower.contains("device limit") ->
-            FriendlyError("Plan limit", "This needs a paid plan or has hit a device limit. Check Account.", false)
-        lower.contains("sign-in") || lower.contains("signin") || lower.contains("credential") ->
-            FriendlyError("Sign in needed", "Sign in again, then retry.", false)
-        lower.contains("tunnel") || lower.contains("unreachable") || lower.contains("asleep") || lower.contains("broken pipe") ->
-            FriendlyError("The computer is unreachable", TunnelCopy.display(raw ?: "", null), true)
-        lower.contains("helper not running") ->
-            FriendlyError("Helper not running", "Start tokenstat on the computer, then try again.", true)
-        else -> FriendlyError("Something went wrong", raw, true)
+    if (raw == null) return FriendlyError("Something went wrong", "The request could not be completed.", true)
+    val text = raw.trim()
+    val lower = text.lowercase()
+    // What the relay says when a screen session is refused or ended. These
+    // arrive as the relay's own short codes. No numbers here: the limits get
+    // tuned, and a message naming one is wrong the week it changes.
+    if (lower.contains("session_time_limit")) {
+        return FriendlyError(
+            "Session ended",
+            "Screen sessions end after a while. Connect again to carry on.",
+            true,
+        )
     }
+    if (lower.contains("session_idle")) {
+        return FriendlyError(
+            "Session ended while it was idle",
+            "This device went quiet, so the stream stopped. Connect again to pick it up.",
+            true,
+        )
+    }
+    if (lower.contains("screen_already_open")) {
+        return FriendlyError(
+            "A screen is already open",
+            "One screen at a time on an account. Close the other one and try again.",
+            false,
+        )
+    }
+    if (lower.contains("quota_exceeded")) {
+        return FriendlyError(
+            "Relay allowance used up",
+            "Check relay usage in Account to see when older traffic leaves the window. " +
+                "Direct connections do not use this allowance.",
+            false,
+        )
+    }
+    // A keychain refusal, which arrives as a bare OSStatus and a sentence
+    // that says nothing.
+    if (lower.contains("-34018") || lower.contains("errsecmissingentitlement")) {
+        return FriendlyError(
+            "This build cannot use the keychain",
+            "This copy of the app is missing the signing configuration needed for protected " +
+                "Keychain storage. Use a build signed with its Keychain entitlement and " +
+                "matching provisioning profile.",
+            false,
+        )
+    }
+    if (lower.contains("-25300")) {
+        return FriendlyError(
+            "The private key is not on this device",
+            "The record is here but the secret it points at is not, which is what a restore " +
+                "from a backup leaves behind. Import or generate the key again.",
+            false,
+        )
+    }
+    // Two different causes share the `machine_required` code: a login that
+    // was never tied to this computer, and a computer the account has not
+    // heard of. They need different advice.
+    if (lower.contains("register this device before using the vault")) {
+        return FriendlyError(
+            "This login is not tied to this computer",
+            "The vault lives on your account, and this sign-in predates linking the two. " +
+                "Press Try again first. If that does not clear it, sign in again from Account. " +
+                "Everything saved here still works.",
+            true,
+        )
+    }
+    if (lower.contains("machine_required") || lower.contains("machine_not_registered") ||
+        lower.contains("not registered on the account") || lower.contains("not bound to an account device")
+    ) {
+        return FriendlyError(
+            "This computer is not on your account",
+            "Sync needs this computer linked to your account before it can hold a copy of " +
+                "your servers. Everything still works here in the meantime.",
+            true,
+        )
+    }
+    if (lower.contains("vault already exists")) {
+        return FriendlyError(
+            "There is already a vault",
+            "An account has one vault. Unlock the one you have, or reset it if you cannot " +
+                "get back into it.",
+            false,
+        )
+    }
+    if (lower.contains("not enrolled") || lower.contains("did not enroll")) {
+        return FriendlyError(
+            "This device cannot read the vault",
+            "It has not been let in yet. Unlock the vault here to give this device its copy " +
+                "of the key.",
+            true,
+        )
+    }
+    // A method the host has never heard of is not a bad call, it is an old
+    // helper: the daemon outlives the app that installed it.
+    if (lower.contains("unknown method") || lower.contains("unknown_method")) {
+        return FriendlyError(
+            "Helper is out of date",
+            "The background helper on this machine is older than the app and does not know " +
+                "this yet. Restart the app to replace it, then try again.",
+            true,
+        )
+    }
+    if (lower.contains("not approved") || lower.contains("waiting for someone to allow")) {
+        return FriendlyError(
+            "Waiting for approval",
+            "The other device has to say yes to this one. Open Devices there and approve it, " +
+                "then try again.",
+            true,
+        )
+    }
+    if (lower.contains("paid-plan") || lower.contains("not_on_this_plan") ||
+        lower.contains("no longer includes remote")
+    ) {
+        // Opens plans rather than retrying, so this is not a retry row.
+        return FriendlyError(
+            "Not on this plan",
+            "Reaching your devices from anywhere is part of a paid plan. Everything else " +
+                "keeps working exactly as it does now.",
+            false,
+        )
+    }
+    // Before the sign-in case, and deliberately: a refused tunnel credential
+    // repairs itself, and its sentence used to contain the words "sign in
+    // again", which sent people to fix something already being fixed.
+    val wantsSignIn = lower.contains("sign in") || lower.contains("signed out") ||
+        lower.contains("not logged in") || (lower.contains("token") && lower.contains("revoked"))
+    if (wantsSignIn && (lower.contains("could not be minted") || lower.contains("paid-plan") ||
+            lower.contains("device limit"))
+    ) {
+        return FriendlyError(
+            "Sign in again",
+            "This device's login is no longer valid. Signing in again puts it back, and " +
+                "nothing local is lost.",
+            true,
+        )
+    }
+    if (lower.contains("credential") || lower.contains("tunnel token") ||
+        lower.contains("key does not match")
+    ) {
+        return FriendlyError(
+            "Reconnecting",
+            "The connection credential was refused, so this device is getting a new one. It " +
+                "usually comes back on its own within a minute.",
+            true,
+        )
+    }
+    if (wantsSignIn) {
+        return FriendlyError(
+            "Sign in again",
+            "This device's login is no longer valid. Signing in again puts it back, and " +
+                "nothing local is lost.",
+            true,
+        )
+    }
+    if (lower.contains("already on the tunnel") || lower.contains("key_already_live")) {
+        return FriendlyError(
+            "Connected somewhere else",
+            "Another copy of tokenstat is on the tunnel with this device's key. Quit it, or " +
+                "wait a moment for it to drop.",
+            false,
+        )
+    }
+    if (lower.contains("offline") || lower.contains("no internet") ||
+        lower.contains("network is unreachable") || lower.contains("dns") ||
+        lower.contains("could not resolve")
+    ) {
+        return FriendlyError(
+            "No connection",
+            "This device cannot reach the network right now. It retries by itself as soon as " +
+                "it can.",
+            true,
+        )
+    }
+    if (lower.contains("timed out") || lower.contains("timeout")) {
+        return FriendlyError(
+            "It did not answer",
+            "The other side took too long. It is usually asleep rather than broken.",
+            true,
+        )
+    }
+    if (lower.contains("this mac is asleep") || lower.contains("host_asleep")) {
+        return FriendlyError(
+            "This Mac is asleep",
+            "That Mac has its lid closed, or tokenstat is not open. Open the app, open the " +
+                "lid, or turn on Always-on host in Account to keep it reachable.",
+            true,
+        )
+    }
+    if (lower.contains("connection refused") || lower.contains("os error 61") ||
+        (lower.contains("no such file or directory") && lower.contains("sock")) ||
+        lower.contains("host daemon") || lower.contains("hostd")
+    ) {
+        return FriendlyError(
+            "The helper is not running",
+            "tokenstat's background helper handles your archive and your devices. Open the " +
+                "app to start it, or turn on Always-on host to keep it running after you " +
+                "quit or close the lid.",
+            true,
+        )
+    }
+    if (lower.contains("broken pipe") || lower.contains("connection reset") ||
+        lower.contains("disconnected")
+    ) {
+        return FriendlyError(
+            "Connection dropped",
+            "The link to the other device closed. It reconnects on its own.",
+            true,
+        )
+    }
+    if (lower.contains("too many requests") || lower.contains("rate limit") ||
+        lower.contains("429")
+    ) {
+        return FriendlyError(
+            "Asked too often",
+            "The account is answering fewer requests for a moment. What is on screen is " +
+                "still good, and the next refresh will go through.",
+            false,
+        )
+    }
+    // Gateway failures establish unreachability, not its cause or duration.
+    if (lower.contains("error code: 1033") ||
+        (lower.contains("1033") && lower.contains("tunnel"))
+    ) {
+        return FriendlyError(
+            "The server is unreachable",
+            "The connection could not reach the server. Try again shortly.",
+            true,
+        )
+    }
+    // Bare codes only count inside a failure sentence ("status request failed
+    // (503)"), never on their own: a number alone could be a port or a count
+    // in some other sentence.
+    val readsAsFailure = lower.contains("status") || lower.contains("gateway") ||
+        lower.contains("error") || lower.contains("failed")
+    if (lower.contains("bad gateway") || lower.contains("service unavailable") ||
+        lower.contains("gateway timeout") || lower.contains("gateway error") ||
+        lower.contains("unknown status code") ||
+        (readsAsFailure && (lower.contains("502") || lower.contains("503") ||
+            lower.contains("504") || lower.contains("530")))
+    ) {
+        return FriendlyError(
+            "The server could not answer",
+            "The request could not be completed. Try again shortly.",
+            true,
+        )
+    }
+    if (lower.contains("device limit") || lower.contains("machine_limit")) {
+        // Offers device management rather than a retry.
+        return FriendlyError(
+            "Device limit reached",
+            "This account is using all the devices its plan allows. Remove one you no longer " +
+                "have, or move up a plan.",
+            false,
+        )
+    }
+    // The relay has no record of that computer. Most often the same cause: it
+    // has never been turned on for remote reach. A relay-evicted or
+    // temporarily offline Mac produces the same strings, so do not assert it.
+    if (lower.contains("no_such_peer") || lower.contains("no direct address") ||
+        lower.contains("peer_not_found") || lower.contains("no such peer") ||
+        (lower.contains("could not reach") && (lower.contains("tunnel") ||
+            lower.contains("direct candidates") || lower.contains("relay")))
+    ) {
+        return FriendlyError(
+            "That computer is not reachable",
+            "It has to be awake with tokenstat running, and set up for remote reach. If this " +
+                "worked before, wake it and try again. If it never worked, on that computer " +
+                "open Devices and turn on \"Reach devices from anywhere\". Until that is on, " +
+                "it never tells the relay where it is.",
+            true,
+        )
+    }
+    // Nothing matched. Say that something failed and show the words the
+    // machine used, rather than inventing a cause.
+    return FriendlyError(
+        "That did not work",
+        text.ifEmpty { "Something went wrong and nothing said what." },
+        true,
+    )
 }
 
 /// The same vault password rule the host enforces in `tokenstat_core::passphrase`.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.auth
 
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -23,6 +24,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Laptop
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.TabletAndroid
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,14 +45,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.ui.components.TsType
@@ -143,17 +159,18 @@ private fun HeatmapArt(reduceMotion: Boolean, active: Boolean) {
 @Composable
 private fun DevicesArt(reduceMotion: Boolean, active: Boolean) {
     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-        DeviceTile("Mac", 86.dp, 58.dp, 0, reduceMotion, active)
-        DeviceTile("Tablet", 52.dp, 70.dp, 80, reduceMotion, active)
-        DeviceTile("Phone", 34.dp, 62.dp, 160, reduceMotion, active)
+        DeviceTile("Mac", Icons.Default.Computer, 86.dp, 58.dp, 0, reduceMotion, active)
+        DeviceTile("Tablet", Icons.Default.TabletAndroid, 52.dp, 70.dp, 80, reduceMotion, active)
+        DeviceTile("Phone", Icons.Default.PhoneAndroid, 34.dp, 62.dp, 160, reduceMotion, active)
     }
 }
 
 @Composable
 private fun DeviceTile(
     label: String,
-    wide: androidx.compose.ui.unit.Dp,
-    tall: androidx.compose.ui.unit.Dp,
+    icon: ImageVector,
+    wide: Dp,
+    tall: Dp,
     delayMs: Int,
     reduceMotion: Boolean,
     active: Boolean,
@@ -169,18 +186,22 @@ private fun DeviceTile(
             shown = true
         }
     }
+    // Apple's spring(response 0.55, dampingFraction 0.78), staggered per tile.
+    val spring = TsMotion.tunedSpring<Float>(0.55f, 0.78f)
     val rise by animateFloatAsState(
         if (shown) 0f else 18f,
-        animationSpec = TsMotion.introSpring(),
+        animationSpec = spring,
         label = "deviceRise",
     )
-    val alpha by animateFloatAsState(
+    val fade by animateFloatAsState(
         if (shown) 1f else 0f,
-        animationSpec = TsMotion.introSpring(),
+        animationSpec = spring,
         label = "deviceFade",
     )
     Column(
-        Modifier.offset(y = rise.dp).padding(0.dp),
+        Modifier
+            .offset(y = rise.dp)
+            .alpha(fade),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -191,20 +212,11 @@ private fun DeviceTile(
                 .border(1.dp, colors.accent.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Box(
-                Modifier
-                    .width(wide * 0.42f)
-                    .height(2.dp)
-                    .clip(RoundedCornerShape(1.dp))
-                    .background(colors.accent.copy(alpha = 0.7f)),
-            )
+            Icon(icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
         }
         Spacer(Modifier.height(8.dp))
         Text(label, style = TextStyle(fontSize = 11.sp), color = colors.textSecondary)
     }
-    // alpha applied via graphicsLayer would need an extra modifier; the rise is the cue.
-    @Suppress("UNUSED_VARIABLE")
-    val ignored = alpha
 }
 
 @Composable
@@ -214,27 +226,28 @@ private fun SpendArt(reduceMotion: Boolean, active: Boolean) {
         0.72f to androidx.compose.ui.graphics.Color(0xFF8B5CF6),
         1.00f to androidx.compose.ui.graphics.Color(0xFFE879F9),
     )
-    var raised by remember(active) { mutableStateOf(reduceMotion || !active) }
-    LaunchedEffect(active, reduceMotion) {
-        raised = reduceMotion || !active
-        if (!reduceMotion && active) {
-            raised = false
-            delay(16)
-            raised = true
-        }
-    }
+    // Apple's spring(response 0.7, dampingFraction 0.78), each bar a tenth
+    // of a second after the one before it.
+    val spring = TsMotion.tunedSpring<Float>(0.7f, 0.78f)
     Row(
         Modifier.height(120.dp),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         bars.forEachIndexed { index, (frac, color) ->
+            var up by remember(active) { mutableStateOf(reduceMotion || !active) }
+            LaunchedEffect(active, reduceMotion) {
+                if (reduceMotion || !active) {
+                    up = true
+                } else {
+                    up = false
+                    delay(index * 100L)
+                    up = true
+                }
+            }
             val h by animateFloatAsState(
-                if (raised) 110f * frac else 110f * 0.12f,
-                animationSpec = androidx.compose.animation.core.spring(
-                    dampingRatio = 0.78f,
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessLow,
-                ),
+                if (up) 110f * frac else 110f * 0.12f,
+                animationSpec = spring,
                 label = "spend$index",
             )
             Box(
@@ -264,9 +277,12 @@ private fun RemainingArt(reduceMotion: Boolean, active: Boolean) {
     }
     val animated by animateFloatAsState(
         trim,
-        animationSpec = tween(900, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        // Apple's easeOut over 0.9s to the 70% mark.
+        animationSpec = tween(900, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)),
         label = "remaining",
     )
+    // The angular accent to secondary to accent sweep from `RemainingArt`.
+    val sweep = Brush.sweepGradient(listOf(colors.accent, colors.secondary, colors.accent))
     Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(132.dp)) {
             val stroke = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
@@ -280,7 +296,7 @@ private fun RemainingArt(reduceMotion: Boolean, active: Boolean) {
                 style = stroke,
             )
             drawArc(
-                color = colors.accent,
+                brush = sweep,
                 startAngle = -90f,
                 sweepAngle = 360f * animated,
                 useCenter = false,
@@ -299,21 +315,15 @@ private fun RemainingArt(reduceMotion: Boolean, active: Boolean) {
 @Composable
 private fun WorkspacesArt(reduceMotion: Boolean, active: Boolean) {
     val colors = LocalTsColors.current
+    // Folder and file glyphs, like Apple's folder.fill and doc.text rows.
     val rows = listOf(
-        0 to "project",
-        18 to "src",
-        36 to "main.rs",
-        18 to "README.md",
+        Triple(0, Icons.Default.Folder, "project"),
+        Triple(18, Icons.Default.Folder, "src"),
+        Triple(36, Icons.Default.Description, "main.rs"),
+        Triple(18, Icons.Default.Description, "README.md"),
     )
-    var shown by remember(active) { mutableStateOf(reduceMotion || !active) }
-    LaunchedEffect(active, reduceMotion) {
-        shown = reduceMotion || !active
-        if (!reduceMotion && active) {
-            shown = false
-            delay(16)
-            shown = true
-        }
-    }
+    // Apple's spring(response 0.5, dampingFraction 0.82), staggered per row.
+    val spring = TsMotion.tunedSpring<Float>(0.5f, 0.82f)
     Column(
         Modifier
             .width(260.dp)
@@ -322,34 +332,45 @@ private fun WorkspacesArt(reduceMotion: Boolean, active: Boolean) {
             .padding(Space.l),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        rows.forEachIndexed { index, (indent, name) ->
-            val alpha by animateFloatAsState(
-                if (shown) 1f else 0f,
-                animationSpec = tween(400, delayMillis = if (reduceMotion) 0 else index * 90),
+        rows.forEachIndexed { index, (indent, icon, name) ->
+            var inView by remember(active) { mutableStateOf(reduceMotion || !active) }
+            LaunchedEffect(active, reduceMotion) {
+                if (reduceMotion || !active) {
+                    inView = true
+                } else {
+                    inView = false
+                    delay(index * 90L)
+                    inView = true
+                }
+            }
+            val fade by animateFloatAsState(
+                if (inView) 1f else 0f,
+                animationSpec = spring,
                 label = "ws$index",
             )
             val shift by animateFloatAsState(
-                if (shown) 0f else -10f,
-                animationSpec = tween(400, delayMillis = if (reduceMotion) 0 else index * 90),
+                if (inView) 0f else -10f,
+                animationSpec = spring,
                 label = "wsx$index",
             )
             Row(
                 Modifier
                     .padding(start = indent.dp)
-                    .offset(x = shift.dp),
+                    .offset(x = shift.dp)
+                    .alpha(fade),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(colors.accent.copy(alpha = alpha)),
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(18.dp),
                 )
                 Text(
                     name,
-                    style = TsType.mono(13),
-                    color = colors.textPrimary.copy(alpha = alpha),
+                    style = TsType.mono(17),
+                    color = colors.textPrimary,
                 )
             }
         }
@@ -393,12 +414,18 @@ private fun SessionsArt(reduceMotion: Boolean, active: Boolean) {
             Box(Modifier.size(7.dp).clip(CircleShape).background(colors.accent.copy(alpha = 0.75f)))
         }
         script.forEachIndexed { index, line ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Each line fades in as it is typed, easeOut over 0.2s, while the
+            // row keeps its space so the card does not jump as lines arrive.
+            val lineAlpha by animateFloatAsState(
+                if (lines > index) 1f else 0f,
+                animationSpec = tween(200, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)),
+                label = "sessionLine$index",
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.alpha(lineAlpha)) {
                 Text(
                     line,
-                    style = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+                    style = TsType.mono(13),
                     color = if (index == 0) colors.accent else colors.textPrimary,
-                    modifier = Modifier.padding(0.dp),
                 )
                 if (lines == index + 1) {
                     Box(
@@ -410,11 +437,6 @@ private fun SessionsArt(reduceMotion: Boolean, active: Boolean) {
                             .background(colors.accent.copy(alpha = if (blink) 1f else 0.15f)),
                     )
                 }
-            }
-            // Hide unread lines by drawing them transparent rather than skipping
-            // layout, so the card does not jump as lines arrive.
-            if (lines <= index) {
-                // The Text above still occupies space; dim it.
             }
         }
     }
@@ -439,7 +461,7 @@ private fun OnTheGoArt(reduceMotion: Boolean, active: Boolean) {
         v
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        DeviceSilhouette(64.dp)
+        GoTile(Icons.Default.PhoneAndroid, 36.dp)
         Box(Modifier.width(72.dp).height(8.dp), contentAlignment = Alignment.Center) {
             Box(
                 Modifier
@@ -456,27 +478,31 @@ private fun OnTheGoArt(reduceMotion: Boolean, active: Boolean) {
                     .background(colors.accent),
             )
         }
-        DeviceSilhouette(68.dp)
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            GoTile(Icons.Default.Laptop, 40.dp)
+            GoTile(Icons.Default.Cloud, 40.dp)
+        }
     }
 }
 
+/// A device seat for the travel scene: accentSoft tile with the device glyph
+/// in the accent, sized like Apple's tile (glyph at 42% of the icon size on
+/// a seat 28 points larger each way).
 @Composable
-private fun DeviceSilhouette(size: androidx.compose.ui.unit.Dp) {
+private fun GoTile(icon: ImageVector, iconSize: Dp) {
     val colors = LocalTsColors.current
     Box(
         Modifier
-            .size(size)
+            .size(iconSize + 28.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(colors.accentSoft)
-            .border(1.dp, colors.accent.copy(alpha = 0.28f), RoundedCornerShape(16.dp)),
+            .background(colors.accentSoft),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier
-                .width(size * 0.36f)
-                .height(2.dp)
-                .clip(RoundedCornerShape(1.dp))
-                .background(colors.accent),
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = colors.accent,
+            modifier = Modifier.size(iconSize * 0.42f),
         )
     }
 }
@@ -494,36 +520,43 @@ private fun PrivacyArt(reduceMotion: Boolean, active: Boolean) {
             locked = true
         }
     }
-    val scale by animateFloatAsState(
+    // Apple's spring(response 0.55, dampingFraction 0.7): the ring settles
+    // from 0.86 and the lock from 0.88, closed once the delay lands.
+    val spring = TsMotion.tunedSpring<Float>(0.55f, 0.7f)
+    val ringScale by animateFloatAsState(
         if (locked) 1f else 0.86f,
-        animationSpec = TsMotion.introSpring(),
-        label = "lockScale",
+        animationSpec = spring,
+        label = "lockRing",
+    )
+    val glyphScale by animateFloatAsState(
+        if (locked) 1f else 0.88f,
+        animationSpec = spring,
+        label = "lockGlyph",
     )
     Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
         Box(
             Modifier
-                .size((132 * scale).dp)
+                .size(132.dp)
                 .clip(CircleShape)
-                .background(colors.accentSoft)
+                .background(colors.accentSoft),
+        )
+        Box(
+            Modifier
+                .size((132 * ringScale).dp)
+                .clip(CircleShape)
                 .border(2.dp, colors.accent.copy(alpha = 0.28f), CircleShape),
         )
-        // Shackle + body, not a Material lock glyph.
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier
-                    .width(28.dp)
-                    .height(18.dp)
-                    .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
-                    .border(3.dp, colors.accent, RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)),
-            )
-            Box(
-                Modifier
-                    .width(36.dp)
-                    .height(28.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(colors.accent),
-            )
-        }
+        Icon(
+            if (locked || reduceMotion) Icons.Default.Lock else Icons.Default.LockOpen,
+            contentDescription = null,
+            tint = colors.accent,
+            modifier = Modifier
+                .size(44.dp)
+                .graphicsLayer {
+                    scaleX = glyphScale
+                    scaleY = glyphScale
+                },
+        )
     }
 }
 
@@ -531,25 +564,28 @@ private fun PrivacyArt(reduceMotion: Boolean, active: Boolean) {
 private fun ControlArt(reduceMotion: Boolean, active: Boolean) {
     val colors = LocalTsColors.current
     val rows = listOf("Private account" to true, "Sync totals" to false, "Remote reach" to false)
-    var shown by remember(active) { mutableStateOf(reduceMotion || !active) }
-    LaunchedEffect(active, reduceMotion) {
-        shown = reduceMotion || !active
-        if (!reduceMotion && active) {
-            shown = false
-            delay(16)
-            shown = true
-        }
-    }
+    // Apple's spring(response 0.5, dampingFraction 0.84), staggered per row.
+    val spring = TsMotion.tunedSpring<Float>(0.5f, 0.84f)
     Column(Modifier.width(280.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         rows.forEachIndexed { index, (label, on) ->
+            var inView by remember(active) { mutableStateOf(reduceMotion || !active) }
+            LaunchedEffect(active, reduceMotion) {
+                if (reduceMotion || !active) {
+                    inView = true
+                } else {
+                    inView = false
+                    delay(index * 80L)
+                    inView = true
+                }
+            }
             val alpha by animateFloatAsState(
-                if (shown) 1f else 0f,
-                animationSpec = tween(400, delayMillis = if (reduceMotion) 0 else index * 80),
+                if (inView) 1f else 0f,
+                animationSpec = spring,
                 label = "ctrl$index",
             )
             val rise by animateFloatAsState(
-                if (shown) 0f else 10f,
-                animationSpec = tween(400, delayMillis = if (reduceMotion) 0 else index * 80),
+                if (inView) 0f else 10f,
+                animationSpec = spring,
                 label = "ctrly$index",
             )
             Row(

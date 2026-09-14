@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Report
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,38 +31,103 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ai.tokenstat.tokenstat.R
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.TsColors
 
-/// The shared component set, ported from `Sources/Design/Theme.swift`. Every
-/// block in the content column uses these so the whole app shares one corner
-/// radius and one border treatment.
+/// The shared type scale and component set, ported from the Apple client's
+/// `Sources/Design/Theme.swift` and `Sources/Design/AppFonts.swift`.
+///
+/// The phone ladder, not the Mac one: body 17 down through callout 16,
+/// subheadline 15, footnote 13, caption 12 and caption2 11. Every size and
+/// weight below traces to that file, nothing is invented here. Interface text
+/// is Manrope, code and identifiers are JetBrains Mono, both bundled as
+/// variable faces under `res/font` from the same files the Mac app ships.
 object TsType {
+    /// Manrope. Language: navigation, controls, body text, headings, labels.
+    val interfaceFamily = FontFamily(Font(R.font.manrope_variable))
+
+    /// JetBrains Mono. Anything read character by character: commands, model
+    /// ids, paths, terminals.
+    val monoFamily = FontFamily(Font(R.font.jetbrainsmono_variable))
+
     /// Numbers that sit in columns must not jitter as they update, so anything
-    /// numeric uses tabular figures.
+    /// numeric uses tabular figures. The interface face, not the terminal one:
+    /// Manrope's tabular figures already hold a column still.
     fun numeric(size: Int, weight: FontWeight = FontWeight.Normal) = TextStyle(
         fontSize = size.sp,
         fontWeight = weight,
+        fontFamily = interfaceFamily,
         fontFeatureSettings = "tnum",
     )
 
     /// Identifiers read character by character: model ids, machine ids, paths.
+    /// Monospaced so strings that look alike do not read alike.
     fun mono(size: Int, weight: FontWeight = FontWeight.Normal) = TextStyle(
         fontSize = size.sp,
         fontWeight = weight,
-        fontFamily = FontFamily.Monospace,
+        fontFamily = monoFamily,
     )
 
     /// Small uppercase label above a group.
-    val sectionHeader = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    val sectionHeader = TextStyle(
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontFamily = interfaceFamily,
+    )
 
-    val cardTitle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    val cardTitle = TextStyle(
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontFamily = interfaceFamily,
+    )
+
+    // The phone text ladder, in the app's face and at the phone's sizes.
+    val largeTitle = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val title = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val title2 = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val title3 = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val headline = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold, fontFamily = interfaceFamily)
+    val body = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val callout = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val subheadline = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val footnote = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val caption = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val caption2 = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+
+    /// Conversation prose is read for minutes at a time, not scanned as
+    /// chrome: one rung below body, the same step the Apple client takes.
+    val chatBody = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
+    val chatCode = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal, fontFamily = monoFamily)
+
+    /// The Material slots the app still reads, pointed at the ladder above so
+    /// unstyled Material text is Manrope at a tokenstat size rather than the
+    /// platform default. Headline numbers keep tabular figures through
+    /// [numeric], which these slots do not carry: prose is not a column.
+    val typography = Typography(
+        displayLarge = largeTitle,
+        displayMedium = title,
+        displaySmall = title2,
+        headlineLarge = title,
+        headlineMedium = title2,
+        headlineSmall = title3,
+        titleLarge = headline,
+        titleMedium = callout,
+        titleSmall = subheadline,
+        bodyLarge = body,
+        bodyMedium = callout,
+        bodySmall = footnote,
+        labelLarge = subheadline,
+        labelMedium = caption,
+        labelSmall = caption2,
+    )
 }
 
 val cardRadiusDp = 14.dp

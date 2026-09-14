@@ -12,8 +12,9 @@ components, motion). Android ports those definitions 1:1 into
 `ui/marks/`; it never invents its own colours, spacing, radii, or timing.
 Validation is the mapping table below: every Apple source has a named Android
 counterpart or an explicit gap. Pure logic that both platforms must answer
-identically (greeting pool, token compaction, tunnel copy) is pinned by unit
-tests in `PortedLogicTest.kt`.
+identically (greeting pool, token compaction, tunnel copy, recents ranking,
+recent places, pin shelf, home arrangement, device sentences, limit ordering
+and severity, stats readings) is pinned by unit tests in `PortedLogicTest.kt`.
 
 | Capability | Rust contract | Apple | Android |
 | --- | --- | --- | --- |
@@ -21,19 +22,20 @@ tests in `PortedLogicTest.kt`.
 | Account activity, limits, insights | built | built | built |
 | Device and remote workspace directory | built | built | built |
 | Sessions, changes, tasks, notes | built | built | built (real renderers; diff/tasks/notes/actions wired) |
-| Workflows, automations, files | built | built | built (run/stop, enable, tree drill, file edit) |
-| Interactive terminal emulator | built | built | built (xterm.js WebView over pty.*; accessory key row) |
-| Port-forwarded browser | built | built | built (`proxy.listen` + WebView) |
+| Workflows, automations, files | built | built | automations built (`automations/Automations.kt` workbench: schedule rows on the host clock, enable, run/stop, complete paginated run history live-first with transcripts; `automations/AutomationEditor.kt` Writing/Settings editor with schedule pickers, revision-checked `automation.edit` saves plus conflict flow on protocol 21+ hosts and `createOnce`/`runOnce` receipts with retry-same; host queue settings); workflows built (`workflows/Workflows.kt` list with live runs, run with input/stop/continue, complete run history with per-step transcripts; `workflows/WorkflowEditor.kt` metadata plus recipe/blank/draft-from-prompt starters, phone step list with explicit Then/Else/Body connections and per-kind step detail, revision-checked `workflow.edit` saves with re-read-and-compare recovery plus conflict flow on protocol 22+ hosts, one-`wf-` creation id with check-back, unknown-field preservation; rules, recipes and model picks in `workflows/WorkflowModels.kt` pinned by `AuthoringLogicTest`); tree drill, tabbed editor |
+| Interactive terminal emulator | built | built | built (xterm.js WebView over pty.*; nextOffset resume with backoff and liveness, dropped/paused banners, TerminalPalette and JetBrains Mono, selection copy, Close/Done) |
+| Port-forwarded browser | built | built | built (`proxy.listen` + WebView; address bar, reload, URL policy, unlisten on leave) |
 | Store subscription activation | Apple + Google built | built | built; custom pitch wraps Play Billing |
-| Push registration and delivery | built | built | built; FCM configuration required |
-| SSH connect + key import | built | built | built (password/key, generate/import) |
-| Screen viewer (Legend) | built | built | built (JPEG blit; H.264 status) |
+| Push registration and delivery | built | built | built; payload is reason plus machine id only (free-text title/body dropped, unknown reasons dropped, banner composed on device from `PushPayload` copy), tap carries reason plus machine and resolves after refresh; on/off switch with pending-removal retry and test sentences matching Apple; needs gitignored `app/google-services.json`, a server FCM key, and the android platform allowlisted sync-side; real delivery is an open device check |
+| SSH connect + key import | built | built | built (password/key, generate/import; live session with Done/End, snippets, vault; no session tabs or suggest palette) |
+| Screen viewer (Legend) | built | built | built (MediaCodec H.264 with JPEG fallback, touch input, control flip, heartbeat, reconnect, viewing notice; no keyboard row, display picker, clipboard sync, audio, or quality switch in control mode) |
 
 ## Component map (Apple → Android)
 
 | Apple (`Sources/Design`) | Android (`ui/theme`, `ui/components`) | Status |
 | --- | --- | --- |
 | `Theme.swift` tokens (accent/secondary pairs, background/panel/sidebar/tabStrip/border/row colours, semantic set, heat ramp, syntax palette) | `theme/TsColors.kt` (light+dark transcribed hex-for-hex) | done |
+| Editor (`IOSCodeTextView`, `EditorDocument`, `ClientEditorStore`, `EditorFindBar`, `EditorConflictCard`, gutter, `ClientFileTabs`, `ClientDiffView` review-to-edit) | `editor/CodeEditor.kt` tabbed editor: `highlight` spans on the shared palette, debounced with stale-version drop, find/replace bar with wrapping literal matches, gutter with line numbers plus diff change marks from `workspace.diff`, tabs with dirty-dot close guard, read-before-write saves with host conflict cards, Tab inserts the language indent; review-to-edit from diffs wired in `WorkspaceChanges.kt`; find/gutter/span/diff rules in `editor/EditorModels.kt` pinned by `AuthoringLogicTest` | done |
 | Spacing scale, cardRadius 14, cardPadding 16 | `theme/TsMotion.kt` (`Space`), `components/TsComponents.kt` (`cardRadiusDp`, `cardPaddingDp`) | done |
 | Tabular figures / mono / sectionHeader fonts | `TsType.numeric/.mono/.sectionHeader/.cardTitle` | done |
 | `Card` | `TsCard` (panel fill + hairline border) | done |
@@ -43,33 +45,52 @@ tests in `PortedLogicTest.kt`.
 | `AccentButtonStyle` / `SecondaryButtonStyle` | `TsAccentButton` / `TsSecondaryButton` (pressed fills/strokes ported) | done |
 | `SegmentedCapsulePicker` | `SegmentedCapsulePicker` | done |
 | `TransientToast` | `TransientToast` (slide-from-trailing + fade, snappy 250ms) | done |
-| `Skeleton.Bar/Rows/CardPlaceholder` + phase-staggered pulse (0.95s autoreverse) | `components/Skeleton.kt` (infiniteTransition, StartOffset phases) | done |
+| `Skeleton.Bar/Rows/CardPlaceholder` + phase-staggered pulse (0.95s autoreverse) | `components/Skeleton.kt` (infiniteTransition, StartOffset phases; static full-strength bar under Reduce Motion) | done |
 | `smoothIn` content arrival (opacity + 4pt rise; fade under Reduce Motion) | `theme/smoothEnter` + `Arrive` wrapper | done |
 | Reduce Motion | `rememberReduceMotion()` (animator duration scale == 0) | done |
-| `Marks.swift`: LogoMark bars (rise loop 0.62s staggered 0.14s, refresh pulse), Wordmark (`token` + accent `stat`), Avatar | `marks/Marks.kt`; Wordmark splits the accent the same way; LogoMark one-shot lands over 1.2s | done |
-| App icon (three bars on dark paper) | Adaptive `mipmap/ic_launcher` + `drawable/app_icon.xml` from `store/play-icon.svg`; notification glyph is the bars, not a T | done |
-| `RelativeTimeText.swift` single shared 15s tick | pending (`RelativeClock` equivalent not yet needed on-screen) | gap |
+| `Marks.swift`: LogoMark bars (rise loop 0.62s staggered 0.14s, one-shot 1.2s staggered 0.15s, refresh pulse 0.26s staggered 0.07s with 0.35 dip), Wordmark (`token` + accent `stat`), Avatar, TierMark | `marks/Marks.kt` (loop/one-shot/pulse timings verified; loops land static under Reduce Motion; listener unsubscribes), Wordmark splits the accent the same way; Avatar uses djb2 over the heat-minus-greys plus warning/danger ramp with the vertical tint gradient; `marks/TierMark.kt` transcribes the exact 24-unit crown/star/shield paths with the 8B5CF6 to C026D3 gradient, free renders nothing, unknown renders the seal | done (source verified; on-device rendering is an open device check) |
+| App icon (three bars on dark paper) | Adaptive `mipmap/ic_launcher` + `drawable/app_icon.xml` from `store/play-icon.svg`; notification glyph is the bars, not a T; launch `windowBackground` is Theme paper in light and night; splash is paper with the looping LogoMark rise plus Wordmark, no skeleton or spinner on the first frame | done in source (install icon, splash frame, and notification rendering need a physical device) |
+| `RelativeTimeText.swift` single shared 15s tick | `components/RelativeTime.kt` `RelativeTick` + `RelativeTimeText` over `RelativeClock.label`; chat event times tick | done |
 | `MiniGraph`, `WorkflowStepStrip`, layering | step-capsule FlowRow reading of workflows (`workspace/WorkspaceSections.kt`) | simplified |
-| `RunVisuals` outcome tints, RunHistoryStrip, DurationBar | pending (needed with workflow runs UI) | gap |
-| `CadenceGlyph`, `CountdownRing`, `SlotGauge` | `marks/CadenceGlyph.kt` (ring + hand) | simplified |
-| `FriendlyError.swift` translation table | `logic/TsLogic.kt` `friendlyError` (core rows only) | partial |
+| `RunVisuals` outcome tints, RunHistoryStrip, DurationBar | `marks/RunVisuals.kt`: `RunOutcome`, `RunHistoryStrip` (8 slots), `DurationBar` | done |
+| `CadenceGlyph`, `CountdownRing`, `NextRunBadge`, `SlotGauge` | `marks/CadenceGlyph.kt` (seven-dot week ring from the host `schedule` struct with Monday on top, idle tint when paused, play/refresh symbols for once/interval; pinned by `scheduleRingFiresLikeApple`) + `marks/RunGauges.kt` (fraction math, 12-tile bound, No cap words) | done (source verified; automation rows previously read a `cadence` key the host never sends, so no glyph ever rendered) |
+| `FriendlyError.swift` translation table | `logic/TsLogic.kt` `friendlyError` (full table, same order and copy) | done |
 | `HistoryLockBanner` | `TokenstatApp.HistoryLockBanner` (same copy, opens pricing) | done |
-| `ActionIcon` (~55 glyphs) | `components/ActionIcon.kt` enum, same case names, Material mapping | done |
+| `ActionIcon` (77 glyphs) | `components/ActionIcon.kt` enum, same case names, Material mapping | done |
+| `TimeLimitChips`, `ConcurrentChips`, `ChoiceChip`, `BrandToggleChip`, `CommitTagPills` | `components/TsChips.kt` (same presets, No limit / No cap sentinels, custom number selects none) | done |
+| `PickerSearchField` | `components/TsSearchField.kt` (magnifier + prompt + clear button, no capitalise or autocorrect) | done |
+| `FieldSaveState`, `FieldSaveBar` | `components/FieldSaveBar.kt` (same five states, same copy, actions only when dirty or failed) | done |
+| `BrandCheckboxStyle`, `ThemeCheckDisc`, `BrandToggleChip` | `components/BrandToggles.kt` (`BrandCheckbox`, `BrandCheckDisc`, `TsBrandSwitch`); the one raw `Switch` now reads `TsBrandSwitch` | done |
 
 ## Client screen map (Apple `Sources/Client` → Android)
 
 | Apple screen | Android counterpart | Motion parity |
 | --- | --- | --- |
-| Onboarding (10 pages) + art | `auth/Onboarding.kt` + `OnboardingArt.kt` scenes | heatmap wave, spend springs, sessions typewriter, privacy lock; Reduce Motion lands on last frame |
+| Onboarding (10 pages) + art | `auth/Onboarding.kt` + `OnboardingArt.kt` scenes | heatmap wave 2.8s landing on 0.35, spend spring 0.7/0.78 staggered 0.1s, remaining sweep gradient with easeOut 0.9s, sessions typewriter 280ms with easeOut 0.2s reveal, device tiles spring 0.55/0.78, privacy lock spring 0.55/0.7 closing after 280ms, control rows spring 0.5/0.84 staggered 0.08s; every scene lands on its last frame under Reduce Motion. Gaps: no Agents scene (Apple has one; Android flow has no agents page), Intro keeps the mark-plus-wordmark lockup rather than Apple's tiles, Devices labels read Mac/Tablet/Phone, progress is a single fill bar rather than per-page capsules | done with noted gaps |
 | Login | LogoMark rise-and-land, Wordmark, `TsAccentButton` / `TsSecondaryButton` | done |
 | Root chrome (avatar leading, wordmark centre) | Themed TopAppBar / NavigationBar from `TsColors` including light; door fade 280ms | done |
-| DevicesView (rows, awake dot, detail) | `TsCard` rows; online dot is accent (`success`), not green | done |
-| HomeView (greeting, totals, heatmap card, limits, lock banner) | `HomeScreen` with `HomeGreeting` port, Stat tiles, Canvas heatmap, lock banner, skeleton→Arrive | done |
+| DevicesView (rows, awake dot, detail) | `TsCard` rows; online dot is accent (`success`), not green; `DeviceCopy` names and status lines; rename over `account.renameMachine`; reach copy with the Always-on sentence; stats bar with failure state and direct/relay route mark | done |
+| HomeView (greeting, totals, heatmap card, limits, lock banner) | `HomeScreen` draws the arranged sections in phone balanced order (usage, continue, machines, pinned, activity, limits) with the Apple copy; continue/pinned shelves over `HomeStores` with pin toggles; awake-hosts machines section; `Customize Home` editor with presets, reorder, hide, reset; offline/empty/error status with getting-started card; limits sorted closest-to-full-first with severity gauges and observed dates | done |
+| `ClientRecentChatsRanking` (3 newest + 5 by priority) | `logic/HomeLogic.kt` `RecentChatsRanking`, pinned by tests; no per-host Recents row in Workspaces yet (needs host-level chat aggregation plus read receipts) | logic done, UI gap |
+| `ClientRecentPlaces` (continue shelf, 20, account scope) | `logic/HomeLogic.kt` `RecentPlaces` + `home/HomeStores.kt` (SharedPreferences); scope is handle-only, the account payload carries no host name; records folder opens, chat/terminal opens not yet recorded | done with noted gaps |
+| `PinnedWork` (pin shelf, 8, refused with words) | `logic/HomeLogic.kt` `PinnedWork` + `HomeStores.togglePin`; shelf-full refusal reads "The shelf holds eight pins" | done |
+| `HomeLayout`/`HomePreset`/`ClientHomeEditor` | `logic/HomeLogic.kt` (`HomeSection`, `HomePreset`, `normalizeHomeLayout`) + `home/HomeSections.kt` `HomeEditor`; presets Balanced/Work first/Usage first, up/down moves, reset with undo | done |
+| `ClientGettingStarted` (phone first run) | `home/HomeSections.kt` `GettingStartedCard`; "Set up a machine" opens the setup wizard (from Home and from Devices); no ghost grid | done with noted gap |
+| `ClientLimitsCard` (sort, severity, observed) | `LimitCard` sorts closest-to-full-first, gauges read the host severity over the `limits.rs` 90/70 scale, observed dates with stale prefix; resets line not rendered (`RelativeClock` is past-oriented) | done with noted gap |
+| `DeviceCopy` (names, status, reach) | `logic/HomeLogic.kt` `DeviceCopy` ported word-for-word, pinned by tests | done |
+| `HostStatsFormat` (power/CPU/RAM words) | `logic/HomeLogic.kt` `HostStatsFormat`; bar shows failure `n/a`, direct/relay route from `remote.status`, same tunnel footnote | done (no CPU/RAM meter bars) |
+| Saved-work library (`ClientSavedWorkView`) | no Android work-cache bridge (`cache.list` and friends do not exist), so no screen and no data | gap |
+| Launch tiles (`ClientLaunchTile`) | tiles live in the workspace launcher, not Home; Android `WorkspaceDetail` has no launcher row yet | gap |
+| App places (`ClientAppPlaces`) | `search/WorkSearch.kt` `SearchPlaces` catalogue (tabs, settings, devices) with the Apple ranking, pinned by tests; destinations that have no Android screen land on the closest tab or the account sheet | done with noted gaps |
+| Host-sent scope notice (`NoticeCard`) | `account.status` carries no scope notice on Android, so nothing to render | gap |
 | PhoneHeatmap (fixed cell, scroll-to-latest-week, month marks, locked alpha, press focus) + DayDetailSheet | `heatmap/Heatmap.kt` YearHeatmap (Canvas, pointer press-focus ring, tap sheet) | done |
 | InsightsView (Models/Tools/Days cuts, search) | rebuilt with SegmentedCapsulePicker, search, accent share bars animating in | done |
-| Workspace sections (Sessions list, Changes w/ DiffView, Tasks composer/archive, Notes, Workflows board, Automations, Files tree) | `workspace/WorkspaceSections.kt` real renderers replacing the JSON dump | run/stop, file edit, browser |
-| TerminalSession + accessory keys | `terminal/TerminalScreen.kt` + bundled xterm.js WebView, pty spawn/read/write/resize/detach, long-poll loop, accessory key row | done |
-| AccountSheet (tier badge, products, sign out) | AccountDialog: TierMark, notify toggle, legal/delete URLs, PaywallSheet | done |
-| Paywall (gradient tier marks, tier-switch spring) | `billing/PaywallSheet.kt` wraps Play Billing | done (no spring) |
-| WebBrowser sheet (progress bar animation) | `browser/PortBrowser.kt` | progress bar |
+| Workspace sections (Sessions list, Changes w/ DiffView, Tasks composer/archive, Notes, Workflows board, Automations, Files tree) | `workspace/WorkspaceSections.kt` + `tasks/TaskBoard.kt` (full board: compact columns with counts, explicit Move earlier/later plus column moves, revision-checked archive/restore/delete, agent plus attention filters plus search, folder-scoped board and All tasks, 3s poll while running) + `tasks/TaskEditor.kt` (shared title/prompt/command/folder/priority/agent/model/effort/budget fields; detail editor with `todo.edit` revision saves and computer-version conflict card; `todo.createOnce` creation with receipt check plus retry-same; foreground/background `todo.runTask` with `task-run-` operation ids, `todo.runReceipt` reconcile, retry-same never launching twice, exact-run `todo.stopTask`, View run/result; run view with live transcript, terminal door, Changes/History links) + `WorkspaceFiles.kt` (per-type icons, breadcrumb drill, single-file editor with return context) + `WorkspaceNotes.kt` (quick capture, search, newest/A-Z sort, archive toggle, optimistic rows, edit sheet, delete confirm, make-a-task) + `WorkspaceChanges.kt` (local selection with counts, review composer, Review All, branch switch) + `WorkspaceCommitState.kt` (P1 submit/check/retry, draft preservation) + `WorkspaceCommit.kt` (composer, push with upstream tracking, review-all dialog) + `WorkspaceHistory.kt` (log, commit detail) + `WorkspaceAutoCommit.kt` (agent auto commit over automation.*) + `WorkspaceTaskResult.kt` (Changes/History links) + `ChatPullsSections.kt` (chat by event kind with approvals, attachments, setup/personas, confirmed send; pulls availability, scope/state filters, detail); task rules (`TaskEditorDraft` validation, `TaskBoardFilter`, `TaskResultRoute`, run acceptance, live-first history) in `tasks/TaskModels.kt` pinned by `AuthoringLogicTest`; feature gates 17/18/19/20 in `logic/HostContracts.kt` | run/stop, file edit, browser |
+| TerminalSession + accessory keys | `terminal/TerminalScreen.kt` + bundled xterm.js WebView, pty spawn/read/write/resize/detach/close, long-poll loop with backoff and liveness, dropped/paused/transport banners, TerminalPalette theme plus JetBrains Mono, selection copy, accessory key row with snippets leading slot | done |
+| AccountSheet (tier badge, products, sign out) | AccountDialog: TierMark, notify toggle ("or a chat" copy), Sync privacy card, legal URLs, "Delete on website…" with the permanence copy, PaywallSheet | done |
+| Paywall (gradient tier marks, tier-switch spring) | `billing/PaywallSheet.kt` wraps Play Billing; feats and summaries match `ClientStore` word-for-word with relay allowances as Apple captions; "Your current plan" marker; Play renew note (Google Play wording where Apple says App Store) | done (no spring; no trial, Play trial state is not exposed) |
+| WebBrowser sheet (progress bar animation) | `browser/PortBrowser.kt` + `BrowserPolicy.kt` (Apple allows-table port, pinned by tests): address bar, reload, load errors, progress bar, unlisten on leave | done |
 | ConnectionChip | `chrome/ConnectionChip.kt` in the top bar | done |
+| Setup wizard (`ClientSetupWizard`, `ClientSetupByHand`, `ClientSetupProjectStep`, `ClientSetupServerGuide`, `ClientSetupOtherDoors`, `ClientSetupState`) | `setup/SetupWizard.kt` + `setup/SetupState.kt`: three doors with the Apple copy, Mac watch screen with share sheet, DigitalOcean cloud import, server guide, by-hand pairing code plus install line, project step with clone and register routes; failure mapping and milestone words ported, pinned by `SetupStateTest` | done with noted gaps (no interactive SSH provisioning steps, no draft resume card, no first-task prefill) |
+| Clone repository (`ClientCloneRepository`) | `workspace/CloneRepository.kt`: form with home default, folder picker over `fs.browse` plus `fs.mkdir`, `workspace.clone` in an embedded terminal with `cloneStatus` polling and the Apple headlines, open-the-folder handoff; reachable from the workspace list and the setup project step | done |
+| Work search (`ClientWorkSearch`) | `search/WorkSearchSheet.kt`: top-bar search button on every screen, places plus pins plus recents plus one folder list per machine, saved-text-off coverage notice; no cache bridge so no conversation text | done with noted gap |

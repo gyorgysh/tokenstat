@@ -36,16 +36,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.TsMotion
+import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.delay
-import kotlin.math.abs
 
 /// One place cross-view UI signals live. Apple posts NotificationCenter
 /// `.clientRefreshing`; the Android equivalent is a listener list.
 object UiSignals {
     private val listeners = mutableListOf<() -> Unit>()
 
-    fun onRefreshing(listener: () -> Unit) {
+    /// Registers a listener, returning an unsubscribe function the caller
+    /// must run when it leaves, so a recomposed logo does not stack listeners.
+    fun onRefreshing(listener: () -> Unit): () -> Unit {
         synchronized(listeners) { listeners.add(listener) }
+        return { synchronized(listeners) { listeners.remove(listener) } }
     }
 
     /// A refresh somebody asked for dips the logo bars and lets them back up,
@@ -58,6 +61,7 @@ object UiSignals {
 /// baseline they share.
 @Composable
 fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
+    val reduceMotion = rememberReduceMotion()
     val unit = size / 42f
     val bars = listOf(
         Triple(34f, 18f, Color(0xFFC3B0FF)),
@@ -68,20 +72,20 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
     // One run of the same rise for a refresh somebody pulled.
     var pulse by remember { mutableStateOf(false) }
     androidx.compose.runtime.DisposableEffect(Unit) {
-        val listener = {
+        val unsubscribe = UiSignals.onRefreshing {
             if (!animated && !pulse) {
                 pulse = true
             }
-            Unit
         }
-        UiSignals.onRefreshing(listener)
-        onDispose { synchronized(UiSignals) { /* listener list lives for the process */ } }
+        onDispose { unsubscribe() }
     }
     LaunchedEffectPulse(pulse) { if (pulse) { delay(300); pulse = false } }
 
     Box(Modifier.size(size.dp)) {
         bars.forEachIndexed { index, (y, height, color) ->
-            val looped = if (animated && loops) {
+            // The repeating rise, or one rise that lands and holds. Reduce
+            // Motion lands on the last frame and stays there.
+            val looped = if (animated && loops && !reduceMotion) {
                 val transition = rememberInfiniteTransition(label = "logo")
                 val v by transition.animateFloat(
                     initialValue = 0.35f,
@@ -95,9 +99,9 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
                 )
                 v
             } else {
-                val land = remember { Animatable(if (animated) 0.35f else 1f) }
+                val land = remember { Animatable(if (animated && !reduceMotion) 0.35f else 1f) }
                 LaunchedEffect(animated, index) {
-                    if (animated) {
+                    if (animated && !reduceMotion) {
                         land.snapTo(0.35f)
                         kotlinx.coroutines.delay(index * 150L)
                         land.animateTo(1f, tween(1200, easing = TsMotion.easeInOut))
@@ -107,7 +111,14 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
                 }
                 land.value
             }
-            val scale = if (pulse) 0.35f else looped
+            // The refresh dip: each bar sinks to 0.35 and comes back up over
+            // 260ms, a beat after the one before it, like `Marks.swift`.
+            val dip = remember { Animatable(1f) }
+            LaunchedEffect(pulse) {
+                delay(index * 70L)
+                dip.animateTo(if (pulse) 0.35f else 1f, tween(260, easing = TsMotion.easeInOut))
+            }
+            val scale = if (pulse || dip.value != 1f) dip.value else looped
             Box(
                 Modifier
                     .align(Alignment.TopStart)
@@ -154,18 +165,37 @@ fun Wordmark(
     }
 }
 
-/// A person's avatar seat, tinted deterministically from their name over the
-/// heat ramp so the same person is the same colour everywhere (the Apple
-/// `Avatar` rule). Initials stand in until a real image arrives.
+/// Which slot of the avatar ramp a name lands in. djb2 over the lowercased
+/// bytes, like Apple's `Avatar.tint`: `hashCode` is a different function, so
+/// the same person would wear a different colour on each platform.
+fun avatarSlot(name: String, slots: Int): Int {
+    require(slots > 0) { "avatar ramp must not be empty" }
+    var hash = 5381L
+    for (byte in name.lowercase().toByteArray(Charsets.UTF_8)) {
+        hash = hash * 33 + (byte.toLong() and 0xFF)
+    }
+    return (hash % slots).toInt()
+}
+
+/// A person's avatar seat, tinted deterministically from their name so the
+/// same person is the same colour everywhere (the Apple `Avatar` rule). The
+/// ramp leaves out the heat's first two quiet-day greys, which no letter can
+/// be read in, and ends on warning and danger. Initials stand in until a real
+/// image arrives.
 @Composable
 fun Avatar(name: String, size: Int = 28) {
     val colors = LocalTsColors.current
-    val tint = colors.heat[abs(name.hashCode()) % colors.heat.size]
+    val ramp = remember(colors) { colors.heat.drop(2) + listOf(colors.warning, colors.danger) }
+    val tint = ramp[avatarSlot(name, ramp.size)]
     Box(
         Modifier
             .size(size.dp)
             .clip(RoundedCornerShape(50))
-            .background(tint.copy(alpha = 0.85f)),
+            .background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    listOf(tint, tint.copy(alpha = 0.72f)),
+                ),
+            ),
         contentAlignment = Alignment.Center,
     ) {
         val initials = name.trim().split(Regex("\\s+")).take(2)

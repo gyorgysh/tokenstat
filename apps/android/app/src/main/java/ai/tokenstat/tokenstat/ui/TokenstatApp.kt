@@ -60,19 +60,41 @@ import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.SegmentedCapsulePicker
 import ai.tokenstat.tokenstat.ui.components.SkeletonCard
 import ai.tokenstat.tokenstat.ui.components.Stat
+import ai.tokenstat.tokenstat.ui.components.TsBrandSwitch
 import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
 import ai.tokenstat.tokenstat.ui.components.cardPaddingDp
 import ai.tokenstat.tokenstat.ui.heatmap.DayDetailSheet
 import ai.tokenstat.tokenstat.ui.heatmap.YearHeatmap
+import ai.tokenstat.tokenstat.ui.home.ClearHomeCard
+import ai.tokenstat.tokenstat.ui.home.ContinueSection
+import ai.tokenstat.tokenstat.ui.home.GettingStartedCard
+import ai.tokenstat.tokenstat.ui.home.HomeEditor
+import ai.tokenstat.tokenstat.ui.home.HomeMachine
+import ai.tokenstat.tokenstat.ui.home.HomeStatusBlock
+import ai.tokenstat.tokenstat.ui.home.HomeStores
+import ai.tokenstat.tokenstat.ui.home.MachinesSection
+import ai.tokenstat.tokenstat.ui.home.PinnedSection
+import ai.tokenstat.tokenstat.ui.logic.DeviceCopy
 import ai.tokenstat.tokenstat.ui.logic.HomeGreeting
+import ai.tokenstat.tokenstat.ui.logic.HomeSection
+import ai.tokenstat.tokenstat.ui.logic.HostStatsFormat
+import ai.tokenstat.tokenstat.ui.logic.LimitLogic
+import ai.tokenstat.tokenstat.ui.logic.PinnedWork
+import ai.tokenstat.tokenstat.ui.logic.RecentPlaces
+import ai.tokenstat.tokenstat.ui.logic.RelativeClock
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
+import ai.tokenstat.tokenstat.ui.logic.friendlyError
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
 import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
+import ai.tokenstat.tokenstat.ui.search.SearchOpen
+import ai.tokenstat.tokenstat.ui.search.WorkSearchSheet
+import ai.tokenstat.tokenstat.ui.setup.SetupWizard
 import ai.tokenstat.tokenstat.ui.terminal.SshTerminalScreen
 import ai.tokenstat.tokenstat.ui.terminal.TerminalScreen
+import ai.tokenstat.tokenstat.ui.workspace.CloneRepositoryScreen
 import ai.tokenstat.tokenstat.ui.workspace.WorkspaceSection
 import ai.tokenstat.tokenstat.ui.chrome.ConnectionChip
 import ai.tokenstat.tokenstat.ui.chrome.TsRefresh
@@ -140,7 +162,7 @@ fun TokenstatApp(model: AppViewModel) {
     }
     TsTheme {
         val colors = LocalTsColors.current
-        MaterialTheme(colorScheme = colors.toColorScheme()) {
+        MaterialTheme(colorScheme = colors.toColorScheme(), typography = TsType.typography) {
             Surface(Modifier.fillMaxSize(), color = colors.background) {
                 val door = when {
                     state.signedIn -> Door.SignedIn
@@ -202,13 +224,14 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
     var pendingLogin by remember { mutableStateOf(false) }
     var loginError by remember { mutableStateOf<String?>(null) }
     val colors = LocalTsColors.current
+    val reduceMotion = rememberReduceMotion()
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // The mark rising once and landing: an intro page, not a spinner.
-        LogoMark(size = 44, animated = true, loops = false)
+        LogoMark(size = 44, animated = !reduceMotion, loops = false)
         Spacer(Modifier.height(Space.s))
         Wordmark(size = 22, showsMark = false)
         Spacer(Modifier.height(12.dp))
@@ -259,8 +282,14 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
 private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var selected by rememberSaveable { mutableStateOf(Destination.Home) }
     var pendingWorkHostId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingWorkFolderId by rememberSaveable { mutableStateOf<String?>(null) }
     var accountOpen by remember { mutableStateOf(false) }
+    var wizardOpen by remember { mutableStateOf(false) }
+    var searchOpen by remember { mutableStateOf(false) }
+    var pendingDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
+    var sshSignal by remember { mutableStateOf(0) }
     val context = LocalContext.current
+    val homeStores = remember { HomeStores(context) }
     val billing = remember { PlayBillingManager(context) }
     billing.appAccountToken = state.appAccountToken
     billing.onActivated = { model.applyAccount(it) }
@@ -306,6 +335,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { searchOpen = true }) {
+                        Icon(ActionIcon.Search.vector, "Search", tint = colors.controlGlyph)
+                    }
                     ConnectionChip(state.connection, onRetry = { model.retryConnection() })
                     Box(Modifier.padding(end = Space.s), contentAlignment = Alignment.Center) {
                         LogoMark(size = 18)
@@ -356,11 +388,31 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 when (selected) {
-                    Destination.Home -> HomeScreen(model, state)
+                    Destination.Home -> HomeScreen(
+                        model = model,
+                        state = state,
+                        stores = homeStores,
+                        onOpenWork = { hostId, folderId ->
+                            pendingWorkHostId = hostId
+                            pendingWorkFolderId = folderId
+                            selected = Destination.Workspaces
+                        },
+                        onOpenDevices = { selected = Destination.Devices },
+                        onSetupWizard = { wizardOpen = true },
+                    )
                     Destination.Workspaces -> if (state.canRemote) {
-                        WorkspacesScreen(model, state, expanded, pendingWorkHostId) {
-                            pendingWorkHostId = null
-                        }
+                        WorkspacesScreen(
+                            model = model,
+                            state = state,
+                            expanded = expanded,
+                            pendingHostId = pendingWorkHostId,
+                            pendingFolderId = pendingWorkFolderId,
+                            stores = homeStores,
+                            onPendingConsumed = {
+                                pendingWorkHostId = null
+                                pendingWorkFolderId = null
+                            },
+                        )
                     } else {
                         RemotePaywall { accountOpen = true }
                     }
@@ -373,12 +425,62 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                             pendingWorkHostId = id
                             selected = Destination.Workspaces
                         },
+                        onSetupWizard = { wizardOpen = true },
+                        sshOpenSignal = sshSignal,
+                        pendingDeviceId = pendingDeviceId,
+                        onPendingDeviceConsumed = { pendingDeviceId = null },
                     )
                 }
             }
         }
     }
+    if (searchOpen) {
+        WorkSearchSheet(
+            model = model,
+            state = state,
+            stores = homeStores,
+            onOpen = { open ->
+                when (open) {
+                    is SearchOpen.Tab -> selected = when (open.name) {
+                        "home" -> Destination.Home
+                        "workspaces" -> Destination.Workspaces
+                        "insights" -> Destination.Insights
+                        else -> Destination.Devices
+                    }
+                    is SearchOpen.Device -> {
+                        pendingDeviceId = open.machineId
+                        selected = Destination.Devices
+                    }
+                    SearchOpen.Account -> accountOpen = true
+                    is SearchOpen.Folder -> {
+                        pendingWorkHostId = open.hostId
+                        pendingWorkFolderId = open.folderId
+                        selected = Destination.Workspaces
+                    }
+                }
+            },
+            onDismiss = { searchOpen = false },
+        )
+    }
     if (accountOpen) AccountDialog(state, model, billing, onDismiss = { accountOpen = false })
+    if (wizardOpen) {
+        SetupWizard(
+            model = model,
+            state = state,
+            onClose = { wizardOpen = false },
+            onOpenSsh = {
+                wizardOpen = false
+                selected = Destination.Devices
+                sshSignal += 1
+            },
+            onOpenWork = { hostId, folderId ->
+                wizardOpen = false
+                pendingWorkHostId = hostId
+                pendingWorkFolderId = folderId
+                selected = Destination.Workspaces
+            },
+        )
+    }
 }
 
 @Composable
@@ -402,25 +504,96 @@ private fun RemotePaywall(onPlans: () -> Unit) {
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun HomeScreen(model: AppViewModel, state: ClientState) {
+private fun HomeScreen(
+    model: AppViewModel,
+    state: ClientState,
+    stores: HomeStores,
+    onOpenWork: (hostId: String, folderId: String?) -> Unit,
+    onOpenDevices: () -> Unit,
+    onSetupWizard: (() -> Unit)? = null,
+) {
     val calendar = state.home
     val rows = calendar?.get("rows") as? JsonArray
     val cells = rows.orEmpty().flatMap { row ->
         (row as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
     }
     var selectedDay by remember { mutableStateOf<JsonObject?>(null) }
+    var customizing by rememberSaveable { mutableStateOf(false) }
     val reduceMotion = rememberReduceMotion()
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
+    fun retry() {
+        scope.launch {
+            refreshing = true
+            TsRefresh.run("home") { model.refresh() }
+            refreshing = false
+        }
+    }
+
+    val accountHandle = state.account?.string("handle")
+        ?: state.account?.string("displayName") ?: ""
+    // Read once for the whole pass. The stores decode on every access, and
+    // reading them again inside the rows is what lets a list change shape
+    // underneath.
+    stores.revision.value
+    val (order, hidden) = stores.layout()
+    val sections = order.filter { it !in hidden }
+    val places = stores.places(accountHandle)
+    val pins = stores.pins(accountHandle)
+    val machines = ((state.account?.get("machines") as? JsonArray).orEmpty())
+        .mapNotNull { it as? JsonObject }
+    val thisId = state.account?.string("thisMachineId")
+    fun machineByPeer(peer: String): JsonObject? =
+        machines.find { it.string("publicIdentity") == peer }
+    fun machineName(peer: String): String? =
+        machineByPeer(peer)?.let {
+            DeviceCopy.displayName(it.string("label"), it.string("platform"), it.string("kind") != "client")
+        }
+    fun machineOnline(peer: String): Boolean? =
+        machineByPeer(peer)?.get("online")?.jsonPrimitive?.booleanOrNull
+    val awakeHosts = machines.filter { machine ->
+        val id = machine.string("id")
+        machine.string("kind") != "client" && machine.bool("online") &&
+            !id.isNullOrEmpty() && id != thisId
+    }.map { machine ->
+        HomeMachine(
+            id = machine.string("id") ?: "",
+            peer = machine.string("publicIdentity"),
+            name = DeviceCopy.displayName(machine.string("label"), machine.string("platform"), true),
+            online = machine.get("online")?.jsonPrimitive?.booleanOrNull,
+        )
+    }
+    fun openPlace(peer: String, workspaceId: String?) {
+        val id = machineByPeer(peer)?.string("id")
+        if (id != null) onOpenWork(id, workspaceId) else onOpenDevices()
+    }
+    fun emptyReason(section: HomeSection): String? = when (section) {
+        HomeSection.CONTINUE -> if (places.isEmpty()) "Appears after you open a folder or conversation." else null
+        HomeSection.PINNED -> if (pins.isEmpty()) "Pin a folder or conversation to keep it here." else null
+        HomeSection.MACHINES -> if (machines.isEmpty()) "Appears when your account has linked devices." else null
+        HomeSection.LIMITS -> if (state.limits.isEmpty() && state.limitsError == null) {
+            "Readings appear after a linked computer shares plan limits."
+        } else null
+        else -> null
+    }
+
+    if (customizing) {
+        HomeEditor(
+            order = order,
+            hidden = hidden,
+            preset = stores.preset(),
+            emptyReason = ::emptyReason,
+            onDone = { nextOrder, nextHidden, nextPreset ->
+                stores.saveLayout(nextOrder, nextHidden, nextPreset)
+                customizing = false
+            },
+            onCancel = { customizing = false },
+        )
+        return
+    }
     PullToRefreshBox(
         isRefreshing = refreshing,
-        onRefresh = {
-            scope.launch {
-                refreshing = true
-                TsRefresh.run("home") { model.refresh() }
-                refreshing = false
-            }
-        },
+        onRefresh = { retry() },
         modifier = Modifier.fillMaxSize(),
     ) {
     LazyColumn(
@@ -434,44 +607,160 @@ private fun HomeScreen(model: AppViewModel, state: ClientState) {
                 style = MaterialTheme.typography.headlineSmall,
                 color = LocalTsColors.current.textPrimary,
             )
-            Spacer(Modifier.height(Space.m))
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                MetricCard("Today", money(spendSince(cells, calendar?.string("last"), 1)), Modifier.weight(1f))
-                MetricCard("This week", money(spendSince(cells, calendar?.string("last"), 7)), Modifier.weight(1f))
+        }
+        // Outside the arrangement, deliberately. Whether the account could
+        // be read at all is the screen talking, not a card somebody chose
+        // to keep, and hiding Activity must not hide "you are offline".
+        if (calendar == null && !state.loading) {
+            if (state.error == null && state.signedIn) {
+                item {
+                    val phoneName = machines.firstOrNull { it.string("kind") == "client" }?.let {
+                        DeviceCopy.displayName(it.string("label"), it.string("platform"), false)
+                    }
+                    GettingStartedCard(phoneName = phoneName, onSetup = onSetupWizard ?: onOpenDevices)
+                }
+            } else {
+                item { HomeStatusBlock(state.error, state.connection.offline, onRetry = ::retry) }
             }
         }
-        item {
-            Arrive(reduceMotion) {
-                TsCard(
-                    title = "Activity",
-                    accessory = {
-                        Text(
-                            "${calendar?.int("activeDays") ?: 0} active days",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = LocalTsColors.current.textSecondary,
+        // In the order this device was arranged in. A card with nothing to
+        // say draws nothing and keeps its place.
+        sections.forEach { section ->
+            when (section) {
+                HomeSection.USAGE -> if (calendar != null) {
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                            MetricCard("Today", money(spendSince(cells, calendar.string("last"), 1)), Modifier.weight(1f))
+                            MetricCard("This week", money(spendSince(cells, calendar.string("last"), 7)), Modifier.weight(1f))
+                        }
+                    }
+                } else if (state.loading) {
+                    item { SkeletonCard() }
+                }
+                HomeSection.CONTINUE -> if (places.isNotEmpty()) {
+                    item {
+                        ContinueSection(
+                            places = places,
+                            machineName = ::machineName,
+                            machineOnline = ::machineOnline,
+                            offline = state.connection.offline,
+                            onOpen = { place -> openPlace(place.id.peer, place.id.workspaceId) },
+                            isPinned = { place ->
+                                stores.isPinned(
+                                    accountHandle, place.id.peer, place.id.workspaceId ?: "",
+                                    if (place.id.kind == RecentPlaces.Kind.CHAT) PinnedWork.Kind.CONVERSATION else PinnedWork.Kind.WORKSPACE,
+                                    place.id.itemId,
+                                )
+                            },
+                            onTogglePin = { place ->
+                                stores.togglePin(
+                                    accountHandle, place.id.peer, place.id.workspaceId ?: "",
+                                    if (place.id.kind == RecentPlaces.Kind.CHAT) PinnedWork.Kind.CONVERSATION else PinnedWork.Kind.WORKSPACE,
+                                    place.id.itemId,
+                                    RecentPlaces.title(place),
+                                    place.workspaceName,
+                                )
+                            },
                         )
-                    },
-                ) {
-                    if (cells.isEmpty()) Text("No synced activity yet.", color = LocalTsColors.current.textSecondary)
-                    else YearHeatmap(
-                        rows!!,
-                        calendar?.get("months") as? JsonArray ?: JsonArray(emptyList()),
-                        onSelectDay = { selectedDay = it },
-                    )
+                    }
+                }
+                HomeSection.MACHINES -> if (awakeHosts.isNotEmpty()) {
+                    item {
+                        MachinesSection(
+                            machines = awakeHosts,
+                            onOpenWork = { id -> onOpenWork(id, null) },
+                            onOpenDevices = onOpenDevices,
+                        )
+                    }
+                }
+                HomeSection.PINNED -> if (pins.isNotEmpty()) {
+                    item {
+                        PinnedSection(
+                            pins = pins,
+                            machineName = ::machineName,
+                            machineOnline = ::machineOnline,
+                            offline = state.connection.offline,
+                            onOpen = { pin -> openPlace(pin.hostIdentity, pin.workspaceId) },
+                            onUnpin = { pin -> stores.unpin(accountHandle, pin) },
+                        )
+                    }
+                }
+                HomeSection.ACTIVITY -> if (calendar != null) {
+                    item {
+                        Arrive(reduceMotion) {
+                            TsCard(
+                                title = "Activity",
+                                accessory = {
+                                    Text(
+                                        "${calendar.int("activeDays") ?: 0} active days",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = LocalTsColors.current.textSecondary,
+                                    )
+                                },
+                            ) {
+                                if (cells.isEmpty()) Text("No synced activity yet.", color = LocalTsColors.current.textSecondary)
+                                else YearHeatmap(
+                                    rows!!,
+                                    calendar.get("months") as? JsonArray ?: JsonArray(emptyList()),
+                                    onSelectDay = { selectedDay = it },
+                                )
+                            }
+                        }
+                    }
+                    // The same Free-year note the public profile puts under the heatmap.
+                    if (rows.orEmpty().any { (it as? JsonArray).orEmpty().any { c -> (c as? JsonObject)?.bool("locked") == true } }) {
+                        item { HistoryLockBanner() }
+                    }
+                } else if (state.loading) {
+                    item { SkeletonCard() }
+                }
+                HomeSection.LIMITS -> if (calendar != null) {
+                    item { SectionLabel("Plan limits") }
+                    val planError = state.limitsError
+                    if (planError != null) {
+                        item {
+                            Text(
+                                "Plan readings could not be refreshed. Pull to try again.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LocalTsColors.current.textSecondary,
+                            )
+                        }
+                    }
+                    val sorted = LimitLogic.closestToFullFirst(
+                        state.limits.mapNotNull { it as? JsonObject },
+                    ) { reading ->
+                        LimitLogic.peakPercent(
+                            ((reading["windows"] as? JsonArray).orEmpty())
+                                .mapNotNull { (it as? JsonObject)?.doubleOrNull("percent") },
+                        )
+                    }
+                    if (sorted.isEmpty() && planError == null) {
+                        item {
+                            Arrive(reduceMotion) {
+                                EmptyCard(
+                                    "No readings yet",
+                                    "On a Mac, turn on Share plan limits with my devices in Account, then refresh limits or sync.",
+                                )
+                            }
+                        }
+                    } else itemsIndexed(sorted) { index, reading ->
+                        Arrive(reduceMotion, staggerIndex = index) { LimitCard(reading) }
+                    }
                 }
             }
         }
-        // The same Free-year note the public profile puts under the heatmap.
-        if (rows.orEmpty().any { (it as? JsonArray).orEmpty().any { c -> (c as? JsonObject)?.bool("locked") == true } }) {
-            item { HistoryLockBanner() }
+        if (sections.isEmpty()) {
+            item { ClearHomeCard() }
         }
-        item { SectionLabel("Plan limits") }
-        if (state.limits.isEmpty()) item {
-            Arrive(reduceMotion) { EmptyCard("No provider reading yet", "Limits appear after one of your hosts shares a reading.") }
-        } else itemsIndexed(state.limits) { index, item ->
-            Arrive(reduceMotion, staggerIndex = index) { LimitCard(item.jsonObject) }
+        item {
+            // At the bottom, under everything it arranges. A control for
+            // changing the furniture does not belong above the furniture.
+            TsSecondaryButton(
+                label = "Customize Home",
+                onClick = { customizing = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
-        state.error?.let { item { ErrorCard(it) } }
     }
     }
     DayDetailSheet(selectedDay, onDismiss = { selectedDay = null })
@@ -666,9 +955,22 @@ private fun DevicesScreen(
     state: ClientState,
     onPlans: () -> Unit,
     onOpenWork: (String) -> Unit,
+    onSetupWizard: () -> Unit = {},
+    sshOpenSignal: Int = 0,
+    pendingDeviceId: String? = null,
+    onPendingDeviceConsumed: () -> Unit = {},
 ) {
     var sshOpen by rememberSaveable { mutableStateOf(false) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(sshOpenSignal) {
+        if (sshOpenSignal > 0) sshOpen = true
+    }
+    LaunchedEffect(pendingDeviceId) {
+        if (pendingDeviceId != null) {
+            selectedId = pendingDeviceId
+            onPendingDeviceConsumed()
+        }
+    }
     val machines = state.account?.get("machines") as? JsonArray ?: JsonArray(emptyList())
     val selected = machines.map { it.jsonObject }.find { it.string("id") == selectedId }
     val thisId = state.account?.string("thisMachineId")
@@ -699,6 +1001,14 @@ private fun DevicesScreen(
                 )
             }
             item {
+                TsAccentButton(
+                    label = "Set up a machine",
+                    icon = ActionIcon.Next.vector,
+                    onClick = onSetupWizard,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
                 val colors = LocalTsColors.current
                 TsCard(Modifier.clickable { sshOpen = true }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -715,7 +1025,9 @@ private fun DevicesScreen(
             items(machines) { machine ->
                 val value = machine.jsonObject
                 val isHost = value.string("kind") != "client"
-                val online = value.bool("online")
+                val online = value.get("online")?.jsonPrimitive?.booleanOrNull
+                val isThis = thisId != null && value.string("id") == thisId
+                val name = DeviceCopy.displayName(value.string("label"), value.string("platform"), isHost)
                 val colors = LocalTsColors.current
                 TsCard(Modifier.clickable { selectedId = value.string("id") }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -727,22 +1039,24 @@ private fun DevicesScreen(
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
-                                value.string("label") ?: value.string("id") ?: "Device",
+                                name,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
                             )
                             Text(
-                                when {
-                                    isHost && online && !value.string("publicIdentity").isNullOrEmpty() ->
-                                        "Awake. Open work from this device."
-                                    else -> listOfNotNull(value.string("platform"), value.string("lastSeenAt")).joinToString(" · ")
-                                },
+                                DeviceCopy.statusLine(
+                                    isThisDevice = isThis,
+                                    online = online,
+                                    isHost = isHost,
+                                    hasKey = !value.string("publicIdentity").isNullOrEmpty(),
+                                    lastSeenText = null,
+                                ),
                                 color = colors.textSecondary,
                             )
                         }
                         Box(
                             Modifier.size(10.dp).background(
-                                if (online) colors.success else colors.stateIdle,
+                                if (online == true || isThis) colors.success else colors.stateIdle,
                                 RoundedCornerShape(5.dp),
                             ),
                         )
@@ -766,14 +1080,51 @@ private fun DeviceDetailScreen(
     val isThis = thisId != null && machine.string("id") == thisId
     val isHost = machine.string("kind") != "client"
     val peer = machine.string("publicIdentity")
-    val online = machine.bool("online")
-    val label = machine.string("label") ?: machine.string("id") ?: "Device"
+    val online = machine.get("online")?.jsonPrimitive?.booleanOrNull
+    val hasKey = !peer.isNullOrEmpty()
+    val label = DeviceCopy.displayName(machine.string("label"), machine.string("platform"), isHost)
     var viewing by remember { mutableStateOf(false) }
+    val detailScope = rememberCoroutineScope()
+    // Naming a device, in the row where the name is read. Empty is the undo
+    // rather than an error: the machine goes back to naming itself.
+    var renaming by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    var savingName by remember { mutableStateOf(false) }
+    var renameError by remember { mutableStateOf<String?>(null) }
+    var renamedTo by remember { mutableStateOf<String?>(null) }
+    val currentName = renamedTo ?: machine.string("label") ?: label
+    fun saveName() {
+        val id = machine.string("id")
+        if (id.isNullOrEmpty()) {
+            renameError = "This device has no id on the account yet."
+            return
+        }
+        savingName = true
+        detailScope.launch {
+            runCatching {
+                model.core(
+                    "account.renameMachine",
+                    buildJsonObject {
+                        put("id", id)
+                        put("name", draft.trim())
+                    },
+                )
+            }.onSuccess {
+                renamedTo = draft.trim().ifEmpty { null }
+                renameError = null
+                renaming = false
+                model.refresh()
+            }.onFailure {
+                renameError = friendlyError(it.message).message
+            }
+            savingName = false
+        }
+    }
     if (viewing && !peer.isNullOrEmpty()) {
         ScreenViewerScreen(
             model = model,
             peer = peer,
-            hostLabel = label,
+            hostLabel = currentName,
             onClose = { viewing = false },
         )
         return
@@ -784,23 +1135,83 @@ private fun DeviceDetailScreen(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Text(label, style = MaterialTheme.typography.headlineSmall)
+            Text(currentName, style = MaterialTheme.typography.headlineSmall)
         }
-        if (!isThis && !peer.isNullOrEmpty() && online) {
+        if (!isThis && !peer.isNullOrEmpty() && online == true) {
             HostStatsBar(model, peer)
         }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Reach", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    when {
-                        isThis -> "This is the device you are holding."
-                        online -> "Awake and reachable through the tunnel from this device, and from any other device signed in to this account."
-                        !peer.isNullOrEmpty() -> "Asleep. It has a connection key, so it can be reached from this device once it is awake."
-                        else -> "Not set up for remote reach. Turn on Reach devices from anywhere on that computer."
-                    },
+                    DeviceCopy.reach(isThis, online, hasKey),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("What this is", style = MaterialTheme.typography.titleMedium)
+                if (renaming) {
+                    Text("Name", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        placeholder = { Text("Name this device") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TsAccentButton(
+                            label = if (savingName) "Saving…" else "Save",
+                            enabled = !savingName,
+                            onClick = { saveName() },
+                        )
+                        TsSecondaryButton(
+                            label = "Cancel",
+                            onClick = { renaming = false; renameError = null },
+                        )
+                    }
+                    Text(
+                        "Empty puts back the name the device gives itself.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Name", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                machine.string("label")?.ifEmpty { null } ?: "not named on this account",
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        // Any device on the account, not only this phone. A
+                        // Linux server with nothing but the CLI on it has no
+                        // other way to be named.
+                        TsSecondaryButton(
+                            label = "Rename",
+                            small = true,
+                            onClick = {
+                                draft = machine.string("label") ?: ""
+                                renaming = true
+                            },
+                        )
+                    }
+                }
+                renameError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                machine.string("platform")?.let {
+                    Column {
+                        Text("What it runs", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(it, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+                machine.string("id")?.let {
+                    Column {
+                        Text("Device id", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
             }
         }
         if (!isThis && isHost && !peer.isNullOrEmpty()) {
@@ -810,7 +1221,7 @@ private fun DeviceDetailScreen(
                     if (state.canRemote) {
                         TsAccentButton(label = "Open work", onClick = onOpenWork, modifier = Modifier.fillMaxWidth())
                         Text(
-                            if (online) "Folders, terminals and sessions on this computer."
+                            if (online == true) "Folders, terminals and sessions on this computer."
                             else "It is asleep. Opening this will wake nothing, but it will try.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -834,39 +1245,68 @@ private fun DeviceDetailScreen(
                 }
             }
         }
-        machine.string("platform")?.let { Text("Runs $it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        machine.string("id")?.let { Text("Device id $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
 @Composable
 private fun HostStatsBar(model: AppViewModel, peer: String) {
+    val colors = LocalTsColors.current
     var stats by remember { mutableStateOf<JsonObject?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    var route by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(peer) {
         runCatching { model.prepareHost(peer, "Host") }
+        runCatching { model.core("remote.status") as? JsonObject }
+            .onSuccess { status ->
+                val peers = ((status?.get("traffic") as? JsonObject)?.get("peers") as? JsonArray)
+                    .orEmpty().mapNotNull { it as? JsonObject }
+                // Missing stays missing: never invent a path nobody observed.
+                route = peers.find { (it.string("peer") ?: "").equals(peer, ignoreCase = true) }
+                    ?.string("route")?.takeIf { it == "direct" || it == "relay" }
+            }
         while (true) {
-            runCatching { model.hostStats(peer) }.onSuccess { stats = it }
+            runCatching { model.hostStats(peer) }
+                .onSuccess { stats = it; failed = false }
+                .onFailure { if (stats == null) failed = true }
             delay(2500)
         }
+    }
+    // Missing readings stay off the bar rather than drawing as zero.
+    val power = HostStatsFormat.powerLabel(
+        charging = stats?.bool("charging") == true,
+        percent = stats?.int("percent"),
+        power = stats?.string("power"),
+        failed = failed,
+        hadStats = stats != null,
+    )
+    val cpu = stats?.doubleOrNull("cpu")?.let { HostStatsFormat.cpuLabel(it) }
+        ?: if (stats == null && !failed) "…" else "n/a"
+    val ram = run {
+        val used = stats?.long("ramUsedBytes")
+        val total = stats?.long("ramTotalBytes")
+        if (used != null && total != null && total > 0) HostStatsFormat.ramLabel(used, total)
+        else if (stats == null && !failed) "…"
+        else "n/a"
     }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                HostStatCell(
-                    title = "Power",
-                    value = powerLabel(stats),
-                    modifier = Modifier.weight(1f),
-                )
-                HostStatCell(
-                    title = "CPU",
-                    value = stats?.doubleOrNull("cpu")?.let { "${(it * 100).roundToInt()}%" } ?: if (stats == null) "…" else "n/a",
-                    modifier = Modifier.weight(1f),
-                )
-                HostStatCell(
-                    title = "Memory",
-                    value = ramLabel(stats) ?: if (stats == null) "…" else "n/a",
-                    modifier = Modifier.weight(1f),
-                )
+                HostStatCell(title = "Power", value = power, modifier = Modifier.weight(1f))
+                HostStatCell(title = "CPU", value = cpu, modifier = Modifier.weight(1f))
+                HostStatCell(title = "Memory", value = ram, modifier = Modifier.weight(1f))
+            }
+            // The same wording and colours the screen viewer uses.
+            when (route) {
+                "direct" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).background(colors.success, RoundedCornerShape(4.dp)))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Direct connection", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                }
+                "relay" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).background(colors.warning, RoundedCornerShape(4.dp)))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Encrypted relay", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                }
             }
             Text(
                 "Read from this computer over the encrypted tunnel. It is not uploaded with usage.",
@@ -885,28 +1325,7 @@ private fun HostStatCell(title: String, value: String, modifier: Modifier = Modi
     }
 }
 
-private fun powerLabel(stats: JsonObject?): String {
-    if (stats == null) return "…"
-    val percent = stats.int("percent")
-    val charging = stats.bool("charging")
-    val power = stats.string("power")
-    if (charging && percent != null) return "$percent%"
-    if (power == "ac" && percent == null) return "Plugged in"
-    if (percent != null) return "$percent%"
-    if (power == "battery") return "On battery"
-    if (power == "ac") return "Plugged in"
-    return "n/a"
-}
 
-private fun ramLabel(stats: JsonObject?): String? {
-    val used = stats?.long("ramUsedBytes") ?: return null
-    val total = stats.long("ramTotalBytes") ?: return null
-    if (total <= 0L) return null
-    val g = 1024.0 * 1024 * 1024
-    val u = used / g
-    val t = total / g
-    return if (t >= 10) "%.0f / %.0f GB".format(u, t) else "%.1f / %.1f GB".format(u, t)
-}
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -954,6 +1373,7 @@ private fun AndroidSSHScreen(
             model = model,
             sessionId = live.first,
             hostLabel = live.second,
+            snippets = snippets,
             onClose = { sshSession = null },
         )
         return
@@ -1389,6 +1809,8 @@ private fun WorkspacesScreen(
     state: ClientState,
     expanded: Boolean,
     pendingHostId: String? = null,
+    pendingFolderId: String? = null,
+    stores: HomeStores? = null,
     onPendingConsumed: () -> Unit = {},
 ) {
     val hosts = ((state.account?.get("machines") as? JsonArray) ?: JsonArray(emptyList()))
@@ -1398,14 +1820,44 @@ private fun WorkspacesScreen(
         val id = pendingHostId ?: return@LaunchedEffect
         val match = hosts.find { it.string("id") == id } ?: return@LaunchedEffect
         host = match
-        onPendingConsumed()
+        if (pendingFolderId == null) onPendingConsumed()
     }
     var folders by remember { mutableStateOf(JsonArray(emptyList())) }
     var selectedFolder by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var terminalSession by remember { mutableStateOf<WorkspaceTerminalRequest?>(null) }
     var browser by remember { mutableStateOf<Pair<String, Int>?>(null) }
-    LaunchedEffect(host) {
+    var cloning by remember { mutableStateOf(false) }
+    var folderRefresh by remember { mutableStateOf(0) }
+    var pendingSelectFolderId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(host, folders, pendingFolderId) {
+        val folderId = pendingFolderId ?: return@LaunchedEffect
+        val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == folderId }
+            ?: return@LaunchedEffect
+        selectedFolder = match
+        onPendingConsumed()
+    }
+    // Home reads device history: opening a folder files it on the continue
+    // shelf. String keys, so an account refresh re-reading the same folder
+    // does not count as another visit.
+    val peerKey = host?.string("publicIdentity")
+    val folderId = selectedFolder?.string("id")
+    val folderName = selectedFolder?.string("name")
+    LaunchedEffect(peerKey, folderId) {
+        val peer = peerKey ?: return@LaunchedEffect
+        val id = folderId ?: return@LaunchedEffect
+        val record = stores ?: return@LaunchedEffect
+        val handle = state.account?.string("handle") ?: state.account?.string("displayName") ?: ""
+        record.recordPlace(handle, peer, id, folderName ?: "Workspace", RecentPlaces.Kind.WORKSPACE)
+    }
+    LaunchedEffect(folders, pendingSelectFolderId) {
+        val id = pendingSelectFolderId ?: return@LaunchedEffect
+        val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == id }
+            ?: return@LaunchedEffect
+        selectedFolder = match
+        pendingSelectFolderId = null
+    }
+    LaunchedEffect(host, folderRefresh) {
         val key = host?.string("publicIdentity")
         if (host != null && key == null) {
             folders = JsonArray(emptyList())
@@ -1427,7 +1879,19 @@ private fun WorkspacesScreen(
     val boundFolder = selectedFolder
     val request = terminalSession
     val browsing = browser
-    if (request != null && boundFolder != null && boundHost != null) {
+    if (cloning && boundHost != null) {
+        CloneRepositoryScreen(
+            model = model,
+            peer = boundHost.string("publicIdentity") ?: "",
+            hostLabel = boundHost.string("label") ?: "Host",
+            onClose = { cloning = false },
+            onCloned = { id ->
+                cloning = false
+                pendingSelectFolderId = id
+                folderRefresh += 1
+            },
+        )
+    } else if (request != null && boundFolder != null && boundHost != null) {
         TerminalScreen(
             model = model,
             peer = boundHost.string("publicIdentity") ?: "",
@@ -1446,7 +1910,7 @@ private fun WorkspacesScreen(
         )
     } else if (expanded && boundFolder != null && boundHost != null) {
         Row(Modifier.fillMaxSize()) {
-            WorkspaceList(hosts, boundHost, folders, { host = it }, { selectedFolder = it }, Modifier.width(340.dp))
+            WorkspaceList(hosts, boundHost, folders, { host = it }, { selectedFolder = it }, Modifier.width(340.dp), onClone = { cloning = true })
             VerticalDivider()
             WorkspaceDetail(
                 model, boundHost, boundFolder, Modifier.weight(1f),
@@ -1463,7 +1927,10 @@ private fun WorkspacesScreen(
             onOpenBrowser = { url, port -> browser = url to port },
         )
     } else {
-        WorkspaceList(hosts, host, folders, { host = it }, { selectedFolder = it }, Modifier.fillMaxSize(), error)
+        WorkspaceList(
+            hosts, host, folders, { host = it }, { selectedFolder = it }, Modifier.fillMaxSize(), error,
+            onClone = if (host != null) ({ cloning = true }) else null,
+        )
     }
 }
 
@@ -1474,9 +1941,20 @@ private fun WorkspaceList(
     hosts: List<JsonObject>, selectedHost: JsonObject?, folders: JsonArray,
     onHost: (JsonObject) -> Unit, onFolder: (JsonObject) -> Unit,
     modifier: Modifier, error: String? = null,
+    onClone: (() -> Unit)? = null,
 ) {
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text("Workspaces", style = MaterialTheme.typography.headlineSmall) }
+        if (selectedHost != null && onClone != null) {
+            item {
+                TsSecondaryButton(
+                    label = "Clone a repository",
+                    icon = ActionIcon.Download.vector,
+                    onClick = onClone,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
         item {
             // A fourth machine must not become unreachable just because a
             // segmented row was drawn for three, so the row scrolls.
@@ -1513,6 +1991,7 @@ private val workspaceParts = listOf(
     WorkspacePart("Chat", "chat.list", Icons.Default.ChatBubble),
     WorkspacePart("Pulls", "pulls.list", Icons.Default.MergeType),
     WorkspacePart("Changes", "workspace.status", Icons.Default.Difference),
+    WorkspacePart("History", "workspace.log", Icons.Default.History),
     WorkspacePart("Tasks", "todo.list", Icons.Default.Checklist),
     // Notes share the todo board's method; the Apple client filters the same
     // answer down to note cards, so the tab is not a second Tasks.
@@ -1561,9 +2040,11 @@ private fun WorkspaceDetail(
             hostLabel = host.string("label") ?: "Host",
             section = section,
             protocol = HostContracts.protocolOf(host),
+            folderName = folder.string("name") ?: "",
             modifier = Modifier.verticalScroll(rememberScrollState()),
             onOpenTerminal = onOpenTerminal,
             onOpenBrowser = onOpenBrowser,
+            onOpenSection = { section = it },
         )
     }
 }
@@ -1580,7 +2061,7 @@ private fun AccountDialog(
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
     var paywall by remember { mutableStateOf(false) }
-    var notifyOn by remember { mutableStateOf(PushRegistrar.registered()) }
+    var notifyOn by remember { mutableStateOf(PushRegistrar.isOn()) }
     var notifyError by remember { mutableStateOf<String?>(null) }
     fun open(url: String) {
         runCatching { CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) }
@@ -1621,18 +2102,18 @@ private fun AccountDialog(
                 Column(Modifier.weight(1f)) {
                     Text("Notify this device", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                     Text(
-                        "When an agent run on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work.",
+                        "When an agent run or a chat on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work.",
                         style = TextStyle(fontSize = 12.sp),
                         color = colors.textSecondary,
                     )
                 }
-                Switch(
+                TsBrandSwitch(
                     checked = notifyOn,
                     onCheckedChange = { on ->
                         scope.launch {
                             runCatching {
-                                if (on) PushRegistrar.refresh() else PushRegistrar.unregister()
-                            }.onSuccess { notifyOn = on; notifyError = null }
+                                if (on) PushRegistrar.enable() else PushRegistrar.disable()
+                            }.onSuccess { notifyOn = PushRegistrar.isOn(); notifyError = null }
                                 .onFailure { notifyError = it.message }
                         }
                     },
@@ -1642,16 +2123,28 @@ private fun AccountDialog(
                 TsSecondaryButton(
                     label = "Send a test",
                     small = true,
-                    onClick = { scope.launch { runCatching { PushRegistrar.test() }.onFailure { notifyError = it.message } } },
+                    onClick = {
+                        scope.launch {
+                            runCatching { PushRegistrar.test() }
+                                .onSuccess { notifyError = it }
+                                .onFailure { notifyError = it.message }
+                        }
+                    },
                 )
             }
             notifyError?.let { Text(it, color = colors.warning) }
             RelayUsageCard(state.account, onRefresh = { model.refresh() })
             LocalTrafficCard(model)
+            SyncPrivacyCard()
             TsSecondaryButton(label = "Terms", onClick = { open("https://tokenstat.ai/terms?mobile=1") }, modifier = Modifier.fillMaxWidth())
             TsSecondaryButton(label = "Privacy", onClick = { open("https://tokenstat.ai/privacy?mobile=1") }, modifier = Modifier.fillMaxWidth())
+            Text(
+                "Permanent. Confirmed on the website's data settings. The account, linked providers, sessions and usage are removed outright.",
+                style = TextStyle(fontSize = 12.sp),
+                color = colors.textSecondary,
+            )
             TsSecondaryButton(
-                label = "Delete account",
+                label = "Delete on website…",
                 onClick = { open("https://tokenstat.ai/settings/data?mobile=1&focus=delete#delete") },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -1659,7 +2152,13 @@ private fun AccountDialog(
             Text("Identity and credentials stay in Android's no-backup app storage.", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
         }
     }
-    if (paywall) PaywallSheet(billing, onDismiss = { paywall = false })
+    if (paywall) {
+        PaywallSheet(
+            billing = billing,
+            onDismiss = { paywall = false },
+            currentTier = state.account?.string("tier"),
+        )
+    }
 }
 
 @Composable
@@ -1793,6 +2292,31 @@ private fun LocalTrafficCard(model: AppViewModel) {
 }
 
 @Composable
+private fun SyncPrivacyCard() {
+    // This phone does not upload an archive; the boundary is what the
+    // computers put on the account and what a remote session carries.
+    TsCard(title = "Sync privacy") {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            Text(
+                "Your computers put aggregate counts on the account. This device reads them. Remote folders, terminals and agents stay encrypted between devices.",
+                color = LocalTsColors.current.textSecondary,
+            )
+            PrivacyLine("On account", "Counts per day, tool and model. Project names as salted hashes.")
+            PrivacyLine("Not synced", "Prompts, replies, file contents, file paths and session ids stay on the computer.")
+            PrivacyLine("Remote", "Folders, terminals and agents go device to device, encrypted. The relay cannot read them.")
+        }
+    }
+}
+
+@Composable
+private fun PrivacyLine(title: String, detail: String) {
+    Column {
+        Text(title, fontWeight = FontWeight.SemiBold, color = LocalTsColors.current.textPrimary)
+        Text(detail, style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+    }
+}
+
+@Composable
 private fun UsageRow(label: String, bytes: Long) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, modifier = Modifier.weight(1f), color = LocalTsColors.current.textPrimary)
@@ -1837,15 +2361,24 @@ private fun transportLabel(raw: String?): String = when (raw) {
 /// generic row card this replaces could not reach any of it.
 @Composable
 private fun LimitCard(reading: JsonObject) {
+    val colors = LocalTsColors.current
     val windows = reading["windows"] as? JsonArray ?: JsonArray(emptyList())
+    val stale = reading.bool("stale")
+    // A reading with no date is not a reading.
+    val observedAt = reading.long("observed_at_ms")?.takeIf { it > 0 }
+    val observed = when {
+        observedAt == null -> "no date"
+        stale -> "stale, ${RelativeClock.label(observedAt)}"
+        else -> RelativeClock.label(observedAt)
+    }
     TsCard(
         title = reading.string("source") ?: "Provider",
         subtitle = reading.string("plan"),
         accessory = {
-            if (reading.bool("stale")) Text(
-                "stale",
+            Text(
+                observed,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (stale) colors.warning else colors.textSecondary,
             )
         },
     ) {
@@ -1856,6 +2389,13 @@ private fun LimitCard(reading: JsonObject) {
                 windows.forEach { window ->
                     val value = window.jsonObject
                     val percent = value.doubleOrNull("percent") ?: 0.0
+                    // Severity is the renderer's decision, taken from the
+                    // core's thresholds rather than reinvented here.
+                    val gauge = when (LimitLogic.severityOf(value.string("severity"), percent)) {
+                        LimitLogic.Severity.CRITICAL -> colors.danger
+                        LimitLogic.Severity.WARNING -> colors.warning
+                        LimitLogic.Severity.NORMAL -> colors.accent
+                    }
                     // Codex reports the account's own allowance beside the
                     // running model's, and both are weekly. Without the scope
                     // the two rows read as one limit stated twice.
@@ -1872,8 +2412,9 @@ private fun LimitCard(reading: JsonObject) {
                         LinearProgressIndicator(
                             progress = { (percent / 100.0).coerceIn(0.0, 1.0).toFloat() },
                             modifier = Modifier.weight(1f),
+                            color = gauge,
                         )
-                        Text("${percent.roundToInt()}%", modifier = Modifier.width(40.dp))
+                        Text("${percent.roundToInt()}%", modifier = Modifier.width(40.dp), color = gauge)
                     }
                 }
                 reading.string("note")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
