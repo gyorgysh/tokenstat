@@ -260,9 +260,11 @@ internal static class Marks
         var grid = new Grid { Width = size, Height = size };
         grid.Children.Add(bubble);
         grid.Children.Add(face);
-        grid.Clip = new EllipseGeometry
+        // UIElement.Clip takes a RectangleGeometry, so the circle is a
+        // square rect with fully rounded corners rather than an ellipse.
+        grid.Clip = new RectangleGeometry
         {
-            Center = new Point(size / 2, size / 2),
+            Rect = new Rect(0, 0, size, size),
             RadiusX = size / 2,
             RadiusY = size / 2,
         };

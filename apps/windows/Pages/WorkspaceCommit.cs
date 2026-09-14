@@ -108,7 +108,7 @@ internal sealed class WorkspaceCommitSession
         !Working
         && SubmittedOperationId is null
         && Review is not null
-        && ReviewPaths().SetEquals(Paths)
+        && Paths.SetEquals(ReviewPaths())
         && !string.IsNullOrWhiteSpace(Title)
         && !MessageTooLong;
 

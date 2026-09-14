@@ -190,7 +190,7 @@ internal sealed class TodoPage : Page
         return bar;
     }
 
-    private static UIElement Labeled(string label, Control control)
+    private static UIElement Labeled(string label, UIElement content)
     {
         var stack = new StackPanel { Spacing = Theme.SpaceXs };
         stack.Children.Add(new TextBlock
@@ -200,7 +200,7 @@ internal sealed class TodoPage : Page
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Opacity = 0.58,
         });
-        stack.Children.Add(control);
+        stack.Children.Add(content);
         return stack;
     }
 
@@ -497,7 +497,7 @@ internal sealed class TodoPage : Page
         _boardHost.Children.Add(grid);
     }
 
-    private UIElement Column(string column, string title)
+    private FrameworkElement Column(string column, string title)
     {
         var cards = VisibleCards(column);
         var list = new StackPanel { Spacing = Theme.SpaceS };
@@ -701,7 +701,7 @@ internal sealed class TodoPage : Page
         {
             var receipt = await AppServices.Host.CallAsync(
                 "todo.creationReceipt", new JsonObject { ["operationId"] = _pendingCreateOp });
-            if (receipt is JsonObject && receipt.Count > 0)
+            if (receipt is JsonObject receiptObject && receiptObject.Count > 0)
             {
                 _pendingCreateOp = null;
                 _quickTitle.Text = "";

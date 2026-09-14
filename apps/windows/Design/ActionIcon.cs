@@ -54,7 +54,11 @@ internal static class ActionIconGlyph
         ActionIcon.Refresh or ActionIcon.AutoRenew => Microsoft.UI.Xaml.Controls.Symbol.Refresh,
         ActionIcon.CancelPlan or ActionIcon.Dismiss or ActionIcon.Disconnect or ActionIcon.Revoke
             => Microsoft.UI.Xaml.Controls.Symbol.Cancel,
-        ActionIcon.HideKeyboard => Microsoft.UI.Xaml.Controls.Symbol.Down,
+        // The Symbol enum has no chevrons, so the three down-arrow cases
+        // borrow the closest stand-in with the same meaning: the keyboard
+        // for hiding it, the tray arrow for fetching or stepping down, and
+        // the closing pane for folding a section away.
+        ActionIcon.HideKeyboard => Microsoft.UI.Xaml.Controls.Symbol.Keyboard,
         ActionIcon.Preview or ActionIcon.Visibility or ActionIcon.Compare
             => Microsoft.UI.Xaml.Controls.Symbol.View,
         ActionIcon.Theme => Microsoft.UI.Xaml.Controls.Symbol.Highlight,
@@ -81,11 +85,11 @@ internal static class ActionIconGlyph
         // view family (enter) and the restore arrow (exit) like Collapse does.
         ActionIcon.EnterFullScreen => Microsoft.UI.Xaml.Controls.Symbol.ViewAll,
         ActionIcon.ExitFullScreen => Microsoft.UI.Xaml.Controls.Symbol.Undo,
-        ActionIcon.Collapse => Microsoft.UI.Xaml.Controls.Symbol.Down,
+        ActionIcon.Collapse => Microsoft.UI.Xaml.Controls.Symbol.ClosePane,
         ActionIcon.Benchmarks => Microsoft.UI.Xaml.Controls.Symbol.ViewAll,
         ActionIcon.Browser => Microsoft.UI.Xaml.Controls.Symbol.Globe,
         ActionIcon.Delete => Microsoft.UI.Xaml.Controls.Symbol.Delete,
-        ActionIcon.Latest or ActionIcon.Downgrade => Microsoft.UI.Xaml.Controls.Symbol.Down,
+        ActionIcon.Latest or ActionIcon.Downgrade => Microsoft.UI.Xaml.Controls.Symbol.Download,
         ActionIcon.Back => Microsoft.UI.Xaml.Controls.Symbol.Back,
         ActionIcon.More => Microsoft.UI.Xaml.Controls.Symbol.More,
         ActionIcon.Search or ActionIcon.SearchAll => Microsoft.UI.Xaml.Controls.Symbol.Find,

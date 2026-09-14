@@ -73,7 +73,7 @@ internal sealed class BrowserPage : Page
             Content = tab.View,
             IsClosable = true,
         };
-        tab.HeaderChanged = () => item.Header = tab.Title;
+        tab.HeaderChanged = _ => item.Header = tab.Title;
         item.Tag = tab;
         _tabs.TabItems.Add(item);
         _tabs.SelectedItem = item;
@@ -295,7 +295,7 @@ internal sealed class BrowserPage : Page
                     {
                         _loadedUrl = shown;
                         _address.Text = shown;
-                        HeaderChanged?.Invoke();
+                        HeaderChanged?.Invoke(this);
                     }
                 }
                 catch
@@ -424,7 +424,7 @@ internal sealed class BrowserPage : Page
             _address.Text = url;
             _status.Children.Clear();
             _empty.Visibility = Visibility.Collapsed;
-            HeaderChanged?.Invoke();
+            HeaderChanged?.Invoke(this);
             try
             {
                 _web.Source = new Uri(url);
@@ -467,7 +467,7 @@ internal sealed class BrowserPage : Page
             _closed = true;
             try
             {
-                _web.Stop();
+                _web.CoreWebView2?.Stop();
             }
             catch
             {

@@ -120,7 +120,7 @@ internal static class Fonts
     /// </summary>
     public static TextBlock Tabular(TextBlock block)
     {
-        Typography.SetNumeralAlignment(block, FontNumeralAlignment.Tabular);
+        Typography.SetNumeralAlignment(block, Windows.UI.Text.FontNumeralAlignment.Tabular);
         return block;
     }
 }

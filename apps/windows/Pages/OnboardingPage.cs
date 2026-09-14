@@ -157,7 +157,11 @@ internal sealed class OnboardingPage : Page
             "Get started", ActionIcon.Next, (_, _) => _done()));
         row.Children.Add(ActionIconGlyph.Button(
             "Sign in", ActionIcon.SignIn,
-            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, _done)));
+            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, () =>
+            {
+                _done();
+                return Task.CompletedTask;
+            })));
         row.Children.Add(ActionIconGlyph.Button(
             "Skip", ActionIcon.Dismiss, (_, _) => _done()));
         body.Children.Add(row);

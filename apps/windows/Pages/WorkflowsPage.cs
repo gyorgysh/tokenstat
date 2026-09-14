@@ -115,7 +115,7 @@ internal sealed class WorkflowsPage : Page
         return row;
     }
 
-    private static UIElement Labeled(string label, Control control)
+    private static UIElement Labeled(string label, UIElement content)
     {
         var stack = new StackPanel { Spacing = Theme.SpaceXs };
         stack.Children.Add(new TextBlock
@@ -125,7 +125,7 @@ internal sealed class WorkflowsPage : Page
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Opacity = 0.58,
         });
-        stack.Children.Add(control);
+        stack.Children.Add(content);
         return stack;
     }
 
@@ -1115,9 +1115,9 @@ internal sealed class WorkflowsPage : Page
         };
         body.Children.Add(Labeled("Title", title));
 
-        if (step is JsonObject node)
+        if (step is JsonObject stepObject)
         {
-            foreach (var field in StepFields(node, kind))
+            foreach (var field in StepFields(stepObject, kind))
             {
                 body.Children.Add(field);
             }
@@ -1641,6 +1641,52 @@ internal sealed class WorkflowsPage : Page
         await LoadAsync();
     }
 
+    /// <summary>
+    /// Run one workflow from its list row. The row's graph is already saved
+    /// on the host, so this starts it directly instead of going through the
+    /// detail's select-and-save path.
+    /// </summary>
+    private async Task RunAsync(string id)
+    {
+        if (_working)
+        {
+            return;
+        }
+        _working = true;
+        try
+        {
+            var parameters = new JsonObject
+            {
+                ["id"] = id,
+                ["input"] = _runInput,
+            };
+            foreach (var graph in _graphs)
+            {
+                if (Format.Text(graph, "id") == id)
+                {
+                    var folder = Format.Text(graph, "workspaceId");
+                    if (!string.IsNullOrEmpty(folder))
+                    {
+                        parameters["workspaceId"] = folder;
+                    }
+                    break;
+                }
+            }
+            await AppServices.Host.CallAsync("workflow.run", parameters);
+            Notice("The run started.");
+        }
+        catch (Exception ex)
+        {
+            Banner(ex.Message);
+            return;
+        }
+        finally
+        {
+            _working = false;
+        }
+        await LoadAsync();
+    }
+
     private async Task KillAsync(string runId)
     {
         try
@@ -1756,9 +1802,9 @@ internal sealed class WorkflowsPage : Page
                 if (saved.Next > 0)
                 {
                     var offset = saved.Next;
-                    var node = nodeId;
+                    var moreNode = nodeId;
                     stepBox.Children.Add(ActionIconGlyph.Button(
-                        "More", ActionIcon.More, async (_, _) => await LoadStepTranscriptAsync(runId, node, offset)));
+                        "More", ActionIcon.More, async (_, _) => await LoadStepTranscriptAsync(runId, moreNode, offset)));
                 }
             }
             var node = nodeId;

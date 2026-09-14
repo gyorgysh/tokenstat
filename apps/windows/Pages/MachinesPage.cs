@@ -398,12 +398,13 @@ internal sealed class MachinesPage : Page
         {
             return;
         }
+        var renamed = string.Empty;
         try
         {
             await AppServices.Host.CallAsync(
                 "machine.rename",
                 new JsonObject { ["name"] = box.Text.Trim() });
-            var renamed = box.Text.Trim();
+            renamed = box.Text.Trim();
         }
         catch (Exception ex)
         {

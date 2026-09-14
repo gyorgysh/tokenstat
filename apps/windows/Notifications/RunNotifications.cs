@@ -203,8 +203,8 @@ internal sealed class RunNotifications
             var notification = new AppNotificationBuilder()
                 .AddText(title)
                 .AddText(body)
-                .AddTag("run." + runId)
-                .AddGroup(Group)
+                .SetTag("run." + runId)
+                .SetGroup(Group)
                 .BuildNotification();
             AppNotificationManager.Default.Show(notification);
         }

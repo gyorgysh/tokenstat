@@ -6,12 +6,12 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 using System.Text.Json.Nodes;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Tokenstat.Design;
 using Windows.System;
-using Windows.UI.Text;
 
 namespace Tokenstat.Pages;
 

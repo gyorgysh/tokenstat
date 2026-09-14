@@ -290,14 +290,17 @@ internal static class WorkspaceDiff
             {
                 break;
             }
-            rows.Children.Add(new TextBlock
+            rows.Children.Add(new Border
             {
-                Text = hunk.Header,
-                FontFamily = Fonts.Mono,
-                FontSize = 11,
-                Foreground = Theme.Brush(Theme.ControlGlyph),
-                Padding = new Thickness(Theme.SpaceS, 6, Theme.SpaceS, 6),
                 Background = Theme.PanelBrush,
+                Padding = new Thickness(Theme.SpaceS, 6, Theme.SpaceS, 6),
+                Child = new TextBlock
+                {
+                    Text = hunk.Header,
+                    FontFamily = Fonts.Mono,
+                    FontSize = 11,
+                    Foreground = Theme.Brush(Theme.ControlGlyph),
+                },
             });
             foreach (var line in hunk.Lines)
             {

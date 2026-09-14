@@ -8,6 +8,7 @@
 using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
@@ -86,7 +87,10 @@ internal static class EmptyState
         });
         if (action is not null)
         {
-            action.HorizontalAlignment = HorizontalAlignment.Center;
+            if (action is FrameworkElement framed)
+            {
+                framed.HorizontalAlignment = HorizontalAlignment.Center;
+            }
             stack.Children.Add(action);
         }
         AutomationProperties.SetName(stack, title);

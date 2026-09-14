@@ -441,11 +441,15 @@ internal sealed class ChatPage : Page
         stack.Children.Add(brief);
         var note = Muted("Sent as an instruction, never as part of your message.");
         stack.Children.Add(note);
-        var save = ActionIconGlyph.PrimaryButton("Save", ActionIcon.Save, async (_, _) =>
+        // The handler is attached after creation so it can name the button
+        // it hides. Declaring the handler inline would use save before it
+        // exists.
+        var save = ActionIconGlyph.PrimaryButton("Save", ActionIcon.Save, (_, _) => { });
+        save.Click += async (_, _) =>
         {
             await UpdateAsync(new JsonObject { ["systemPrompt"] = brief.Text ?? "" });
             save.Visibility = Visibility.Collapsed;
-        });
+        };
         save.Visibility = Visibility.Collapsed;
         brief.TextChanged += (_, _) =>
         {
@@ -1955,7 +1959,7 @@ internal sealed class ChatPage : Page
 
     private static void Detach(UIElement element)
     {
-        if (element.Parent is Panel panel)
+        if (VisualTreeHelper.GetParent(element) is Panel panel)
         {
             panel.Children.Remove(element);
         }
