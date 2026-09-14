@@ -129,7 +129,11 @@ struct AvatarButton: View {
             }
             pictureImage = nil
             let loaded = await AvatarCache.shared.image(for: raw)
-            guard !Task.isCancelled else { return }
+            // Cancellation covers an avatar change (the task id is the URL),
+            // but the fetch itself is a detached, deduped request that outlives
+            // cancellation: only land while this URL is still the one on show,
+            // so a slow answer for the previous account cannot cover the new one.
+            guard !Task.isCancelled, pictureRaw == raw else { return }
             pictureImage = loaded
         }
     }

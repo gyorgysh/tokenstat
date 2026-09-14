@@ -17,7 +17,9 @@
 #     `.themedMultiline` for a field that grows.
 #   - `(.bar)`, the system's grey bar material. A terminal key bar wore it
 #     below a themed screen. Use `TerminalPalette.surface` or a `Theme.`
-#     colour instead.
+#     colour instead. If a surface is genuinely the platform's (a Menu, an
+#     alert, a toolbar), add it to ALLOWED here rather than working around
+#     the guard.
 #
 # The action-icon guard is the precedent. A convention nobody can enforce by
 # remembering is a convention that comes back.

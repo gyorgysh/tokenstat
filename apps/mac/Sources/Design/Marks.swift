@@ -273,7 +273,11 @@ struct Avatar: View {
                 }
                 image = nil
                 let loaded = await AvatarCache.shared.image(for: url)
-                guard !Task.isCancelled else { return }
+                // The task id is the URL so a change cancels this run, but the
+                // fetch is detached and deduped and can still resume late: only
+                // land while this URL is still the one on show, so a slow face
+                // for the previous row cannot cover the new one.
+                guard !Task.isCancelled, pictureURL == url else { return }
                 image = loaded
             }
     }

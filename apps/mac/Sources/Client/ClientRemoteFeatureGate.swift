@@ -9,7 +9,7 @@ import SwiftUI
 /// Keep the version beside the feature rather than testing for an error after
 /// loading it. `protocol` is present before either feature and gives a person a
 /// useful update state instead of exposing an implementation error.
-enum RemoteHostFeature {
+enum RemoteHostFeature: Hashable {
     case chat
     case pulls
     case modelRefresh
@@ -175,27 +175,31 @@ struct RemoteHostFeatureGate<Content: View>: View {
                         feature: feature,
                         hostName: hostName,
                         hostProtocol: version,
-                        retry: { probe.retry &+= 1 }
+                        retry: { probe.retry += 1 }
                     )
                 }
             } else {
                 content()
             }
         }
-        .task(id: "\(peer ?? "local")-\(probe.retry)") {
+        .task(id: "\(peer ?? "local")-\(feature)-\(probe.retry)") {
             guard let peer, !peer.isEmpty else {
-                probe.state = .available
+                // A local host is always current, and it must not leave the
+                // previous remote answer behind: remote needsUpdate, a local
+                // interlude, then back to the same remote must re-check rather
+                // than resume the local .available and hide the update prompt.
+                probe.noteLocal()
                 return
             }
             // Pushing another screen cancels this task and popping restarts it
             // for the same peer. Clearing to .checking then would unmount the
             // content and drop its state, so Back from workspace tools landed
-            // on the chat list instead of the open thread. Only a new peer or
-            // an explicit retry is a new question; the `beginRun` gate keeps
-            // the old answer mounted for a restart. This view can be retained
-            // while the person changes the selected computer, and that still
-            // re-checks: a new peer is a new key.
-            let key = "\(peer)-\(probe.retry)"
+            // on the chat list instead of the open thread. Only a new peer, a
+            // new feature, or an explicit retry is a new question; the
+            // `beginRun` gate keeps the old answer mounted for a restart. This
+            // view can be retained while the person changes the selected
+            // computer, and that still re-checks: a new peer is a new key.
+            let key = RemoteHostFeatureProbeKey(peer: peer, feature: feature, retry: probe.retry)
             guard probe.beginRun(key: key) else { return }
             do {
                 let version = try await Bridge.peerProtocolVersion(peer)
@@ -216,6 +220,12 @@ struct RemoteHostFeatureGate<Content: View>: View {
 /// Internal for the standalone probe tests: pushing a screen cancels the
 /// gate's task and popping restarts it, and the tests pin that a restart for
 /// the same peer keeps the old answer instead of clearing it.
+struct RemoteHostFeatureProbeKey: Equatable, Hashable {
+    var peer: String
+    var feature: RemoteHostFeature
+    var retry: Int
+}
+
 @MainActor @Observable
 final class RemoteHostFeatureProbe {
     enum State: Equatable {
@@ -226,24 +236,39 @@ final class RemoteHostFeatureProbe {
 
     var state: State = .checking
     var retry = 0
-    /// What the last answered run asked, `peer-retry`. Set only when an answer
-    /// lands: a run cancelled before answering leaves no key, so its restart
-    /// asks again instead of resuming a check that never finished.
-    var checkedKey: String?
+    /// What the last answered run asked. Set only when an answer lands: a run
+    /// cancelled before answering leaves no key, so its restart asks again
+    /// instead of resuming a check that never finished.
+    var checkedKey: RemoteHostFeatureProbeKey?
+    /// What the newest begun run asked. A peer switch while the old host is
+    /// still answering must not let the late answer cover the new host, so an
+    /// answer lands only while its key is still the newest one.
+    var inflightKey: RemoteHostFeatureProbeKey?
 
     /// Open a run for this key. A restart for the already-answered key returns
     /// false and the caller asks nothing, leaving the old answer and its
     /// content mounted. Anything else returns true and clears to `.checking`.
-    func beginRun(key: String) -> Bool {
+    func beginRun(key: RemoteHostFeatureProbeKey) -> Bool {
         guard checkedKey != key else { return false }
+        inflightKey = key
         state = .checking
         return true
     }
 
-    /// Record the answer, so a later restart for the same key resumes it.
-    func didAnswer(key: String, state: State) {
+    /// Record the answer, so a later restart for the same key resumes it. A
+    /// late answer for a superseded peer is dropped: only the newest begun key
+    /// may land.
+    func didAnswer(key: RemoteHostFeatureProbeKey, state: State) {
+        guard key == inflightKey else { return }
         checkedKey = key
         self.state = state
+    }
+
+    /// A local host needs no check and must not leave a remote answer behind.
+    func noteLocal() {
+        state = .available
+        checkedKey = nil
+        inflightKey = nil
     }
 }
 
