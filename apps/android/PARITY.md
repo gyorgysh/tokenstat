@@ -51,10 +51,14 @@ tests in `PortedLogicTest.kt`.
 | `RelativeTimeText.swift` single shared 15s tick | `components/RelativeTime.kt` `RelativeTick` + `RelativeTimeText` over `RelativeClock.label`; chat event times tick | done |
 | `MiniGraph`, `WorkflowStepStrip`, layering | step-capsule FlowRow reading of workflows (`workspace/WorkspaceSections.kt`) | simplified |
 | `RunVisuals` outcome tints, RunHistoryStrip, DurationBar | `marks/RunVisuals.kt`: `RunOutcome`, `RunHistoryStrip` (8 slots), `DurationBar` | done |
-| `CadenceGlyph`, `CountdownRing`, `SlotGauge` | `marks/CadenceGlyph.kt` (ring + hand) | simplified |
+| `CadenceGlyph`, `CountdownRing`, `NextRunBadge`, `SlotGauge` | `marks/CadenceGlyph.kt` (ring + hand) + `marks/RunGauges.kt` (fraction math, 12-tile bound, No cap words) | done |
 | `FriendlyError.swift` translation table | `logic/TsLogic.kt` `friendlyError` (full table, same order and copy) | done |
 | `HistoryLockBanner` | `TokenstatApp.HistoryLockBanner` (same copy, opens pricing) | done |
-| `ActionIcon` (~55 glyphs) | `components/ActionIcon.kt` enum, same case names, Material mapping | done |
+| `ActionIcon` (77 glyphs) | `components/ActionIcon.kt` enum, same case names, Material mapping | done |
+| `TimeLimitChips`, `ConcurrentChips`, `ChoiceChip`, `BrandToggleChip`, `CommitTagPills` | `components/TsChips.kt` (same presets, No limit / No cap sentinels, custom number selects none) | done |
+| `PickerSearchField` | `components/TsSearchField.kt` (magnifier + prompt + clear button, no capitalise or autocorrect) | done |
+| `FieldSaveState`, `FieldSaveBar` | `components/FieldSaveBar.kt` (same five states, same copy, actions only when dirty or failed) | done |
+| `BrandCheckboxStyle`, `ThemeCheckDisc`, `BrandToggleChip` | `components/BrandToggles.kt` (`BrandCheckbox`, `BrandCheckDisc`, `TsBrandSwitch`); the one raw `Switch` now reads `TsBrandSwitch` | done |
 
 ## Client screen map (Apple `Sources/Client` → Android)
 

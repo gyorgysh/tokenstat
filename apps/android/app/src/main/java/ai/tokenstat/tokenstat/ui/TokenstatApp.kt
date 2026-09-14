@@ -60,6 +60,7 @@ import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.SegmentedCapsulePicker
 import ai.tokenstat.tokenstat.ui.components.SkeletonCard
 import ai.tokenstat.tokenstat.ui.components.Stat
+import ai.tokenstat.tokenstat.ui.components.TsBrandSwitch
 import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
@@ -1626,7 +1627,7 @@ private fun AccountDialog(
                         color = colors.textSecondary,
                     )
                 }
-                Switch(
+                TsBrandSwitch(
                     checked = notifyOn,
                     onCheckedChange = { on ->
                         scope.launch {
