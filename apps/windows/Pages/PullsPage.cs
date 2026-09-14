@@ -531,8 +531,22 @@ internal sealed class PullsPage : Page
 
     private static Grid LazyDiff()
     {
-        var progress = new ProgressRing { IsActive = true, Width = 28, Height = 28 };
-        return new Grid { MinHeight = 260, Tag = null, Children = { progress } };
+        // A spinner alone reads as frozen. The pulsing rows say what shape
+        // the diff lands in.
+        var progress = new ProgressRing
+        {
+            IsActive = true,
+            Width = 28,
+            Height = 28,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var stack = new StackPanel
+        {
+            Spacing = Theme.SpaceM,
+            Padding = new Thickness(0, Theme.SpaceM, 0, Theme.SpaceM),
+            Children = { progress, Motion.SkeletonRows(4) },
+        };
+        return new Grid { MinHeight = 260, Tag = null, Children = { stack } };
     }
 
     private async Task LoadDiffAsync(Grid holder, long number)

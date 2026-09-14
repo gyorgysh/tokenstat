@@ -606,26 +606,19 @@ internal sealed class ChatPage : Page
                 var existing = _transcript.Children[workingIdx] as FrameworkElement;
                 if (existing?.Tag as string != workingKey)
                 {
-                    var workingBlock = new TextBlock
-                    {
-                        Text = "Working",
-                        Foreground = Theme.AccentBrush,
-                        FontSize = 12,
-                        Tag = workingKey,
-                    };
+                    // It breathes while the turn runs, so a long wait does not
+                    // read as frozen.
+                    var workingBlock = Motion.WorkingLabel();
+                    workingBlock.Tag = workingKey;
                     _transcript.Children.RemoveAt(workingIdx);
                     _transcript.Children.Insert(workingIdx, workingBlock);
                 }
             }
             else
             {
-                _transcript.Children.Add(new TextBlock
-                {
-                    Text = "Working",
-                    Foreground = Theme.AccentBrush,
-                    FontSize = 12,
-                    Tag = workingKey,
-                });
+                var working = Motion.WorkingLabel();
+                working.Tag = workingKey;
+                _transcript.Children.Add(working);
             }
         }
 

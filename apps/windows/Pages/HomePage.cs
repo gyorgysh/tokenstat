@@ -57,6 +57,10 @@ internal sealed class HomePage : Page
     private async Task LoadAsync()
     {
         _status.Text = "Loading…";
+        // A wireframe shaped like the cards coming, with a light pulse so the
+        // wait does not feel frozen. Real content replaces it with an arrival.
+        var skeleton = Motion.SkeletonCard();
+        _root.Children.Add(skeleton);
         JsonNode calendar;
         JsonNode totals;
         JsonNode limits;
@@ -77,6 +81,7 @@ internal sealed class HomePage : Page
         }
         catch (Exception ex)
         {
+            _root.Children.Remove(skeleton);
             _status.Text = ex.Message;
             return;
         }

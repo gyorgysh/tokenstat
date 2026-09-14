@@ -71,21 +71,21 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                _frame.Content = new TerminalPage(workspaceId, sessionId);
+                SetContent(new TerminalPage(workspaceId, sessionId));
             });
         };
         AppServices.OpenBrowser = (url, host, port, unlisten) =>
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                _frame.Content = new BrowserPage(url, host, port, unlisten);
+                SetContent(new BrowserPage(url, host, port, unlisten));
             });
         };
         AppServices.OpenScreen = (peer, name) =>
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                _frame.Content = new ScreenPage(peer, name);
+                SetContent(new ScreenPage(peer, name));
             });
         };
 
@@ -200,6 +200,17 @@ public sealed partial class MainWindow : Window
             Content = Chrome.Banner("Host is starting…", Theme.Accent, Symbol.Refresh),
         };
         _frame.Content = _hostSplash;
+        Motion.PlayDoor(_hostSplash);
+    }
+
+    /// <summary>
+    /// Mount a page with the smooth arrival. Every navigation goes through
+    /// here so content lands the same way on every screen.
+    /// </summary>
+    private void SetContent(Page page)
+    {
+        _frame.Content = page;
+        Motion.PlayArrival(page);
     }
 
     private void NavOnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -218,7 +229,7 @@ public sealed partial class MainWindow : Window
         {
             if (Enum.TryParse<GlobalSection>(tag["global:".Length..], out var section))
             {
-                _frame.Content = section switch
+                Page page = section switch
                 {
                     GlobalSection.Home => new HomePage(),
                     GlobalSection.Insights => new InsightsPage(),
@@ -232,6 +243,7 @@ public sealed partial class MainWindow : Window
                     GlobalSection.About => new AboutPage(),
                     _ => new AboutPage(),
                 };
+                SetContent(page);
             }
             return;
         }
@@ -243,7 +255,7 @@ public sealed partial class MainWindow : Window
                 && Enum.TryParse<WorkspaceSection>(rest[(i + 1)..], out var section))
             {
                 var id = rest[..i];
-                _frame.Content = section switch
+                Page page = section switch
                 {
                     WorkspaceSection.Notes => new NotesPage(id),
                     WorkspaceSection.Workflows => new WorkflowsPage(id),
@@ -252,6 +264,7 @@ public sealed partial class MainWindow : Window
                     WorkspaceSection.Chat => new ChatPage(id),
                     _ => new WorkspacePage(id, section),
                 };
+                SetContent(page);
             }
         }
     }
