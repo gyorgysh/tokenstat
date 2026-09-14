@@ -128,6 +128,9 @@ internal sealed class TodoPage : Page
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_boardHost);
         _root.Children.Add(_detailHost);
+        // A wireframe until the first load lands. RenderBoard clears the
+        // host, so real content replaces it, like Home's skeleton.
+        _boardHost.Children.Add(Motion.SkeletonCard());
         Content = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
@@ -150,7 +153,7 @@ internal sealed class TodoPage : Page
         titles.Children.Add(new TextBlock
         {
             Text = "Tasks",
-            FontSize = 24,
+            FontSize = Fonts.PageTitle,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         titles.Children.Add(new TextBlock

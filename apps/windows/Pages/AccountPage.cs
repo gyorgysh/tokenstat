@@ -531,7 +531,7 @@ internal sealed class AccountPage : Page
                 Height = 38,
                 CornerRadius = new CornerRadius(11),
                 Background = Theme.AccentSoftBrush,
-                Child = new SymbolIcon { Symbol = Symbol.Switch, Foreground = Theme.AccentBrush },
+                Child = new SymbolIcon { Symbol = ActionIcon.Merge.Symbol(), Foreground = Theme.AccentBrush },
             });
             var words = new StackPanel { Spacing = 2 };
             words.Children.Add(new TextBlock
@@ -655,7 +655,7 @@ internal sealed class AccountPage : Page
                 {
                     Text = code,
                     FontFamily = Fonts.Mono,
-                    FontSize = 25,
+                    FontSize = Fonts.SignInCode,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     CharacterSpacing = 120,
                     Foreground = Theme.AccentBrush,

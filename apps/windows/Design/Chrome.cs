@@ -104,7 +104,11 @@ internal static class Chrome
         };
     }
 
-    public static StackPanel Empty(string title, string message, Symbol symbol, UIElement? action = null)
+    /// <summary>
+    /// An empty state: the mark from the one vocabulary, then the headline
+    /// naming what is missing and the line saying what the thing is for.
+    /// </summary>
+    public static StackPanel Empty(string title, string message, ActionIcon icon, UIElement? action = null)
     {
         var stack = new StackPanel
         {
@@ -114,7 +118,7 @@ internal static class Chrome
         };
         stack.Children.Add(new SymbolIcon
         {
-            Symbol = symbol,
+            Symbol = icon.Symbol(),
             Width = 28,
             Height = 28,
             Foreground = Theme.AccentBrush,

@@ -95,7 +95,7 @@ internal sealed class WorkSearchPage : Page
         head.Children.Add(new TextBlock
         {
             Text = "Search work",
-            FontSize = 24,
+            FontSize = Fonts.PageTitle,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         head.Children.Add(_query);
@@ -186,7 +186,7 @@ internal sealed class WorkSearchPage : Page
                 _results.Children.Add(Chrome.Empty(
                     "No matches in your work",
                     "Nothing here matches. Try fewer words, or another machine.",
-                    Symbol.Find));
+                    ActionIcon.Search));
                 return;
             }
             if (hits is not null)
@@ -265,7 +265,7 @@ internal sealed class WorkSearchPage : Page
         var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         heading.Children.Add(new SymbolIcon
         {
-            Symbol = KindSymbol(kind),
+            Symbol = KindIcon(kind).Symbol(),
             Foreground = Theme.AccentBrush,
         });
         heading.Children.Add(new TextBlock
@@ -323,13 +323,18 @@ internal sealed class WorkSearchPage : Page
         return open;
     }
 
-    private static Symbol KindSymbol(string kind) => kind switch
+    /// <summary>
+    /// The mark for a search hit kind, from the one vocabulary. Glyphs match
+    /// the previous call-site symbols one for one: comment is the message,
+    /// reveal the folder, merge the switch, plan the document, search the lens.
+    /// </summary>
+    private static ActionIcon KindIcon(string kind) => kind switch
     {
-        "conversation" => Symbol.Message,
-        "workspace" => Symbol.Folder,
-        "commit" => Symbol.Switch,
-        "savedDiff" => Symbol.Document,
-        _ => Symbol.Find,
+        "conversation" => ActionIcon.Comment,
+        "workspace" => ActionIcon.Reveal,
+        "commit" => ActionIcon.Merge,
+        "savedDiff" => ActionIcon.Plan,
+        _ => ActionIcon.Search,
     };
 
     private static UIElement Excerpt(JsonNode hit, string excerpt)
@@ -425,7 +430,7 @@ internal sealed class WorkSearchPage : Page
             _results.Children.Add(Chrome.Empty(
                 "Search your work",
                 "Type to find a conversation, a folder, or a change you have opened or saved.",
-                Symbol.Find));
+                ActionIcon.Search));
             return;
         }
         var list = new StackPanel { Spacing = Theme.SpaceS };

@@ -265,7 +265,7 @@ internal sealed class BrowserPage : Page
             _empty.Children.Add(Chrome.Empty(
                 "Open a project preview",
                 "Enter a local development server or any URL above.",
-                Symbol.Globe));
+                ActionIcon.Browser));
 
             _view.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             _view.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });

@@ -54,6 +54,10 @@ internal static class Fonts
     public const double ChatCode = 12;
     public const double SectionHeader = 12;
     public const double StatValue = 26;
+    /// <summary>Screen titles: every page header reads the same size.</summary>
+    public const double PageTitle = 24;
+    /// <summary>The sign-in code: large mono, selectable, in accent.</summary>
+    public const double SignInCode = 25;
 
     /// <summary>
     /// Interface text at a scale size. The face comes from here rather than

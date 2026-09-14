@@ -126,7 +126,7 @@ internal sealed class ChatPage : Page
                 _root.Children.Add(Chrome.Empty(
                     "Start a chat",
                     "Ask an agent to explore, plan, or work in this folder.",
-                    Symbol.Message,
+                    ActionIcon.Comment,
                     ActionIconGlyph.PrimaryButton("New chat", ActionIcon.Create, async (_, _) => await CreateAsync())));
                 return;
             }
@@ -158,7 +158,7 @@ internal sealed class ChatPage : Page
             Background = Theme.AccentSoftBrush,
             Child = new SymbolIcon
             {
-                Symbol = Symbol.Message,
+                Symbol = ActionIcon.Comment.Symbol(),
                 Foreground = Theme.AccentBrush,
             },
         };
@@ -167,7 +167,7 @@ internal sealed class ChatPage : Page
         titles.Children.Add(new TextBlock
         {
             Text = "Chat",
-            FontSize = 24,
+            FontSize = Fonts.PageTitle,
             FontWeight = FontWeights.SemiBold,
         });
         titles.Children.Add(new TextBlock

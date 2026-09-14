@@ -68,7 +68,7 @@ internal sealed class WorkspacePage : Page
                         _section.Label() + " on Windows",
                         "The Mac app has the full " + _section.Label().ToLowerInvariant()
                         + " surface. This build lists the folder and the shared boards.",
-                        Symbol.Folder));
+                        ActionIcon.Reveal));
                     break;
             }
         }
@@ -439,7 +439,7 @@ internal sealed class WorkspacePage : Page
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         row.Children.Add(new SymbolIcon
         {
-            Symbol = Symbol.Switch,
+            Symbol = ActionIcon.Merge.Symbol(),
             Foreground = Theme.AccentBrush,
             VerticalAlignment = VerticalAlignment.Center,
         });

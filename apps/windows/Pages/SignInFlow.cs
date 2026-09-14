@@ -73,7 +73,7 @@ internal static class SignInFlow
             {
                 Text = string.IsNullOrEmpty(code) ? "Complete sign-in in the browser." : code,
                 FontFamily = Fonts.Mono,
-                FontSize = 25,
+                FontSize = Fonts.SignInCode,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = Theme.AccentBrush,
                 IsTextSelectionEnabled = true,

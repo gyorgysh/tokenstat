@@ -99,6 +99,9 @@ internal sealed class AutomationsPage : Page
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_listHost);
         _root.Children.Add(_detailHost);
+        // A wireframe until the first load lands. RenderList clears the host,
+        // so real content replaces it, like Home's skeleton.
+        _listHost.Children.Add(Motion.SkeletonCard());
         Content = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
@@ -117,7 +120,7 @@ internal sealed class AutomationsPage : Page
         titles.Children.Add(new TextBlock
         {
             Text = "Automations",
-            FontSize = 24,
+            FontSize = Fonts.PageTitle,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         titles.Children.Add(new TextBlock

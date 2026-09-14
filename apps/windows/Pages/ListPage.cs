@@ -18,7 +18,7 @@ internal sealed class ListPage : Page
     private readonly string _title;
     private readonly string _empty;
     private readonly string _hint;
-    private readonly Symbol _symbol;
+    private readonly ActionIcon _symbol;
     private readonly string _itemKey;
     private readonly string? _kindEquals;
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
@@ -28,7 +28,7 @@ internal sealed class ListPage : Page
         string title,
         string empty,
         string hint,
-        Symbol symbol,
+        ActionIcon symbol,
         string itemKey = "title",
         string? kindEquals = null)
     {

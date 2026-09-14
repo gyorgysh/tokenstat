@@ -57,7 +57,7 @@ internal sealed class MachinesPage : Page
             _root.Children.Add(Chrome.Empty(
                 "Sign in to see devices",
                 "Devices live on the account, so a closed laptop still counts. Open Account in the sidebar to link this machine.",
-                Symbol.CellPhone));
+                ActionIcon.Device));
             return;
         }
 

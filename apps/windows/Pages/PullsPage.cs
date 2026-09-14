@@ -78,19 +78,19 @@ internal sealed class PullsPage : Page
                     _root.Children.Add(Chrome.Empty(
                         "This folder is not a Git repository",
                         "Pull requests appear for folders with a Git repository and a GitHub origin.",
-                        Symbol.Switch));
+                        ActionIcon.Merge));
                     break;
                 case "noRemote":
                     _root.Children.Add(Chrome.Empty(
                         "No GitHub origin yet",
                         "Add an origin remote to this repository, then refresh this screen.",
-                        Symbol.Switch));
+                        ActionIcon.Merge));
                     break;
                 default:
                     _root.Children.Add(Chrome.Empty(
                         "Pull requests are unavailable",
                         "Refresh to ask the workspace host again.",
-                        Symbol.Switch));
+                        ActionIcon.Merge));
                     break;
             }
         }
@@ -114,7 +114,7 @@ internal sealed class PullsPage : Page
             Background = Theme.AccentSoftBrush,
             Child = new SymbolIcon
             {
-                Symbol = Symbol.Switch,
+                Symbol = ActionIcon.Merge.Symbol(),
                 Foreground = Theme.AccentBrush,
             },
         };
@@ -123,7 +123,7 @@ internal sealed class PullsPage : Page
         titles.Children.Add(new TextBlock
         {
             Text = "Pull requests",
-            FontSize = 24,
+            FontSize = Fonts.PageTitle,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         titles.Children.Add(new TextBlock { Text = subtitle, Opacity = 0.66, TextWrapping = TextWrapping.Wrap });
@@ -225,7 +225,7 @@ internal sealed class PullsPage : Page
             _root.Children.Add(Chrome.Empty(
                 $"No {states[Math.Max(0, _state.SelectedIndex)]} pull requests",
                 "Nothing in this repository matches the selected scope and state.",
-                Symbol.Switch));
+                ActionIcon.Merge));
             return;
         }
         var list = new StackPanel { Spacing = Theme.SpaceS };
@@ -601,7 +601,7 @@ internal sealed class PullsPage : Page
             }
             if (stack.Children.Count == 0)
             {
-                stack.Children.Add(Chrome.Empty("No text changes", "This pull request has no line-by-line diff to show.", Symbol.OpenFile));
+                stack.Children.Add(Chrome.Empty("No text changes", "This pull request has no line-by-line diff to show.", ActionIcon.Compare));
             }
             holder.Children.Clear();
             holder.Children.Add(new ScrollViewer { MaxHeight = 620, Content = stack });
@@ -640,7 +640,7 @@ internal sealed class PullsPage : Page
         }
         if (stack.Children.Count == 0)
         {
-            stack.Children.Add(Chrome.Empty("No checks reported", "The head commit does not publish a check suite.", Symbol.Accept));
+            stack.Children.Add(Chrome.Empty("No checks reported", "The head commit does not publish a check suite.", ActionIcon.Done));
         }
         return new ScrollViewer { MaxHeight = 600, Content = stack };
     }
