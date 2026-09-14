@@ -260,31 +260,32 @@ internal static class Marks
         var grid = new Grid { Width = size, Height = size };
         grid.Children.Add(bubble);
         grid.Children.Add(face);
-        // WinUI RectangleGeometry carries only a Rect: the WPF corner radii
-        // do not exist on it, so the circle is an EllipseGeometry instead.
-        grid.Clip = new EllipseGeometry
-        {
-            Center = new Point(size / 2, size / 2),
-            RadiusX = size / 2,
-            RadiusY = size / 2,
-        };
 
         if (!string.IsNullOrWhiteSpace(url))
         {
-            // Under the photo, so a slow or failed load still shows the
-            // letters rather than a hole. A failed load collapses the photo.
-            var photo = new Image
+            // The bubble and the face are already round; only the square
+            // photo needs circularizing. WinUI has no circular clip
+            // (UIElement.Clip takes a RectangleGeometry, which carries only
+            // a Rect), so the photo is an ellipse filled with the image
+            // instead of a clipped rectangle. A slow or failed load still
+            // shows the letters rather than a hole.
+            var source = AvatarImage(url.Trim());
+            if (source is not null)
             {
-                Width = size,
-                Height = size,
-                Stretch = Stretch.UniformToFill,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            photo.ImageFailed += (_, _) => photo.Visibility = Visibility.Collapsed;
-            photo.Source = AvatarImage(url.Trim());
-            if (photo.Source is not null)
-            {
+                var brush = new ImageBrush
+                {
+                    ImageSource = source,
+                    Stretch = Stretch.UniformToFill,
+                };
+                var photo = new Ellipse
+                {
+                    Width = size,
+                    Height = size,
+                    Fill = brush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                brush.ImageFailed += (_, _) => photo.Visibility = Visibility.Collapsed;
                 grid.Children.Add(photo);
             }
         }
