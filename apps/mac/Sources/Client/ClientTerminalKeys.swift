@@ -143,12 +143,12 @@ struct ClientTerminalKeys: View {
             .padding(.vertical, 6)
         }
         .scrollIndicators(.hidden)
-        // The keys stay above the home indicator, the material carries on
-        // past it. Container only: when the keyboard is up this bar rides on
-        // top of it and has nothing left to fill.
+        // The keys stay above the home indicator, the terminal surface
+        // carries on past it. Container only: when the keyboard is up this
+        // bar rides on top of it and has nothing left to fill.
         .background {
             Rectangle()
-                .fill(.bar)
+                .fill(TerminalPalette.surface)
                 .ignoresSafeArea(.container, edges: .bottom)
         }
         .onReceive(

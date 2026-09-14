@@ -15,6 +15,9 @@
 #   - `.roundedBorder`, AppKit's bezel and UIKit's, which resolves to a flat
 #     mid grey on a dark panel. Use `.themed`, `.themedSmall`, or
 #     `.themedMultiline` for a field that grows.
+#   - `(.bar)`, the system's grey bar material. A terminal key bar wore it
+#     below a themed screen. Use `TerminalPalette.surface` or a `Theme.`
+#     colour instead.
 #
 # The action-icon guard is the precedent. A convention nobody can enforce by
 # remembering is a convention that comes back.
@@ -54,6 +57,7 @@ BANNED = [
     (".accentColor", "the system accent"),
     ("Divider()", "a system divider"),
     (".roundedBorder", "the platform's field bezel"),
+    ("(.bar)", "the system's bar material"),
 ]
 
 

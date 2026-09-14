@@ -187,26 +187,37 @@ struct RemoteHostFeatureGate<Content: View>: View {
                 probe.state = .available
                 return
             }
-            // This view can be retained while the person changes the selected
-            // computer. Do not let the previous host's answer expose a feature
-            // while the next host is still being checked.
-            probe.state = .checking
+            // Pushing another screen cancels this task and popping restarts it
+            // for the same peer. Clearing to .checking then would unmount the
+            // content and drop its state, so Back from workspace tools landed
+            // on the chat list instead of the open thread. Only a new peer or
+            // an explicit retry is a new question; the `beginRun` gate keeps
+            // the old answer mounted for a restart. This view can be retained
+            // while the person changes the selected computer, and that still
+            // re-checks: a new peer is a new key.
+            let key = "\(peer)-\(probe.retry)"
+            guard probe.beginRun(key: key) else { return }
             do {
                 let version = try await Bridge.peerProtocolVersion(peer)
                 guard !Task.isCancelled else { return }
-                probe.state = version >= feature.minimumProtocol ? .available : .needsUpdate(version)
+                probe.didAnswer(key: key, state: version >= feature.minimumProtocol ? .available : .needsUpdate(version))
             } catch {
                 guard !Task.isCancelled else { return }
                 // Reachability has its own UI. Turning an asleep host into an
                 // "update" instruction sends somebody in the wrong direction.
-                probe.state = .available
+                probe.didAnswer(key: key, state: .available)
             }
         }
     }
 }
 
+/// The gate's check state, held across task restarts.
+///
+/// Internal for the standalone probe tests: pushing a screen cancels the
+/// gate's task and popping restarts it, and the tests pin that a restart for
+/// the same peer keeps the old answer instead of clearing it.
 @MainActor @Observable
-private final class RemoteHostFeatureProbe {
+final class RemoteHostFeatureProbe {
     enum State: Equatable {
         case checking
         case available
@@ -215,6 +226,25 @@ private final class RemoteHostFeatureProbe {
 
     var state: State = .checking
     var retry = 0
+    /// What the last answered run asked, `peer-retry`. Set only when an answer
+    /// lands: a run cancelled before answering leaves no key, so its restart
+    /// asks again instead of resuming a check that never finished.
+    var checkedKey: String?
+
+    /// Open a run for this key. A restart for the already-answered key returns
+    /// false and the caller asks nothing, leaving the old answer and its
+    /// content mounted. Anything else returns true and clears to `.checking`.
+    func beginRun(key: String) -> Bool {
+        guard checkedKey != key else { return false }
+        state = .checking
+        return true
+    }
+
+    /// Record the answer, so a later restart for the same key resumes it.
+    func didAnswer(key: String, state: State) {
+        checkedKey = key
+        self.state = state
+    }
 }
 
 private struct RemoteHostFeatureCheckingView: View {
