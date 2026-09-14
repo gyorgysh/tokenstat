@@ -572,6 +572,28 @@ internal sealed class ChatPage : Page
         var items = Coalesce(_events);
         var desiredCount = items.Count + (Busy() ? 1 : 0);
 
+        // The host has not answered yet. A question nobody replied to is not
+        // an empty answer, so it gets the waiting picture, not a blank.
+        if (items.Count == 0 && Busy())
+        {
+            const string waitingKey = "__waiting__";
+            var current = _transcript.Children.Count == 1
+                ? _transcript.Children[0] as FrameworkElement
+                : null;
+            if (current?.Tag as string != waitingKey)
+            {
+                _transcript.Children.Clear();
+                var waiting = EmptyState.View(
+                    "Waiting for the host",
+                    "The host has not answered yet.",
+                    EmptyArtKind.Waiting);
+                waiting.Tag = waitingKey;
+                _transcript.Children.Add(waiting);
+            }
+            if (_followEnd) _scroll?.ChangeView(null, _scroll.ScrollableHeight, null, true);
+            return;
+        }
+
         for (int i = 0; i < items.Count; i++)
         {
             var item = items[i];

@@ -109,6 +109,13 @@ internal sealed class HomePage : Page
         _root.Children.Add(Chrome.Card("This archive", stats));
 
         _root.Children.Add(Chrome.Card("Activity", BuildHeatmap(calendar), subtitle: StreakLine(calendar)));
+        // The year is already on screen. This says why the older squares are
+        // muted and offers the page that unlocks them.
+        if (Format.Flag(calendar, "history_locked"))
+        {
+            var days = Format.Long(calendar, "history_days");
+            _root.Children.Add(EmptyState.HistoryLockBanner(days <= 0 ? 30 : (int)days));
+        }
         _root.Children.Add(LimitsCard(limits));
     }
 
@@ -125,7 +132,7 @@ internal sealed class HomePage : Page
         var rows = calendar["rows"] as JsonArray;
         if (rows is null || rows.Count == 0)
         {
-            return Chrome.Empty("No activity yet", "Scan local logs to fill the year.", Symbol.FourBars);
+            return EmptyState.View("No activity yet", "Scan local logs to fill the year.", EmptyArtKind.FirstBars);
         }
 
         // Host sends seven weekday rows, Monday first, each cell a week column.
@@ -139,7 +146,7 @@ internal sealed class HomePage : Page
         }
         if (weekCount == 0)
         {
-            return Chrome.Empty("No activity yet", "Scan local logs to fill the year.", Symbol.FourBars);
+            return EmptyState.View("No activity yet", "Scan local logs to fill the year.", EmptyArtKind.FirstBars);
         }
 
         var grid = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };

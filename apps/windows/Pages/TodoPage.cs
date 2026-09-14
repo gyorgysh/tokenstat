@@ -75,10 +75,10 @@ internal sealed class TodoPage : Page
         var array = cards as JsonArray ?? cards["cards"] as JsonArray ?? cards["items"] as JsonArray;
         if (array is null || array.Count == 0)
         {
-            _root.Children.Add(Chrome.Empty(
+            _root.Children.Add(EmptyState.View(
                 "No tasks yet",
                 "Add a task to run it with an agent in a folder.",
-                Symbol.AllApps));
+                EmptyArtKind.Tasks));
             return;
         }
 
@@ -121,10 +121,10 @@ internal sealed class TodoPage : Page
         }
         if (list.Children.Count == 0)
         {
-            _root.Children.Add(Chrome.Empty(
+            _root.Children.Add(EmptyState.View(
                 "No tasks yet",
                 "Add a task to run it with an agent in a folder.",
-                Symbol.AllApps));
+                EmptyArtKind.Tasks));
             return;
         }
         _root.Children.Add(Chrome.Card("Tasks", list));

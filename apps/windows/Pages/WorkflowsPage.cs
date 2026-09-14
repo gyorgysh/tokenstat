@@ -118,10 +118,10 @@ internal sealed class WorkflowsPage : Page
         }
         if (list.Children.Count == 0)
         {
-            _root.Children.Add(Chrome.Empty(
+            _root.Children.Add(EmptyState.View(
                 "No workflows yet",
                 "Design a workflow on a Mac, then Run and Kill it from here.",
-                Symbol.Switch));
+                EmptyArtKind.Workflows));
             return;
         }
         _root.Children.Add(Chrome.Card("Workflows", list));

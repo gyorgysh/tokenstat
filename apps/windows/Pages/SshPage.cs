@@ -120,10 +120,10 @@ internal sealed class SshPage : Page
         var array = listed as JsonArray ?? listed["hosts"] as JsonArray;
         if (array is null || array.Count == 0)
         {
-            _listRoot.Children.Add(Chrome.Empty(
+            _listRoot.Children.Add(EmptyState.View(
                 "No saved hosts",
                 "Save a server on a Mac, then connect from here with a password or a key.",
-                Symbol.Link));
+                EmptyArtKind.WorkspaceAccess));
         }
         else
         {

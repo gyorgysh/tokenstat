@@ -103,10 +103,10 @@ internal sealed class AutomationsPage : Page
         }
         if (list.Children.Count == 0)
         {
-            _root.Children.Add(Chrome.Empty(
+            _root.Children.Add(EmptyState.View(
                 "No automations yet",
                 "Scheduled jobs run on this host when Always-on is on.",
-                Symbol.Flag));
+                EmptyArtKind.Automations));
             return;
         }
         _root.Children.Add(Chrome.Card("Automations", list));

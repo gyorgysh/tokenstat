@@ -109,7 +109,7 @@ internal sealed class WorkspacePage : Page
         var array = tree as JsonArray ?? tree["entries"] as JsonArray;
         if (array is null || array.Count == 0)
         {
-            _root.Children.Add(Chrome.Empty("Empty folder", "Nothing to list here.", Symbol.Folder));
+            _root.Children.Add(EmptyState.View("Empty folder", "Nothing to list here.", EmptyArtKind.Files));
             return;
         }
 
@@ -265,7 +265,7 @@ internal sealed class WorkspacePage : Page
             var clean = string.IsNullOrEmpty(branch)
                 ? "No uncommitted changes in this folder."
                 : $"On {branch}. No uncommitted changes.";
-            _root.Children.Add(Chrome.Empty("Clean tree", clean, Symbol.Accept));
+            _root.Children.Add(EmptyState.View("Clean tree", clean, EmptyArtKind.Changes));
             return;
         }
 
@@ -524,10 +524,10 @@ internal sealed class WorkspacePage : Page
         }
         if (n == 0)
         {
-            _root.Children.Add(Chrome.Empty(
+            _root.Children.Add(EmptyState.View(
                 "No shells in this folder",
                 "Open a new shell. It runs on this PC through the host.",
-                Symbol.Play));
+                EmptyArtKind.Sessions));
             return;
         }
         _root.Children.Add(Chrome.Card("Sessions", list));
@@ -634,7 +634,7 @@ internal sealed class WorkspacePage : Page
         }
         if (n == 0)
         {
-            _root.Children.Add(Chrome.Empty("No tasks in this folder", "Add one from Tasks.", Symbol.AllApps));
+            _root.Children.Add(EmptyState.View("No tasks in this folder", "Add one from Tasks.", EmptyArtKind.Tasks));
             return;
         }
         _root.Children.Add(Chrome.Card("Tasks", list));

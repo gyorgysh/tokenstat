@@ -70,10 +70,10 @@ internal sealed class MachinesPage : Page
         var machines = account["machines"] as JsonArray;
         if (machines is null || machines.Count == 0)
         {
-            _root.Children.Add(Chrome.Empty(
+            _root.Children.Add(EmptyState.View(
                 "No devices yet",
                 "This account has no linked machines.",
-                Symbol.CellPhone));
+                EmptyArtKind.Devices));
             return;
         }
 
