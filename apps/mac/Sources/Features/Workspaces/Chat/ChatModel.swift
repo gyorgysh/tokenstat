@@ -671,11 +671,18 @@ final class ChatModel {
         recentMessagePreview = recentMessages.messages(for: key)
     }
 
-    /// Adjacent conversation in the same order as the sidebar, without wrapping.
+    /// Adjacent conversation in sidebar order, looping inside the warm ten.
+    /// A held arrow key cycles those instead of stopping dead or walking
+    /// the archive; older chats live behind See-all. The sidebar draws the
+    /// same window, so every landing is already on screen.
     func adjacentConversation(_ step: Int) -> ChatConversation? {
-        guard let index = chats.firstIndex(where: { $0.id == selected?.id }),
-              step == -1 || step == 1, chats.indices.contains(index + step) else { return nil }
-        return chats[index + step]
+        guard !chats.isEmpty, step == -1 || step == 1 else { return nil }
+        let current = chats.firstIndex(where: { $0.id == selected?.id })
+        guard let next = ChatHistoryWindow.looped(count: chats.count, current: current, step: step),
+              chats.indices.contains(next) else {
+            return nil
+        }
+        return chats[next]
     }
 
     /// Conversation lists read earlier this session, keyed by the folder id

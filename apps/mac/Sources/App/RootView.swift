@@ -146,6 +146,10 @@ struct RootView: View {
     /// the title bar. Keep the longer list opt-in so a busy workspace does
     /// not turn the sidebar into a transcript index.
     @State private var expandedChatHistories: Set<String> = []
+    /// Folders whose chat history is minimized to its section row. The list
+    /// is always open otherwise, and a busy folder leaves no way to get it
+    /// out of the way.
+    @State private var collapsedChatHistories: Set<String> = []
     /// The section each folder was last left on, so returning to a folder
     /// returns to what you were doing in it.
     @State private var lastSection: [String: WorkspaceSection] = [:]
@@ -1902,25 +1906,35 @@ struct RootView: View {
                             // centre-pane section. iPhone and iPad have no
                             // inspector column, so they list it with Changes.
                             ForEach(WorkspaceSection.allCases.filter { $0 != .history }) { section in
-                                WorkspaceSectionRow(
-                                    section: section,
-                                    count: count(of: section, in: folder),
-                                    // Sessions is the route for both the
-                                    // terminal and Launch. Only light it when
-                                    // a terminal is actually in front; Launch
-                                    // lights the folder card instead.
-                                    isSelected: route == .workspace(id: folder.id, section: section)
-                                        && (section != .sessions || !showingLauncher),
-                                    removeAllChats: section == .chat ? {
-                                        workspacePendingChatRemoval = folder
-                                    } : nil
-                                ) {
-                                    openSection(section, in: folder.id) {
-                                        if section == .chat { showingChatOverview = true }
-                                    }
-                                }
                                 if section == .chat {
-                                    chatHistoryRows(for: folder)
+                                    // Chevron beside the row rather than
+                                    // inside it, the way the folder rows do
+                                    // it. A button inside a button is one
+                                    // target that swallows the other.
+                                    HStack(spacing: 0) {
+                                        let minimized = collapsedChatHistories.contains(folder.id)
+                                        Button {
+                                            if minimized {
+                                                collapsedChatHistories.remove(folder.id)
+                                            } else {
+                                                collapsedChatHistories.insert(folder.id)
+                                            }
+                                        } label: {
+                                            Image(systemName: minimized ? "chevron.right" : "chevron.down")
+                                                .font(Theme.font(8, weight: .semibold))
+                                                .foregroundStyle(.secondary)
+                                                .frame(width: 18, height: 24)
+                                                .contentShape(.rect)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help(minimized ? "Expand chats" : "Minimize chats")
+                                        workspaceSectionRow(.chat, in: folder, showingLauncher: showingLauncher)
+                                    }
+                                    if !collapsedChatHistories.contains(folder.id) {
+                                        chatHistoryRows(for: folder)
+                                    }
+                                } else {
+                                    workspaceSectionRow(section, in: folder, showingLauncher: showingLauncher)
                                 }
                                 if section == .automations {
                                     ForEach(automations.liveJobs(in: folder.id)) { job in
@@ -2767,6 +2781,28 @@ struct RootView: View {
     /// rest, so opening a chat in one project no longer clears the rows just
     /// left in another. A folder never opened keeps its compact Chat row and
     /// its host-provided count until it is opened.
+    /// One section row, shared by the plain sections and the chat row that
+    /// carries its minimize chevron beside it.
+    @ViewBuilder
+    private func workspaceSectionRow(_ section: WorkspaceSection, in folder: WorkspaceFolder, showingLauncher: Bool) -> some View {
+        WorkspaceSectionRow(
+            section: section,
+            count: count(of: section, in: folder),
+            // Sessions is the route for both the terminal and Launch. Only
+            // light it when a terminal is actually in front; Launch lights
+            // the folder card instead.
+            isSelected: route == .workspace(id: folder.id, section: section)
+                && (section != .sessions || !showingLauncher),
+            removeAllChats: section == .chat ? {
+                workspacePendingChatRemoval = folder
+            } : nil
+        ) {
+            openSection(section, in: folder.id) {
+                if section == .chat { showingChatOverview = true }
+            }
+        }
+    }
+
     @ViewBuilder
     private func chatHistoryRows(for folder: WorkspaceFolder) -> some View {
         let list = chat.sidebarChats(in: folder.id)
@@ -2784,20 +2820,18 @@ struct RootView: View {
         // owning host: selecting directly would fetch it against the folder
         // on screen and its peer.
         let isCurrent = chat.folderID == folder.id
-        // Five rows fit without pushing the sections below off screen. Past
-        // twenty the inline list stops growing: the full chat window owns
-        // search, so it owns the archive too.
-        let collapsedLimit = 5
-        let inlineLimit = 20
+        // Five rows fit without pushing the sections below off screen, ten
+        // is the warm set. Past ten the inline list stops growing: the full
+        // chat window owns search, so it owns the archive too.
         let expanded = expandedChatHistories.contains(folder.id)
-        // Arrow keys walk the whole folder list, not just the drawn rows.
-        // When the selection lands past the collapsed few, draw the expanded
-        // list so the lit row stays on screen instead of leaving it.
+        // Arrows loop the warm ten; a selection from search or the
+        // overview can sit anywhere, and the window follows it so the lit
+        // row is always drawn. At most ten rows stay warm either way.
         let selectedIndex = conversations.firstIndex { $0.id == chat.selected?.id }
-        let showExpanded = expanded || (selectedIndex.map { $0 >= collapsedLimit } ?? false)
-        let visible = showExpanded
-            ? Array(conversations.prefix(inlineLimit))
-            : Array(conversations.prefix(collapsedLimit))
+        let window = ChatHistoryWindow.visible(
+            count: conversations.count, selected: selectedIndex, expanded: expanded
+        )
+        let visible = Array(conversations[window])
         Group {
             ForEach(visible) { conversation in
                 ChatSidebarConversationRow(
@@ -2831,41 +2865,48 @@ struct RootView: View {
                     }
                 )
             }
-            if conversations.count > collapsedLimit {
-                Button(expanded ? "Show less" : "Show more") {
-                    if expanded {
-                        expandedChatHistories.remove(folder.id)
-                    } else {
-                        expandedChatHistories.insert(folder.id)
+            // One quiet footer row instead of stacked loud ones: the
+            // expander on the left, the archive on the right.
+            if conversations.count > ChatHistoryWindow.collapsedLimit {
+                HStack {
+                    // The count is what is hidden, not what is drawn: with
+                    // a deep selection the window slides, and the number
+                    // still answers "how many am I not seeing".
+                    Button(expanded ? "Show less" : "Show \(conversations.count - window.count) more") {
+                        if expanded {
+                            expandedChatHistories.remove(folder.id)
+                        } else {
+                            expandedChatHistories.insert(folder.id)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(Theme.fit(11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    Spacer(minLength: Theme.Space.s)
+                    // Past the warm ten the rest live in the full chat
+                    // window, where search, filters and sorting exist.
+                    if conversations.count > ChatHistoryWindow.inlineLimit {
+                        Button("See all chats", .search) {
+                            openSection(.chat, in: folder.id) {
+                                showingChatOverview = true
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(Theme.fit(11, weight: .medium))
+                        .foregroundStyle(.secondary)
                     }
                 }
-                .buttonStyle(.plain)
-                .font(Theme.fit(11, weight: .medium))
-                .foregroundStyle(Theme.accent)
                 .padding(.leading, Theme.Space.xl + Theme.Space.s)
-                .padding(.vertical, 4)
-            }
-            // Past the inline cap the rest live in the full chat window,
-            // where search, filters and sorting already exist.
-            if conversations.count > inlineLimit {
-                Button("See all chats", .search) {
-                    openSection(.chat, in: folder.id) {
-                        showingChatOverview = true
-                    }
-                }
-                .buttonStyle(.plain)
-                .font(Theme.fit(11, weight: .medium))
-                .foregroundStyle(Theme.accent)
-                .padding(.leading, Theme.Space.xl + Theme.Space.s)
+                .padding(.trailing, Theme.Space.m)
                 .padding(.vertical, 4)
             }
         }
         .onChange(of: chat.selected?.id) { _, selectedID in
-            // Persist the auto-expansion above, so "Show more" still says
+            // Persist the auto-expansion above, so the footer still says
             // what the list is doing after the selection moves on.
             guard let selectedID,
                   let index = conversations.firstIndex(where: { $0.id == selectedID }),
-                  index >= collapsedLimit
+                  index >= ChatHistoryWindow.collapsedLimit
             else { return }
             expandedChatHistories.insert(folder.id)
         }

@@ -58,6 +58,15 @@ import Foundation
         assert(messy.hidden == [.sessions, .recentChats]
             || messy.hidden == [.recentChats, .sessions])
 
+        // The host-wide task board link is off unless asked for, and the
+        // choice survives a relaunch. The section order above is untouched.
+        assert(fresh.allTasksVisible == false)
+        fresh.setAllTasksVisible(true)
+        assert(fresh.allTasksVisible == true)
+        assert(WorkspacesLayout(defaults: defaults).allTasksVisible == true)
+        fresh.setAllTasksVisible(false)
+        assert(WorkspacesLayout(defaults: defaults).allTasksVisible == false)
+
         print("WorkspacesLayoutTests: ok")
     }
 }

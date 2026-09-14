@@ -262,6 +262,9 @@ ALLOWED = [
     # editor's words: the whole pill is its name, marked by its fill, so a
     # glyph on each of the three would be one symbol repeated across the row.
     ("Client/ClientWorkspacesEditor.swift", "preset = option"),
+    # The All tasks toggle row. The label already carries the task mark and
+    # the check disc: a vocabulary glyph would be a third mark on one row.
+    ("Client/ClientWorkspacesEditor.swift", "allTasks.toggle()"),
     # A ranking row. The whole card is the label and the row already carries
     # its value bar and counts; a glyph on every row would repeat one symbol
     # down the list.

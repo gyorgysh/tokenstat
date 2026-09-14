@@ -32,6 +32,9 @@ struct ClientSidebarRoot: View {
     /// One workspaces model for the whole layout: the tree in the sidebar and
     /// the screen in the detail column are the same connection, not two.
     @State private var workspaces = ClientWorkspacesModel()
+    /// Whether the host-wide task board link shows under a connected host.
+    /// Off unless asked for in Customize Workspaces.
+    @State private var workspacesLayout = WorkspacesLayout.shared
     @State private var notificationOpen = NotificationOpen.shared
     /// What each folder holds, keyed by workspace id. One call for the whole
     /// tree rather than one per folder: the Mac's sidebar draws these counts
@@ -287,7 +290,9 @@ struct ClientSidebarRoot: View {
                 ForEach(workspaces.hosts) { host in
                     hostRow(host)
                     if workspaces.connectedKey == host.peerKey {
-                        ClientAllTasksLink(peer: host.peerKey, hostName: host.name)
+                        if workspacesLayout.allTasksVisible {
+                            ClientAllTasksLink(peer: host.peerKey, hostName: host.name)
+                        }
                         ForEach(workspaces.folders) { folder in
                             folderRow(folder)
                             // Keep the last opened folder expanded when the

@@ -6,7 +6,11 @@ import Foundation
 struct ChatRecentMessages<Row> {
     private var entries: [String: [Row]] = [:]
     private var order: [String] = []
-    static var conversationLimit: Int { 8 }
+    /// Ten warm conversations: the whole loop set. Holding the arrow never
+    /// leaves these ten, so every landing renders from memory and feels
+    /// instant. Previews past ten reload from the store instead of sitting
+    /// in memory.
+    static var conversationLimit: Int { 10 }
     static var messageLimit: Int { 150 }
     static var byteLimit: Int { 512 * 1024 }
 

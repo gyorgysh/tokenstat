@@ -20,6 +20,7 @@ struct ClientWorkspacesEditor: View {
     @State private var order: [WorkspacesSection]
     @State private var hidden: Set<WorkspacesSection>
     @State private var preset: WorkspacesPreset?
+    @State private var allTasks: Bool
     @State private var beforeReset: (
         order: [WorkspacesSection],
         hidden: Set<WorkspacesSection>,
@@ -33,6 +34,7 @@ struct ClientWorkspacesEditor: View {
         _order = State(initialValue: layout.order)
         _hidden = State(initialValue: layout.hidden)
         _preset = State(initialValue: layout.preset)
+        _allTasks = State(initialValue: layout.allTasksVisible)
     }
 
     private var visible: [WorkspacesSection] { order.filter { !hidden.contains($0) } }
@@ -75,6 +77,36 @@ struct ClientWorkspacesEditor: View {
                 }
 
                 Section {
+                    Button {
+                        allTasks.toggle()
+                    } label: {
+                        HStack(spacing: Theme.Space.m) {
+                            Image("mark_todo")
+                                .resizable().scaledToFit().frame(width: 24, height: 24)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("All tasks")
+                                    .font(ClientType.body)
+                                    .foregroundStyle(allTasks ? .primary : .secondary)
+                                Text("Host-wide task board above the sections")
+                                    .font(ClientType.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            ThemeCheckDisc(on: allTasks)
+                        }
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                    .accessibilityLabel("All tasks link")
+                    .accessibilityValue(allTasks ? "Visible" : "Hidden")
+                } header: {
+                    Text("Task board")
+                }
+
+                Section {
                     Button("Reset Workspaces", .refresh) {
                         beforeReset = (order, hidden, preset)
                         order = WorkspacesPreset.foldersFirst.order
@@ -113,6 +145,7 @@ struct ClientWorkspacesEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", .done) {
                         layout.apply(order: order, hidden: hidden, preset: preset)
+                        layout.setAllTasksVisible(allTasks)
                         dismiss()
                     }
                 }

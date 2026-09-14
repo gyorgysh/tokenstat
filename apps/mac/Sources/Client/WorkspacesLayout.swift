@@ -85,10 +85,15 @@ final class WorkspacesLayout {
     private static let orderKey = "workspaces.sectionOrder.v1"
     private static let hiddenKey = "workspaces.sectionHidden.v1"
     private static let presetKey = "workspaces.sectionPreset.v1"
+    private static let allTasksKey = "workspaces.allTasksVisible.v1"
 
     private(set) var order: [WorkspacesSection]
     private(set) var hidden: Set<WorkspacesSection>
     private(set) var preset: WorkspacesPreset?
+    /// The host-wide task board link above the sections. Off unless asked:
+    /// the per-folder boards already cover daily work, and the sidebar link
+    /// duplicated every folder's own board one tap away.
+    private(set) var allTasksVisible: Bool
 
     var sections: [WorkspacesSection] { order.filter { !hidden.contains($0) } }
 
@@ -107,6 +112,16 @@ final class WorkspacesLayout {
         preset = stored == nil
             ? .foldersFirst
             : defaults.string(forKey: Self.presetKey).flatMap(WorkspacesPreset.init(rawValue:))
+        allTasksVisible = defaults.object(forKey: Self.allTasksKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.allTasksKey)
+    }
+
+    /// Show or hide the host-wide task board link. Kept apart from the
+    /// section order: it is one card above the sections, not one of them.
+    func setAllTasksVisible(_ visible: Bool) {
+        allTasksVisible = visible
+        defaults.set(visible, forKey: Self.allTasksKey)
     }
 
     @ObservationIgnored private let defaults: UserDefaults

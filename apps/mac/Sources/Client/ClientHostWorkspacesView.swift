@@ -205,7 +205,7 @@ struct ClientHostWorkspacesView: View {
                     }
                 }
 
-                if model.isAllowed == true && !model.isConnecting {
+                if model.isAllowed == true && !model.isConnecting, layout.allTasksVisible {
                     ClientAllTasksLink(peer: peerKey, hostName: hostName).padding(Theme.Space.m).cardSurface()
                 }
                 if !model.folders.isEmpty || !model.sessions.isEmpty || !model.recentChats.isEmpty {

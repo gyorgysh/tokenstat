@@ -21,9 +21,9 @@ private struct ChatRecentMessage: Equatable {
         precondition(cache.messages(for: "other-account|host|folder|chat").isEmpty)
         precondition(cache.messages(for: "account|other-host|folder|chat").isEmpty)
         cache.removeAll()
-        for id in 0..<8 { cache.store([message(id)], for: "\(id)", cost: { $0.text.utf8.count + $0.id.utf8.count + ($0.backend?.utf8.count ?? 0) }) }
+        for id in 0..<10 { cache.store([message(id)], for: "\(id)", cost: { $0.text.utf8.count + $0.id.utf8.count + ($0.backend?.utf8.count ?? 0) }) }
         _ = cache.messages(for: "0")
-        cache.store([message(8)], for: "8", cost: { $0.text.utf8.count + $0.id.utf8.count + ($0.backend?.utf8.count ?? 0) })
+        cache.store([message(10)], for: "10", cost: { $0.text.utf8.count + $0.id.utf8.count + ($0.backend?.utf8.count ?? 0) })
         precondition(cache.messages(for: "1").isEmpty)
         precondition(!cache.messages(for: "0").isEmpty)
         cache.store([message(0, text: String(repeating: "🟣", count: ChatRecentMessages<ChatRecentMessage>.byteLimit))], for: "large", cost: { $0.text.utf8.count + $0.id.utf8.count + ($0.backend?.utf8.count ?? 0) })

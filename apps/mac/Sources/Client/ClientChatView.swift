@@ -954,7 +954,7 @@ struct ClientChatThread: View {
                     )
                 }
             }
-            .transcriptEarlierPages(model, window: window, proxy: proxy, hiddenEarlierRows: hiddenAboveCount)
+            .transcriptEarlierPages(model, window: window, proxy: proxy)
             .onChange(of: structureToken) { _, _ in
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
@@ -1021,14 +1021,6 @@ struct ClientChatThread: View {
                 window.nearTopChanged = { measuringRows = $0 }
                 installRepin(proxy)
                 pinToLatest(proxy, animated: false)
-            }
-            .onChange(of: measuringRows) { _, near in
-                // Seamless history: the slice already holds older built
-                // rows, so reaching the top edge slides them in without a
-                // tap. One step per approach; the pill below stays as the
-                // fallback for a reader resting at the very top.
-                guard near, isActive, hiddenAboveCount > 0 else { return }
-                revealEarlier()
             }
             .task(id: model.readingIdentity) {
                 // A lazy stack does not know its own height until it has drawn
