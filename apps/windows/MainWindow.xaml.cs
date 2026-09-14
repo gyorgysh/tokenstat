@@ -88,6 +88,10 @@ public sealed partial class MainWindow : Window
                 SetContent(new ScreenPage(peer, name));
             });
         };
+        AppServices.OpenOnboarding = () =>
+        {
+            DispatcherQueue.TryEnqueue(() => ShowOnboarding(firstRun: false));
+        };
 
         if (_nav.MenuItems[0] is NavigationViewItem first)
         {
@@ -192,6 +196,10 @@ public sealed partial class MainWindow : Window
                 Show(tag);
             }
             _hostSplash = null;
+            if (!OnboardingState.HasOnboarded)
+            {
+                ShowOnboarding(firstRun: true);
+            }
         });
     }
 
@@ -220,6 +228,27 @@ public sealed partial class MainWindow : Window
         _hostSplash = splash;
         _frame.Content = splash;
         Motion.PlayDoor(splash);
+    }
+
+    /// <summary>
+    /// The first-run tour over the current page. First run marks it seen on
+    /// the way in, so any exit, Skip, Get started, or the sidebar, counts.
+    /// Re-opened from About it leaves the flag alone.
+    /// </summary>
+    private void ShowOnboarding(bool firstRun)
+    {
+        if (firstRun)
+        {
+            OnboardingState.HasOnboarded = true;
+        }
+        SetContent(new OnboardingPage(() =>
+        {
+            if (_nav.SelectedItem is NavigationViewItem selected
+                && selected.Tag is string tag)
+            {
+                Show(tag);
+            }
+        }));
     }
 
     /// <summary>

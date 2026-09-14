@@ -32,4 +32,10 @@ internal static class AppServices
     /// machine's public identity, then a label for the chrome.
     /// </summary>
     public static Action<string, string>? OpenScreen { get; set; }
+
+    /// <summary>
+    /// Show the first-run tour over the current page. Set from MainWindow,
+    /// called from About so the tour can be re-opened after onboarding.
+    /// </summary>
+    public static Action? OpenOnboarding { get; set; }
 }
