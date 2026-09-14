@@ -736,10 +736,8 @@ struct RootView: View {
     /// chrome (narrow windows, or a hidden column on a wide one), not the
     /// user's expanded preference.
     private var isLeftSidebarOpen: Bool {
-        if windowContentWidth > 0, windowContentWidth < Self.widthForSidebar {
-            return isSidebarPinned
-        }
         if windowContentWidth <= 0 { return true }
+        if !sidebarColumnFits { return isSidebarPinned }
         return columnVisibilityChoice == .all
     }
 
@@ -763,7 +761,7 @@ struct RootView: View {
         // Always clear float state first so a hide never leaves a peek up.
         isSidebarOverlayVisible = false
 
-        if windowContentWidth > 0, windowContentWidth < Self.widthForSidebar {
+        if windowContentWidth > 0, !sidebarColumnFits {
             // Narrow: the sidebar is a floating popup only. Pin it open or
             // close it. The split column stays shut below the fit edge.
             isSidebarPinned.toggle()
@@ -886,6 +884,28 @@ struct RootView: View {
         width >= widthForThreeColumns
     }
 
+    /// Whether the sidebar keeps its column at this width.
+    ///
+    /// The legacy edge below, plus room for the browser at the user's own
+    /// width when it is open: sidebar, dividers, comfortable detail, and
+    /// the pane. Below the edge the sidebar peeks like the inspector
+    /// instead of squeezing the detail (see `ChromeFit`). Static so
+    /// `applyWidth` can ask about the width it was given rather than the
+    /// one already stored.
+    private static func sidebarColumnFits(width: Double, browserOpen: Bool, persistedBrowser: Double) -> Bool {
+        width >= widthForSidebar
+            && (!browserOpen || ChromeFit.sidebarRoomForBrowser(width: width, persistedBrowser: persistedBrowser))
+    }
+
+    private var sidebarColumnFits: Bool {
+        windowContentWidth > 0
+            && Self.sidebarColumnFits(
+                width: windowContentWidth,
+                browserOpen: showsWorkspaceBrowser,
+                persistedBrowser: browserPaneWidth
+            )
+    }
+
     /// Publishes the window content size for the day hover card. Deferred so a
     /// GeometryReader measurement cannot re-enter layout on the same pass.
     private func publishWindowSize(_ next: CGSize) {
@@ -907,7 +927,7 @@ struct RootView: View {
         // again. A popup pinned below the edge is the user saying "keep the
         // sidebar", so hand it to the column. Otherwise the collapsed choice
         // stands, and the next narrowing auto-closes again.
-        if width >= Self.widthForSidebar {
+        if Self.sidebarColumnFits(width: width, browserOpen: showsWorkspaceBrowser, persistedBrowser: browserPaneWidth) {
             if isSidebarPinned {
                 columnVisibilityChoice = .all
             }
@@ -932,7 +952,7 @@ struct RootView: View {
     /// Window fit affects presentation without changing the user's preference.
     private var showsSidebar: Bool {
         columnVisibilityChoice != .detailOnly &&
-            (windowContentWidth <= 0 || windowContentWidth >= Self.widthForSidebar)
+            (windowContentWidth <= 0 || sidebarColumnFits)
     }
 
     private var showsInspector: Bool {
@@ -1109,14 +1129,15 @@ struct RootView: View {
 
     /// Whether the left-edge float is allowed.
     ///
-    /// The sidebar column is off screen in two situations: the window is too
-    /// narrow to hold it, or the user hid it on a wide window. Both get the
-    /// same hover peek the right inspector has: the sidebar comes back as a
-    /// floating pane while the pointer is near the leading edge.
+    /// The sidebar column is off screen in three situations: the window is
+    /// too narrow to hold it, the user hid it on a wide window, or the
+    /// browser is open with no room for the column beside comfortable
+    /// detail. All three get the same hover peek the right inspector has:
+    /// the sidebar comes back as a floating pane while the pointer is near
+    /// the leading edge.
     private var usesOverlaySidebar: Bool {
         guard windowContentWidth > 0 else { return false }
-        if windowContentWidth < Self.widthForSidebar { return true }
-        return columnVisibilityChoice == .detailOnly
+        return !showsSidebar
     }
 
     /// The floated sidebar is on screen: pinned open, or peeking under the
@@ -1177,10 +1198,14 @@ struct RootView: View {
             .overlay(alignment: .trailing) { inspectorFloatLayer }
             .overlay(alignment: .trailing) {
                 if showsWorkspaceBrowser && !browserFitsBesideWorkspace {
-                    workspaceBrowserPane
-                        .frame(width: min(fittedBrowserWidth, max(320, windowContentWidth - 32)))
-                        .background(Theme.background)
-                        .shadow(color: Theme.shadow(0.2), radius: 12, x: -5)
+                    HStack(spacing: 0) {
+                        browserResizeHandle
+                        workspaceBrowserPane
+                            .frame(width: fittedBrowserWidth)
+                    }
+                    .frame(maxHeight: .infinity)
+                    .background(Theme.background)
+                    .shadow(color: Theme.shadow(0.2), radius: 12, x: -5)
                 }
             }
             .animation(
@@ -1201,8 +1226,18 @@ struct RootView: View {
         supportsWorkspaceBrowser && route.workspaceID != nil && browserWorkspaceID == route.workspaceID
     }
 
+    /// Whether the browser sits beside the workspace rather than floating.
+    ///
+    /// The inspector's standard, not the detail minimum: the detail keeps
+    /// its comfort width, and below that the pane floats instead of
+    /// crushing the content (see `ChromeFit`). Takes the persisted width,
+    /// so modes flip on drag end, never mid-gesture.
     private var browserFitsBesideWorkspace: Bool {
-        windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0) >= Self.detailMinimumWidth + 325
+        ChromeFit.browserBeside(
+            width: windowContentWidth,
+            sidebarShowing: showsSidebar,
+            persistedBrowser: browserPaneWidth
+        )
     }
 
     @ViewBuilder private var workspaceBrowserPane: some View {
@@ -1222,7 +1257,10 @@ struct RootView: View {
 
     private var fittedBrowserWidth: CGFloat {
         let available = windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0)
-        return min(max(320, browserLiveWidth ?? browserPaneWidth), max(320, available - Self.detailMinimumWidth - 6))
+        let cap = browserFitsBesideWorkspace
+            ? ChromeFit.besideMax(available: available)
+            : ChromeFit.overlayMax(width: windowContentWidth)
+        return min(max(ChromeFit.browserMinimum, browserLiveWidth ?? browserPaneWidth), cap)
     }
 
     private var browserResizeHandle: some View {
@@ -1241,8 +1279,13 @@ struct RootView: View {
             .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { value in
                 if browserResizeStart == nil { browserResizeStart = fittedBrowserWidth }
                 let available = windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0)
-                browserLiveWidth = max(320, min(available - Self.detailMinimumWidth - 6,
-                    (browserResizeStart ?? fittedBrowserWidth) - value.translation.width))
+                let cap = browserFitsBesideWorkspace
+                    ? ChromeFit.besideMax(available: available)
+                    : ChromeFit.overlayMax(width: windowContentWidth)
+                browserLiveWidth = max(
+                    ChromeFit.browserMinimum,
+                    min(cap, (browserResizeStart ?? fittedBrowserWidth) - value.translation.width)
+                )
             }.onEnded { _ in
                 browserPaneWidth = fittedBrowserWidth
                 browserLiveWidth = nil
