@@ -180,6 +180,12 @@ ALLOWED = [
     # Invisible carriers for the iPad's keyboard shortcuts. They are never
     # drawn, and their titles are what the system lists when Command is held.
     ("Client/ClientShortcuts.swift", "Button(command.title) {"),
+    # Invisible carriers for the editor's find shortcuts (Cmd+G / Shift+Cmd+G
+    # when the caret is in the text, where a SwiftUI shortcut would not fire).
+    # Same class as the shortcut carriers above: never drawn, so a glyph
+    # would be a symbol nobody sees.
+    ("Features/Workspaces/EditorView.swift", 'Button("Find next") {'),
+    ("Features/Workspaces/EditorView.swift", 'Button("Find previous") {'),
 
     # A whole row is the target: the section list on the phone, and the
     # sidebar group heading on the Mac, where the label is the button.

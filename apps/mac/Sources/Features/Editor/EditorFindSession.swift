@@ -25,12 +25,20 @@ final class EditorFindSession {
     /// Bounded so a pathological query cannot mint unbounded ranges.
     static let matchLimit = 2000
 
-    var showing = false
-    var query = "" { didSet { revision &+= 1 } }
+    /// Showing and hiding repaints the match backgrounds: hiding must clear
+    /// them rather than leave stale tint behind.
+    var showing = false { didSet { revision &+= 1 } }
+    /// Setting the query searches immediately. The bar binds its field to
+    /// this and owns no buffer, so waiting for the caller to re-run the
+    /// search by hand meant every keystroke in the field showed "No
+    /// results" until the document itself changed.
+    var query = "" { didSet { refresh(text: lastText) } }
     var replaceText = ""
     var replacing = false
     /// The text view is inside a live composition. Replacements wait.
     var composing = false
+    /// The buffer as `refresh` last saw it: what a query keystroke searches.
+    private var lastText = ""
 
     private(set) var matches: [NSRange] = []
     private(set) var currentIndex = 0
@@ -68,8 +76,10 @@ final class EditorFindSession {
     var canReplace: Bool { hasQuery && !matches.isEmpty && !composing }
 
     /// Recompute matches against the buffer. Keeps the current position
-    /// when the same match is still there, otherwise clamps.
+    /// when the same match is still there, otherwise clamps. Remembers the
+    /// buffer, so the next query keystroke has something to search.
     func refresh(text: String) {
+        lastText = text
         let found = Self.search(query: query, in: text)
         let previous = current
         matches = found.matches

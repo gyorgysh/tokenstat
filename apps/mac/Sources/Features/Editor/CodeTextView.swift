@@ -26,6 +26,8 @@ import SwiftUI
 /// re-read from disk.
 struct CodeTextView: NSViewRepresentable {
     let document: EditorDocument
+    /// The shared find session behind the in-app find bar. Nil hides find.
+    var find: EditorFindSession?
     /// Called when the user asks to save, so the shortcut works with focus in
     /// the text view rather than only on the button.
     let onSave: () -> Void
@@ -53,10 +55,12 @@ struct CodeTextView: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
         textView.isGrammarCheckingEnabled = false
-        // The native find bar, which is Cmd+F, Cmd+G and replace, for free and
-        // behaving exactly as it does everywhere else on the system.
-        textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
+        // No native find bar: AppKit draws it in unthemed system grey, and
+        // the product Theme cannot reach it. Find runs through the shared
+        // `EditorFindSession` behind the in-app bar instead, with Cmd+F and
+        // Cmd+G caught below. Incremental searching belongs to the native
+        // bar, so it goes with it.
+        textView.usesFindBar = false
         textView.font = Coordinator.editorFont
         textView.textContainerInset = NSSize(width: 6, height: 8)
         textView.drawsBackground = false
@@ -80,6 +84,7 @@ struct CodeTextView: NSViewRepresentable {
 
         context.coordinator.textView = textView
         context.coordinator.ruler = ruler
+        context.coordinator.attach(find: find)
         context.coordinator.load(document, into: textView)
         return scrollView
     }
@@ -87,6 +92,7 @@ struct CodeTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = context.coordinator.textView else { return }
         context.coordinator.onSave = onSave
+        context.coordinator.attach(find: find)
         context.coordinator.sync(document, into: textView)
     }
 
@@ -119,6 +125,90 @@ struct CodeTextView: NSViewRepresentable {
             self.onSave = onSave
         }
 
+        // MARK: - Find
+
+        private var find: EditorFindSession?
+        private var appliedFindRevision = -1
+
+        func attach(find: EditorFindSession?) {
+            if self.find !== find {
+                self.find = find
+                appliedFindRevision = -1
+            }
+            find?.handler = { [weak self] action in
+                guard let self, let view = self.textView else { return }
+                self.perform(action, in: view)
+            }
+        }
+
+        /// Match backgrounds over the buffer. Foreground colours belong to
+        /// the syntax pass, which never touches the background, so the two
+        /// do not fight. The current match needs no paint: the selection
+        /// itself is its highlight.
+        private func applyFindHighlights(to textView: NSTextView, force: Bool) {
+            guard let find else { return }
+            guard !textView.hasMarkedText() else { return }
+            guard force || find.revision != appliedFindRevision else { return }
+            appliedFindRevision = find.revision
+            guard let storage = textView.textStorage else { return }
+            storage.beginEditing()
+            storage.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: storage.length))
+            if find.showing, find.hasQuery {
+                let tint = NSColor(Theme.accent.opacity(0.22))
+                for range in find.matches {
+                    guard range.location + range.length <= storage.length else { continue }
+                    if find.current == range { continue }
+                    storage.addAttribute(.backgroundColor, value: tint, range: range)
+                }
+            }
+            storage.endEditing()
+            textView.needsDisplay = true
+        }
+
+        private func perform(_ action: EditorFindSession.Action, in textView: NSTextView) {
+            guard let find else { return }
+            switch action {
+            case .next, .previous:
+                guard let range = find.current else { return }
+                textView.setSelectedRange(range)
+                textView.scrollRangeToVisible(range)
+            case .replaceCurrent:
+                guard !textView.hasMarkedText(), let range = find.current else { return }
+                guard range.location + range.length <= (textView.string as NSString).length else {
+                    return
+                }
+                replace(range, with: find.replaceText, in: textView)
+                findAfterEdit(textView)
+                if let next = find.current {
+                    textView.setSelectedRange(next)
+                    textView.scrollRangeToVisible(next)
+                }
+            case .replaceAll:
+                guard !textView.hasMarkedText(), !find.matches.isEmpty else { return }
+                // One undo for the whole scope, which is this open document.
+                textView.undoManager?.beginUndoGrouping()
+                for range in find.matches.reversed() {
+                    guard range.location + range.length <= (textView.string as NSString).length else {
+                        continue
+                    }
+                    replace(range, with: find.replaceText, in: textView)
+                }
+                textView.undoManager?.endUndoGrouping()
+                findAfterEdit(textView)
+            }
+        }
+
+        /// Push an edit the view already holds into the document and
+        /// recompute the matches around it.
+        private func findAfterEdit(_ textView: NSTextView) {
+            let text = textView.string
+            syncedText = text
+            document.setText(text)
+            find?.refresh(text: text)
+            applyFindHighlights(to: textView, force: true)
+            refreshRuler(textView)
+        }
+
         // MARK: - Loading
 
         func load(_ document: EditorDocument, into textView: NSTextView) {
@@ -127,6 +217,8 @@ struct CodeTextView: NSViewRepresentable {
             appliedSpans = -1
             applyBaseAttributes(to: textView)
             applySpans(to: textView)
+            find?.refresh(text: document.text)
+            applyFindHighlights(to: textView, force: true)
             refreshRuler(textView)
         }
 
@@ -170,7 +262,12 @@ struct CodeTextView: NSViewRepresentable {
             // the text storage every time it is read. `sync` runs on every
             // SwiftUI update of this view, so that read was a full copy of the
             // file for the common case of nothing having changed at all.
-            if next.text != syncedText {
+            // New spans wipe the match backgrounds along with the colours
+            // (`setAttributes` replaces everything), so the highlights are
+            // repainted whenever either changed.
+            let textChanged = next.text != syncedText
+            let spansChanged = next.spansVersion != appliedSpans
+            if textChanged {
                 let selection = textView.selectedRange()
                 replaceText(next.text, in: textView)
                 textView.setSelectedRange(
@@ -182,6 +279,10 @@ struct CodeTextView: NSViewRepresentable {
                 applyBaseAttributes(to: textView)
             }
             applySpans(to: textView)
+            if textChanged {
+                find?.refresh(text: next.text)
+            }
+            applyFindHighlights(to: textView, force: textChanged || spansChanged)
             refreshRuler(textView)
         }
 
@@ -294,6 +395,10 @@ struct CodeTextView: NSViewRepresentable {
             let text = textView.string
             syncedText = text
             document.setText(text)
+            if !textView.hasMarkedText() {
+                find?.refresh(text: text)
+                applyFindHighlights(to: textView, force: true)
+            }
             refreshRuler(textView)
         }
 
@@ -392,6 +497,38 @@ struct CodeTextView: NSViewRepresentable {
             onSave()
         }
 
+        /// Cmd+F from the text view, where a SwiftUI shortcut would not fire.
+        func toggleFind() {
+            find?.showing.toggle()
+        }
+
+        /// The menu's Hide command, which is a close rather than a toggle.
+        func hideFind() {
+            if find?.showing == true {
+                find?.showing.toggle()
+            }
+        }
+
+        /// Cmd+G moves to the next match, opening the bar when it is hidden.
+        func findNext() {
+            guard let find else { return }
+            if find.showing {
+                find.goNext()
+            } else {
+                find.showing = true
+            }
+        }
+
+        /// Shift+Cmd+G mirrors it backwards.
+        func findPrevious() {
+            guard let find else { return }
+            if find.showing {
+                find.goPrevious()
+            } else {
+                find.showing = true
+            }
+        }
+
         /// Comment or uncomment every line the selection touches.
         ///
         /// Uncomments when *every* touched line is already commented, which is
@@ -482,7 +619,9 @@ struct CodeTextView: NSViewRepresentable {
 /// Cmd+/ and Cmd+] have no `NSResponder` selector to override, so they are
 /// caught as key equivalents. Cmd+S is here too, because the toolbar button
 /// alone means the shortcut does nothing while the caret is in the text, which
-/// is where it always is when someone wants to save.
+/// is where it always is when someone wants to save. Cmd+F, Cmd+G and
+/// Shift+Cmd+G are here for the same reason: they drive the in-app find bar,
+/// and the caret is in the text whenever they are pressed.
 private final class CodeNSTextView: NSTextView {
     weak var coordinator: CodeTextView.Coordinator?
 
@@ -503,8 +642,40 @@ private final class CodeNSTextView: NSTextView {
         case "s":
             MainActor.assumeIsolated { coordinator?.save() }
             return true
+        case "f":
+            // The in-app find bar, themed, in place of the native grey one.
+            MainActor.assumeIsolated { coordinator?.toggleFind() }
+            return true
+        case "g":
+            MainActor.assumeIsolated { coordinator?.findNext() }
+            return true
+        case "G":
+            MainActor.assumeIsolated { coordinator?.findPrevious() }
+            return true
         default:
             return super.performKeyEquivalent(with: event)
+        }
+    }
+
+    /// The main menu's Find actions, which AppKit still sends to the first
+    /// responder even with the native bar gone. Without this they would fall
+    /// through to nothing; routed here they drive the in-app bar instead.
+    override func performTextFinderAction(_ sender: Any?) {
+        guard let tag = (sender as? NSMenuItem)?.tag else {
+            MainActor.assumeIsolated { coordinator?.toggleFind() }
+            return
+        }
+        MainActor.assumeIsolated {
+            switch tag {
+            case NSTextFinder.Action.nextMatch.rawValue:
+                coordinator?.findNext()
+            case NSTextFinder.Action.previousMatch.rawValue:
+                coordinator?.findPrevious()
+            case NSTextFinder.Action.hideFindInterface.rawValue:
+                coordinator?.hideFind()
+            default:
+                coordinator?.toggleFind()
+            }
         }
     }
 

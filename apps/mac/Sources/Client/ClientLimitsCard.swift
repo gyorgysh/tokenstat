@@ -25,6 +25,7 @@ struct ClientLimitsCard: View {
     let providers: [ProviderLimits]
     let isLoading: Bool
     var errorMessage: String? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -47,16 +48,51 @@ struct ClientLimitsCard: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                ClientAdaptiveCards {
-                    ForEach(sorted) { provider in
-                        ProviderRow(provider: provider)
-                            .padding(Theme.Space.m)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .cardSurface()
+                // Dealt into rows the way the Mac Home panels are: every row
+                // divides the full width between the cards it has, so a
+                // trailing row with an odd card out stretches it across the
+                // window instead of leaving a hole beside it. An adaptive grid
+                // keeps a short last row at column width, which is exactly the
+                // iPad shape this card takes.
+                WidthReader { width in
+                    VStack(spacing: Theme.Space.m) {
+                        ForEach(Array(rows(for: width).enumerated()), id: \.offset) { _, row in
+                            HStack(alignment: .top, spacing: Theme.Space.m) {
+                                ForEach(row) { provider in
+                                    ProviderRow(provider: provider)
+                                        .padding(Theme.Space.m)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                                        .cardSurface()
+                                }
+                            }
+                            // The row takes the tallest card's own height, and
+                            // the cards in it fill that.
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
             }
         }
+    }
+
+    /// The providers dealt into rows of as many as the width fits, keeping the
+    /// column width the adaptive grid used: one column on phones, roomier
+    /// grids on iPad.
+    private func rows(for width: CGFloat) -> [[ProviderLimits]] {
+        let all = sorted
+        let count = columnCount(for: width)
+        guard count > 0 else { return [all] }
+        return stride(from: 0, to: all.count, by: count).map {
+            Array(all[$0..<min($0 + count, all.count)])
+        }
+    }
+
+    /// How many cards share a row: as many minimum-width columns as fit.
+    private func columnCount(for width: CGFloat) -> Int {
+        let available = width > 0 ? width : 320
+        let minimum = min(available, typeSize.isAccessibilitySize ? 600 : 320)
+        let fits = Int((available + Theme.Space.m) / (minimum + Theme.Space.m))
+        return max(1, fits)
     }
 
     /// Only providers with an actual reading.

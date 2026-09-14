@@ -5,16 +5,16 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
-#if !os(macOS)
 import SwiftUI
 
-/// The iOS find bar: query, match count, previous/next, replace.
+/// The in-app find bar: query, match count, previous/next, replace.
 ///
-/// UIKit has no system find bar, so this sits above the buffer while it is
-/// open. The query gets the full first row; the controls get a second row
-/// of full-size targets, because four glyph buttons beside the field do not
-/// fit a phone portrait. The buttons carry keyboard shortcuts, so holding
-/// Command on an iPad discovers the same actions.
+/// Neither AppKit's grey system bar nor a UIKit equivalent carries the
+/// product Theme, so this sits above the buffer on every Apple client while
+/// it is open. The query gets the full first row; the controls get a second
+/// row of full-size targets, because four glyph buttons beside the field do
+/// not fit a phone portrait. The buttons carry keyboard shortcuts, so
+/// holding Command on an iPad discovers the same actions.
 struct EditorFindBar: View {
     @Bindable var find: EditorFindSession
     @FocusState private var queryFocused: Bool
@@ -24,14 +24,18 @@ struct EditorFindBar: View {
             HStack(spacing: Theme.Space.s) {
                 TextField("Find in file", text: $find.query)
                     .textFieldStyle(.themed)
+                    #if os(macOS)
+                    .disableAutocorrection(true)
+                    #else
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    #endif
                     .focused($queryFocused)
                     .accessibilityLabel("Find in file")
                     .onSubmit { find.goNext() }
                 if let count = find.countLabel {
                     Text(count)
-                        .font(ClientType.caption.monospacedDigit())
+                        .font(Theme.caption.monospacedDigit())
                         .foregroundStyle(Theme.controlGlyph)
                         .accessibilityLabel("\(count) matches")
                 }
@@ -76,8 +80,12 @@ struct EditorFindBar: View {
             if find.replacing {
                 TextField("Replace with", text: $find.replaceText)
                     .textFieldStyle(.themed)
+                    #if os(macOS)
+                    .disableAutocorrection(true)
+                    #else
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    #endif
                     .accessibilityLabel("Replace with")
                 HStack(spacing: Theme.Space.s) {
                     Button("Replace") { find.replaceCurrent() }
@@ -110,4 +118,3 @@ struct EditorFindBar: View {
         .onAppear { queryFocused = true }
     }
 }
-#endif

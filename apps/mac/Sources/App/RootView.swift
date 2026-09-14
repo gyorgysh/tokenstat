@@ -2784,54 +2784,90 @@ struct RootView: View {
         // owning host: selecting directly would fetch it against the folder
         // on screen and its peer.
         let isCurrent = chat.folderID == folder.id
-        let visible = expandedChatHistories.contains(folder.id)
-            ? conversations
-            : Array(conversations.prefix(5))
-        ForEach(visible) { conversation in
-            ChatSidebarConversationRow(
-                conversation: conversation,
-                // The reference, not the answer. The mark reads the store
-                // itself, so a draft coming or going does not lay this
-                // window out again. See `ChatDraftMark`.
-                draft: chat.draftReference(for: conversation.id, in: folder.id),
-                // The stamp, not the flag: the row's clock reads the same
-                // start the composer does, so the two never disagree.
-                runningSince: chat.turnStartedAt(for: conversation.id),
-                // A chat is the lit row only while the chat screen is the one
-                // in front. The model keeps its selection when you leave, so
-                // without the route test a conversation stayed marked under
-                // Notes, Home or a server, beside whatever row you did pick.
-                isSelected: chat.selected?.id == conversation.id
-                    && !showingChatOverview
-                    && route == .workspace(id: folder.id, section: .chat),
-                select: {
-                    if isCurrent {
-                        openSection(.chat, in: folder.id) {
-                            Task { await chat.select(conversation) }
+        // Five rows fit without pushing the sections below off screen. Past
+        // twenty the inline list stops growing: the full chat window owns
+        // search, so it owns the archive too.
+        let collapsedLimit = 5
+        let inlineLimit = 20
+        let expanded = expandedChatHistories.contains(folder.id)
+        // Arrow keys walk the whole folder list, not just the drawn rows.
+        // When the selection lands past the collapsed few, draw the expanded
+        // list so the lit row stays on screen instead of leaving it.
+        let selectedIndex = conversations.firstIndex { $0.id == chat.selected?.id }
+        let showExpanded = expanded || (selectedIndex.map { $0 >= collapsedLimit } ?? false)
+        let visible = showExpanded
+            ? Array(conversations.prefix(inlineLimit))
+            : Array(conversations.prefix(collapsedLimit))
+        Group {
+            ForEach(visible) { conversation in
+                ChatSidebarConversationRow(
+                    conversation: conversation,
+                    // The reference, not the answer. The mark reads the store
+                    // itself, so a draft coming or going does not lay this
+                    // window out again. See `ChatDraftMark`.
+                    draft: chat.draftReference(for: conversation.id, in: folder.id),
+                    // The stamp, not the flag: the row's clock reads the same
+                    // start the composer does, so the two never disagree.
+                    runningSince: chat.turnStartedAt(for: conversation.id),
+                    // A chat is the lit row only while the chat screen is the one
+                    // in front. The model keeps its selection when you leave, so
+                    // without the route test a conversation stayed marked under
+                    // Notes, Home or a server, beside whatever row you did pick.
+                    isSelected: chat.selected?.id == conversation.id
+                        && !showingChatOverview
+                        && route == .workspace(id: folder.id, section: .chat),
+                    select: {
+                        if isCurrent {
+                            openSection(.chat, in: folder.id) {
+                                Task { await chat.select(conversation) }
+                            }
+                        } else {
+                            chat.reveal(id: conversation.id, in: folder.id)
+                            openSection(.chat, in: folder.id)
                         }
-                    } else {
-                        chat.reveal(id: conversation.id, in: folder.id)
-                        openSection(.chat, in: folder.id)
+                    },
+                    remove: {
+                        Task { await chat.remove(conversation, in: folder.id) }
                     }
-                },
-                remove: {
-                    Task { await chat.remove(conversation, in: folder.id) }
-                }
-            )
-        }
-        if conversations.count > 5 {
-            Button(expandedChatHistories.contains(folder.id) ? "Show less" : "Show more") {
-                if expandedChatHistories.contains(folder.id) {
-                    expandedChatHistories.remove(folder.id)
-                } else {
-                    expandedChatHistories.insert(folder.id)
-                }
+                )
             }
-            .buttonStyle(.plain)
-            .font(Theme.fit(11, weight: .medium))
-            .foregroundStyle(Theme.accent)
-            .padding(.leading, Theme.Space.xl + Theme.Space.s)
-            .padding(.vertical, 4)
+            if conversations.count > collapsedLimit {
+                Button(expanded ? "Show less" : "Show more") {
+                    if expanded {
+                        expandedChatHistories.remove(folder.id)
+                    } else {
+                        expandedChatHistories.insert(folder.id)
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(Theme.fit(11, weight: .medium))
+                .foregroundStyle(Theme.accent)
+                .padding(.leading, Theme.Space.xl + Theme.Space.s)
+                .padding(.vertical, 4)
+            }
+            // Past the inline cap the rest live in the full chat window,
+            // where search, filters and sorting already exist.
+            if conversations.count > inlineLimit {
+                Button("See all chats", .search) {
+                    openSection(.chat, in: folder.id) {
+                        showingChatOverview = true
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(Theme.fit(11, weight: .medium))
+                .foregroundStyle(Theme.accent)
+                .padding(.leading, Theme.Space.xl + Theme.Space.s)
+                .padding(.vertical, 4)
+            }
+        }
+        .onChange(of: chat.selected?.id) { _, selectedID in
+            // Persist the auto-expansion above, so "Show more" still says
+            // what the list is doing after the selection moves on.
+            guard let selectedID,
+                  let index = conversations.firstIndex(where: { $0.id == selectedID }),
+                  index >= collapsedLimit
+            else { return }
+            expandedChatHistories.insert(folder.id)
         }
     }
 

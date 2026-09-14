@@ -774,6 +774,14 @@ struct ChatView: View {
                 installRepin(proxy)
                 pinToLatest(proxy, animated: false)
             }
+            .onChange(of: measuringRows) { _, near in
+                // Seamless history: the slice already holds older built
+                // rows, so reaching the top edge slides them in without a
+                // tap. One step per approach; the pill below stays as the
+                // fallback for a reader resting at the very top.
+                guard near, isActive, hiddenAboveCount > 0 else { return }
+                revealEarlier()
+            }
             .task(id: ChatPresentationIdentity(reading: model.readingIdentity, active: isActive)) {
                 // A lazy stack does not know its own height until it has drawn
                 // the rows, so the first scroll to the end lands on estimates.

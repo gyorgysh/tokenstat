@@ -286,11 +286,13 @@ struct TodoView: View {
                                 Task { await model.reorder(dragged, to: model.storageColumn(id), order: order) }
                             },
                             onTargeted: { on in
-                                if on {
-                                    dropTarget = id
-                                    dropBeforeID = card.id
-                                } else if dropTarget == id && dropBeforeID == card.id {
-                                    clearDropChrome()
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    if on {
+                                        dropTarget = id
+                                        dropBeforeID = card.id
+                                    } else if dropTarget == id && dropBeforeID == card.id {
+                                        clearDropChrome()
+                                    }
                                 }
                             }
                         )
@@ -333,15 +335,18 @@ struct TodoView: View {
                         .dropDestination(for: String.self) { ids, _ in
                             dropOnColumn(ids, column: id)
                         } isTargeted: { targeted in
-                            if targeted {
-                                dropTarget = id
-                                dropBeforeID = "__end__"
-                            } else if dropTarget == id && dropBeforeID == "__end__" {
-                                clearDropChrome()
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                if targeted {
+                                    dropTarget = id
+                                    dropBeforeID = "__end__"
+                                } else if dropTarget == id && dropBeforeID == "__end__" {
+                                    clearDropChrome()
+                                }
                             }
                         }
                 }
                 .frame(minHeight: columnBodyHeights[id] ?? 0, alignment: .top)
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: dropBeforeID)
 
             }
             .background(
@@ -370,19 +375,24 @@ struct TodoView: View {
         .dropDestination(for: String.self) { ids, _ in
             dropOnColumn(ids, column: id)
         } isTargeted: { targeted in
-            if targeted {
-                dropTarget = id
-                dropBeforeID = "__end__"
-            } else if dropTarget == id {
-                clearDropChrome()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                if targeted {
+                    dropTarget = id
+                    dropBeforeID = "__end__"
+                } else if dropTarget == id {
+                    clearDropChrome()
+                }
             }
         }
     }
 
+    /// Accent rule marking where the dragged card would land. Rows above
+    /// and below slide apart with a spring, like home-screen icon reorder.
     private var insertionLine: some View {
         RoundedRectangle(cornerRadius: 1)
             .fill(Theme.accent)
             .frame(height: 2)
+            .transition(.opacity.combined(with: .scale))
     }
 
     /// Drop highlight is local to the pointer. A same-column drop never
@@ -469,6 +479,12 @@ private struct CardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: Theme.Space.s) {
+                Image(systemName: "line.3.horizontal")
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .help("Drag to reorder")
+                    .accessibilityLabel("Drag to reorder")
+                    .padding(.top, 2)
                 FeatureMark(name: card.isNote ? "mark_note" : "mark_todo",
                             tint: card.isNote ? Theme.secondary : Theme.accent,
                             size: 16)

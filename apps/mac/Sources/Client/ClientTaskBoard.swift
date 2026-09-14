@@ -55,6 +55,9 @@ struct ClientTaskBoard: View {
     @Environment(\.scenePhase) private var phase
     @State private var showingFilters = false
     @State private var targetedColumn: String?
+    /// Live drop-placement preview: the column and card id the drag would land before, or "__end__".
+    @State private var dropColumn: String?
+    @State private var dropBeforeID: String?
     @State private var presentedRun: ClientTaskRunPresentation?
     @State private var presentedTerminal: ClientTerminalSession?
 
@@ -224,11 +227,24 @@ struct ClientTaskBoard: View {
                 Text("\(cards.count)").font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             }.padding(.vertical, Theme.Space.s)
             ForEach(cards) { card in
+                if dropColumn == id && dropBeforeID == card.id {
+                    insertionLine
+                }
                 taskRow(card)
                     .draggable(dragValue(card))
                     .dropDestination(for: String.self) { values, _ in
-                        drop(values, column: id, before: card.id)
+                        clearDropPreview()
+                        return drop(values, column: id, before: card.id)
+                    } isTargeted: { hovering in
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            if hovering { dropColumn = id; dropBeforeID = card.id }
+                            else if dropColumn == id && dropBeforeID == card.id { dropColumn = nil; dropBeforeID = nil }
+                        }
                     }
+            }
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: dropBeforeID)
+            if dropColumn == id && dropBeforeID == "__end__" {
+                insertionLine
             }
             if wide || cards.isEmpty {
                 Text(targetedColumn == id ? "Drop to move here" : cards.isEmpty ? "No tasks" : "")
@@ -236,9 +252,17 @@ struct ClientTaskBoard: View {
                     .frame(maxWidth: .infinity, minHeight: wide ? 72 : 44)
                     .background(Theme.accent.opacity(targetedColumn == id ? 0.08 : 0), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     .contentShape(Rectangle())
-                    .dropDestination(for: String.self) { values, _ in drop(values, column: id, before: nil) } isTargeted: { hovering in
-                        if hovering { targetedColumn = id }
-                        else if targetedColumn == id { targetedColumn = nil }
+                    .dropDestination(for: String.self) { values, _ in
+                        clearDropPreview()
+                        return drop(values, column: id, before: nil)
+                    } isTargeted: { hovering in
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            if hovering { targetedColumn = id; dropColumn = id; dropBeforeID = "__end__" }
+                            else {
+                                if targetedColumn == id { targetedColumn = nil }
+                                if dropColumn == id && dropBeforeID == "__end__" { dropColumn = nil; dropBeforeID = nil }
+                            }
+                        }
                     }
             }
         }
@@ -250,6 +274,10 @@ struct ClientTaskBoard: View {
             Button { session.editingTask = card } label: {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     HStack(alignment: .top) {
+                        Image(systemName: "line.3.horizontal")
+                            .font(Theme.caption.weight(.medium)).foregroundStyle(Theme.controlGlyph)
+                            .accessibilityLabel("Drag to reorder")
+                            .padding(.top, 2)
                         Text(card.title).font(Theme.callout.weight(.semibold)).lineLimit(3)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Image(systemName: "chevron.right").font(Theme.caption).foregroundStyle(Theme.controlGlyph).accessibilityHidden(true)
@@ -344,6 +372,22 @@ struct ClientTaskBoard: View {
             presentedTerminal = ClientTerminalSession(peer: peer, info: info)
         }
     }
+    /// Accent rule marking where the dragged card would land, like a
+    /// home-screen icon gap opening between rows.
+    private var insertionLine: some View {
+        RoundedRectangle(cornerRadius: 1)
+            .fill(Theme.accent)
+            .frame(height: 2)
+            .transition(.opacity.combined(with: .scale))
+    }
+
+    /// Drop highlight is local to the pointer. Clearing it on drop keeps a
+    /// stale preview from lingering after the card moves.
+    private func clearDropPreview() {
+        dropColumn = nil
+        dropBeforeID = nil
+    }
+
     private func dragValue(_ card: TodoCard) -> String { "tokenstat-task|\(WorkReferenceKey.encode(peer))|\(WorkReferenceKey.encode(card.id))" }
     private func drop(_ values: [String], column: String, before: String?) -> Bool {
         guard !session.working, session.capabilities?.edit == true, !session.filter.newestFirst, values.count == 1,

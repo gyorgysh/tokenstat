@@ -28,6 +28,15 @@ struct ClientReviewAllView: View {
     @State private var diffs: [String: FileDiff] = [:]
     @State private var failures = 0
     @State private var loaded = false
+    /// The width of the screen, measured.
+    ///
+    /// Inside a horizontally scrolling container `maxWidth: .infinity` means
+    /// *unbounded* rather than "fill", so rows grow enormous and the content
+    /// ends up somewhere off to the right. A row takes it as a minimum
+    /// instead, which is also what makes the tint behind a short line span
+    /// the screen rather than stop at the last character. Same measure as
+    /// the per-file diff and the commit detail.
+    @State private var paneWidth: CGFloat = 0
 
     private var shown: [FileChange] { Array(files.prefix(Self.maxFiles)) }
     private var leftoverFiles: Int { max(0, files.count - shown.count) }
@@ -62,6 +71,18 @@ struct ClientReviewAllView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    // Quantised: `minWidth` relays every row in the diff, and
+                    // a rotation or a split-view drag would otherwise deliver
+                    // a new width, and a full relayout, on every frame.
+                    .onAppear { paneWidth = (proxy.size.width / 8).rounded(.down) * 8 }
+                    .onChange(of: (proxy.size.width / 8).rounded(.down) * 8) { _, new in
+                        paneWidth = new
+                    }
+            }
+        )
         .navigationTitle("Review all")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
@@ -93,18 +114,7 @@ struct ClientReviewAllView: View {
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    let total = diff.hunks.reduce(0) { $0 + $1.lines.count }
-                    let (shown, cut) = diff.clipped(toLines: Self.linesPerFile)
-                    ForEach(shown.hunks) { hunk in
-                        ForEach(hunk.lines) { line in
-                            DiffLineRow(line: line, minWidth: 0)
-                        }
-                    }
-                    if cut > 0 {
-                        Text("Showing \(total - cut) of \(total) lines here.")
-                            .font(ClientType.caption)
-                            .foregroundStyle(Theme.controlGlyph)
-                    }
+                    hunks(of: diff)
                 }
             } else {
                 Text("Still loading.")
@@ -133,6 +143,47 @@ struct ClientReviewAllView: View {
         .cardSurface()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(file.path). \(file.kind.label)")
+    }
+
+    /// The width a row should fill, less the card's own horizontal padding.
+    private var rowWidth: CGFloat {
+        max(0, paneWidth - Theme.Space.m * 2)
+    }
+
+    /// One horizontal scroll around each file's diff, not one per row, so the
+    /// gutter and the code cannot slide out of step with each other. The same
+    /// container the per-file diff and the commit detail use: without it a
+    /// long line, which never wraps, forces its row wider than the screen and
+    /// the card overflows with nowhere to scroll.
+    private func hunks(of diff: FileDiff) -> some View {
+        let total = diff.hunks.reduce(0) { $0 + $1.lines.count }
+        let (shown, cut) = diff.clipped(toLines: Self.linesPerFile)
+        return VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(shown.hunks) { hunk in
+                        Text(hunk.header)
+                            .font(ClientType.code)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .padding(.horizontal, Theme.Space.s)
+                            .padding(.vertical, 6)
+                            .frame(minWidth: rowWidth, alignment: .leading)
+                            .background(Theme.panel)
+                        ForEach(hunk.lines) { line in
+                            DiffLineRow(line: line, minWidth: rowWidth)
+                        }
+                    }
+                }
+                .padding(.vertical, Theme.Space.xs)
+            }
+            if cut > 0 {
+                Text("Showing \(total - cut) of \(total) lines here.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .padding(.top, Theme.Space.xs)
+            }
+        }
     }
 
     private func load() async {

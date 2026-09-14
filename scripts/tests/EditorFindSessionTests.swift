@@ -70,6 +70,23 @@ struct EditorFindSessionTests {
             check(find.countLabel == "1 of 2000+", "capped count")
         }
         do {
+            // The UI order is buffer-first, query-second: the text view
+            // refreshes on load, and the bar only ever sets `query`. Typing
+            // the query must search without an explicit re-run, or the bar
+            // sits on "No results" while the word is on screen.
+            let find = EditorFindSession()
+            find.refresh(text: text)
+            check(find.matches.isEmpty, "no query, no matches")
+            find.query = "tokens"
+            check(find.matches.count == 4, "typing the query searches")
+            check(find.countLabel == "1 of 4", "count follows the query")
+            find.query = "missing"
+            check(find.countLabel == "No results", "retyping re-searches")
+            find.query = ""
+            check(find.matches.isEmpty, "clearing the query clears the matches")
+            check(find.countLabel == nil, "no count without a query")
+        }
+        do {
             var actions: [EditorFindSession.Action] = []
             let find = EditorFindSession()
             find.query = "tokens"

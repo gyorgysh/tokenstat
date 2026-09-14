@@ -52,8 +52,28 @@ struct EditorView: View {
     @ViewBuilder
     private func editor(_ document: EditorDocument) -> some View {
         #if os(macOS)
-        CodeTextView(document: document) {
-            Task { await model.saveText(path, in: folder.id) }
+        VStack(spacing: 0) {
+            if find.showing {
+                EditorFindBar(find: find)
+            }
+            CodeTextView(document: document, find: find) {
+                Task { await model.saveText(path, in: folder.id) }
+            }
+        }
+        .background {
+            // For focus in the SwiftUI chrome. With the caret in the text,
+            // the text view's key equivalents answer instead.
+            Group {
+                Button("Find next") {
+                    if find.showing { find.goNext() } else { find.showing = true }
+                }
+                .keyboardShortcut("g", modifiers: .command)
+                Button("Find previous") {
+                    if find.showing { find.goPrevious() } else { find.showing = true }
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+            }
+            .hidden()
         }
         #else
         VStack(spacing: 0) {
@@ -115,6 +135,12 @@ struct EditorView: View {
                     .foregroundStyle(.tertiary)
             }
 
+            Button("Find in file", systemImage: "magnifyingglass") { find.showing.toggle() }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.controlGlyph)
+                .help("Find in file")
+                .keyboardShortcut("f", modifiers: .command)
             Button("Save", .save) {
                 Task { await model.saveText(path, in: folder.id) }
             }

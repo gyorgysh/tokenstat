@@ -183,18 +183,20 @@ struct IOSCodeTextView: UIViewRepresentable {
         /// do not fight. The current match needs no paint: the selection
         /// itself is its highlight.
         private func applyFindHighlights(to view: UITextView, force: Bool) {
-            guard let find, find.showing, find.hasQuery else { return }
+            guard let find else { return }
             guard view.markedTextRange == nil else { return }
             guard force || find.revision != appliedFindRevision else { return }
             appliedFindRevision = find.revision
             let storage = view.textStorage
             storage.beginEditing()
             storage.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: storage.length))
-            let tint = UIColor(Theme.accent.opacity(0.22))
-            for range in find.matches {
-                guard range.location + range.length <= storage.length else { continue }
-                if find.current == range { continue }
-                storage.addAttribute(.backgroundColor, value: tint, range: range)
+            if find.showing, find.hasQuery {
+                let tint = UIColor(Theme.accent.opacity(0.22))
+                for range in find.matches {
+                    guard range.location + range.length <= storage.length else { continue }
+                    if find.current == range { continue }
+                    storage.addAttribute(.backgroundColor, value: tint, range: range)
+                }
             }
             storage.endEditing()
         }
@@ -283,6 +285,13 @@ struct IOSCodeTextView: UIViewRepresentable {
             guard !applying else { return }
             syncedText = textView.text
             document.setText(textView.text)
+            // Typing moves the matches, and `sync` compares against
+            // `syncedText`, so without this the count would sit stale until
+            // an unrelated reload recomputed it.
+            if textView.markedTextRange == nil {
+                find?.refresh(text: textView.text)
+                applyFindHighlights(to: textView, force: true)
+            }
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
