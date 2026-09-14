@@ -600,6 +600,14 @@ internal static class WorkspaceCommitComposer
                 files.Children.Add(row);
             }
             stack.Children.Add(files);
+            stack.Children.Add(ActionIconGlyph.Button("Review all", ActionIcon.Compare, async (_, _) =>
+            {
+                var all = included
+                    .Select(path => (path, "", (long?)null, (long?)null))
+                    .ToList();
+                await WorkspaceDiff.ShowReviewAllAsync(
+                    owner, all, reviewedPath => LoadReviewedAsync(workspaceId, session, reviewedPath));
+            }));
         }
         else if (session.Working)
         {
@@ -634,22 +642,10 @@ internal static class WorkspaceCommitComposer
     private static async Task ShowReviewedDiffAsync(
         UIElement owner, string workspaceId, WorkspaceCommitSession session, string path)
     {
-        JsonNode diff;
+        JsonNode? diff;
         try
         {
-            var review = session.SubmittedReview ?? session.Review;
-            if (review is null)
-            {
-                return;
-            }
-            diff = await AppServices.Host.CallAsync(
-                "workspace.commitReviewDiff",
-                new JsonObject
-                {
-                    ["id"] = workspaceId,
-                    ["review"] = review.DeepClone(),
-                    ["path"] = path,
-                });
+            diff = await LoadReviewedAsync(workspaceId, session, path);
         }
         catch (Exception ex)
         {
@@ -663,30 +659,24 @@ internal static class WorkspaceCommitComposer
             await Chrome.ShowDialog(owner, failed);
             return;
         }
-        var text = diff?["diff"]?.GetValue<string>()
-            ?? diff?["text"]?.GetValue<string>()
-            ?? diff?.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
-            ?? "(empty)";
-        if (text.Length > 20000)
+        await WorkspaceDiff.ShowFileDiffAsync(owner, path, diff);
+    }
+
+    private static async Task<JsonNode?> LoadReviewedAsync(
+        string workspaceId, WorkspaceCommitSession session, string path)
+    {
+        var review = session.SubmittedReview ?? session.Review;
+        if (review is null)
         {
-            text = text[..20000] + "…";
+            return null;
         }
-        var dialog = new ContentDialog
-        {
-            Title = path,
-            Content = new ScrollViewer
+        return await AppServices.Host.CallAsync(
+            "workspace.commitReviewDiff",
+            new JsonObject
             {
-                MaxHeight = 480,
-                Content = new TextBlock
-                {
-                    Text = text,
-                    FontFamily = Fonts.Mono,
-                    TextWrapping = TextWrapping.Wrap,
-                    IsTextSelectionEnabled = true,
-                },
-            },
-            CloseButtonText = "Close",
-        };
-        await Chrome.ShowDialog(owner, dialog);
+                ["id"] = workspaceId,
+                ["review"] = review.DeepClone(),
+                ["path"] = path,
+            });
     }
 }

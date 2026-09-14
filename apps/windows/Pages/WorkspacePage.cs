@@ -242,6 +242,7 @@ internal sealed class WorkspacePage : Page
 
         var session = WorkspaceCommitSession.For(_id);
         var available = new List<string>();
+        var reviewFiles = new List<(string Path, string Kind, long? Added, long? Removed)>();
         if (array is not null)
         {
             foreach (var entry in array)
@@ -250,6 +251,11 @@ internal sealed class WorkspacePage : Page
                 if (!string.IsNullOrEmpty(availablePath))
                 {
                     available.Add(availablePath);
+                    reviewFiles.Add((
+                        availablePath,
+                        Format.Text(entry, "kind", Format.Text(entry, "status")),
+                        entry?["added"] is null ? null : Format.Long(entry, "added"),
+                        entry?["removed"] is null ? null : Format.Long(entry, "removed")));
                 }
             }
         }
@@ -288,6 +294,18 @@ internal sealed class WorkspacePage : Page
             }
             await WorkspaceCommitComposer.ShowAsync(this, _id, folderName, branch);
             await LoadAsync();
+        }));
+        selectionRow.Children.Add(ActionIconGlyph.Button("Review all", ActionIcon.Compare, async (_, _) =>
+        {
+            if (reviewFiles.Count == 0)
+            {
+                _root.Children.Insert(1, Chrome.Banner(
+                    "No changes to review.",
+                    Theme.Warning,
+                    Symbol.Important));
+                return;
+            }
+            await WorkspaceDiff.ShowReviewAllAsync(this, reviewFiles, LoadOneDiffAsync);
         }));
         _root.Children.Add(selectionRow);
 
@@ -385,7 +403,7 @@ internal sealed class WorkspacePage : Page
 
     private async Task ShowDiffAsync(string filePath)
     {
-        JsonNode diff;
+        JsonNode? diff;
         try
         {
             diff = await AppServices.Host.CallAsync(
@@ -397,28 +415,14 @@ internal sealed class WorkspacePage : Page
             _root.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
             return;
         }
-        var text = diff?["diff"]?.GetValue<string>()
-            ?? diff?["text"]?.GetValue<string>()
-            ?? diff?.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
-            ?? "(empty)";
-        if (text.Length > 20000) text = text[..20000] + "…";
-        var dialog = new ContentDialog
-        {
-            Title = "Diff · " + filePath,
-            Content = new ScrollViewer
-            {
-                MaxHeight = 480,
-                Content = new TextBlock
-                {
-                    Text = text,
-                    FontFamily = Fonts.Mono,
-                    TextWrapping = TextWrapping.Wrap,
-                    IsTextSelectionEnabled = true,
-                },
-            },
-            CloseButtonText = "Close",
-        };
-        await Chrome.ShowDialog(this, dialog);
+        await WorkspaceDiff.ShowFileDiffAsync(this, "Diff · " + filePath, diff);
+    }
+
+    private async Task<JsonNode?> LoadOneDiffAsync(string path)
+    {
+        return await AppServices.Host.CallAsync(
+            "workspace.diff",
+            new JsonObject { ["id"] = _id, ["path"] = path });
     }
 
     private UIElement BranchBar(string current, string upstream, long ahead, long behind, string folderName)
