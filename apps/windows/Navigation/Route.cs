@@ -15,6 +15,7 @@ internal enum GlobalSection
     Insights,
     Machines,
     Ssh,
+    Search,
     Todo,
     Notes,
     Workflows,
@@ -40,7 +41,7 @@ internal enum WorkspaceSection
 internal static class Sections
 {
     public static readonly GlobalSection[] Standalone =
-        [GlobalSection.Home, GlobalSection.Insights, GlobalSection.Machines, GlobalSection.Ssh];
+        [GlobalSection.Home, GlobalSection.Insights, GlobalSection.Machines, GlobalSection.Ssh, GlobalSection.Search];
 
     public static readonly GlobalSection[] Everywhere =
         [GlobalSection.Todo, GlobalSection.Notes, GlobalSection.Workflows, GlobalSection.Automations];
@@ -51,6 +52,7 @@ internal static class Sections
         GlobalSection.Insights => "Insights",
         GlobalSection.Machines => "Devices",
         GlobalSection.Ssh => "SSH",
+        GlobalSection.Search => "Search",
         GlobalSection.Todo => "Tasks",
         GlobalSection.Notes => "Notes",
         GlobalSection.Workflows => "Workflows",
@@ -66,6 +68,7 @@ internal static class Sections
         GlobalSection.Insights => Microsoft.UI.Xaml.Controls.Symbol.FourBars,
         GlobalSection.Machines => Microsoft.UI.Xaml.Controls.Symbol.CellPhone,
         GlobalSection.Ssh => Microsoft.UI.Xaml.Controls.Symbol.Link,
+        GlobalSection.Search => Microsoft.UI.Xaml.Controls.Symbol.Find,
         GlobalSection.Todo => Microsoft.UI.Xaml.Controls.Symbol.AllApps,
         GlobalSection.Notes => Microsoft.UI.Xaml.Controls.Symbol.OpenFile,
         GlobalSection.Workflows => Microsoft.UI.Xaml.Controls.Symbol.Switch,

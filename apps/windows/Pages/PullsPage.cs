@@ -78,19 +78,19 @@ internal sealed class PullsPage : Page
                     _root.Children.Add(Chrome.Empty(
                         "This folder is not a Git repository",
                         "Pull requests appear for folders with a Git repository and a GitHub origin.",
-                        Symbol.Switch));
+                        ActionIcon.Merge));
                     break;
                 case "noRemote":
                     _root.Children.Add(Chrome.Empty(
                         "No GitHub origin yet",
                         "Add an origin remote to this repository, then refresh this screen.",
-                        Symbol.Switch));
+                        ActionIcon.Merge));
                     break;
                 default:
                     _root.Children.Add(Chrome.Empty(
                         "Pull requests are unavailable",
                         "Refresh to ask the workspace host again.",
-                        Symbol.Switch));
+                        ActionIcon.Merge));
                     break;
             }
         }
@@ -114,7 +114,7 @@ internal sealed class PullsPage : Page
             Background = Theme.AccentSoftBrush,
             Child = new SymbolIcon
             {
-                Symbol = Symbol.Switch,
+                Symbol = ActionIcon.Merge.Symbol(),
                 Foreground = Theme.AccentBrush,
             },
         };
@@ -123,7 +123,7 @@ internal sealed class PullsPage : Page
         titles.Children.Add(new TextBlock
         {
             Text = "Pull requests",
-            FontSize = 24,
+            FontSize = Fonts.PageTitle,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         titles.Children.Add(new TextBlock { Text = subtitle, Opacity = 0.66, TextWrapping = TextWrapping.Wrap });
@@ -225,7 +225,7 @@ internal sealed class PullsPage : Page
             _root.Children.Add(Chrome.Empty(
                 $"No {states[Math.Max(0, _state.SelectedIndex)]} pull requests",
                 "Nothing in this repository matches the selected scope and state.",
-                Symbol.Switch));
+                ActionIcon.Merge));
             return;
         }
         var list = new StackPanel { Spacing = Theme.SpaceS };
@@ -265,12 +265,12 @@ internal sealed class PullsPage : Page
             Opacity = 0.68,
             TextWrapping = TextWrapping.Wrap,
         });
-        body.Children.Add(new TextBlock
+        body.Children.Add(Fonts.Tabular(new TextBlock
         {
             Text = $"+{Format.Long(pull, "additions")}   −{Format.Long(pull, "deletions")}   {Format.Long(pull, "changedFiles")} files   {Format.Long(pull, "comments")} comments",
             FontSize = 11,
             Foreground = Theme.Brush(tint),
-        });
+        }));
         var card = new Border
         {
             Background = Theme.PanelBrush,
@@ -343,6 +343,8 @@ internal sealed class PullsPage : Page
                 Theme.Accent,
                 Symbol.Contact));
             _loginPoll = new CancellationTokenSource();
+            _root.Children.Insert(2, ActionIconGlyph.Button(
+                "Cancel sign-in", ActionIcon.Dismiss, async (_, _) => await CancelLoginAsync()));
             var token = _loginPoll.Token;
             while (!token.IsCancellationRequested)
             {
@@ -363,6 +365,23 @@ internal sealed class PullsPage : Page
         {
             _root.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
         }
+    }
+
+    /// <summary>
+    /// The device flow holds server state, so leaving it cancels the wait
+    /// rather than leaving a code the page forgot about.
+    /// </summary>
+    private async Task CancelLoginAsync()
+    {
+        _loginPoll?.Cancel();
+        try
+        {
+            await AppServices.Host.CallAsync("pulls.cancelSignIn", new JsonObject());
+        }
+        catch
+        {
+        }
+        await LoadAsync();
     }
 
     private async Task ShowDetailAsync(long number, bool refresh = false)
@@ -531,8 +550,22 @@ internal sealed class PullsPage : Page
 
     private static Grid LazyDiff()
     {
-        var progress = new ProgressRing { IsActive = true, Width = 28, Height = 28 };
-        return new Grid { MinHeight = 260, Tag = null, Children = { progress } };
+        // A spinner alone reads as frozen. The pulsing rows say what shape
+        // the diff lands in.
+        var progress = new ProgressRing
+        {
+            IsActive = true,
+            Width = 28,
+            Height = 28,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var stack = new StackPanel
+        {
+            Spacing = Theme.SpaceM,
+            Padding = new Thickness(0, Theme.SpaceM, 0, Theme.SpaceM),
+            Children = { progress, Motion.SkeletonRows(4) },
+        };
+        return new Grid { MinHeight = 260, Tag = null, Children = { stack } };
     }
 
     private async Task LoadDiffAsync(Grid holder, long number)
@@ -568,7 +601,7 @@ internal sealed class PullsPage : Page
             }
             if (stack.Children.Count == 0)
             {
-                stack.Children.Add(Chrome.Empty("No text changes", "This pull request has no line-by-line diff to show.", Symbol.OpenFile));
+                stack.Children.Add(Chrome.Empty("No text changes", "This pull request has no line-by-line diff to show.", ActionIcon.Compare));
             }
             holder.Children.Clear();
             holder.Children.Add(new ScrollViewer { MaxHeight = 620, Content = stack });
@@ -587,7 +620,7 @@ internal sealed class PullsPage : Page
         Child = new TextBlock
         {
             Text = text,
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = Fonts.Mono,
             FontSize = 12,
             IsTextSelectionEnabled = true,
         },
@@ -607,7 +640,7 @@ internal sealed class PullsPage : Page
         }
         if (stack.Children.Count == 0)
         {
-            stack.Children.Add(Chrome.Empty("No checks reported", "The head commit does not publish a check suite.", Symbol.Accept));
+            stack.Children.Add(Chrome.Empty("No checks reported", "The head commit does not publish a check suite.", ActionIcon.Done));
         }
         return new ScrollViewer { MaxHeight = 600, Content = stack };
     }

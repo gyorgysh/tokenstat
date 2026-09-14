@@ -138,10 +138,10 @@ internal sealed class NotesPage : Page
         }
         if (list.Children.Count == 0)
         {
-            _root.Children.Add(Chrome.Empty(
+            _root.Children.Add(EmptyState.View(
                 "No notes yet",
                 "A note is text kept beside the folder it belongs to.",
-                Symbol.OpenFile));
+                EmptyArtKind.Notes));
             return;
         }
         _root.Children.Add(Chrome.Card("Notes", list));

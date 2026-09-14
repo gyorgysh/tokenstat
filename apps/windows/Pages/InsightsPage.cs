@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
+using Tokenstat.Host;
 
 namespace Tokenstat.Pages;
 
@@ -79,10 +80,10 @@ internal sealed class InsightsPage : Page
 
         if (rows is not JsonArray array || array.Count == 0)
         {
-            _root.Children.Add(Chrome.Empty(
+            _root.Children.Add(EmptyState.View(
                 "Nothing in this window",
                 "Scan local logs, or pick a different grouping.",
-                Symbol.FourBars));
+                EmptyArtKind.FirstBars));
             return;
         }
 

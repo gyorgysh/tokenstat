@@ -40,6 +40,24 @@
     <Content Include="Assets\tokenstat.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!--
+      Bundled typefaces, byte-identical copies of the Mac app's files. Content
+      with PreserveNewest lands beside the exe in publish output, so the zip
+      and the per-user install under %LOCALAPPDATA% carry them along. The OFL
+      texts ship beside the files they cover.
+    -->
+    <Content Include="Assets\Fonts\Manrope-Variable.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\Fonts\JetBrainsMono-Variable.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\Fonts\Manrope-OFL.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\Fonts\JetBrainsMono-OFL.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>

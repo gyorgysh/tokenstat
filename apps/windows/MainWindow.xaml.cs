@@ -71,21 +71,41 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                _frame.Content = new TerminalPage(workspaceId, sessionId);
+                SetContent(new TerminalPage(workspaceId, sessionId));
             });
         };
         AppServices.OpenBrowser = (url, host, port, unlisten) =>
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                _frame.Content = new BrowserPage(url, host, port, unlisten);
+                SetContent(new BrowserPage(url, host, port, unlisten));
             });
         };
         AppServices.OpenScreen = (peer, name) =>
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                _frame.Content = new ScreenPage(peer, name);
+                SetContent(new ScreenPage(peer, name));
+            });
+        };
+        AppServices.OpenOnboarding = () =>
+        {
+            DispatcherQueue.TryEnqueue(() => ShowOnboarding(firstRun: false));
+        };
+        AppServices.OpenWorkspace = (workspaceId, section) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                SetContent(section switch
+                {
+                    WorkspaceSection.Files => new EditorPage(workspaceId),
+                    WorkspaceSection.Notes => new NotesPage(workspaceId),
+                    WorkspaceSection.Workflows => new WorkflowsPage(workspaceId),
+                    WorkspaceSection.Automations => new AutomationsPage(workspaceId),
+                    WorkspaceSection.Pulls => new PullsPage(workspaceId),
+                    WorkspaceSection.Chat => new ChatPage(workspaceId),
+                    _ => new WorkspacePage(workspaceId, section),
+                });
             });
         };
 
@@ -94,6 +114,8 @@ public sealed partial class MainWindow : Window
             _nav.SelectedItem = first;
         }
 
+        // First frame is the brand on paper, before the helper has answered.
+        ShowHostSplash(null);
         _ = LoadWorkspacesAsync();
         AppServices.Update.Changed += () => DispatcherQueue.TryEnqueue(RefreshUpdateBadge);
     }
@@ -118,12 +140,17 @@ public sealed partial class MainWindow : Window
                 listed = await AppServices.Host.CallAsync("workspace.list");
                 break;
             }
-            catch
+            catch (Exception ex)
             {
-                DispatcherQueue.TryEnqueue(ShowHostSplash);
+                var info = FriendlyError.From(ex.Message);
+                DispatcherQueue.TryEnqueue(() => ShowHostSplash(info));
+                // Try again shortens the wait. One loop only: the button
+                // wakes this wait rather than starting a second loop.
+                _hostWake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var wake = _hostWake.Task;
                 try
                 {
-                    await Task.Delay(1000);
+                    await Task.WhenAny(Task.Delay(2000), wake);
                 }
                 catch
                 {
@@ -185,21 +212,69 @@ public sealed partial class MainWindow : Window
                 Show(tag);
             }
             _hostSplash = null;
+            if (!OnboardingState.HasOnboarded)
+            {
+                ShowOnboarding(firstRun: true);
+            }
         });
     }
 
-    private void ShowHostSplash()
+    private TaskCompletionSource? _hostWake;
+    private string _hostSplashKey = "";
+
+    private void ShowHostSplash(FriendlyErrorInfo? error)
     {
+        // Dismissed once the helper answered: a late retry must not drag the
+        // splash back over the first page.
         if (_hostSplash is not null && _frame.Content != _hostSplash)
         {
             return;
         }
-        _hostSplash = new ScrollViewer
+        var state = error is null
+            ? HostSplashState.Starting
+            : error.Title == "No connection" ? HostSplashState.Offline : HostSplashState.Error;
+        var key = state + "|" + (error?.Title ?? "");
+        // Same state already on screen: rebuilding would restart the rise.
+        if (_hostSplash is not null && _hostSplashKey == key)
         {
-            Padding = new Thickness(Theme.SpaceL),
-            Content = Chrome.Banner("Host is starting…", Theme.Accent, Symbol.Refresh),
-        };
-        _frame.Content = _hostSplash;
+            return;
+        }
+        _hostSplashKey = key;
+        var splash = HostSplash.View(state, error, () => { _hostWake?.TrySetResult(); });
+        _hostSplash = splash;
+        _frame.Content = splash;
+        Motion.PlayDoor(splash);
+    }
+
+    /// <summary>
+    /// The first-run tour over the current page. First run marks it seen on
+    /// the way in, so any exit, Skip, Get started, or the sidebar, counts.
+    /// Re-opened from About it leaves the flag alone.
+    /// </summary>
+    private void ShowOnboarding(bool firstRun)
+    {
+        if (firstRun)
+        {
+            OnboardingState.HasOnboarded = true;
+        }
+        SetContent(new OnboardingPage(() =>
+        {
+            if (_nav.SelectedItem is NavigationViewItem selected
+                && selected.Tag is string tag)
+            {
+                Show(tag);
+            }
+        }));
+    }
+
+    /// <summary>
+    /// Mount a page with the smooth arrival. Every navigation goes through
+    /// here so content lands the same way on every screen.
+    /// </summary>
+    private void SetContent(Page page)
+    {
+        _frame.Content = page;
+        Motion.PlayArrival(page);
     }
 
     private void NavOnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -218,12 +293,13 @@ public sealed partial class MainWindow : Window
         {
             if (Enum.TryParse<GlobalSection>(tag["global:".Length..], out var section))
             {
-                _frame.Content = section switch
+                Page page = section switch
                 {
                     GlobalSection.Home => new HomePage(),
                     GlobalSection.Insights => new InsightsPage(),
                     GlobalSection.Machines => new MachinesPage(),
                     GlobalSection.Ssh => new SshPage(),
+                    GlobalSection.Search => new WorkSearchPage(),
                     GlobalSection.Todo => new TodoPage(),
                     GlobalSection.Notes => new NotesPage(),
                     GlobalSection.Workflows => new WorkflowsPage(),
@@ -232,6 +308,7 @@ public sealed partial class MainWindow : Window
                     GlobalSection.About => new AboutPage(),
                     _ => new AboutPage(),
                 };
+                SetContent(page);
             }
             return;
         }
@@ -243,8 +320,9 @@ public sealed partial class MainWindow : Window
                 && Enum.TryParse<WorkspaceSection>(rest[(i + 1)..], out var section))
             {
                 var id = rest[..i];
-                _frame.Content = section switch
+                Page page = section switch
                 {
+                    WorkspaceSection.Files => new EditorPage(id),
                     WorkspaceSection.Notes => new NotesPage(id),
                     WorkspaceSection.Workflows => new WorkflowsPage(id),
                     WorkspaceSection.Automations => new AutomationsPage(id),
@@ -252,6 +330,7 @@ public sealed partial class MainWindow : Window
                     WorkspaceSection.Chat => new ChatPage(id),
                     _ => new WorkspacePage(id, section),
                 };
+                SetContent(page);
             }
         }
     }

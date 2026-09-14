@@ -213,6 +213,45 @@ internal static class Format
     public static bool IsLegend(string? tier) =>
         string.Equals(tier?.Trim(), "legend", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// A server moment in the user's own reading: minutes, hours, days ago.
+    /// Empty or unparsable means never, which is a fact about the account
+    /// rather than a failure to read it.
+    /// </summary>
+    public static string Relative(string? value)
+    {
+        if (string.IsNullOrEmpty(value)
+            || !DateTimeOffset.TryParse(value, out var moment))
+        {
+            return "Never";
+        }
+        var age = DateTimeOffset.Now - moment;
+        if (age < TimeSpan.Zero)
+        {
+            return "just now";
+        }
+        if (age < TimeSpan.FromMinutes(1))
+        {
+            return "just now";
+        }
+        if (age < TimeSpan.FromHours(1))
+        {
+            var minutes = Math.Max(1, (int)age.TotalMinutes);
+            return minutes == 1 ? "1 minute ago" : $"{minutes} minutes ago";
+        }
+        if (age < TimeSpan.FromDays(1))
+        {
+            var hours = Math.Max(1, (int)age.TotalHours);
+            return hours == 1 ? "1 hour ago" : $"{hours} hours ago";
+        }
+        if (age < TimeSpan.FromDays(30))
+        {
+            var days = Math.Max(1, (int)age.TotalDays);
+            return days == 1 ? "1 day ago" : $"{days} days ago";
+        }
+        return moment.LocalDateTime.ToString("d");
+    }
+
     /// <summary>One line for an automation schedule, matching the Mac summary.</summary>
     public static string Cadence(JsonNode? item)
     {

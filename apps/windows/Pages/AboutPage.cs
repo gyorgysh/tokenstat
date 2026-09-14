@@ -69,6 +69,8 @@ internal sealed class AboutPage : Page
             MaxWidth = 480,
             Opacity = 0.8,
         });
+        body.Children.Add(ActionIconGlyph.Button(
+            "Take the tour again", ActionIcon.Help, (_, _) => AppServices.OpenOnboarding?.Invoke()));
         if (SelfInstall.IsRunningFromInstall)
         {
             body.Children.Add(new TextBlock

@@ -126,7 +126,7 @@ internal sealed class ChatPage : Page
                 _root.Children.Add(Chrome.Empty(
                     "Start a chat",
                     "Ask an agent to explore, plan, or work in this folder.",
-                    Symbol.Message,
+                    ActionIcon.Comment,
                     ActionIconGlyph.PrimaryButton("New chat", ActionIcon.Create, async (_, _) => await CreateAsync())));
                 return;
             }
@@ -158,7 +158,7 @@ internal sealed class ChatPage : Page
             Background = Theme.AccentSoftBrush,
             Child = new SymbolIcon
             {
-                Symbol = Symbol.Message,
+                Symbol = ActionIcon.Comment.Symbol(),
                 Foreground = Theme.AccentBrush,
             },
         };
@@ -167,7 +167,7 @@ internal sealed class ChatPage : Page
         titles.Children.Add(new TextBlock
         {
             Text = "Chat",
-            FontSize = 24,
+            FontSize = Fonts.PageTitle,
             FontWeight = FontWeights.SemiBold,
         });
         titles.Children.Add(new TextBlock
@@ -349,7 +349,7 @@ internal sealed class ChatPage : Page
             _setupExpanded = false;
             PaintConversation();
         }));
-        body.Children.Add(Caption("How this chat should work"));
+        body.Children.Add(Chrome.SectionLabel("How this chat should work"));
         body.Children.Add(Muted("Agent, model and mode also live on the composer. Personas stay here."));
 
         body.Children.Add(Labeled("Agent", AgentPicker(backendId, running)));
@@ -412,7 +412,96 @@ internal sealed class ChatPage : Page
         {
             _ = UpdateAsync(new JsonObject { ["autonomy"] = "bypass" });
         }
+        body.Children.Add(InstructionsCard(
+            Format.Text(chat, "systemPrompt"),
+            Format.Text(backend, "label", "This agent"),
+            running));
         return Card("Setup", body);
+    }
+
+    /// <summary>
+    /// What a conversation tells its agent before it hears the person. The
+    /// brief belongs to the person and is editable here; the one rule
+    /// tokenstat adds is readable under it rather than described.
+    /// </summary>
+    private UIElement InstructionsCard(string systemPrompt, string agent, bool running)
+    {
+        var chatId = _openId;
+        var stack = new StackPanel { Spacing = Theme.SpaceS };
+        stack.Children.Add(Chrome.SectionLabel("Instructions"));
+        var brief = new TextBox
+        {
+            PlaceholderText = "How should this agent behave?",
+            Text = systemPrompt,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 76,
+            IsEnabled = !running,
+        };
+        stack.Children.Add(brief);
+        var note = Muted("Sent as an instruction, never as part of your message.");
+        stack.Children.Add(note);
+        // The handler is attached after creation so it can name the button
+        // it hides. Declaring the handler inline would use save before it
+        // exists.
+        var save = ActionIconGlyph.PrimaryButton("Save", ActionIcon.Save, (_, _) => { });
+        save.Click += async (_, _) =>
+        {
+            await UpdateAsync(new JsonObject { ["systemPrompt"] = brief.Text ?? "" });
+            save.Visibility = Visibility.Collapsed;
+        };
+        save.Visibility = Visibility.Collapsed;
+        brief.TextChanged += (_, _) =>
+        {
+            save.Visibility = brief.Text != systemPrompt ? Visibility.Visible : Visibility.Collapsed;
+        };
+        stack.Children.Add(save);
+        var added = new TextBlock
+        {
+            FontFamily = Fonts.Mono,
+            FontSize = 11,
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            Visibility = Visibility.Collapsed,
+        };
+        var toggle = ActionIconGlyph.Button(
+            "What tokenstat adds", ActionIcon.More, (_, _) =>
+            {
+                added.Visibility = added.Visibility == Visibility.Visible
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+            });
+        stack.Children.Add(toggle);
+        stack.Children.Add(added);
+        if (chatId is not null)
+        {
+            _ = LoadInstructionsAsync(chatId, agent, note, added);
+        }
+        return stack;
+    }
+
+    private async Task LoadInstructionsAsync(string chatId, string agent, TextBlock note, TextBlock added)
+    {
+        JsonNode answer;
+        try
+        {
+            answer = await AppServices.Host.CallAsync(
+                "chat.instructions", new JsonObject { ["id"] = chatId });
+        }
+        catch
+        {
+            return;
+        }
+        if (_openId != chatId)
+        {
+            return;
+        }
+        var text = Format.Text(answer, "added");
+        added.Text = string.IsNullOrEmpty(text) ? "Not available on this computer." : text;
+        note.Text = Format.Text(answer, "channel") == "systemPrompt"
+            ? $"{agent} takes this as a system prompt, so it is never part of your message."
+            : $"{agent} has no system-prompt flag, so this is sent once, ahead of your message.";
     }
 
     private UIElement AgentPicker(string current, bool disabled)
@@ -519,34 +608,15 @@ internal sealed class ChatPage : Page
 
     private UIElement ModePills(string mode, bool enabled)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        row.Children.Add(ModePill("Plan", "plan", mode, enabled));
-        row.Children.Add(ModePill("Execute", "execute", mode, enabled));
-        return row;
-    }
-
-    private UIElement ModePill(string label, string value, string current, bool enabled)
-    {
-        var selected = value == current;
-        var button = new Button
-        {
-            Content = label,
-            IsEnabled = enabled,
-            Background = selected ? Theme.AccentBrush : Theme.AccentSoftBrush,
-            Foreground = selected
-                ? new SolidColorBrush(Colors.White)
-                : Theme.AccentBrush,
-            BorderBrush = Theme.Brush(Theme.Accent),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-        };
-        button.Click += async (_, _) =>
-        {
-            if (value == current) return;
-            await UpdateAsync(new JsonObject { ["mode"] = value });
-            PaintConversation();
-        };
-        return button;
+        return Chrome.Segmented(
+            [("plan", "Plan"), ("execute", "Execute")],
+            mode,
+            async value =>
+            {
+                await UpdateAsync(new JsonObject { ["mode"] = value });
+                PaintConversation();
+            },
+            enabled: enabled);
     }
 
     private static string ItemContentKey(DisplayItem item) => item.Kind switch
@@ -571,6 +641,28 @@ internal sealed class ChatPage : Page
         }
         var items = Coalesce(_events);
         var desiredCount = items.Count + (Busy() ? 1 : 0);
+
+        // The host has not answered yet. A question nobody replied to is not
+        // an empty answer, so it gets the waiting picture, not a blank.
+        if (items.Count == 0 && Busy())
+        {
+            const string waitingKey = "__waiting__";
+            var current = _transcript.Children.Count == 1
+                ? _transcript.Children[0] as FrameworkElement
+                : null;
+            if (current?.Tag as string != waitingKey)
+            {
+                _transcript.Children.Clear();
+                var waiting = EmptyState.View(
+                    "Waiting for the host",
+                    "The host has not answered yet.",
+                    EmptyArtKind.Waiting);
+                waiting.Tag = waitingKey;
+                _transcript.Children.Add(waiting);
+            }
+            if (_followEnd) _scroll?.ChangeView(null, _scroll.ScrollableHeight, null, true);
+            return;
+        }
 
         for (int i = 0; i < items.Count; i++)
         {
@@ -606,26 +698,19 @@ internal sealed class ChatPage : Page
                 var existing = _transcript.Children[workingIdx] as FrameworkElement;
                 if (existing?.Tag as string != workingKey)
                 {
-                    var workingBlock = new TextBlock
-                    {
-                        Text = "Working",
-                        Foreground = Theme.AccentBrush,
-                        FontSize = 12,
-                        Tag = workingKey,
-                    };
+                    // It breathes while the turn runs, so a long wait does not
+                    // read as frozen.
+                    var workingBlock = Motion.WorkingLabel();
+                    workingBlock.Tag = workingKey;
                     _transcript.Children.RemoveAt(workingIdx);
                     _transcript.Children.Insert(workingIdx, workingBlock);
                 }
             }
             else
             {
-                _transcript.Children.Add(new TextBlock
-                {
-                    Text = "Working",
-                    Foreground = Theme.AccentBrush,
-                    FontSize = 12,
-                    Tag = workingKey,
-                });
+                var working = Motion.WorkingLabel();
+                working.Tag = workingKey;
+                _transcript.Children.Add(working);
             }
         }
 
@@ -739,7 +824,7 @@ internal sealed class ChatPage : Page
                 Content = new TextBlock
                 {
                     Text = code,
-                    FontFamily = new FontFamily("Consolas"),
+                    FontFamily = Fonts.Mono,
                     FontSize = 12,
                     IsTextSelectionEnabled = true,
                 },
@@ -766,7 +851,7 @@ internal sealed class ChatPage : Page
             body.Children.Add(new TextBlock
             {
                 Text = item.Detail,
-                FontFamily = new FontFamily("Consolas"),
+                FontFamily = Fonts.Mono,
                 FontSize = 12,
                 Opacity = 0.78,
                 IsTextSelectionEnabled = true,
@@ -782,25 +867,26 @@ internal sealed class ChatPage : Page
         heading.Children.Add(new TextBlock
         {
             Text = item.Path,
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = Fonts.Mono,
             FontSize = 12,
             Opacity = 0.78,
             TextWrapping = TextWrapping.Wrap,
         });
-        heading.Children.Add(new TextBlock
+        // Diff counts stay steady as they update: tabular figures.
+        heading.Children.Add(Fonts.Tabular(new TextBlock
         {
             Text = "+" + item.Added,
             Foreground = Theme.Brush(Theme.DiffAdded),
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
-        });
-        heading.Children.Add(new TextBlock
+        }));
+        heading.Children.Add(Fonts.Tabular(new TextBlock
         {
             Text = "−" + item.Removed,
             Foreground = Theme.Brush(Theme.DiffRemoved),
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
-        });
+        }));
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(heading);
         if (!string.IsNullOrEmpty(item.Patch))
@@ -820,7 +906,7 @@ internal sealed class ChatPage : Page
                     Child = new TextBlock
                     {
                         Text = line,
-                        FontFamily = new FontFamily("Consolas"),
+                        FontFamily = Fonts.Mono,
                         FontSize = 12,
                         IsTextSelectionEnabled = true,
                     },
@@ -845,7 +931,7 @@ internal sealed class ChatPage : Page
         body.Children.Add(new TextBlock
         {
             Text = Format.Text(approval, "preview"),
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = Fonts.Mono,
             FontSize = 12,
             IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
@@ -972,17 +1058,17 @@ internal sealed class ChatPage : Page
         track.Children.Add(split);
         body.Children.Add(track);
         var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
-        legend.Children.Add(new TextBlock { Text = $"In {input:N0}", FontSize = 12 });
-        legend.Children.Add(new TextBlock { Text = $"Out {output:N0}", FontSize = 12 });
+        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = $"In {input:N0}", FontSize = 12 }));
+        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = $"Out {output:N0}", FontSize = 12 }));
         if (cost > 0)
         {
-            legend.Children.Add(new TextBlock
+            legend.Children.Add(Fonts.Tabular(new TextBlock
             {
                 Text = cost.ToString("C2", CultureInfo.GetCultureInfo("en-US")),
                 Foreground = Theme.AccentBrush,
                 FontWeight = FontWeights.SemiBold,
                 FontSize = 12,
-            });
+            }));
         }
         body.Children.Add(legend);
         if (cache > 0) body.Children.Add(Muted($"{cache:N0} cached"));
@@ -1843,18 +1929,10 @@ internal sealed class ChatPage : Page
     private static UIElement Labeled(string label, UIElement control)
     {
         var stack = new StackPanel { Spacing = Theme.SpaceXs };
-        stack.Children.Add(Caption(label));
+        stack.Children.Add(Chrome.SectionLabel(label));
         stack.Children.Add(control);
         return stack;
     }
-
-    private static TextBlock Caption(string text) => new()
-    {
-        Text = text.ToUpperInvariant(),
-        FontSize = 11,
-        FontWeight = FontWeights.SemiBold,
-        Opacity = 0.58,
-    };
 
     private static TextBlock Muted(string text) => new()
     {
@@ -1881,7 +1959,7 @@ internal sealed class ChatPage : Page
 
     private static void Detach(UIElement element)
     {
-        if (element.Parent is Panel panel)
+        if (VisualTreeHelper.GetParent(element) is Panel panel)
         {
             panel.Children.Remove(element);
         }

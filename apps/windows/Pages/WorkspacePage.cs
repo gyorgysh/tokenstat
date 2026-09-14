@@ -22,7 +22,6 @@ internal sealed class WorkspacePage : Page
     private readonly WorkspaceSection _section;
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private string _path = "";
-    private string _commitDraft = "";
 
     public WorkspacePage(string id, WorkspaceSection section)
     {
@@ -69,7 +68,7 @@ internal sealed class WorkspacePage : Page
                         _section.Label() + " on Windows",
                         "The Mac app has the full " + _section.Label().ToLowerInvariant()
                         + " surface. This build lists the folder and the shared boards.",
-                        Symbol.Folder));
+                        ActionIcon.Reveal));
                     break;
             }
         }
@@ -109,7 +108,7 @@ internal sealed class WorkspacePage : Page
         var array = tree as JsonArray ?? tree["entries"] as JsonArray;
         if (array is null || array.Count == 0)
         {
-            _root.Children.Add(Chrome.Empty("Empty folder", "Nothing to list here.", Symbol.Folder));
+            _root.Children.Add(EmptyState.View("Empty folder", "Nothing to list here.", EmptyArtKind.Files));
             return;
         }
 
@@ -168,7 +167,7 @@ internal sealed class WorkspacePage : Page
             Text = shown,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = Fonts.Mono,
             IsReadOnly = huge,
             Height = 420,
             MinWidth = 640,
@@ -231,41 +230,91 @@ internal sealed class WorkspacePage : Page
             ?? status["files"] as JsonArray
             ?? status as JsonArray;
         var branch = Format.Text(git, "branch", Format.Text(status, "branch"));
+        var upstream = Format.Text(git, "upstream", Format.Text(status, "upstream"));
+        var ahead = Format.Long(git, "ahead");
+        var behind = Format.Long(git, "behind");
+        var folderName = await FolderNameAsync();
 
         if (!string.IsNullOrEmpty(branch))
         {
-            _root.Children.Add(await BranchBarAsync(branch));
+            _root.Children.Add(BranchBar(branch, upstream, ahead, behind, folderName));
         }
 
-        var commitBox = new TextBox
+        var session = WorkspaceCommitSession.For(_id);
+        var available = new List<string>();
+        var reviewFiles = new List<(string Path, string Kind, long? Added, long? Removed)>();
+        if (array is not null)
         {
-            PlaceholderText = "Commit message",
-            Text = _commitDraft,
-            MinWidth = 280,
-        };
-        commitBox.TextChanged += (_, _) => _commitDraft = commitBox.Text;
-        var commitRow = new StackPanel
+            foreach (var entry in array)
+            {
+                var availablePath = Format.Text(entry, "path", Format.Text(entry, "name"));
+                if (!string.IsNullOrEmpty(availablePath))
+                {
+                    available.Add(availablePath);
+                    reviewFiles.Add((
+                        availablePath,
+                        Format.Text(entry, "kind", Format.Text(entry, "status")),
+                        entry?["added"] is null ? null : Format.Long(entry, "added"),
+                        entry?["removed"] is null ? null : Format.Long(entry, "removed")));
+                }
+            }
+        }
+        session.Reconcile(available);
+
+        var selectionRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = Theme.SpaceS,
         };
-        commitRow.Children.Add(commitBox);
-        commitRow.Children.Add(ActionIconGlyph.Button("Commit", ActionIcon.Commit, async (_, _) =>
+        selectionRow.Children.Add(new TextBlock
         {
-            await GitwriteAsync("workspace.commit", new JsonObject
-            {
-                ["id"] = _id,
-                ["message"] = _commitDraft,
-            });
+            Text = $"{session.SelectedCount} of {available.Count} selected",
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0.7,
+        });
+        selectionRow.Children.Add(ActionIconGlyph.Button("Select all", ActionIcon.Apply, async (_, _) =>
+        {
+            session.SetAll(available);
+            await LoadAsync();
         }));
-        _root.Children.Add(commitRow);
+        selectionRow.Children.Add(ActionIconGlyph.Button("Clear", ActionIcon.Dismiss, async (_, _) =>
+        {
+            session.ClearSelection();
+            await LoadAsync();
+        }));
+        selectionRow.Children.Add(ActionIconGlyph.Button("Review and commit", ActionIcon.Commit, async (_, _) =>
+        {
+            if (session.SelectedCount == 0)
+            {
+                _root.Children.Insert(1, Chrome.Banner(
+                    "Select at least one file to review.",
+                    Theme.Warning,
+                    Symbol.Important));
+                return;
+            }
+            await WorkspaceCommitComposer.ShowAsync(this, _id, folderName, branch);
+            await LoadAsync();
+        }));
+        selectionRow.Children.Add(ActionIconGlyph.Button("Review all", ActionIcon.Compare, async (_, _) =>
+        {
+            if (reviewFiles.Count == 0)
+            {
+                _root.Children.Insert(1, Chrome.Banner(
+                    "No changes to review.",
+                    Theme.Warning,
+                    Symbol.Important));
+                return;
+            }
+            await WorkspaceDiff.ShowReviewAllAsync(this, reviewFiles, LoadOneDiffAsync);
+        }));
+        _root.Children.Add(selectionRow);
 
         if (array is null || array.Count == 0)
         {
             var clean = string.IsNullOrEmpty(branch)
                 ? "No uncommitted changes in this folder."
                 : $"On {branch}. No uncommitted changes.";
-            _root.Children.Add(Chrome.Empty("Clean tree", clean, Symbol.Accept));
+            _root.Children.Add(EmptyState.View("Clean tree", clean, EmptyArtKind.Changes));
             return;
         }
 
@@ -284,14 +333,34 @@ internal sealed class WorkspacePage : Page
             }
             var filePath = path;
             var line = new Grid();
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            line.Children.Add(new TextBlock
+            var check = new CheckBox
             {
-                Text = string.IsNullOrEmpty(kind) ? path : $"{kind} {path}",
+                IsChecked = session.Paths.Contains(filePath),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            ToolTipService.SetToolTip(check, "Include in the next commit");
+            check.Checked += async (_, _) =>
+            {
+                session.Select(filePath);
+                await LoadAsync();
+            };
+            check.Unchecked += async (_, _) =>
+            {
+                session.Select(filePath);
+                await LoadAsync();
+            };
+            line.Children.Add(check);
+            var label = new TextBlock
+            {
+                Text = string.IsNullOrEmpty(kind) ? path : $"{WorkspaceGit.KindLabel(kind)} · {path}",
                 TextWrapping = TextWrapping.Wrap,
                 VerticalAlignment = VerticalAlignment.Center,
-            });
+            };
+            Grid.SetColumn(label, 1);
+            line.Children.Add(label);
             var actions = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -315,20 +384,26 @@ internal sealed class WorkspacePage : Page
                     ["paths"] = paths,
                 });
             }));
-            actions.Children.Add(ActionIconGlyph.Button("Diff", ActionIcon.Diff, async (_, _) =>
+            actions.Children.Add(ActionIconGlyph.Button("Diff", ActionIcon.Compare, async (_, _) =>
             {
                 await ShowDiffAsync(filePath);
             }));
-            Grid.SetColumn(actions, 1);
+            Grid.SetColumn(actions, 2);
             line.Children.Add(actions);
             list.Children.Add(line);
         }
         _root.Children.Add(Chrome.Card("Changes", list));
+
+        var history = await WorkspaceHistory.LoadCardAsync(this, _id, ShowDiffAsync);
+        if (history is not null)
+        {
+            _root.Children.Add(history);
+        }
     }
 
     private async Task ShowDiffAsync(string filePath)
     {
-        JsonNode diff;
+        JsonNode? diff;
         try
         {
             diff = await AppServices.Host.CallAsync(
@@ -340,92 +415,47 @@ internal sealed class WorkspacePage : Page
             _root.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
             return;
         }
-        var text = diff?["diff"]?.GetValue<string>()
-            ?? diff?["text"]?.GetValue<string>()
-            ?? diff?.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
-            ?? "(empty)";
-        if (text.Length > 20000) text = text[..20000] + "…";
-        var dialog = new ContentDialog
-        {
-            Title = "Diff · " + filePath,
-            Content = new ScrollViewer
-            {
-                MaxHeight = 480,
-                Content = new TextBlock
-                {
-                    Text = text,
-                    FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
-                    TextWrapping = TextWrapping.Wrap,
-                    IsTextSelectionEnabled = true,
-                },
-            },
-            CloseButtonText = "Close",
-        };
-        await Chrome.ShowDialog(this, dialog);
+        await WorkspaceDiff.ShowFileDiffAsync(this, "Diff · " + filePath, diff);
     }
 
-    private async Task<UIElement> BranchBarAsync(string current)
+    private async Task<JsonNode?> LoadOneDiffAsync(string path)
     {
-        var branches = await AppServices.Host.CallAsync(
-            "workspace.branches",
-            new JsonObject { ["id"] = _id });
-        var items = branches as JsonArray ?? new JsonArray();
-        var choices = new List<(string Name, bool Remote)>();
-        foreach (var item in items)
-        {
-            if (item is null) continue;
-            var name = Format.Text(item, "name");
-            if (!string.IsNullOrEmpty(name)) choices.Add((name, Format.Flag(item, "remote")));
-        }
-        var picker = new ComboBox
-        {
-            MinWidth = 240,
-            ItemsSource = choices.Select(choice => choice.Remote ? choice.Name + " · remote" : choice.Name),
-            SelectedIndex = Math.Max(0, choices.FindIndex(choice => choice.Name == current)),
-        };
-        var ready = false;
-        picker.SelectionChanged += async (_, _) =>
-        {
-            if (!ready || picker.SelectedIndex < 0 || picker.SelectedIndex >= choices.Count) return;
-            var choice = choices[picker.SelectedIndex];
-            if (choice.Name == current) return;
-            await GitwriteAsync("workspace.checkout", new JsonObject
-            {
-                ["id"] = _id,
-                ["branch"] = choice.Name,
-                ["remote"] = choice.Remote,
-            });
-            await LoadAsync();
-        };
-        ready = true;
+        return await AppServices.Host.CallAsync(
+            "workspace.diff",
+            new JsonObject { ["id"] = _id, ["path"] = path });
+    }
 
+    private UIElement BranchBar(string current, string upstream, long ahead, long behind, string folderName)
+    {
+        var label = WorkspaceGit.ShortBranch(current);
+        if (ahead > 0)
+        {
+            label += $" ↑{ahead}";
+        }
+        if (behind > 0)
+        {
+            label += $" ↓{behind}";
+        }
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         row.Children.Add(new SymbolIcon
         {
-            Symbol = Symbol.Switch,
+            Symbol = ActionIcon.Merge.Symbol(),
             Foreground = Theme.AccentBrush,
             VerticalAlignment = VerticalAlignment.Center,
         });
-        row.Children.Add(picker);
-        row.Children.Add(ActionIconGlyph.Button("New branch", ActionIcon.Create, async (_, _) =>
+        var switchButton = ActionIconGlyph.Button(label, ActionIcon.Merge, async (_, _) =>
         {
-            var name = new TextBox { PlaceholderText = "feature/name", MinWidth = 280 };
-            var dialog = new ContentDialog
-            {
-                Title = $"New branch from {current}",
-                Content = name,
-                PrimaryButtonText = "Create branch",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Primary,
-            };
-            if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary
-                || string.IsNullOrWhiteSpace(name.Text)) return;
-            await GitwriteAsync("workspace.createBranch", new JsonObject
-            {
-                ["id"] = _id,
-                ["branch"] = name.Text.Trim(),
-                ["from"] = current,
-            });
+            await WorkspaceBranches.ShowAsync(this, _id, current);
+            await LoadAsync();
+        });
+        if (!string.IsNullOrEmpty(upstream))
+        {
+            ToolTipService.SetToolTip(switchButton, "Tracking " + upstream);
+        }
+        row.Children.Add(switchButton);
+        row.Children.Add(ActionIconGlyph.Button("Push", ActionIcon.Upload, async (_, _) =>
+        {
+            await WorkspacePushDialog.ShowAsync(this, _id, folderName);
             await LoadAsync();
         }));
         return new Border
@@ -448,10 +478,6 @@ internal sealed class WorkspacePage : Page
             {
                 _root.Children.Insert(1, Chrome.Banner(message, Theme.Danger, Symbol.Important));
                 return;
-            }
-            if (method == "workspace.commit")
-            {
-                _commitDraft = "";
             }
         }
         catch (Exception ex)
@@ -524,10 +550,10 @@ internal sealed class WorkspacePage : Page
         }
         if (n == 0)
         {
-            _root.Children.Add(Chrome.Empty(
+            _root.Children.Add(EmptyState.View(
                 "No shells in this folder",
                 "Open a new shell. It runs on this PC through the host.",
-                Symbol.Play));
+                EmptyArtKind.Sessions));
             return;
         }
         _root.Children.Add(Chrome.Card("Sessions", list));
@@ -634,10 +660,33 @@ internal sealed class WorkspacePage : Page
         }
         if (n == 0)
         {
-            _root.Children.Add(Chrome.Empty("No tasks in this folder", "Add one from Tasks.", Symbol.AllApps));
+            _root.Children.Add(EmptyState.View("No tasks in this folder", "Add one from Tasks.", EmptyArtKind.Tasks));
             return;
         }
         _root.Children.Add(Chrome.Card("Tasks", list));
+    }
+
+    private async Task<string> FolderNameAsync()
+    {
+        try
+        {
+            var listed = await AppServices.Host.CallAsync("workspace.list");
+            var array = listed as JsonArray ?? listed["workspaces"] as JsonArray;
+            if (array is not null)
+            {
+                foreach (var folder in array)
+                {
+                    if (Format.Text(folder, "id") == _id)
+                    {
+                        return Format.Text(folder, "name", Format.Text(folder, "path", _id));
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+        return _id;
     }
 
     private static bool OutcomeOk(JsonNode outcome, out string message)
