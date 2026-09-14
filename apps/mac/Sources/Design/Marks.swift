@@ -198,8 +198,13 @@ struct Avatar: View {
     /// the name is read.
     var tint: Color = Theme.accent
 
-    /// Seeded from the cache so a picture already fetched paints on the first
-    /// frame rather than flashing the letter tile again.
+    /// The fetched picture, once it has arrived.
+    ///
+    /// This is *not* what the first frame reads: a `.task` runs after that
+    /// frame, and a fresh view with empty state is the common case wherever a
+    /// toolbar or a list rebuilds its rows. `displayImage` reads the shared
+    /// cache synchronously, so a picture fetched once paints immediately on
+    /// every later view instead of flashing the letter tile again.
     @State private var image: Image?
 
     /// A stable colour for a person, from the app's own ramp.
@@ -246,8 +251,8 @@ struct Avatar: View {
                     // Under the photo, so a slow or failed load still shows
                     // the letters rather than a hole.
                     letter
-                    if let image {
-                        image
+                    if let picture = displayImage {
+                        picture
                             .resizable()
                             .scaledToFill()
                     }
@@ -279,6 +284,15 @@ struct Avatar: View {
               !raw.isEmpty
         else { return nil }
         return raw
+    }
+
+    /// The fetched picture when one is on hand: this view's own image first,
+    /// then the shared cache, read synchronously so the first frame already
+    /// has it.
+    private var displayImage: Image? {
+        if let image { return image }
+        guard let url = pictureURL else { return nil }
+        return AvatarCache.shared.cached(url)
     }
 
     private var bubble: some View {

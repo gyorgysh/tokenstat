@@ -45,6 +45,17 @@ struct AvatarButton: View {
 
     var action: () -> Void
 
+    /// The fetched picture, once it has arrived.
+    ///
+    /// This is *not* what the first frame reads. The toolbar is rebuilt on
+    /// every navigation (each tab owns its chrome, and the sidebar layout
+    /// re-keys the whole split on every selection), so a fresh button with an
+    /// empty state is the common case, not the exception. Reading the shared
+    /// cache synchronously in `displayImage` is what keeps an already fetched
+    /// picture on screen instead of flashing the monogram while a new fetch
+    /// spins up. See `Avatar`, which reads the same cache for the same reason.
+    @State private var pictureImage: Image?
+
     /// The toolbar's own metric, and the whole item.
     ///
     /// This used to draw at 30 inside a 44pt frame, on the reasoning that 44 is
@@ -73,19 +84,22 @@ struct AvatarButton: View {
                     Text(monogram)
                         .font(Theme.fixed(drawn * 0.42, weight: .semibold))
                         .foregroundStyle(.white)
-                    if let picture {
+                    if let picture = displayImage {
                         // Over the monogram, not instead of it, so a slow or
-                        // failed load shows the letter rather than a hole. The
-                        // system caches the response, so this is one fetch per
-                        // launch and not one per screen that draws an avatar.
-                        AsyncImage(url: picture) { image in
-                            image.resizable().scaledToFill()
-                        } placeholder: {
-                            Color.clear
-                        }
-                        .frame(width: drawn, height: drawn)
-                        .clipShape(.circle)
-                        .transition(.opacity)
+                        // failed load shows the letter rather than a hole.
+                        //
+                        // Not `AsyncImage`. Every navigation builds a fresh
+                        // button, and a fresh `AsyncImage` loads asynchronously
+                        // even for a URL the system has cached, so each one
+                        // painted its placeholder first: the picture blinking
+                        // back to the letter on every tap. This reads the
+                        // shared `AvatarCache` synchronously, so a picture
+                        // fetched once stays painted on every later button.
+                        picture
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: drawn, height: drawn)
+                            .clipShape(.circle)
                     }
                 } else {
                     Image(systemName: "person.fill")
@@ -104,14 +118,43 @@ struct AvatarButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(signedIn ? "Account, \(name)" : "Sign in to tokenstat")
         .accessibilityHint("Opens your account")
+        .task(id: pictureRaw) {
+            guard let raw = pictureRaw else {
+                pictureImage = nil
+                return
+            }
+            if let hit = AvatarCache.shared.cached(raw) {
+                pictureImage = hit
+                return
+            }
+            pictureImage = nil
+            let loaded = await AvatarCache.shared.image(for: raw)
+            guard !Task.isCancelled else { return }
+            pictureImage = loaded
+        }
     }
 
     private var signedIn: Bool { account.signedIn }
 
     /// The account's picture, already absolute by the time it reaches here.
-    private var picture: URL? {
-        guard let raw = account.account?.avatar, !raw.isEmpty else { return nil }
-        return URL(string: raw)
+    /// Blank is "no picture", same rule as `Avatar`.
+    private var pictureRaw: String? {
+        guard let raw = account.account?.avatar?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty
+        else { return nil }
+        return raw
+    }
+
+    /// The fetched picture when one is on hand.
+    ///
+    /// The state's own image first, then the shared cache, read synchronously
+    /// so a fresh button paints the picture on its first frame. A `.task` alone
+    /// runs after that frame, which is exactly the one-frame monogram flash
+    /// this exists to prevent.
+    private var displayImage: Image? {
+        if let pictureImage { return pictureImage }
+        guard let raw = pictureRaw else { return nil }
+        return AvatarCache.shared.cached(raw)
     }
 
     private var name: String { account.account?.title ?? "your account" }
