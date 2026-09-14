@@ -11,6 +11,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
 using Tokenstat.Navigation;
+using Tokenstat.Notifications;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace Tokenstat.Pages;
@@ -256,6 +257,7 @@ internal sealed class TodoPage : Page
                 ?? cardsTask.Result["cards"] as JsonArray
                 ?? new JsonArray();
             _runs = Format.Items(runsTask.Result) ?? new JsonArray();
+            RunNotifications.Shared.SettleAutomations(_runs);
             _folders = ReadFolders(foldersTask.Result);
             _backends = ReadBackends(backendsTask.Result);
             var budget = queueTask.Result["defaultBudgetSeconds"];
@@ -445,7 +447,7 @@ internal sealed class TodoPage : Page
 
     private void Notice(string text)
     {
-        _bannerHost.Children.Insert(0, Chrome.Banner(text, Theme.Accent, Symbol.Accept));
+        _bannerHost.Children.Insert(0, Chrome.Toast(text, BannerSeverity.Success));
         while (_bannerHost.Children.Count > 3)
         {
             _bannerHost.Children.RemoveAt(_bannerHost.Children.Count - 1);

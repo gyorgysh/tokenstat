@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
 using Tokenstat.Install;
+using Tokenstat.Notifications;
 
 namespace Tokenstat.Pages;
 
@@ -54,6 +55,7 @@ internal sealed class AccountPage : Page
         {
             _content.Children.Add(Chrome.Banner(
                 FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+            _content.Children.Add(NotificationsCard());
             _content.Children.Add(UpdateCard());
             return;
         }
@@ -74,6 +76,7 @@ internal sealed class AccountPage : Page
 
         _content.Children.Add(await LocalTrafficCardAsync());
         _content.Children.Add(await PullConnectionCardAsync());
+        _content.Children.Add(NotificationsCard());
         _content.Children.Add(UpdateCard());
         _content.Children.Add(PrivacyNote());
         _content.Children.Add(AboutBlurb());
@@ -712,6 +715,44 @@ internal sealed class AccountPage : Page
         {
             _content.Children.Insert(0, Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
         }
+    }
+
+    /// <summary>
+    /// Local run notifications, matching the Mac account card. One switch for
+    /// one feature: this computer watches its own automations and workflows
+    /// and posts a toast when one finishes or stops for a question. No
+    /// account and no network are involved, so the card shows whether or not
+    /// the host answered above.
+    /// </summary>
+    private UIElement NotificationsCard()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        body.Children.Add(Chrome.ToggleChip(
+            "Tell me when work needs attention",
+            RunNotifications.Shared.IsOn,
+            async on =>
+            {
+                RunNotifications.Shared.IsOn = on;
+                await LoadAsync();
+            }));
+        body.Children.Add(new TextBlock
+        {
+            Text = "Automations and workflows on this computer. Nothing leaves "
+                + "the machine: this computer watches its own work.",
+            FontSize = 12,
+            Opacity = 0.68,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        if (RunNotifications.Shared.IsOn)
+        {
+            body.Children.Add(ActionIconGlyph.Button(
+                "Send a test", ActionIcon.Preview,
+                (_, _) => RunNotifications.Shared.SendTest()));
+        }
+        return Chrome.Card(
+            "Notifications",
+            body,
+            "When an agent run finishes, or stops for a question.");
     }
 
     private UIElement UpdateCard()

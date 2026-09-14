@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.IO;
 using Microsoft.UI.Xaml;
 using Tokenstat.Host;
+using Tokenstat.Notifications;
 
 namespace Tokenstat;
 
@@ -48,6 +49,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        RunNotifications.Shared.EnsureRegistered();
         HostOwnerLock.Acquire();
         _window = new MainWindow();
         CurrentWindow = _window;

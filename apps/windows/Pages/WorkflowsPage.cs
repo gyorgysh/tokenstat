@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
+using Tokenstat.Notifications;
 
 namespace Tokenstat.Pages;
 
@@ -139,6 +140,7 @@ internal sealed class WorkflowsPage : Page
             await Task.WhenAll(listTask, runsTask, foldersTask, backendsTask, queueTask);
             _graphs = Format.Items(listTask.Result, "graphs") ?? new JsonArray();
             _runs = Format.Items(runsTask.Result) ?? new JsonArray();
+            RunNotifications.Shared.SettleWorkflows(_runs);
             _folders = ReadFolders(foldersTask.Result);
             _backends = ReadBackends(backendsTask.Result);
             var queue = queueTask.Result;
@@ -233,7 +235,7 @@ internal sealed class WorkflowsPage : Page
 
     private void Notice(string text)
     {
-        _bannerHost.Children.Insert(0, Chrome.Banner(text, Theme.Accent, Symbol.Accept));
+        _bannerHost.Children.Insert(0, Chrome.Toast(text, BannerSeverity.Success));
         while (_bannerHost.Children.Count > 3)
         {
             _bannerHost.Children.RemoveAt(_bannerHost.Children.Count - 1);
