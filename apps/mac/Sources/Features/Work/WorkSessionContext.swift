@@ -26,8 +26,13 @@ final class WorkSessionContext {
     func update(account: Account?) {
         let next: WorkReference.Scope?
         if let account {
+            // Signed in without a handle is still a full account: the
+            // server's id scopes it, and every function works under that
+            // scope exactly as under a handle. Nil only when neither the
+            // handle nor the id answers, which is the unknown state.
             next = account.signedIn
-                ? account.handle.flatMap { WorkReference.Scope.account(origin: account.host, handle: $0) }
+                ? WorkReference.Scope.accountIdentity(handle: account.handle, id: account.accountId)
+                    .flatMap { WorkReference.Scope.account(origin: account.host, handle: $0) }
                 : .local(installationID: installationID)
         } else {
             next = nil
@@ -39,7 +44,10 @@ final class WorkSessionContext {
                     guard let identity = machine.publicIdentity, !identity.isEmpty else { return }
                     result[identity] = machine.displayName
                 }
-                return SavedWorkOwner(scope: scope, name: account.title ?? scope.identity, hosts: hosts)
+                // The name is shown ("Saved for …"), so it stays human: the
+                // identity underneath may be a server id, which names
+                // nothing a person would recognise.
+                return SavedWorkOwner(scope: scope, name: account.title ?? "your account", hosts: hosts)
             }
             savedAccess.verified(owner)
         } else {

@@ -11,7 +11,14 @@ import Foundation
                                   name: "Alice", hosts: ["host-a": "Studio"])
         let bob = SavedWorkOwner(scope: .account(origin: "https://example.com", handle: "bob")!,
                                 name: "Bob", hosts: ["host-b": "Laptop"])
+        // A handleless account verifies and reads back under the server's
+        // id exactly like a claimed handle.
+        let unclaimed = SavedWorkOwner(scope: .account(origin: "https://example.com", handle: "acc_new")!,
+                                       name: "your account", hosts: [:])
+        assert(unclaimed.isValid)
         let first = SavedWorkAccess(defaults: defaults)
+        first.verified(unclaimed)
+        assert(SavedWorkAccess(defaults: defaults).offeredOwner == unclaimed)
         assert(first.offeredOwner == nil && !first.beginReading(alice))
         first.verified(alice)
         assert(first.offeredOwner == nil && first.reader == nil)

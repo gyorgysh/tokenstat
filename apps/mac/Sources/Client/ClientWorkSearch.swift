@@ -126,7 +126,7 @@ struct ClientWorkSearchPresentation: View {
         var known = pins.map {
             WorkSearchCatalog.KnownFolder(reference: $0.reference, name: $0.folderName, updatedAt: $0.pinnedAt)
         }
-        let recentScope = ClientRecentPlaces.Scope(host: value.host, handle: value.handle)
+        let recentScope = ClientRecentPlaces.Scope(host: value.host, handle: value.handle, id: value.accountId)
         known += ClientRecentPlaces.shared.places(in: recentScope).compactMap { place in
             guard let folder = place.id.workspaceID else { return nil }
             return .init(reference: WorkReference(scope: scope, hostIdentity: place.id.peer,

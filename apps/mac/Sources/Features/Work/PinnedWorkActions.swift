@@ -23,6 +23,6 @@ extension Account {
     /// are.
     var pinnedWorkScope: WorkReference.Scope? {
         guard signedIn else { return nil }
-        return PinnedWorkStore.scope(host: host, handle: handle)
+        return PinnedWorkStore.scope(host: host, handle: handle, id: accountId)
     }
 }

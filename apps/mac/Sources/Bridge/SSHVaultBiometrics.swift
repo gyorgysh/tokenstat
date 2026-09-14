@@ -19,10 +19,13 @@ enum SSHVaultBiometrics {
 
     static func accountKey() async throws -> String {
         let account = try await Bridge.account()
-        guard account.signedIn, let handle = account.handle, let machine = account.thisMachineID else {
+        guard account.signedIn, let machine = account.thisMachineID else {
             throw failure("Sign in before enabling biometric vault unlock.")
         }
-        return [account.host, handle, machine].joined(separator: "\n")
+        guard let identity = WorkReference.Scope.accountIdentity(handle: account.handle, id: account.accountId) else {
+            throw failure("The account did not answer with an identity. Try again.")
+        }
+        return [account.host, identity, machine].joined(separator: "\n")
     }
 
     private static func query(_ account: String? = nil) -> [String: Any] {

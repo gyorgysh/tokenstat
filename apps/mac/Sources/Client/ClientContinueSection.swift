@@ -5,7 +5,7 @@ import SwiftUI
 
 extension Account {
     var recentPlacesScope: ClientRecentPlaces.Scope? {
-        signedIn ? ClientRecentPlaces.Scope(host: host, handle: handle) : nil
+        signedIn ? ClientRecentPlaces.Scope(host: host, handle: handle, id: accountId) : nil
     }
 }
 

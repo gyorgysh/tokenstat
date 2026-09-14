@@ -353,7 +353,10 @@ pub(super) fn draw_wizard(f: &mut Frame<'_>, area: Rect, app: &App) {
         ),
         Wizard::AfterLogin { handle, host, .. } => (
             " Logged in ",
-            format!("@{handle} on {host}"),
+            match handle.as_deref() {
+                Some(handle) => format!("@{handle} on {host}"),
+                None => format!("Connected to {host}"),
+            },
             AFTER_LOGIN_ACTIONS.to_vec(),
             None,
         ),

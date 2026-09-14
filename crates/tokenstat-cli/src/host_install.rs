@@ -45,9 +45,12 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
     if let Some(name) = name {
         tokenstat_identity::set_machine_label(name).map_err(anyhow::Error::msg)?;
     }
+    // A redeemed code links the machine; the handle only names the
+    // account, and a new account has not claimed one yet.
     let account = code
         .map(crate::host_enroll::PairingCode::redeem)
-        .transpose()?;
+        .transpose()?
+        .flatten();
     install_service(&binary, service)?;
     let socket = tokenstat_paths::data_dir()
         .context("No data directory is available")?
@@ -120,8 +123,9 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
     if let Some(device) = allow {
         println!("  allowed: {device}");
     }
-    match account {
-        Some(account) => println!("  signed in: {account}"),
+    match account.as_deref() {
+        Some(handle) => println!("  signed in: {handle}"),
+        None if code.is_some() => println!("  signed in: yes"),
         None => println!(
             "\nUse `tokenstat login --code` to sign in if this machine is not already linked."
         ),

@@ -1632,7 +1632,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     serde_json::to_value(DevicePollDto {
                         state: "confirmed",
                         interval: None,
-                        handle: Some(result.handle),
+                        handle: result.handle,
                         host: Some(result.host),
                         machine: Some(result.machine),
                     })

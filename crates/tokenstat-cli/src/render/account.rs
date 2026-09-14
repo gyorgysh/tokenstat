@@ -2,7 +2,7 @@ use anstream::println;
 use anyhow::Result;
 use tokenstat_core::Store;
 
-use super::{json_opt, json_string};
+use super::{json_opt, json_string, login_as_suffix};
 use crate::ui::{self, BOLD, DIM, accent, good, warn};
 
 /// Report remote fetch outcomes after scan or `tokenstat fetch`.
@@ -181,7 +181,7 @@ pub fn profile_login(host: Option<&str>, json: bool) -> Result<()> {
         println!(
             r#"{{"host":{},"handle":{},"machine":{},"schema_min_v":{},"schema_max_v":{}}}"#,
             json_string(&result.host),
-            json_string(&result.handle),
+            json_opt(result.handle.as_deref()),
             json_string(&result.machine),
             result.schema_min_v,
             result.schema_max_v
@@ -190,7 +190,10 @@ pub fn profile_login(host: Option<&str>, json: bool) -> Result<()> {
     }
     let g = good();
     println!();
-    println!("  {g}logged in{g:#} as {BOLD}@{}{BOLD:#}", result.handle);
+    println!(
+        "  {g}logged in{g:#}{}",
+        login_as_suffix(result.handle.as_deref())
+    );
     println!("  {DIM}host{DIM:#}     {}", result.host);
     println!("  {DIM}machine{DIM:#}  {}", result.machine);
     println!(
@@ -213,7 +216,7 @@ pub fn profile_login_code(host: Option<&str>, code: &str, json: bool) -> Result<
         println!(
             r#"{{"host":{},"handle":{},"machine":{},"schema_min_v":{},"schema_max_v":{}}}"#,
             json_string(&result.host),
-            json_string(&result.handle),
+            json_opt(result.handle.as_deref()),
             json_string(&result.machine),
             result.schema_min_v,
             result.schema_max_v
@@ -222,7 +225,10 @@ pub fn profile_login_code(host: Option<&str>, code: &str, json: bool) -> Result<
     }
     let g = good();
     println!();
-    println!("  {g}connected{g:#} as {BOLD}@{}{BOLD:#}", result.handle);
+    println!(
+        "  {g}connected{g:#}{}",
+        login_as_suffix(result.handle.as_deref())
+    );
     println!("  {DIM}host{DIM:#}     {}", result.host);
     println!("  {DIM}machine{DIM:#}  {}", result.machine);
     println!("  {DIM}token stored under credentials/sync/ for this host{DIM:#}");

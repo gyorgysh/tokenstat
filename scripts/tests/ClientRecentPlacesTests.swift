@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ClientRecentPlaces.swift.
+// Compile with ClientRecentPlaces.swift WorkReference.swift.
 import Foundation
 
 @main struct ClientRecentPlacesTests {
@@ -8,11 +8,20 @@ import Foundation
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = ClientRecentPlaces(defaults: defaults)
-        let alice = ClientRecentPlaces.Scope(host: "https://one.example", handle: "alice")!
-        let bob = ClientRecentPlaces.Scope(host: "https://one.example", handle: "bob")!
-        let otherHost = ClientRecentPlaces.Scope(host: "https://two.example", handle: "alice")!
+        let alice = ClientRecentPlaces.Scope(host: "https://one.example", handle: "alice", id: "acc_alice")!
+        let bob = ClientRecentPlaces.Scope(host: "https://one.example", handle: "bob", id: "acc_bob")!
+        let otherHost = ClientRecentPlaces.Scope(host: "https://two.example", handle: "alice", id: "acc_alice")!
+        // A handleless account keeps history under the server's id for it.
+        let unclaimed = ClientRecentPlaces.Scope(host: "https://one.example", handle: nil, id: "acc_new")!
+        assert(unclaimed.identity == "acc_new" && alice.identity == "alice")
         assert(store.places(in: alice).isEmpty)
-        assert(ClientRecentPlaces.Scope(host: "host", handle: nil) == nil)
+        assert(store.places(in: unclaimed).isEmpty)
+        store.record(in: unclaimed, peer: "peer", workspaceID: "workspace", workspaceName: "Garden",
+                     kind: .chat, itemID: "chat-1")
+        assert(store.places(in: unclaimed).count == 1)
+        assert(store.places(in: alice).isEmpty)
+        assert(ClientRecentPlaces.Scope(host: "host", handle: nil, id: nil) == nil)
+        assert(ClientRecentPlaces.Scope(host: "", handle: "alice", id: nil) == nil)
         func record(_ n: Int, scope: ClientRecentPlaces.Scope? = alice, name: String = "Garden") {
             store.record(in: scope, peer: "peer", workspaceID: "workspace", workspaceName: name,
                          kind: .chat, itemID: "chat-\(n)", at: Date(timeIntervalSince1970: Double(n)))

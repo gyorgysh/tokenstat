@@ -209,6 +209,15 @@ pub(super) fn json_string_array(items: &[String]) -> String {
     format!("[{}]", parts.join(","))
 }
 
+/// " as @handle" in bold, or nothing. Every login print shares this, so
+/// a handleless account reads "logged in" rather than "logged in as @?".
+pub(super) fn login_as_suffix(handle: Option<&str>) -> String {
+    match handle {
+        Some(handle) => format!(" as {BOLD}@{handle}{BOLD:#}", BOLD = crate::ui::BOLD),
+        None => String::new(),
+    }
+}
+
 /// Replace control characters in a log-derived label.
 ///
 /// Keys come from files this tool did not write. A raw `\x1b` in a model id or

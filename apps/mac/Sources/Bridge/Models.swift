@@ -1432,8 +1432,9 @@ struct Account: Codable, Sendable, Hashable {
     var signedIn: Bool
     var host: String
     var handle: String?
-    /// The name the user chose to be shown as. The handle is the identifier,
-    /// this is the label.
+    /// The name the user chose to be shown as. The stable identity is the
+    /// handle when claimed, else the server's id (`accountId`); this is
+    /// only ever the label.
     var displayName: String?
     var tier: String?
     /// Profile picture URL, when the account has one.

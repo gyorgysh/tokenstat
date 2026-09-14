@@ -174,7 +174,7 @@ enum Wizard {
     LoginHost { selected: usize },
     /// After a successful login: offer sync or done.
     AfterLogin {
-        handle: String,
+        handle: Option<String>,
         host: String,
         selected: usize,
     },

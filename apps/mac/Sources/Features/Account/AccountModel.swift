@@ -461,9 +461,12 @@ final class AccountModel {
         isSigningOut = true
         defer { isSigningOut = false }
         // The scope whose saved work leaves with it. Captured first: the
-        // snapshot below clears the handle this is built from.
+        // snapshot below clears the identity this is built from. Same rule
+        // as the session scope, or a handleless account's work survives
+        // its sign-out and meets whoever signs in next.
         let purgeScope = account.flatMap { signed in
-            signed.handle.flatMap { WorkReference.Scope.account(origin: signed.host, handle: $0) }
+            WorkReference.Scope.accountIdentity(handle: signed.handle, id: signed.accountId)
+                .flatMap { WorkReference.Scope.account(origin: signed.host, handle: $0) }
         }
         do {
             if let purgeScope { try WorkCacheCleanupJournal.shared.prepare(scope: WorkCache.scope(for: purgeScope)) }

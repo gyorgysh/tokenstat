@@ -20,9 +20,20 @@ enum HomeGreeting {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> String {
+        "\(line(hasHistory: hasHistory, now: now, calendar: calendar)), \(firstName(name))"
+    }
+
+    /// "Good afternoon", with no name. A signed-in account that set
+    /// neither a display name nor a handle is still signed in, and the
+    /// greeting must not claim otherwise.
+    static func line(
+        hasHistory: Bool,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
         let hour = calendar.component(.hour, from: now)
         let day = calendar.ordinality(of: .day, in: .year, for: now) ?? 1
-        return "\(phrase(hour: hour, hasHistory: hasHistory, dayOfYear: day)), \(firstName(name))"
+        return phrase(hour: hour, hasHistory: hasHistory, dayOfYear: day)
     }
 
     static func firstName(_ name: String) -> String {

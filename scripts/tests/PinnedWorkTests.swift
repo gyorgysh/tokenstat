@@ -76,11 +76,19 @@ import Foundation
         assert(store.pins(in: bob).contains { $0.label == "Pinned work" })
 
         // The scope pins file under: the signed-in account, never whoever
-        // signs in next.
-        assert(PinnedWorkStore.scope(host: "https://example.com", handle: "alice") == alice)
-        assert(PinnedWorkStore.scope(host: "https://example.com", handle: nil) == nil)
-        assert(PinnedWorkStore.scope(host: "https://example.com", handle: "") == nil)
-        assert(PinnedWorkStore.scope(host: "", handle: "alice") == nil)
+        // signs in next. The handle wins when claimed; the server's id
+        // scopes a handleless account instead of refusing it pins.
+        assert(PinnedWorkStore.scope(host: "https://example.com", handle: "alice", id: "acc_alice") == alice)
+        let idScope = WorkReference.Scope.account(origin: "https://example.com", handle: "acc_alice")!
+        assert(PinnedWorkStore.scope(host: "https://example.com", handle: nil, id: "acc_alice") == idScope)
+        assert(PinnedWorkStore.scope(host: "https://example.com", handle: "", id: "acc_alice") == idScope)
+        assert(store.pin(conversation(idScope, host: "mac", folder: "site", id: "c1"),
+                         label: "Unclaimed", folderName: "Site"))
+        assert(store.pins(in: idScope).count == 1)
+        assert(store.pins(in: alice).count == 8)
+        assert(PinnedWorkStore.scope(host: "https://example.com", handle: nil, id: nil) == nil)
+        assert(PinnedWorkStore.scope(host: "https://example.com", handle: "", id: " ") == nil)
+        assert(PinnedWorkStore.scope(host: "", handle: "alice", id: nil) == nil)
 
         // Corruption reads as empty, not a crash.
         defaults.set(Data("not pins".utf8), forKey: "pinned.work.v1.\(WorkCache.scope(for: bob))")

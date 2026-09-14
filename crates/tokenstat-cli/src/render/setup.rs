@@ -183,7 +183,10 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
                 Ok(res) => {
                     connected = true;
                     if !opts.json {
-                        println!("  {g}connected{g:#} as {BOLD}@{}{BOLD:#}", res.handle);
+                        println!(
+                            "  {g}connected{g:#}{}",
+                            login_as_suffix(res.handle.as_deref())
+                        );
                     }
                 }
                 Err(e) => {
@@ -204,7 +207,10 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
                 match tokenstat_sync::login(opts.host) {
                     Ok(res) => {
                         connected = true;
-                        println!("  {g}connected{g:#} as {BOLD}@{}{BOLD:#}", res.handle);
+                        println!(
+                            "  {g}connected{g:#}{}",
+                            login_as_suffix(res.handle.as_deref())
+                        );
                     }
                     Err(e) => {
                         println!("  {DIM}not connected: {e}{DIM:#}");

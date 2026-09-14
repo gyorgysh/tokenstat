@@ -52,7 +52,7 @@ impl PairingCode {
         Ok(Self(plain.to_ascii_uppercase()))
     }
 
-    pub fn redeem(&self) -> Result<String> {
+    pub fn redeem(&self) -> Result<Option<String>> {
         tokenstat_sync::login_with_code(None, &self.0)
             .map(|result| result.handle)
             .map_err(|error| {

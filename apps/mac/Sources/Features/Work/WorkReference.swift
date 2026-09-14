@@ -10,6 +10,26 @@ struct WorkReference: Codable, Hashable, Sendable {
         let origin: String
         let identity: String
 
+        /// Whose account this names. The claimed handle when there is one,
+        /// else the server's own id for it. A new account has no handle,
+        /// and every function must still work for it, so the id is a full
+        /// identity here rather than a lesser fallback. Nil only when
+        /// neither answers, which is the unknown-account state.
+        static func accountIdentity(handle: String?, id: String?) -> String? {
+            if let handle = handle?.trimmingCharacters(in: .whitespacesAndNewlines), !handle.isEmpty {
+                return handle
+            }
+            if let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
+                return id
+            }
+            return nil
+        }
+
+        /// An account scope. The handle parameter carries the stable
+        /// identity, which is the claimed handle when there is one and the
+        /// server's id otherwise (see `accountIdentity`). Either one
+        /// round-trips through validation unchanged: only the origin's
+        /// shape is checked, and the identity only has to be non-empty.
         static func account(origin: String, handle: String) -> Self? {
             guard !handle.isEmpty,
                   var url = URLComponents(string: origin),

@@ -97,7 +97,9 @@ impl ProfileError {
 #[derive(Debug, Clone)]
 pub struct LoginResult {
     pub host: String,
-    pub handle: String,
+    /// The claimed handle, when the account has one. A new account has not
+    /// claimed one yet, and the login is complete without it.
+    pub handle: Option<String>,
     pub machine: String,
     pub schema_min_v: u32,
     pub schema_max_v: u32,
@@ -273,7 +275,7 @@ pub fn login_with_code(host_flag: Option<&str>, code: &str) -> Result<LoginResul
     let _ = publish_machine_profile(Some(&host));
     Ok(LoginResult {
         host,
-        handle: ok.handle.unwrap_or_else(|| "(unknown)".into()),
+        handle: ok.handle,
         machine,
         schema_min_v: envelope.min_v,
         schema_max_v: envelope.max_v,
@@ -468,7 +470,7 @@ pub fn device_poll(login: &DeviceLogin) -> Result<DeviceStatus, ProfileError> {
         let _ = publish_machine_profile(Some(&login.host));
         return Ok(DeviceStatus::Confirmed(Box::new(LoginResult {
             host: login.host.clone(),
-            handle: ok.handle.unwrap_or_else(|| "(unknown)".into()),
+            handle: ok.handle,
             machine: login.machine.clone(),
             schema_min_v: login.schema_min_v,
             schema_max_v: login.schema_max_v,

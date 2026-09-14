@@ -247,9 +247,9 @@ struct ClientHomeView: View {
     /// the first name, and the star / badge / crown next to it.
     @ViewBuilder
     private var greeting: some View {
-        if let name = account.account?.title, !name.isEmpty {
+        if account.signedIn {
             HStack(alignment: .center, spacing: Theme.Space.s) {
-                Text(HomeGreeting.line(name: name, hasHistory: hasHistory))
+                Text(greetingLine)
                     .font(ClientType.screenTitle)
                     .lineLimit(2)
                 if let tier = account.account?.tier, !tier.isEmpty {
@@ -258,6 +258,17 @@ struct ClientHomeView: View {
                 Spacer(minLength: 0)
             }
             .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// The greeting keeps its phrase when the account has no name to
+    /// greet by. A missing display name and handle say nothing about
+    /// the session, so the line stays and only the name drops out.
+    private var greetingLine: String {
+        if let name = account.account?.title, !name.isEmpty {
+            HomeGreeting.line(name: name, hasHistory: hasHistory)
+        } else {
+            HomeGreeting.line(hasHistory: hasHistory)
         }
     }
 

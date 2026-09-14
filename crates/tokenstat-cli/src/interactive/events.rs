@@ -284,9 +284,15 @@ pub(super) fn handle_wizard_key(
         } => {
             if selected == 0 {
                 app.pending_sync_host = Some(host.clone());
-                app.status = format!("Syncing as @{handle}…");
+                app.status = match handle.as_deref() {
+                    Some(handle) => format!("Syncing as @{handle}…"),
+                    None => "Syncing…".into(),
+                };
             } else {
-                app.status = format!("Logged in as @{handle} · sync later with /sync");
+                app.status = match handle.as_deref() {
+                    Some(handle) => format!("Logged in as @{handle} · sync later with /sync"),
+                    None => "Logged in · sync later with /sync".into(),
+                };
             }
         }
         Wizard::Setup { step, selected } => match step {
@@ -399,7 +405,12 @@ pub(super) fn run_login_outside_tui(
             app.refresh_sync_hint();
             // Same as CLI login: sync only runs on a schedule once linked.
             let _ = app.install_linked_schedules(host_flag);
-            app.status = format!("Logged in as @{} · {}", result.handle, result.host);
+            // Plain text: the status line is drawn by the TUI, not the
+            // terminal, so ANSI styling would show up as characters.
+            app.status = match result.handle.as_deref() {
+                Some(handle) => format!("Logged in as @{handle} · {}", result.host),
+                None => format!("Logged in · {}", result.host),
+            };
             app.wizard = Some(Wizard::AfterLogin {
                 handle: result.handle,
                 host: result.host,

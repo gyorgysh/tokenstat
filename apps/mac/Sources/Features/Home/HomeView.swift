@@ -405,11 +405,14 @@ struct HomeView: View {
     }
 
     /// Local-clock greeting plus the first name. Signed out stays literal.
+    /// Signed in without a name keeps the greeting and drops the name: a
+    /// missing display name and handle say nothing about the session.
     private var greetingTitle: String {
-        guard let name = account.account?.title, !name.isEmpty else {
-            return "Not signed in"
-        }
         let hasHistory = (model.calendar?.activeDays ?? 0) > 0
+        guard let name = account.account?.title, !name.isEmpty else {
+            guard account.signedIn else { return "Not signed in" }
+            return HomeGreeting.line(hasHistory: hasHistory)
+        }
         return HomeGreeting.line(name: name, hasHistory: hasHistory)
     }
 

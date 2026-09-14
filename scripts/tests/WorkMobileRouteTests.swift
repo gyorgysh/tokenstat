@@ -48,6 +48,13 @@ import Foundation
         assert(store.save(route))
         store.clear()
         assert(store.route(for: alice) == nil)
+        // A handleless account's route saves and restores under the
+        // server's id exactly like a claimed handle.
+        let idScope = WorkReference.Scope.account(origin: "https://example.com", handle: "acc_new")!
+        let idRoute = WorkMobileRoute(scope: idScope, tab: "home")
+        assert(store.save(idRoute) && store.route(for: idScope) == idRoute)
+        assert(store.route(for: alice) == nil)
+        assert(store.save(route))
         let launch = WorkMobileRouteLaunch()
         let ticket = launch.generation
         launch.navigationChanged()

@@ -12,18 +12,19 @@ final class ClientRecentPlaces {
 
     struct Scope: Codable, Hashable {
         let host: String
-        let handle: String
+        let identity: String
 
-        init?(host: String, handle: String?) {
-            guard let handle, !handle.isEmpty, !host.isEmpty else { return nil }
+        init?(host: String, handle: String?, id: String?) {
+            guard !host.isEmpty,
+                  let identity = WorkReference.Scope.accountIdentity(handle: handle, id: id) else { return nil }
             self.host = host
-            self.handle = handle
+            self.identity = identity
         }
 
         fileprivate var key: String {
             // Length-prefixed rather than encoded: no throwing, and "ab"+"c"
             // never shares a key with "a"+"bc".
-            "client.recentPlaces.v1.\(host.count):\(host)\(handle.count):\(handle)"
+            "client.recentPlaces.v1.\(host.count):\(host)\(identity.count):\(identity)"
         }
     }
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ClientSetupState.swift, ClientSetupStore.swift and ClientSetupCoordinator.swift.
+// Compile with ClientSetupState.swift, ClientSetupStore.swift, ClientSetupCoordinator.swift
+// and WorkReference.swift.
 //
 // The two stubs below stand in for `ActionIcon` and `BridgeError`, which live
 // in files that pull in the whole app. They mirror only what this file uses.

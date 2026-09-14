@@ -26,18 +26,13 @@ struct ClientSetupScope: Codable, Equatable {
     var account: String
     var deviceKey: String
 
-    /// Whose setup this is. The handle when the account has claimed one, else
-    /// the server's own id for it. A new account has no handle, and it still
-    /// gets setup. An empty answer means the draft goes unpersisted. The
-    /// store is keyed by scope, and one account must never resume another's.
+    /// Whose setup this is. One rule for the whole app: the handle when the
+    /// account has claimed one, else the server's own id for it. A new
+    /// account has no handle, and it still gets setup. An empty answer
+    /// means the draft goes unpersisted. The store is keyed by scope, and
+    /// one account must never resume another's.
     static func accountIdentity(handle: String?, id: String?) -> String {
-        if let handle = handle?.trimmingCharacters(in: .whitespacesAndNewlines), !handle.isEmpty {
-            return handle
-        }
-        if let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
-            return id
-        }
-        return ""
+        WorkReference.Scope.accountIdentity(handle: handle, id: id) ?? ""
     }
 }
 
