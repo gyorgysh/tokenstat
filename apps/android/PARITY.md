@@ -22,7 +22,7 @@ and severity, stats readings) is pinned by unit tests in `PortedLogicTest.kt`.
 | Account activity, limits, insights | built | built | built |
 | Device and remote workspace directory | built | built | built |
 | Sessions, changes, tasks, notes | built | built | built (real renderers; diff/tasks/notes/actions wired) |
-| Workflows, automations, files | built | built | built (run/stop, enable, tree drill, file edit) |
+| Workflows, automations, files | built | built | automations built (`automations/Automations.kt` workbench: schedule rows on the host clock, enable, run/stop, complete paginated run history live-first with transcripts; `automations/AutomationEditor.kt` Writing/Settings editor with schedule pickers, revision-checked `automation.edit` saves plus conflict flow on protocol 21+ hosts and `createOnce`/`runOnce` receipts with retry-same; host queue settings); workflows run/stop, tree drill, file edit |
 | Interactive terminal emulator | built | built | built (xterm.js WebView over pty.*; nextOffset resume with backoff and liveness, dropped/paused banners, TerminalPalette and JetBrains Mono, selection copy, Close/Done) |
 | Port-forwarded browser | built | built | built (`proxy.listen` + WebView; address bar, reload, URL policy, unlisten on leave) |
 | Store subscription activation | Apple + Google built | built | built; custom pitch wraps Play Billing |

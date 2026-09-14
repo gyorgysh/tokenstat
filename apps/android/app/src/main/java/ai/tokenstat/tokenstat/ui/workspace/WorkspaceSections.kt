@@ -144,7 +144,7 @@ fun WorkspaceSection(
         "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier, folderName, hostLabel, onOpenSection, protocol, onOpenTerminal)
         "Notes" -> NotesSection(model, peer, workspace, modifier, folderName, hostLabel)
         "Workflows" -> WorkflowsSection(model, peer, workspace, data, error, loading, reload, modifier)
-        "Automations" -> AutomationsSection(model, peer, data, error, loading, reload, modifier)
+        "Automations" -> AutomationsSection(model, peer, workspace, data, error, loading, reload, modifier, folderName, hostLabel, protocol)
         "Files" -> FilesSection(model, peer, workspace, modifier, folderName, hostLabel)
         "Browser" -> BrowserSection(model, peer, onOpenBrowser, modifier)
         else -> EmptyState(Icons.AutoMirrored.Filled.Notes, "Nothing here", "This section has no content yet.", modifier)
@@ -544,16 +544,24 @@ private fun StepCapsule(label: String) {
 private fun AutomationsSection(
     model: AppViewModel,
     peer: String,
+    workspace: String,
     data: JsonElement?,
     error: String?,
     loading: Boolean,
     onChanged: () -> Unit,
     modifier: Modifier,
+    folderName: String = "",
+    hostLabel: String = "",
+    protocol: Long? = null,
 ) {
     val scope = rememberCoroutineScope()
     val automations = asObjects(data)
+    var workbench by remember { mutableStateOf(false) }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
+        item {
+            TsSecondaryButton(label = "Open automations", small = true, onClick = { workbench = true })
+        }
         if (!loading && automations.isEmpty()) {
             item {
                 EmptyState(
@@ -638,6 +646,17 @@ private fun AutomationsSection(
                 )
             }
         }
+    }
+    if (workbench) {
+        ai.tokenstat.tokenstat.ui.automations.AutomationsDialog(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            workspaceID = workspace,
+            folderName = folderName,
+            onDismiss = { workbench = false; onChanged() },
+        )
     }
 }
 
