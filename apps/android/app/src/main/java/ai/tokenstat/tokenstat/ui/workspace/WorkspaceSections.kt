@@ -83,12 +83,16 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
-private fun JsonObject.str(key: String): String? =
+/// Shared JSON readers for the workspace sections. Internal so each section
+/// file reads the host answers the same way.
+internal fun JsonObject.str(key: String): String? =
     this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
 
-private fun JsonObject.bol(key: String): Boolean = this[key]?.jsonPrimitive?.booleanOrNull == true
+internal fun JsonObject.bol(key: String): Boolean = this[key]?.jsonPrimitive?.booleanOrNull == true
 
-private fun asObjects(element: JsonElement?): List<JsonObject> =
+internal fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
+
+internal fun asObjects(element: JsonElement?): List<JsonObject> =
     (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()/// One workspace section, rendered as its own surface instead of a raw JSON
 /// dump. Each section reaches the real remote method over the tunnel; the
 /// renderers mirror their Apple counterparts' content and colour rules.
@@ -102,6 +106,7 @@ fun WorkspaceSection(
     section: String,
     modifier: Modifier = Modifier,
     protocol: Long? = null,
+    folderName: String = "",
     onOpenTerminal: (String?) -> Unit,
     onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
 ) {
@@ -135,10 +140,10 @@ fun WorkspaceSection(
         "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier)
         "Changes" -> ChangesSection(model, peer, workspace, data, error, loading, modifier)
         "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier)
-        "Notes" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = false, onChanged = reload, modifier)
+        "Notes" -> NotesSection(model, peer, workspace, modifier, folderName, hostLabel)
         "Workflows" -> WorkflowsSection(model, peer, workspace, data, error, loading, reload, modifier)
         "Automations" -> AutomationsSection(model, peer, data, error, loading, reload, modifier)
-        "Files" -> FilesSection(model, peer, workspace, modifier)
+        "Files" -> FilesSection(model, peer, workspace, modifier, folderName, hostLabel)
         "Browser" -> BrowserSection(model, peer, onOpenBrowser, modifier)
         else -> EmptyState(Icons.AutoMirrored.Filled.Notes, "Nothing here", "This section has no content yet.", modifier)
     }
@@ -385,7 +390,9 @@ private fun TodoSection(
         }
         itemsIndexed(cards) { _, card ->
             val id = card.str("id") ?: return@itemsIndexed
-            val archived = (card.str("column") ?: "") == "archived"
+            // The host column for put-away cards is "archive"
+            // (`TodoCard.isArchived`); "archived" never matches.
+            val archived = (card.str("column") ?: "") == "archive"
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -414,7 +421,7 @@ private fun TodoSection(
                             runCatching {
                                 model.workspaceSection(peer, "todo.update", buildJsonObject {
                                     put("id", id)
-                                    put("column", if (archived) "backlog" else "archived")
+                                    put("column", if (archived) "backlog" else "archive")
                                 })
                             }
                             onChanged()
@@ -708,128 +715,6 @@ private fun AutomationsSection(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun FilesSection(
-    model: AppViewModel,
-    peer: String,
-    workspace: String,
-    modifier: Modifier,
-) {
-    val scope = rememberCoroutineScope()
-    var path by remember { mutableStateOf("") }
-    var entries by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var editorPath by remember { mutableStateOf<String?>(null) }
-    var editorBody by remember { mutableStateOf("") }
-
-    suspend fun load(at: String) {
-        loading = true
-        runCatching {
-            model.workspaceSection(peer, "workspace.tree", buildJsonObject {
-                put("id", workspace); put("path", at)
-            })
-        }.onSuccess {
-            entries = asObjects(it).ifEmpty { asObjects((it as? JsonObject)?.get("entries")) }
-            error = null
-        }.onFailure { error = it.message }
-        loading = false
-    }
-    LaunchedEffect(path) { load(path) }
-
-    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        if (path.isNotEmpty()) {
-            item {
-                TsSecondaryButton(label = "Up", small = true, onClick = {
-                    path = path.trimEnd('/').substringBeforeLast('/', "")
-                })
-            }
-        }
-        if (error != null) item { SectionError(error) }
-        if (!loading && entries.isEmpty()) {
-            item {
-                EmptyState(
-                    Icons.Default.FolderOpen,
-                    "Empty folder",
-                    "This folder has nothing registered on the host.",
-                    art = { EmptyArt(EmptyArtKind.Files) },
-                )
-            }
-        }
-        itemsIndexed(entries) { _, entry ->
-            val name = entry.str("name") ?: entry.str("path") ?: return@itemsIndexed
-            val child = entry.str("path") ?: listOf(path, name).filter { it.isNotBlank() }.joinToString("/")
-            val dir = entry.bol("dir") || entry.bol("isDir") || entry.str("kind") == "dir" || entry.str("type") == "dir"
-            Column {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            if (dir) {
-                                path = child
-                            } else {
-                                scope.launch {
-                                    runCatching {
-                                        val read = model.workspaceSection(peer, "workspace.read", buildJsonObject {
-                                            put("id", workspace); put("path", child)
-                                        }) as? JsonObject
-                                        editorPath = child
-                                        editorBody = read?.str("content") ?: ""
-                                    }.onFailure { error = it.message }
-                                }
-                            }
-                        }
-                        .padding(vertical = Space.xs),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space.s),
-                ) {
-                    Icon(
-                        if (dir) Icons.Default.FolderOpen else Icons.AutoMirrored.Filled.InsertDriveFile,
-                        null,
-                        tint = LocalTsColors.current.accent,
-                    )
-                    Text(name, style = TsType.mono(12), color = LocalTsColors.current.textPrimary)
-                }
-                HorizontalDivider(color = LocalTsColors.current.border)
-            }
-        }
-    }
-    val editing = editorPath
-    if (editing != null) {
-        AlertDialog(
-            onDismissRequest = { editorPath = null },
-            title = { Text(editing, style = TsType.mono(12)) },
-            text = {
-                OutlinedTextField(
-                    editorBody,
-                    { editorBody = it },
-                    minLines = 8,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            },
-            confirmButton = {
-                TsAccentButton(
-                    label = "Save",
-                    small = true,
-                    onClick = {
-                        scope.launch {
-                            runCatching {
-                                model.workspaceSection(peer, "workspace.write", buildJsonObject {
-                                    put("id", workspace)
-                                    put("path", editing)
-                                    put("content", editorBody)
-                                })
-                            }
-                            editorPath = null
-                        }
-                    },
-                )
-            },
-            dismissButton = { TextButton(onClick = { editorPath = null }) { Text("Close") } },
-        )
     }
 }
 

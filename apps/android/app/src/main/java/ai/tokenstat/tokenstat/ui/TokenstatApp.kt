@@ -1918,6 +1918,7 @@ private fun WorkspaceDetail(
             hostLabel = host.string("label") ?: "Host",
             section = section,
             protocol = HostContracts.protocolOf(host),
+            folderName = folder.string("name") ?: "",
             modifier = Modifier.verticalScroll(rememberScrollState()),
             onOpenTerminal = onOpenTerminal,
             onOpenBrowser = onOpenBrowser,

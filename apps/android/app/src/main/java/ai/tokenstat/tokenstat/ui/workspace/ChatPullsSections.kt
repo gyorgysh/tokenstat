@@ -20,8 +20,7 @@ import kotlinx.serialization.json.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 
-private fun JsonObject.str(key: String): String? =
-    this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
+/// `str` comes from the shared workspace readers in `WorkspaceSections.kt`.
 
 @Composable
 fun ChatSection(
