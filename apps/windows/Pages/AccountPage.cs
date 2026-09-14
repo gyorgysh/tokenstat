@@ -197,7 +197,8 @@ internal sealed class AccountPage : Page
             if (limitNode is not null)
             {
                 subtitle = $"{used} of {Format.Long(account, "machineLimit")} devices";
-                if (!(account["canRemote"]?.GetValue<bool>() ?? true))
+                if (account["canRemote"] is JsonValue noRemote
+                    && noRemote.GetValueKind() == System.Text.Json.JsonValueKind.False)
                 {
                     subtitle += ". No remote control on this plan.";
                 }
