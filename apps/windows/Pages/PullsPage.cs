@@ -355,7 +355,7 @@ internal sealed class PullsPage : Page
                     return;
                 }
                 var next = Format.Long(polled, "interval");
-                if (next > 0 && started is JsonObject object) object["interval"] = next;
+                if (next > 0 && started is JsonObject startedObject) startedObject["interval"] = next;
             }
         }
         catch (OperationCanceledException) { }
