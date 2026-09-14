@@ -89,6 +89,8 @@ import ai.tokenstat.tokenstat.ui.logic.compactTokens
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
 import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
+import ai.tokenstat.tokenstat.ui.search.SearchOpen
+import ai.tokenstat.tokenstat.ui.search.WorkSearchSheet
 import ai.tokenstat.tokenstat.ui.setup.SetupWizard
 import ai.tokenstat.tokenstat.ui.terminal.SshTerminalScreen
 import ai.tokenstat.tokenstat.ui.terminal.TerminalScreen
@@ -283,6 +285,8 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var pendingWorkFolderId by rememberSaveable { mutableStateOf<String?>(null) }
     var accountOpen by remember { mutableStateOf(false) }
     var wizardOpen by remember { mutableStateOf(false) }
+    var searchOpen by remember { mutableStateOf(false) }
+    var pendingDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
     var sshSignal by remember { mutableStateOf(0) }
     val context = LocalContext.current
     val homeStores = remember { HomeStores(context) }
@@ -331,6 +335,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { searchOpen = true }) {
+                        Icon(ActionIcon.Search.vector, "Search", tint = colors.controlGlyph)
+                    }
                     ConnectionChip(state.connection, onRetry = { model.retryConnection() })
                     Box(Modifier.padding(end = Space.s), contentAlignment = Alignment.Center) {
                         LogoMark(size = 18)
@@ -420,10 +427,40 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                         },
                         onSetupWizard = { wizardOpen = true },
                         sshOpenSignal = sshSignal,
+                        pendingDeviceId = pendingDeviceId,
+                        onPendingDeviceConsumed = { pendingDeviceId = null },
                     )
                 }
             }
         }
+    }
+    if (searchOpen) {
+        WorkSearchSheet(
+            model = model,
+            state = state,
+            stores = homeStores,
+            onOpen = { open ->
+                when (open) {
+                    is SearchOpen.Tab -> selected = when (open.name) {
+                        "home" -> Destination.Home
+                        "workspaces" -> Destination.Workspaces
+                        "insights" -> Destination.Insights
+                        else -> Destination.Devices
+                    }
+                    is SearchOpen.Device -> {
+                        pendingDeviceId = open.machineId
+                        selected = Destination.Devices
+                    }
+                    SearchOpen.Account -> accountOpen = true
+                    is SearchOpen.Folder -> {
+                        pendingWorkHostId = open.hostId
+                        pendingWorkFolderId = open.folderId
+                        selected = Destination.Workspaces
+                    }
+                }
+            },
+            onDismiss = { searchOpen = false },
+        )
     }
     if (accountOpen) AccountDialog(state, model, billing, onDismiss = { accountOpen = false })
     if (wizardOpen) {
@@ -920,11 +957,19 @@ private fun DevicesScreen(
     onOpenWork: (String) -> Unit,
     onSetupWizard: () -> Unit = {},
     sshOpenSignal: Int = 0,
+    pendingDeviceId: String? = null,
+    onPendingDeviceConsumed: () -> Unit = {},
 ) {
     var sshOpen by rememberSaveable { mutableStateOf(false) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(sshOpenSignal) {
         if (sshOpenSignal > 0) sshOpen = true
+    }
+    LaunchedEffect(pendingDeviceId) {
+        if (pendingDeviceId != null) {
+            selectedId = pendingDeviceId
+            onPendingDeviceConsumed()
+        }
     }
     val machines = state.account?.get("machines") as? JsonArray ?: JsonArray(emptyList())
     val selected = machines.map { it.jsonObject }.find { it.string("id") == selectedId }

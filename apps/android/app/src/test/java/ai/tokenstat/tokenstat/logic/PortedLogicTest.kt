@@ -26,7 +26,13 @@ import ai.tokenstat.tokenstat.ui.marks.runStripSummary
 import ai.tokenstat.tokenstat.ui.marks.visibleRunTicks
 import ai.tokenstat.tokenstat.ui.theme.LightColors
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
+import ai.tokenstat.tokenstat.ui.search.SearchOpen
+import ai.tokenstat.tokenstat.ui.search.SearchPlace
+import ai.tokenstat.tokenstat.ui.search.SearchPlaces
 
 /// Pins the ported pure logic to the same answers the Apple client's Swift
 /// originals produce, so both platforms cannot drift apart silently.
@@ -465,6 +471,38 @@ class PortedLogicTest {
         assertEquals("24 / 32 GB", HostStatsFormat.ramLabel(24L * 1024 * 1024 * 1024, 32L * 1024 * 1024 * 1024))
         assertEquals("3.5 / 8.0 GB", HostStatsFormat.ramLabel((3.5 * 1024 * 1024 * 1024).toLong(), 8L * 1024 * 1024 * 1024))
         assertEquals("42%", HostStatsFormat.cpuLabel(0.42))
+    }
+
+    // SearchPlaces.rank — every word must start a word in the place; title
+    // beats keywords beats the trail. Mirrors WorkSearchPlaceMatch.
+    @Test
+    fun searchRankMatchesApple() {
+        val places = SearchPlaces.all(mapOf("peer-1" to "Build Mac"), mapOf("peer-1" to "macOS"))
+        val notifications = SearchPlaces.rank("not", places)
+        assertTrue(notifications.any { it.id == "account:thisDevice:notifications" })
+        val traffic = SearchPlaces.rank("local traffic", places)
+        assertEquals(listOf("account:thisDevice:traffic"), traffic.map { it.id })
+        // A word from nowhere removes the place rather than ranking it last.
+        assertEquals(emptyList<SearchPlace>(), SearchPlaces.rank("zxqv", places))
+        assertEquals(emptyList<SearchPlace>(), SearchPlaces.rank("", places))
+        // "plan" means the Plan card, not every setting that mentions a plan.
+        val plan = SearchPlaces.rank("plan", places)
+        assertEquals("account:account:plans", plan.first().id)
+        // A machine name finds the device.
+        val device = SearchPlaces.rank("build", places)
+        assertTrue(device.any { it.id == "device:peer-1" })
+    }
+
+    @Test
+    fun searchDestinationsParse() {
+        val tab = SearchPlace("tab:insights", "Insights", "Tab", ActionIcon.Benchmarks)
+        assertEquals(SearchOpen.Tab("insights"), SearchPlaces.destinationOf(tab) { null })
+        val device = SearchPlace("device:peer-1", "Build Mac", "Devices", ActionIcon.Device)
+        assertEquals(SearchOpen.Device("m-1"), SearchPlaces.destinationOf(device) { if (it == "peer-1") "m-1" else null })
+        val account = SearchPlace("account:thisDevice", "Settings", "Behind your avatar", ActionIcon.Settings)
+        assertEquals(SearchOpen.Account, SearchPlaces.destinationOf(account) { null })
+        val unknown = SearchPlace("elsewhere", "Lost", "Nowhere", ActionIcon.Help)
+        assertNull(SearchPlaces.destinationOf(unknown) { null })
     }
 
     // RunHistoryStrip trimming and summary.
