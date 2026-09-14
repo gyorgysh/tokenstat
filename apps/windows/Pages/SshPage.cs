@@ -106,6 +106,17 @@ internal sealed class SshPage : Page
         _listRoot.Children.Add(ActionIconGlyph.Button(
             "Refresh", ActionIcon.Refresh, async (_, _) => await LoadAsync()));
 
+        JsonArray? keys = null;
+        try
+        {
+            keys = Format.Items(await AppServices.Host.CallAsync("ssh.key.list"));
+        }
+        catch (Exception ex)
+        {
+            _listRoot.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+        }
+        AddVaultCard(keys);
+
         JsonNode listed;
         try
         {
@@ -165,23 +176,133 @@ internal sealed class SshPage : Page
             _listRoot.Children.Add(Chrome.Card("Hosts", list));
         }
 
-        await LoadKeysAsync();
+        await LoadKeysAsync(keys);
     }
 
-    private async Task LoadKeysAsync()
+    /// <summary>
+    /// The credential vault, as one card above the host list. Like the Apple
+    /// vault screen it leads with what the store holds and gates use on
+    /// presence: a key whose secret is not on this PC connects with a
+    /// password or a pasted key, never with a displayed one.
+    /// </summary>
+    private void AddVaultCard(JsonArray? keys)
     {
-        JsonNode listed;
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceS,
+            Children =
+            {
+                ActionIconGlyph.Button("Generate", ActionIcon.Create, async (_, _) => await AddKeyAsync(generate: true)),
+                ActionIconGlyph.Button("Import", ActionIcon.Upload, async (_, _) => await AddKeyAsync(generate: false)),
+            },
+        });
+        var onThisPc = 0;
+        var total = keys?.Count ?? 0;
+        if (keys is not null)
+        {
+            foreach (var key in keys)
+            {
+                if (SshSecrets.Has(Format.Text(key, "secretRef")))
+                {
+                    onThisPc++;
+                }
+            }
+        }
+        body.Children.Add(new TextBlock
+        {
+            Text = keys is null
+                ? "The key list is unavailable, so the vault cannot be counted."
+                : total == 0
+                    ? "No keys yet. Import one to stop typing passwords."
+                    : $"{onThisPc} of {total} key secrets on this PC, in the Windows credential store.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.8,
+        });
+        if (keys is not null)
+        {
+            foreach (var key in keys)
+            {
+                var label = Format.Text(key, "label", Format.Text(key, "fingerprint", "Key"));
+                var id = Format.Text(key, "id");
+                var secretRef = Format.Text(key, "secretRef");
+                var ready = SshSecrets.Has(secretRef);
+                var row = new Grid();
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var name = new TextBlock
+                {
+                    Text = ready ? label : $"{label} · not on this PC",
+                    TextWrapping = TextWrapping.Wrap,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(name, 0);
+                row.Children.Add(name);
+                if (!string.IsNullOrEmpty(id))
+                {
+                    var record = key;
+                    var remove = ActionIconGlyph.Button(
+                        "Remove", ActionIcon.Delete, async (_, _) => await RemoveKeyAsync(record));
+                    Grid.SetColumn(remove, 1);
+                    row.Children.Add(remove);
+                }
+                body.Children.Add(row);
+            }
+        }
+        _listRoot.Children.Add(Chrome.Card("Credential vault", body));
+    }
+
+    private async Task RemoveKeyAsync(JsonNode? key)
+    {
+        var id = Format.Text(key, "id");
+        var label = Format.Text(key, "label", Format.Text(key, "fingerprint", "Key"));
+        var secretRef = Format.Text(key, "secretRef");
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+        var dialog = new ContentDialog
+        {
+            Title = "Remove key",
+            Content = $"Remove {label} from this PC? Saved hosts that use it will ask for a password or a pasted key.",
+            PrimaryButtonText = "Remove",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
         try
         {
-            listed = await AppServices.Host.CallAsync("ssh.key.list");
+            await AppServices.Host.CallAsync("ssh.key.delete", new JsonObject { ["id"] = id });
         }
         catch (Exception ex)
         {
-            _listRoot.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            _listRoot.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
             return;
         }
+        SshSecrets.Forget(secretRef);
+        await LoadAsync();
+    }
 
-        var array = Format.Items(listed);
+    private async Task LoadKeysAsync(JsonArray? keys)
+    {
+        if (keys is null)
+        {
+            try
+            {
+                keys = Format.Items(await AppServices.Host.CallAsync("ssh.key.list"));
+            }
+            catch (Exception ex)
+            {
+                _listRoot.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+                return;
+            }
+        }
+
+        var array = keys;
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(new StackPanel
         {
@@ -295,8 +416,15 @@ internal sealed class SshPage : Page
                 return;
             }
             var id = "key_" + Guid.NewGuid().ToString("N");
-            var secretRef = "winmem:" + id;
-            SshSecrets.Put(secretRef, privateKey);
+            var secretRef = CredentialVault.RefFor(id);
+            if (!SshSecrets.Put(secretRef, privateKey))
+            {
+                _listRoot.Children.Insert(1, Chrome.Banner(
+                    "The key could not be stored in the Windows credential store.",
+                    Theme.Danger,
+                    Symbol.Important));
+                return;
+            }
             await AppServices.Host.CallAsync(
                 "ssh.key.save",
                 new JsonObject
@@ -383,7 +511,7 @@ internal sealed class SshPage : Page
         {
             form.Children.Add(new TextBlock
             {
-                Text = "A key on this PC will be used. Leave the password blank, or fill it to use a password instead.",
+                Text = "A key from the credential vault will be used. Leave the password blank, or fill it to use a password instead.",
                 TextWrapping = TextWrapping.Wrap,
                 Opacity = 0.8,
             });
@@ -686,24 +814,80 @@ internal sealed class SshPage : Page
 }
 
 /// <summary>
-/// Private key bytes for this process only. The host list stores a secretRef,
-/// not PEM, and this cut does not invent a Windows vault.
+/// Private key bytes, held in memory and in the Windows credential store.
+/// The host record keeps a secretRef, never PEM: "wincred:" ids live in
+/// Credential Manager under tokenstat/ssh/ and survive restarts, "winmem:"
+/// ids are this process only. Like the Apple vault, use is gated on the
+/// secret being present, and secret material is never displayed. Removing a
+/// key deletes both the host record and the stored secret.
 /// </summary>
 internal static class SshSecrets
 {
     private static readonly ConcurrentDictionary<string, string> Store = new();
 
-    public static void Put(string secretRef, string pem)
+    public static bool Put(string secretRef, string pem)
     {
-        if (!string.IsNullOrEmpty(secretRef))
+        if (string.IsNullOrEmpty(secretRef) || string.IsNullOrEmpty(pem))
         {
-            Store[secretRef] = pem;
+            return false;
         }
+        var vaultId = CredentialVault.IdFromRef(secretRef);
+        if (vaultId is not null && !CredentialVault.Save(vaultId, pem))
+        {
+            return false;
+        }
+        Store[secretRef] = pem;
+        return true;
     }
 
-    public static string? Get(string secretRef) =>
-        string.IsNullOrEmpty(secretRef) ? null : Store.GetValueOrDefault(secretRef);
+    public static string? Get(string secretRef)
+    {
+        if (string.IsNullOrEmpty(secretRef))
+        {
+            return null;
+        }
+        if (Store.GetValueOrDefault(secretRef) is string cached)
+        {
+            return cached;
+        }
+        var vaultId = CredentialVault.IdFromRef(secretRef);
+        if (vaultId is null)
+        {
+            return null;
+        }
+        var loaded = CredentialVault.Load(vaultId);
+        if (loaded is not null)
+        {
+            Store[secretRef] = loaded;
+        }
+        return loaded;
+    }
 
-    public static bool Has(string secretRef) =>
-        !string.IsNullOrEmpty(secretRef) && Store.ContainsKey(secretRef);
+    public static bool Has(string secretRef)
+    {
+        if (string.IsNullOrEmpty(secretRef))
+        {
+            return false;
+        }
+        if (Store.ContainsKey(secretRef))
+        {
+            return true;
+        }
+        var vaultId = CredentialVault.IdFromRef(secretRef);
+        return vaultId is not null && CredentialVault.Contains(vaultId);
+    }
+
+    public static void Forget(string secretRef)
+    {
+        if (string.IsNullOrEmpty(secretRef))
+        {
+            return;
+        }
+        Store.TryRemove(secretRef, out _);
+        var vaultId = CredentialVault.IdFromRef(secretRef);
+        if (vaultId is not null)
+        {
+            CredentialVault.Remove(vaultId);
+        }
+    }
 }
