@@ -2869,10 +2869,9 @@ struct RootView: View {
             // expander on the left, the archive on the right.
             if conversations.count > ChatHistoryWindow.collapsedLimit {
                 HStack {
-                    // The count is what is hidden, not what is drawn: with
-                    // a deep selection the window slides, and the number
-                    // still answers "how many am I not seeing".
-                    Button(expanded ? "Show less" : "Show \(conversations.count - window.count) more") {
+                    // Count only the rows this expander reveals. The rest
+                    // of the archive belongs to See all chats.
+                    Button(expanded ? "Show less" : "Show \(min(conversations.count, ChatHistoryWindow.inlineLimit) - window.count) more") {
                         if expanded {
                             expandedChatHistories.remove(folder.id)
                         } else {
