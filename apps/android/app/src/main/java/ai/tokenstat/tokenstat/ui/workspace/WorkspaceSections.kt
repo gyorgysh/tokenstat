@@ -137,8 +137,8 @@ fun WorkspaceSection(
     val reload: () -> Unit = { scope.launch { load() } }
     when (section) {
         "Sessions" -> SessionsSection(data, error, loading, onOpenTerminal, reload, modifier)
-        "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier)
-        "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier)
+        "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel)
+        "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel)
         "Changes" -> ChangesSection(model, peer, workspace, modifier, folderName, hostLabel, protocol, onChanged = reload)
         "History" -> HistorySection(model, peer, workspace, modifier, folderName, hostLabel)
         "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier, folderName, hostLabel, onOpenSection)
