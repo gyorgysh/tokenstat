@@ -247,6 +247,8 @@ targets:
       - name: Third-party notices
         basedOnDependencyAnalysis: false
         script: |
+          # Xcode from the GUI has no cargo on PATH, so say where it lives.
+          export PATH="$HOME/.cargo/bin:$PATH"
           cd "$SRCROOT/../.."
           cargo run -q -p xtask -- notices "apps/mac/Resources/THIRD_PARTY_NOTICES.md" tokenstat-host
           cat "apps/mac/Resources/SwiftTerm-LICENSE.txt" >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
@@ -268,6 +270,8 @@ targets:
       - name: Bundled price book
         basedOnDependencyAnalysis: false
         script: |
+          # Xcode from the GUI has no cargo on PATH, so say where it lives.
+          export PATH="$HOME/.cargo/bin:$PATH"
           cd "$SRCROOT/../.."
           SEED="apps/mac/Resources/PriceBookSeed.json"
           if [ -f "$SEED" ] && [ -n "$(find "$SEED" -mtime -7 2>/dev/null)" ]; then
