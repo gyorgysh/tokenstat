@@ -15,7 +15,12 @@ import ai.tokenstat.tokenstat.ui.logic.normalizeHomeLayout
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
+import ai.tokenstat.tokenstat.ui.logic.harnessCanonicalID
+import ai.tokenstat.tokenstat.ui.logic.harnessName
 import ai.tokenstat.tokenstat.ui.logic.money
+import ai.tokenstat.tokenstat.ui.logic.moneyValue
+import ai.tokenstat.tokenstat.ui.logic.shortDate
+import ai.tokenstat.tokenstat.ui.logic.tagSignInUrl
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
 import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
 import ai.tokenstat.tokenstat.ui.marks.RunOutcome
@@ -81,8 +86,8 @@ class PortedLogicTest {
         )
     }
 
-    // compactTokens — mirrors the Apple client's K/M/B compaction beside model
-    // names.
+    // compactTokens — port of formatTokens in Bridge/Models.swift: lowercase
+    // k, whole thousands above ten thousand.
     @Test
     fun tokenCountsCompact() {
         assertEquals("0", compactTokens(0))
@@ -90,18 +95,73 @@ class PortedLogicTest {
         assertEquals("0", compactTokens(null))
         assertEquals("0", compactTokens(-5))
         assertEquals("999", compactTokens(999))
-        assertEquals("1.0K", compactTokens(1_000))
-        assertEquals("1.6K", compactTokens(1_600))
+        assertEquals("1.0k", compactTokens(1_000))
+        assertEquals("1.6k", compactTokens(1_600))
+        assertEquals("126k", compactTokens(125_844))
         assertEquals("1.6M", compactTokens(1_600_000))
         assertEquals("2.0B", compactTokens(2_000_000_000))
     }
 
     @Test
     fun moneyFormatsMicros() {
-        // Micros divide by one million before formatting; the currency symbol
-        // and placement are the device locale's business.
-        val formatted = money(1_500_000L)
-        assert(formatted.contains("1.50") || formatted.contains("1,50")) { formatted }
+        // Rates are published in US dollars: en_US USD whatever the device
+        // locale, like Money in Bridge/Models.swift.
+        assertEquals("$1.50", money(1_500_000L))
+    }
+
+    @Test
+    fun moneyValueQualifiesFloorsAndEstimates() {
+        assertEquals("$1.50", moneyValue(1_500_000L, estimated = false, complete = true))
+        assertEquals("~$1.50", moneyValue(1_500_000L, estimated = true, complete = true))
+        assertEquals("$1.50+", moneyValue(1_500_000L, estimated = false, complete = false))
+        assertEquals("$1.50+", moneyValue(1_500_000L, estimated = true, complete = false))
+    }
+
+    @Test
+    fun harnessNamesMatchAppleSpelling() {
+        assertEquals("Claude Code", harnessName("claude_code"))
+        assertEquals("Claude Code (recovered)", harnessName("claude_code_rollup"))
+        assertEquals("OpenCode 2", harnessName("opencode2"))
+        assertEquals("Grok Build", harnessName("grok"))
+        assertEquals("Antigravity", harnessName("agy"))
+        assertEquals("unknown", harnessName(""))
+        assertEquals("someslug", harnessName("someslug"))
+    }
+
+    @Test
+    fun harnessCanonicalNormalizesLegacyIds() {
+        assertEquals("antigravity", harnessCanonicalID("agy"))
+        assertEquals("antigravity", harnessCanonicalID("antigravity-2"))
+        assertEquals("claude_code", harnessCanonicalID("claude"))
+        assertEquals("opencode", harnessCanonicalID("opencode2"))
+        assertEquals("codex", harnessCanonicalID("codex"))
+    }
+
+    @Test
+    fun signInUrlCarriesAndroidClient() {
+        assertEquals(
+            "https://tokenstat.ai/link?code=AB12CD34&app=android&mobile=1",
+            tagSignInUrl("https://tokenstat.ai/link?code=AB12CD34"),
+        )
+        assertEquals(
+            "https://tokenstat.ai/link?app=android&mobile=1",
+            tagSignInUrl("https://tokenstat.ai/link"),
+        )
+    }
+
+    @Test
+    fun shortDateOmitsCurrentYear() {
+        val now = java.time.LocalDate.now()
+        val thisYear = now.withMonth(8).withDayOfMonth(11)
+            .let { if (it.isAfter(now)) it.minusYears(1) else it }
+        val expectedDay = thisYear.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM"))
+        assertEquals(expectedDay, shortDate(thisYear.toString()))
+        val otherYear = thisYear.minusYears(1)
+        assertEquals(
+            otherYear.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy")),
+            shortDate(otherYear.toString()),
+        )
+        assertEquals("not-a-date", shortDate("not-a-date"))
     }
 
     // TunnelCopy — a mid-reconnect tunnel reads as waiting, not gone.

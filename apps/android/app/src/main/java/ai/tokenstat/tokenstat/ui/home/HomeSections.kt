@@ -407,33 +407,30 @@ fun MachinesSection(
                 modifier = Modifier.clickable { onOpenDevices() }.padding(vertical = 12.dp),
             )
         }
-        TsCard {
-            Column {
-                machines.forEachIndexed { index, machine ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable { onOpenWork(machine.id) }.padding(vertical = 12.dp),
-                    ) {
-                        androidx.compose.foundation.Canvas(Modifier.size(9.dp)) {
-                            drawCircle(color = if (machine.online == true) awakeDot else asleepDot)
-                        }
-                        Spacer(Modifier.width(Space.m))
-                        Icon(ActionIcon.Device.vector, null, tint = colors.textSecondary, modifier = Modifier.width(24.dp))
-                        Spacer(Modifier.width(Space.m))
-                        Column(Modifier.weight(1f)) {
-                            Text(machine.name, fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1)
-                            Text(
-                                if (machine.online == true) "Awake" else "Status unknown",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.textSecondary,
-                                maxLines = 1,
-                            )
-                        }
-                        Icon(Icons.Default.ChevronRight, null, tint = colors.textSecondary)
+        // One card per machine, like the Apple home. A divided list reads
+        // as one thing with seams; these are separate computers.
+        machines.forEach { machine ->
+            TsCard {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable { onOpenWork(machine.id) }.padding(vertical = 12.dp),
+                ) {
+                    androidx.compose.foundation.Canvas(Modifier.size(9.dp)) {
+                        drawCircle(color = if (machine.online == true) awakeDot else asleepDot)
                     }
-                    if (index != machines.lastIndex) {
-                        HorizontalDivider(color = colors.border)
+                    Spacer(Modifier.width(Space.m))
+                    Icon(ActionIcon.Device.vector, null, tint = colors.textSecondary, modifier = Modifier.width(24.dp))
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text(machine.name, fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1)
+                        Text(
+                            if (machine.online == true) "Awake" else "Status unknown",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                            maxLines = 1,
+                        )
                     }
+                    Icon(Icons.Default.ChevronRight, null, tint = colors.textSecondary)
                 }
             }
         }

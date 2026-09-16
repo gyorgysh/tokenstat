@@ -26,6 +26,15 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="tokenstat.ai" android:pathPrefix="/app/auth" />
             </intent-filter>
+            <!-- The sign-in callback, the same scheme the site redirects the
+                 iOS authentication session to. A custom scheme needs no
+                 verified link, so it also works on debug builds. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tokenstat" android:host="auth" android:pathPrefix="/done" />
+            </intent-filter>
         </activity>
         <service
             android:name=".notifications.TokenstatMessagingService"

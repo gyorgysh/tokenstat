@@ -670,8 +670,7 @@ private fun BranchDialog(
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(Space.m)
-                .verticalScroll(rememberScrollState()),
+                .padding(Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             Text("Switch branch", style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
@@ -679,7 +678,9 @@ private fun BranchDialog(
             if (loading) {
                 Text("Loading…", color = LocalTsColors.current.textSecondary)
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                // The list scrolls itself; scrolling the dialog Column too
+                // would measure it with infinite height and crash.
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     items(branches, key = { it.str("name") ?: it.hashCode().toString() }) { branchRow ->
                         val name = branchRow.str("name") ?: return@items
                         val isCurrent = branchRow.bol("current") || name == current

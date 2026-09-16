@@ -7,11 +7,16 @@ import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.core.CoreClient
 import ai.tokenstat.tokenstat.core.CoreFailure
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
+import ai.tokenstat.tokenstat.ui.logic.tagSignInUrl
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -36,7 +41,6 @@ data class ClientState(
     val home: JsonObject? = null,
     val limits: JsonArray = JsonArray(emptyList()),
     val limitsError: String? = null,
-    val insights: JsonElement? = null,
     val error: String? = null,
     val connection: ConnectionUi = ConnectionUi(),
 ) {
@@ -63,6 +67,26 @@ data class ClientState(
             ?.jsonPrimitive
             ?.content
             ?.takeIf { it.isNotBlank() }
+}
+
+data class PendingLogin(val url: String, val code: String)
+
+private enum class SignInPollFailure { TRANSPORT, INVALID_GRANT, TERMINAL }
+
+private class SignInFailed(message: String) : Exception(message)
+
+// The core gives device polling its own codes. Transport errors below the
+// core envelope stay retryable too.
+private fun signInPollFailure(error: Exception): SignInPollFailure {
+    val code = (error as? CoreFailure)?.code
+    if (code == "device_transport" || code == "offline" || code == "host_timeout" || code == "host_unreachable") {
+        return SignInPollFailure.TRANSPORT
+    }
+    if (code == "device_invalid_grant") return SignInPollFailure.INVALID_GRANT
+    if (error is java.net.UnknownHostException || error is java.net.SocketException || error is java.io.IOException) {
+        return SignInPollFailure.TRANSPORT
+    }
+    return SignInPollFailure.TERMINAL
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -106,13 +130,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             })
         }
         val limits = viewModelScope.async { CoreClient.call("usage.limits") }
-        // Proto 5 coherent snapshot first (what the Mac Insights model uses);
-        // fall back to the legacy per-model report when the host is older.
-        val report = viewModelScope.async {
-            runCatching { CoreClient.call("insights.snapshot", buildJsonObject {}) }.getOrElse {
-                CoreClient.call("account.report", buildJsonObject { put("group", "model"); put("weeks", 53) })
-            }
-        }
         runCatching { calendar.await() }.onSuccess {
             mutableState.value = mutableState.value.copy(home = (it as? JsonObject))
         }
@@ -126,25 +143,116 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .onFailure {
                 mutableState.value = mutableState.value.copy(limitsError = it.message)
             }
-        runCatching { report.await() }.onSuccess {
-            mutableState.value = mutableState.value.copy(insights = it)
+    }
+
+    // One account-plane breakdown, the way the iOS Insights model loads it:
+    // per cut, from `account.report`, because a client has no archive of its
+    // own. `group` is "model", "source" or "day".
+    suspend fun accountReport(group: String, weeks: Int = 53): JsonObject =
+        core("account.report", buildJsonObject { put("group", group); put("weeks", weeks) }) as JsonObject
+
+    private val _pendingLogin = MutableStateFlow<PendingLogin?>(null)
+    val pendingLogin = _pendingLogin.asStateFlow()
+    private val _signInNotice = MutableStateFlow<String?>(null)
+    val signInNotice = _signInNotice.asStateFlow()
+    private val _signInError = MutableStateFlow<String?>(null)
+    val signInError = _signInError.asStateFlow()
+    private var signInJob: Job? = null
+
+    // Start the device flow, open the approval page, then poll until
+    // confirmed, the way the iOS account model does. The cadence and the
+    // deadline come from the server: polling faster than asked invites a
+    // rate limit, and a fixed loop ends while somebody is still typing a
+    // provider password.
+    fun signIn(openPage: (String) -> Unit) {
+        // A sign-in is already running. Do not start a second one: a second
+        // device code orphans the first, and the poll that is running belongs
+        // to the code the user is looking at. Put the page back in front of
+        // them instead, which is what tapping the button again means.
+        if (signInJob?.isActive == true) {
+            _pendingLogin.value?.let { openPage(it.url) }
+            return
+        }
+        _signInError.value = null
+        signInJob = viewModelScope.launch {
+            try {
+                val device = CoreClient.call("account.deviceStart").jsonObject
+                val raw = device["openUrl"]?.jsonPrimitive?.content
+                    ?: throw IllegalStateException("The account did not return a sign-in URL.")
+                val url = tagSignInUrl(raw)
+                val code = device["userCode"]?.jsonPrimitive?.content ?: ""
+                var interval = device["interval"]?.jsonPrimitive?.longOrNull ?: 5L
+                val deadline = System.currentTimeMillis() +
+                    (device["expiresIn"]?.jsonPrimitive?.longOrNull ?: 900L) * 1_000
+                _pendingLogin.value = PendingLogin(url, code)
+                openPage(url)
+                var transportFailures = 0
+                while (System.currentTimeMillis() < deadline) {
+                    delay(interval * 1_000)
+                    ensureActive()
+                    val poll = try {
+                        CoreClient.call("account.devicePoll")
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        when (signInPollFailure(e)) {
+                            SignInPollFailure.TRANSPORT -> {
+                                transportFailures += 1
+                                if (transportFailures < 3) {
+                                    _signInNotice.value = "Waiting for the network."
+                                    delay(maxOf(interval, 3L) * 1_000)
+                                    continue
+                                }
+                                cancelLogin()
+                                throw SignInFailed("The account service could not be reached after several tries. Try again.")
+                            }
+                            SignInPollFailure.INVALID_GRANT -> {
+                                cancelLogin()
+                                throw SignInFailed("That sign-in expired. Start again.")
+                            }
+                            SignInPollFailure.TERMINAL -> {
+                                cancelLogin()
+                                throw e
+                            }
+                        }
+                    }
+                    transportFailures = 0
+                    _signInNotice.value = null
+                    if (poll.jsonObject["state"]?.jsonPrimitive?.content == "confirmed") {
+                        refresh()
+                        return@launch
+                    }
+                    interval = poll.jsonObject["interval"]?.jsonPrimitive?.longOrNull ?: interval
+                }
+                cancelLogin()
+                _signInError.value = "The sign-in code expired before it was confirmed."
+            } catch (e: CancellationException) {
+                runCatching { CoreClient.call("account.cancelLogin") }
+            } catch (e: SignInFailed) {
+                _signInError.value = e.message
+            } catch (e: Exception) {
+                _signInError.value = e.message
+            } finally {
+                _pendingLogin.value = null
+                _signInNotice.value = null
+            }
         }
     }
 
-    suspend fun beginLogin(): String {
-        val login = CoreClient.call("account.deviceStart").jsonObject
-        val url = login["openUrl"]?.jsonPrimitive?.content
-            ?: throw IllegalStateException("The account did not return a sign-in URL.")
-        viewModelScope.launch {
-            repeat(120) {
-                delay(2_000)
-                val poll = runCatching { CoreClient.call("account.devicePoll") }.getOrNull() ?: return@repeat
-                if (poll.jsonObject["state"]?.jsonPrimitive?.content == "confirmed") {
-                    refresh(); return@launch
-                }
-            }
-        }
-        return url
+    // Put the approval page back in front of the user. The browser tab can
+    // be dismissed while the sign-in it started is still perfectly alive
+    // underneath.
+    fun presentSignInPage(openPage: (String) -> Unit) {
+        _pendingLogin.value?.let { openPage(it.url) }
+    }
+
+    fun cancelSignIn() {
+        signInJob?.cancel()
+        signInJob = null
+    }
+
+    private suspend fun cancelLogin() {
+        runCatching { CoreClient.call("account.cancelLogin") }
     }
 
     fun signOut() = viewModelScope.launch {
@@ -160,6 +268,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope.launch { loadDashboard() }
         }
     }
+
+    // This phone's own key, so the workspaces list can leave it out the way
+    // the iOS model does: a record from before the server knew client kinds
+    // carries no kind and would otherwise list this phone as an asleep host.
+    suspend fun machineIdentity(): JsonObject =
+        CoreClient.call("machine.identity") as? JsonObject ?: buildJsonObject {}
 
     suspend fun prepareHost(peer: String, label: String) {
         CoreClient.call("machine.pair", buildJsonObject {

@@ -90,5 +90,21 @@ object RelativeClock {
         return java.text.SimpleDateFormat("MMM d", java.util.Locale.US)
             .format(java.util.Date(epochMillis))
     }
+
+    /// Future mirror of `label`: "in 2 days", for limit reset dates.
+    fun until(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
+        val delta = (epochMillis - nowMillis) / 1000
+        if (delta < 0) return label(epochMillis, nowMillis)
+        if (delta < 5) return "now"
+        if (delta < 60) return "in ${delta}s"
+        val minutes = delta / 60
+        if (minutes < 60) return "in ${minutes}m"
+        val hours = minutes / 60
+        if (hours < 24) return "in ${hours}h"
+        val days = hours / 24
+        if (days < 7) return "in ${days}d"
+        return java.text.SimpleDateFormat("MMM d", java.util.Locale.US)
+            .format(java.util.Date(epochMillis))
+    }
 }
 

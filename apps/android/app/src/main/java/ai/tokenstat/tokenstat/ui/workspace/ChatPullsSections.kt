@@ -1,26 +1,44 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,21 +46,28 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.marks.HarnessMark
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.RelativeTimeText
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
+import ai.tokenstat.tokenstat.ui.components.TsBrandSwitch
+import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsSearchField
 import ai.tokenstat.tokenstat.ui.components.TsType
@@ -50,6 +75,7 @@ import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
+import ai.tokenstat.tokenstat.ui.logic.harnessName
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import kotlinx.coroutines.launch
@@ -83,6 +109,10 @@ fun ChatSection(
     var draft by remember(workspace) { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
+    var agentFilter by remember { mutableStateOf("") }
+    var runningOnly by remember { mutableStateOf(false) }
+    var alphabetical by remember { mutableStateOf(false) }
+    var filterOpen by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<JsonObject?>(null) }
     var pendingSend by remember { mutableStateOf<String?>(null) }
     var showingSetup by remember { mutableStateOf(false) }
@@ -165,35 +195,84 @@ fun ChatSection(
                 return
             }
             TsSearchField(prompt = "Titles, agents, or models", query = search, onQueryChange = { search = it }, modifier = Modifier.fillMaxWidth())
+            ChatStatPanels(chats)
             val query = search.trim()
-            val shown = chats.filter {
-                query.isEmpty() ||
+            val agentIds = chats.mapNotNull { it.str("backend") }.toSortedSet()
+            val filtered = chats.filter {
+                (query.isEmpty() ||
                     (it.str("title") ?: "").contains(query, ignoreCase = true) ||
                     (it.str("backend") ?: "").contains(query, ignoreCase = true) ||
-                    (it.str("model") ?: "").contains(query, ignoreCase = true)
+                    (it.str("model") ?: "").contains(query, ignoreCase = true)) &&
+                    (agentFilter.isEmpty() || it.str("backend") == agentFilter) &&
+                    (!runningOnly || it.bol("running"))
             }
-            val running = chats.count { it.bol("running") }
-            Text(
-                "${shown.size} shown" + if (running > 0) " · $running running" else "",
-                style = TextStyle(fontSize = 12.sp),
-                color = LocalTsColors.current.textSecondary,
-            )
+            val shown = if (alphabetical) filtered.sortedBy { (it.str("title") ?: "").lowercase() } else filtered
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box {
+                    TsSecondaryButton(
+                        label = "Filter & sort",
+                        icon = ActionIcon.Filter.vector,
+                        small = true,
+                        onClick = { filterOpen = true },
+                    )
+                    DropdownMenu(expanded = filterOpen, onDismissRequest = { filterOpen = false }) {
+                        ChatAgentMenuItem("All agents", agentFilter.isEmpty()) { agentFilter = ""; filterOpen = false }
+                        agentIds.forEach { backend ->
+                            ChatAgentMenuItem(harnessName(backend), agentFilter == backend) {
+                                agentFilter = backend; filterOpen = false
+                            }
+                        }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Running only") },
+                            trailingIcon = { TsBrandSwitch(runningOnly, { runningOnly = it }) },
+                            onClick = { runningOnly = !runningOnly; filterOpen = false },
+                        )
+                        HorizontalDivider()
+                        ChatAgentMenuItem("Recent first", !alphabetical) { alphabetical = false; filterOpen = false }
+                        ChatAgentMenuItem("Title A–Z", alphabetical) { alphabetical = true; filterOpen = false }
+                    }
+                }
+                Text(
+                    "${shown.size} shown",
+                    style = TextStyle(fontSize = 12.sp),
+                    color = LocalTsColors.current.textSecondary,
+                )
+            }
             if (shown.isEmpty()) {
                 Text("No matching conversations. Adjust your search or filters.", style = MaterialTheme.typography.bodySmall)
                 return
             }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(shown, key = { it.str("id") ?: it.hashCode().toString() }) { chat ->
-                    ElevatedCard(onClick = { openId = chat.str("id") }) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(chat.str("title") ?: "Untitled", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                listOfNotNull(chat.str("backend"), chat.str("model")).joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            Row {
-                                TextButton(onClick = { pendingDelete = chat }) { Text("Delete") }
+                    val dismiss = rememberSwipeToDismissBoxState(
+                        confirmValueChange = { value ->
+                            if (value != SwipeToDismissBoxValue.Settled) pendingDelete = chat
+                            false
+                        },
+                    )
+                    SwipeToDismissBox(
+                        state = dismiss,
+                        enableDismissFromStartToEnd = false,
+                        backgroundContent = {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(cardRadiusDp))
+                                    .background(LocalTsColors.current.danger)
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
+                                Icon(Icons.Default.Delete, null, tint = Color.White)
                             }
+                        },
+                    ) {
+                        ElevatedCard(onClick = { openId = chat.str("id") }, modifier = Modifier.fillMaxWidth()) {
+                            ChatRow(chat)
                         }
                     }
                 }
@@ -220,14 +299,23 @@ fun ChatSection(
                     },
                 )
             }
+            val openChat = chats.firstOrNull { it.str("id") == openId }
+            val transcript = remember(events, openChat) {
+                coalesceTranscript(
+                    events,
+                    defaultBackend = openChat?.str("backend"),
+                    running = openChat?.bol("running") ?: true,
+                )
+            }
             LazyColumn(Modifier.weight(1f, false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(events, key = { it.str("seq") ?: it.hashCode().toString() }) { ev ->
-                    ChatEventRow(
-                        ev = ev,
+                items(transcript, key = { it.id }) { item ->
+                    TranscriptItemRow(
+                        item = item,
                         model = model,
                         peer = peer,
                         chatId = openId ?: "",
                         hostLabel = hostLabel,
+                        defaultAgentName = openChat?.str("backend")?.let { harnessName(it) } ?: "Agent",
                     )
                 }
             }
@@ -326,223 +414,84 @@ fun ChatSection(
     }
 }
 
-/// One transcript event, drawn by kind like `ClientChatEventRow`: user and
-/// assistant prose, thinking as an aside, tool calls with their target,
-/// attachments with Download/Open, handoffs with the brief, approvals with
-/// Allow/Deny, usage as counts, failures in danger.
+/// The three fact cards the iOS list leads with: Conversations, Running,
+/// Agents. Figure first in accent, caption below, mark trailing.
 @Composable
-private fun ChatEventRow(
-    ev: JsonObject,
-    model: AppViewModel,
-    peer: String,
-    chatId: String,
-    hostLabel: String,
-) {
-    val scope = rememberCoroutineScope()
-    val kind = (ev.str("kind") ?: ev.str("role") ?: "event").lowercase()
-    val inner = ev["event"] as? JsonObject
-    val timeMs = ev["atMs"]?.jsonPrimitive?.longOrNull
-        ?: ev["at_ms"]?.jsonPrimitive?.longOrNull
-        ?: inner?.get("atMs")?.jsonPrimitive?.longOrNull
+private fun ChatStatPanels(chats: List<JsonObject>) {
     val colors = LocalTsColors.current
-
-    @Composable
-    fun frame(label: String, content: @Composable () -> Unit) {
-        Card {
-            Column(Modifier.padding(10.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(label, style = MaterialTheme.typography.labelSmall)
-                    if (timeMs != null && timeMs > 0) {
-                        RelativeTimeText(
-                            timeMs,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
-                        )
+    val panels = listOf(
+        Triple("Conversations", chats.size.toString(), Icons.Default.ChatBubbleOutline),
+        Triple("Running", chats.count { it.bol("running") }.toString(), Icons.Default.Bolt),
+        Triple("Agents", chats.mapNotNull { it.str("backend") }.toSet().size.toString(), Icons.Default.Person),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+        panels.forEach { (label, value, mark) ->
+            TsCard(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(value, style = TsType.numeric(20, FontWeight.Medium), color = colors.accent, maxLines = 1)
+                        Text(label, style = TsType.caption2, color = colors.textSecondary, maxLines = 1)
                     }
-                }
-                content()
-            }
-        }
-    }
-
-    when (kind) {
-        "user" -> {
-            val text = ev.str("text") ?: ev.str("body") ?: ""
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Text(
-                    text,
-                    style = TextStyle(fontSize = 14.sp),
-                    color = colors.textPrimary,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(colors.accentSoft)
-                        .padding(Space.m),
-                )
-            }
-        }
-        "thinking" -> {
-            val text = ev.str("text") ?: inner?.str("text") ?: ""
-            Text(text, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-        }
-        "tool" -> {
-            val verb = inner?.str("verb") ?: ev.str("verb") ?: "Tool"
-            val target = inner?.str("target") ?: ev.str("target") ?: ""
-            val snippet = inner?.str("snippet") ?: ""
-            val failed = inner?.bol("failed") ?: ev.bol("failed") ?: false
-            val running = inner?.bol("running") ?: ev.bol("running") ?: false
-            frame("$verb${if (running) " · running" else ""}") {
-                if (target.isNotBlank()) {
-                    Text(target, style = TsType.mono(12), color = colors.textPrimary)
-                }
-                if (snippet.isNotBlank()) {
-                    Text(snippet, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary, maxLines = 4)
-                }
-                if (failed) Text("Failed", style = TextStyle(fontSize = 12.sp), color = colors.danger)
-            }
-        }
-        "edit" -> {
-            val target = inner?.str("target") ?: ev.str("target") ?: "Edit"
-            frame("Edit") {
-                Text(target, style = TsType.mono(12), color = colors.textPrimary, maxLines = 6)
-            }
-        }
-        "attachment" -> {
-            val name = inner?.str("name") ?: ev.str("name") ?: "Attachment"
-            val attachmentId = inner?.str("id") ?: inner?.str("attachmentId") ?: ev.str("attachmentId") ?: ""
-            var downloaded by remember(attachmentId) { mutableStateOf(false) }
-            var busy by remember(attachmentId) { mutableStateOf(false) }
-            var failure by remember(attachmentId) { mutableStateOf<String?>(null) }
-            frame("Attachment") {
-                Text(name, style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium), color = colors.textPrimary, maxLines = 1)
-                val detail = listOfNotNull(
-                    inner?.str("mediaType") ?: inner?.str("media_type"),
-                    inner?.get("size")?.jsonPrimitive?.longOrNull?.let { "$it bytes" },
-                ).joinToString(" · ")
-                if (detail.isNotBlank()) {
-                    Text(detail, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-                }
-                if (failure != null) {
-                    Text(failure!!, style = TextStyle(fontSize = 12.sp), color = colors.danger)
-                }
-                if (downloaded) {
-                    Text("Downloaded", style = TextStyle(fontSize = 12.sp), color = colors.accent)
-                } else {
-                    TsSecondaryButton(
-                        label = if (busy) "…" else if (failure == null) "Download" else "Retry",
-                        small = true,
-                        enabled = !busy && attachmentId.isNotBlank(),
-                        onClick = {
-                            busy = true
-                            scope.launch {
-                                runCatching {
-                                    model.workspaceSection(peer, "chat.attachment", buildJsonObject {
-                                        put("id", chatId); put("attachmentId", attachmentId)
-                                    }) as? JsonObject
-                                }.onSuccess {
-                                    downloaded = (it?.get("data")?.jsonPrimitive?.contentOrNull?.length ?: 0) > 0
-                                    failure = null
-                                }.onFailure {
-                                    failure = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
-                                }
-                                busy = false
-                            }
-                        },
-                    )
-                }
-            }
-        }
-        "handoff" -> {
-            val to = inner?.str("to") ?: ev.str("to") ?: ""
-            val brief = inner?.str("brief") ?: ev.str("brief") ?: ""
-            var expanded by remember { mutableStateOf(false) }
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = Space.xs),
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text(
-                        "Handed to ${to.ifBlank { "another agent" }}",
-                        style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
-                        color = colors.accent,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (brief.isNotBlank()) {
-                        Text(
-                            if (expanded) "Hide" else "What it was told",
-                            style = TextStyle(fontSize = 12.sp),
-                            color = colors.textSecondary,
-                            modifier = Modifier.clickable { expanded = !expanded },
-                        )
-                    }
-                }
-                if (expanded && brief.isNotBlank()) {
-                    Text(brief, style = TsType.mono(11), color = colors.textSecondary)
-                }
-            }
-        }
-        "approval" -> {
-            val approval = inner ?: ev
-            ApprovalCard(
-                approval = approval,
-                onResolve = { choice ->
-                    scope.launch {
-                        runCatching {
-                            model.workspaceSection(peer, "chat.resolveApproval", buildJsonObject {
-                                put("id", approval.str("id") ?: "")
-                                put("choice", choice)
-                            })
-                        }
-                    }
-                },
-            )
-        }
-        "usage" -> {
-            val input = inner?.get("input")?.jsonPrimitive?.longOrNull ?: ev["input"]?.jsonPrimitive?.longOrNull
-            val output = inner?.get("output")?.jsonPrimitive?.longOrNull ?: ev["output"]?.jsonPrimitive?.longOrNull
-            val cost = inner?.str("cost") ?: ev.str("cost")
-            if (input != null || output != null) {
-                Text(
-                    "${input ?: 0} in · ${output ?: 0} out" + (cost?.let { " · $it" } ?: ""),
-                    style = TextStyle(fontSize = 12.sp),
-                    color = colors.textSecondary,
-                )
-            }
-        }
-        "failed", "error" -> {
-            val text = ev.str("text") ?: inner?.str("text") ?: ev.str("body") ?: "Something failed."
-            Text(text, style = TextStyle(fontSize = 14.sp), color = colors.danger)
-        }
-        "turn", "separator" -> {
-            val backend = ev.str("backend") ?: inner?.str("backend") ?: ""
-            Text(
-                if (backend.isNotBlank()) "$backend · new turn" else "New turn",
-                style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
-                color = colors.accent,
-            )
-        }
-        else -> {
-            val text = ev.str("text")
-                ?: inner?.str("delta")
-                ?: inner?.str("text")
-                ?: inner?.str("target")?.let { target -> "${inner.str("verb") ?: "Tool"}: $target" }
-                ?: inner?.str("name")?.let { name -> "Attachment: $name" }
-                ?: ev.str("body")
-                ?: ""
-            if (text.isNotEmpty()) {
-                frame(kind) {
-                    Text(text, style = MaterialTheme.typography.bodySmall)
+                    Icon(mark, null, tint = colors.controlGlyph, modifier = Modifier.size(22.dp))
                 }
             }
         }
     }
 }
 
+@Composable
+private fun ChatAgentMenuItem(label: String, checked: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        leadingIcon = if (checked) ({ Icon(Icons.Default.Check, null) }) else null,
+        onClick = onClick,
+    )
+}
+
+/// One conversation row like the iOS list: harness mark, running dot,
+/// two-line title, agent and Plan/Execute in accent, relative time, chevron.
+@Composable
+private fun ChatRow(chat: JsonObject) {
+    val colors = LocalTsColors.current
+    val mode = if (chat.str("mode") == "plan") "Plan" else "Execute"
+    val atMs = chat["lastMessageAtMs"]?.jsonPrimitive?.longOrNull
+        ?: chat["updatedAtMs"]?.jsonPrimitive?.longOrNull
+    Row(
+        Modifier.padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        HarnessMark(chat.str("backend") ?: "?", size = 28.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (chat.bol("running")) {
+                    Canvas(Modifier.size(7.dp)) { drawCircle(colors.accent) }
+                }
+                Text(
+                    chat.str("title") ?: "Untitled",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                "${harnessName(chat.str("backend") ?: "?")} · $mode",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.accent,
+                maxLines = 1,
+            )
+            if (atMs != null) {
+                RelativeTimeText(atMs, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+            }
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.controlGlyph)
+    }
+}
+
 /// A tool approval awaiting an answer: verb, preview, and Allow, Always
 /// allow, Deny. Decided approvals read back their outcome instead.
 @Composable
-private fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
+internal fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
     val verb = approval.str("verb") ?: "Approval"
     val preview = approval.str("preview") ?: ""
     val pending = approval.str("decision").isNullOrBlank()

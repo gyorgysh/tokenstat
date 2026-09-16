@@ -7,6 +7,7 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -42,6 +43,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -59,6 +63,7 @@ import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.SegmentedCapsulePicker
 import ai.tokenstat.tokenstat.ui.components.SkeletonCard
+import ai.tokenstat.tokenstat.ui.components.SkeletonRows
 import ai.tokenstat.tokenstat.ui.components.Stat
 import ai.tokenstat.tokenstat.ui.components.TsBrandSwitch
 import ai.tokenstat.tokenstat.ui.components.TsCard
@@ -87,6 +92,10 @@ import ai.tokenstat.tokenstat.ui.logic.RelativeClock
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
+import ai.tokenstat.tokenstat.ui.logic.harnessName
+import ai.tokenstat.tokenstat.ui.logic.money
+import ai.tokenstat.tokenstat.ui.logic.moneyValue
+import ai.tokenstat.tokenstat.ui.logic.shortDate
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
 import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
 import ai.tokenstat.tokenstat.ui.search.SearchOpen
@@ -97,6 +106,8 @@ import ai.tokenstat.tokenstat.ui.terminal.TerminalScreen
 import ai.tokenstat.tokenstat.ui.workspace.CloneRepositoryScreen
 import ai.tokenstat.tokenstat.ui.workspace.WorkspaceSection
 import ai.tokenstat.tokenstat.ui.chrome.ConnectionChip
+import ai.tokenstat.tokenstat.ui.chrome.FloatingTabBar
+import ai.tokenstat.tokenstat.ui.chrome.TabSpec
 import ai.tokenstat.tokenstat.ui.chrome.TsRefresh
 import ai.tokenstat.tokenstat.ui.billing.PaywallSheet
 import ai.tokenstat.tokenstat.ui.browser.PortBrowserScreen
@@ -105,6 +116,10 @@ import ai.tokenstat.tokenstat.ui.ssh.SshConnectDialog
 import ai.tokenstat.tokenstat.ui.ssh.SshKeyImportDialog
 import ai.tokenstat.tokenstat.ui.marks.EmptyArt
 import ai.tokenstat.tokenstat.ui.marks.EmptyArtKind
+import ai.tokenstat.tokenstat.ui.marks.HarnessMark
+import ai.tokenstat.tokenstat.ui.ssh.SshSecrets
+import ai.tokenstat.tokenstat.ui.ssh.SshVaultSync
+import ai.tokenstat.tokenstat.ui.ssh.vaultEnvelopeOf
 import ai.tokenstat.tokenstat.ui.marks.TierMark
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
 import ai.tokenstat.tokenstat.ui.components.TierBadge
@@ -129,10 +144,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import java.text.NumberFormat
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
 /// The brand accent from the shared token system.
@@ -220,11 +236,14 @@ private fun LoadingScreen() {
 @Composable
 private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var pendingLogin by remember { mutableStateOf(false) }
-    var loginError by remember { mutableStateOf<String?>(null) }
     val colors = LocalTsColors.current
     val reduceMotion = rememberReduceMotion()
+    val pending by model.pendingLogin.collectAsStateWithLifecycle()
+    val notice by model.signInNotice.collectAsStateWithLifecycle()
+    val signInError by model.signInError.collectAsStateWithLifecycle()
+    fun openPage(url: String) {
+        CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
+    }
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
@@ -236,45 +255,117 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
         Wordmark(size = 22, showsMark = false)
         Spacer(Modifier.height(12.dp))
         Text("Your AI coding activity, wherever your machines are.", color = colors.textSecondary)
-        if (pendingLogin) {
-            Spacer(Modifier.height(20.dp))
-            Text("Waiting for the browser to confirm you…", color = colors.textSecondary)
+        Spacer(Modifier.height(28.dp))
+        if (pending != null) {
+            // The approval is happening in the browser tab. Shown for the
+            // same reason iOS shows it: the tab can be dismissed while the
+            // sign-in is alive underneath, and without this the screen would
+            // look exactly as it did before the tap.
+            CircularProgressIndicator(color = colors.accent)
+            Spacer(Modifier.height(Space.s))
+            Text("Waiting for approval", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(Space.xs))
+            Text(
+                notice ?: "Approve this device on tokenstat.ai. This screen updates by itself.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
+            Spacer(Modifier.height(Space.s))
+            Text(
+                pending!!.code,
+                style = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 2.sp,
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(colors.accentSoft)
+                    .padding(vertical = Space.s, horizontal = Space.m),
+            )
+            Spacer(Modifier.height(Space.s))
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                TsSecondaryButton(
+                    label = "Open the page",
+                    icon = ActionIcon.External.vector,
+                    small = true,
+                    onClick = { model.presentSignInPage(::openPage) },
+                )
+                TsSecondaryButton(
+                    label = "Cancel",
+                    icon = ActionIcon.Dismiss.vector,
+                    small = true,
+                    onClick = { model.cancelSignIn() },
+                )
+            }
+        } else {
+            TsAccentButton(
+                label = "Sign in",
+                icon = ActionIcon.SignIn.vector,
+                onClick = { model.signIn(::openPage) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(Space.xs))
+            Text(
+                "No password to make. Signing in with GitHub, Google, X or Apple creates your account the first time.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
         }
-        val shown = loginError ?: error
+        val shown = signInError ?: error
         if (shown != null) {
             Spacer(Modifier.height(20.dp))
             Text(shown, color = colors.danger)
         }
-        Spacer(Modifier.height(28.dp))
-        TsAccentButton(
-            label = "Sign in",
-            onClick = {
-                scope.launch {
-                    pendingLogin = true
-                    runCatching { model.beginLogin() }
-                        .onSuccess { url ->
-                            loginError = null
-                            CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
-                        }
-                        .onFailure { loginError = it.message ?: "Starting sign-in failed." }
-                    pendingLogin = false
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(Space.s))
-        TsSecondaryButton(
-            label = "I already signed in",
-            onClick = { UiSignals.beganRefreshing(); model.refresh() },
-            modifier = Modifier.fillMaxWidth(),
-        )
         Spacer(Modifier.height(Space.s))
         TsSecondaryButton(
             label = "What is tokenstat?",
+            icon = ActionIcon.Help.vector,
             onClick = onReboard,
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(Modifier.height(Space.s))
+        // Signing in creates the account, so the two documents that govern
+        // it belong on this screen and not only in Settings.
+        LegalLine(
+            onOpen = { openPage("$it?mobile=1") },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
+}
+
+@Composable
+private fun LegalLine(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalTsColors.current
+    val terms = "Terms"
+    val privacy = "Privacy policy"
+    val text = "By signing in you accept the $terms and the $privacy."
+    val annotated = remember {
+        buildAnnotatedString {
+            append(text)
+            addStyle(
+                SpanStyle(color = colors.accent, fontWeight = FontWeight.Medium),
+                text.indexOf(terms),
+                text.indexOf(terms) + terms.length,
+            )
+            addStringAnnotation("url", "https://tokenstat.ai/terms", text.indexOf(terms), text.indexOf(terms) + terms.length)
+            addStyle(
+                SpanStyle(color = colors.accent, fontWeight = FontWeight.Medium),
+                text.indexOf(privacy),
+                text.indexOf(privacy) + privacy.length,
+            )
+            addStringAnnotation("url", "https://tokenstat.ai/privacy", text.indexOf(privacy), text.indexOf(privacy) + privacy.length)
+        }
+    }
+    ClickableText(
+        annotated,
+        style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary),
+        modifier = modifier,
+        onClick = { offset ->
+            annotated.getStringAnnotations("url", offset, offset).firstOrNull()?.let { onOpen(it.item) }
+        },
+    )
 }
 
 @Composable
@@ -305,13 +396,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     }
 
     val colors = LocalTsColors.current
-    val navItemColors = NavigationBarItemDefaults.colors(
-        selectedIconColor = colors.accent,
-        selectedTextColor = colors.accent,
-        indicatorColor = colors.accentSoft,
-        unselectedIconColor = colors.controlGlyph,
-        unselectedTextColor = colors.controlGlyph,
-    )
     Scaffold(
         containerColor = colors.background,
         topBar = {
@@ -326,7 +410,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 ),
                 title = {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Wordmark(size = 22, showsMark = false)
+                        Wordmark(size = 22, showsMark = true)
                     }
                 },
                 navigationIcon = {
@@ -339,9 +423,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                         Icon(ActionIcon.Search.vector, "Search", tint = colors.controlGlyph)
                     }
                     ConnectionChip(state.connection, onRetry = { model.retryConnection() })
-                    Box(Modifier.padding(end = Space.s), contentAlignment = Alignment.Center) {
-                        LogoMark(size = 18)
-                    }
                     IconButton(onClick = {
                         UiSignals.beganRefreshing()
                         model.refresh()
@@ -351,17 +432,11 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         },
         bottomBar = {
             if (!expanded) {
-                NavigationBar(containerColor = colors.tabStrip, contentColor = colors.textSecondary) {
-                    Destination.entries.forEach { destination ->
-                        NavigationBarItem(
-                            selected = selected == destination,
-                            onClick = { selected = destination },
-                            icon = { Icon(destination.icon, null) },
-                            label = { Text(destination.label) },
-                            colors = navItemColors,
-                        )
-                    }
-                }
+                FloatingTabBar(
+                    selected = Destination.entries.indexOf(selected),
+                    tabs = Destination.entries.map { TabSpec(it.label, it.icon) },
+                    onSelect = { selected = Destination.entries[it] },
+                )
             }
         },
     ) { padding ->
@@ -387,7 +462,17 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                when (selected) {
+                // Tab switches crossfade like the iOS TabView: a short
+                // fade with the door easing. A fade stays readable under
+                // Reduce Motion, so no second path is needed.
+                AnimatedContent(
+                    targetState = selected,
+                    transitionSpec = {
+                        fadeIn(TsMotion.door()) togetherWith fadeOut(TsMotion.door())
+                    },
+                    label = "destination",
+                ) { destination ->
+                when (destination) {
                     Destination.Home -> HomeScreen(
                         model = model,
                         state = state,
@@ -412,11 +497,12 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                                 pendingWorkHostId = null
                                 pendingWorkFolderId = null
                             },
+                            onSetupWizard = { wizardOpen = true },
                         )
                     } else {
                         RemotePaywall { accountOpen = true }
                     }
-                    Destination.Insights -> InsightsScreen(model, state)
+                    Destination.Insights -> InsightsScreen(model, state, onHome = { selected = Destination.Home })
                     Destination.Devices -> DevicesScreen(
                         model,
                         state,
@@ -430,6 +516,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                         pendingDeviceId = pendingDeviceId,
                         onPendingDeviceConsumed = { pendingDeviceId = null },
                     )
+                }
                 }
             }
         }
@@ -602,11 +689,21 @@ private fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         item {
-            Text(
-                homeGreeting(state.account, cells.isNotEmpty()),
-                style = MaterialTheme.typography.headlineSmall,
-                color = LocalTsColors.current.textPrimary,
-            )
+            // Same line the website and the Apple home use: a local-clock
+            // phrase, the first name, and the tier mark next to it.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                Text(
+                    homeGreeting(state.account, cells.isNotEmpty()),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = LocalTsColors.current.textPrimary,
+                    maxLines = 2,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                val tier = state.account?.string("tier")
+                if (!tier.isNullOrEmpty()) {
+                    TierMark(tier.lowercase(), markSize = 16)
+                }
+            }
         }
         // Outside the arrangement, deliberately. Whether the account could
         // be read at all is the screen talking, not a card somebody chose
@@ -691,19 +788,35 @@ private fun HomeScreen(
                             TsCard(
                                 title = "Activity",
                                 accessory = {
-                                    Text(
-                                        "${calendar.int("activeDays") ?: 0} active days",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = LocalTsColors.current.textSecondary,
-                                    )
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            "${calendar.int("activeDays") ?: 0} active days",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = LocalTsColors.current.textSecondary,
+                                        )
+                                        calendar.string("freshness")?.let {
+                                            Text(
+                                                it,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = LocalTsColors.current.textSecondary.copy(alpha = 0.8f),
+                                            )
+                                        }
+                                    }
                                 },
                             ) {
                                 if (cells.isEmpty()) Text("No synced activity yet.", color = LocalTsColors.current.textSecondary)
-                                else YearHeatmap(
-                                    rows!!,
-                                    calendar.get("months") as? JsonArray ?: JsonArray(emptyList()),
-                                    onSelectDay = { selectedDay = it },
-                                )
+                                else {
+                                    Text(
+                                        "Swipe for the whole year, hold a day to read it",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = LocalTsColors.current.textSecondary,
+                                    )
+                                    YearHeatmap(
+                                        rows!!,
+                                        calendar.get("months") as? JsonArray ?: JsonArray(emptyList()),
+                                        onSelectDay = { selectedDay = it },
+                                    )
+                                }
                             }
                         }
                     }
@@ -832,32 +945,72 @@ private fun spendSince(cells: List<JsonObject>, last: String?, days: Int): Long 
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun InsightsScreen(model: AppViewModel, state: ClientState) {
+private fun InsightsScreen(model: AppViewModel, state: ClientState, onHome: () -> Unit) {
     val colors = LocalTsColors.current
     val reduceMotion = rememberReduceMotion()
-    // Three cuts only — Models/Tools/Days — the privacy boundary the Apple
+    // Three cuts only — Models/Harnesses/Days — the privacy boundary the iOS
     // client draws: the account holds no projects and no sessions.
     var cut by rememberSaveable { mutableStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
-    val cutNames = listOf("Models", "Tools", "Days")
-    val cutKeys = listOf("models", "tools", "days")
-    val report = state.insights as? JsonObject
-    val buckets = ((report?.get(cutKeys[cut]) ?: report?.get("rows") ?: report?.get("buckets")) as? JsonArray)
-        ?.filterIsInstance<JsonObject>().orEmpty()
-        .filter { query.isBlank() || (it.string("key") ?: "").contains(query, ignoreCase = true) }
-    val total = buckets.sumOf { it.long("valueMicros") ?: 0L }
-    val peak = buckets.maxOfOrNull { it.long("valueMicros") ?: 0L } ?: 0L
+    val cutNames = listOf("Models", "Harnesses", "Days")
+    val cutKeys = listOf("model", "source", "day")
+    // Rows per cut. Null means "not asked yet", which is not the same as an
+    // empty account and must not draw like one.
+    val cached = remember { mutableStateMapOf<String, List<JsonObject>>() }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var needsSignIn by remember { mutableStateOf(false) }
+    var fetchedAtMs by remember { mutableStateOf<Long?>(null) }
+    var stale by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    var refreshing by remember { mutableStateOf(false) }
-    PullToRefreshBox(
-        isRefreshing = refreshing,
-        onRefresh = {
-            scope.launch {
-                refreshing = true
-                TsRefresh.run("insights") { model.refresh() }
-                refreshing = false
+
+    suspend fun fetch(asked: Int) {
+        isLoading = true
+        runCatching { model.accountReport(cutKeys[asked]) }
+            .onSuccess { report ->
+                cached[cutKeys[asked]] = (report["rows"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+                fetchedAtMs = report["fetchedAtMs"]?.jsonPrimitive?.longOrNull
+                stale = report["stale"]?.jsonPrimitive?.booleanOrNull == true
+                if (asked == cut) {
+                    errorMessage = null
+                    needsSignIn = false
+                }
             }
-        },
+            .onFailure {
+                if (asked == cut) {
+                    val text = it.message ?: "The request failed."
+                    needsSignIn = text.contains("sign in", ignoreCase = true)
+                    errorMessage = text
+                }
+            }
+        if (asked == cut) isLoading = false
+    }
+    LaunchedEffect(cut) {
+        // Each cut keeps its own rows, so going back to one already seen is
+        // instant and costs nothing.
+        if (!cached.containsKey(cutKeys[cut])) fetch(cut)
+    }
+    fun refresh() {
+        scope.launch {
+            // Drop everything rather than the current cut alone: they are
+            // three views of one series.
+            cached.clear()
+            fetch(cut)
+        }
+    }
+    val rows = cached[cutKeys[cut]]
+    val term = query.trim()
+    val shown = rows.orEmpty().filter { row ->
+        val key = row.string("key") ?: ""
+        term.isBlank() || key.contains(term, ignoreCase = true) ||
+            cutTitle(cut, key).contains(term, ignoreCase = true)
+    }
+    // A share bar needs something to be a share of, and the largest shown
+    // row is a steadier reference than the total.
+    val peak = shown.maxOfOrNull { it.long("valueMicros") ?: 0L } ?: 1L
+    PullToRefreshBox(
+        isRefreshing = isLoading,
+        onRefresh = { scope.launch { TsRefresh.run("insights") { cached.clear(); fetch(cut) } } },
         modifier = Modifier.fillMaxSize(),
     ) {
     LazyColumn(
@@ -883,69 +1036,255 @@ private fun InsightsScreen(model: AppViewModel, state: ClientState) {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (buckets.isEmpty()) {
-            item { EmptyCard("No breakdown yet", "Activity appears after your machines sync.") }
+        if (rows == null) {
+            if (isLoading) {
+                item { SkeletonRows(count = 5) }
+            } else if (errorMessage != null) {
+                item {
+                    val offline = state.connection.offline
+                    EmptyState(
+                        icon = if (needsSignIn) Icons.Default.Person else Icons.Default.Warning,
+                        title = if (offline) "You are offline" else "Could not load your usage",
+                        message = if (offline) {
+                            "This updates by itself when the connection is back."
+                        } else {
+                            friendlyError(errorMessage).message
+                        },
+                        action = if (!offline) {
+                            {
+                                TsAccentButton(
+                                    label = "Try again",
+                                    icon = ActionIcon.Refresh.vector,
+                                    small = true,
+                                    onClick = { refresh() },
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                    )
+                }
+            }
+        } else if (rows.isEmpty()) {
+            // Not a dead end. An account with nothing on it has one thing
+            // to do next, and it is on Home.
+            item {
+                EmptyState(
+                    icon = Icons.Default.BarChart,
+                    title = "Nothing recorded yet",
+                    message = "Add a computer to this account and what it counts shows up here.",
+                    art = { EmptyArt(EmptyArtKind.FirstBars) },
+                    action = {
+                        TsAccentButton(
+                            label = "How to start",
+                            icon = ActionIcon.Home.vector,
+                            small = true,
+                            onClick = onHome,
+                        )
+                    },
+                )
+            }
         } else {
             item {
                 Arrive(reduceMotion) {
-                    TsCard(title = "Total", subtitle = "at list rates, across every device") {
-                        Text(money(total), style = TsType.numeric(26, FontWeight.Medium), color = tsAccent())
+                    InsightSummary(
+                        rows = rows,
+                        cutName = cutNames[cut],
+                        stale = stale,
+                        fetchedAtMs = fetchedAtMs,
+                    )
+                }
+            }
+            if (cut == 2) {
+                item {
+                    Arrive(reduceMotion) {
+                        InsightDayChart(rows = rows)
                     }
                 }
             }
-            itemsIndexed(buckets) { index, row ->
-                val value = row.long("valueMicros") ?: 0L
-                val share = if (peak > 0) (value.toFloat() / peak).coerceIn(0f, 1f) else 0f
-                Arrive(reduceMotion, staggerIndex = index.coerceAtMost(8)) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(cardRadiusDp))
-                            .background(colors.panel)
-                            .border(1.dp, colors.border, RoundedCornerShape(cardRadiusDp))
-                            .padding(Space.m),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(row.string("key") ?: "Model", fontWeight = FontWeight.Medium, maxLines = 1)
-                                val counters = row["counters"]?.jsonObject?.long("total")
-                                val events = row.long("events")
-                                val bits = buildList {
-                                    counters?.let { add("${compactTokens(it)} tokens") }
-                                    events?.let { add("$it events") }
-                                }
-                                if (bits.isNotEmpty()) Text(
-                                    bits.joinToString(" · "),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.textSecondary,
-                                )
-                            }
-                            Spacer(Modifier.width(Space.s))
-                            Text(money(value), color = tsAccent(), style = TsType.numeric(14))
-                        }
-                        // A quiet share bar in the accent, not a system meter.
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(5.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(colors.accentSoft),
-                        ) {
-                            val animated by animateFloatAsState(share, tween(320), label = "shareBar")
-                            Box(
-                                Modifier
-                                    .fillMaxWidth(animated)
-                                    .height(5.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(colors.accent),
-                            )
-                        }
+            if (shown.isEmpty()) {
+                item {
+                    Text(
+                        "Nothing matches \"$term\".",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary,
+                    )
+                }
+            } else {
+                item { SectionLabel(cutNames[cut]) }
+                itemsIndexed(shown) { index, row ->
+                    Arrive(reduceMotion, staggerIndex = index.coerceAtMost(8)) {
+                        InsightRow(row = row, cut = cut, peak = peak)
                     }
                 }
             }
         }
     }
+    }
+}
+
+/// A row's key as a person reads it, port of `Cut.title`: a harness id is
+/// a slug, and a day is an ISO date nobody says out loud. Cut 0 models,
+/// 1 harnesses, 2 days.
+private fun cutTitle(cut: Int, key: String): String = when (cut) {
+    1 -> harnessName(key)
+    2 -> shortDate(key)
+    else -> key
+}
+
+/// "This period": the total at list rates plus the three fact panels, like
+/// the iOS summary. A remembered answer says how old it is.
+@Composable
+private fun InsightSummary(rows: List<JsonObject>, cutName: String, stale: Boolean, fetchedAtMs: Long?) {
+    val colors = LocalTsColors.current
+    val total = rows.sumOf { it.long("valueMicros") ?: 0L }
+    val estimated = rows.any { it["estimated"]?.jsonPrimitive?.booleanOrNull == true }
+    val complete = rows.all { ((it["unpricedModels"] as? JsonArray)?.size ?: 0) == 0 }
+    val tokens = rows.sumOf { it["counters"]?.jsonObject?.long("total") ?: 0L }
+    val events = rows.sumOf { it.long("events") ?: 0L }
+    TsCard(title = "This period") {
+        Text(
+            moneyValue(total, estimated, complete),
+            style = TsType.numeric(26, FontWeight.Medium),
+            color = tsAccent(),
+            maxLines = 1,
+        )
+        Text(
+            "at list rates, across every device",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+        )
+        Spacer(Modifier.height(Space.s))
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            InsightFactPanel(label = "Tokens", value = compactTokens(tokens), modifier = Modifier.weight(1f))
+            InsightFactPanel(label = "Events", value = compactTokens(events), modifier = Modifier.weight(1f))
+            InsightFactPanel(label = cutName, value = rows.size.toString(), modifier = Modifier.weight(1f))
+        }
+        if (stale && fetchedAtMs != null) {
+            Text(
+                "The refresh did not go through. Showing what this device last fetched, " +
+                    "${RelativeClock.label(fetchedAtMs, System.currentTimeMillis())}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun InsightFactPanel(label: String, value: String, modifier: Modifier = Modifier) {
+    val colors = LocalTsColors.current
+    Column(modifier) {
+        Text(value, style = TsType.numeric(16, FontWeight.Medium), color = colors.accent, maxLines = 1)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1)
+    }
+}
+
+/// Tokens per day as bars, the Day cut's chart on iOS. Drawn on a Canvas:
+/// 53 accent bars need no chart dependency.
+@Composable
+private fun InsightDayChart(rows: List<JsonObject>) {
+    val colors = LocalTsColors.current
+    val days = rows.sortedBy { it.string("key") ?: "" }
+    val peak = days.maxOfOrNull { it["counters"]?.jsonObject?.long("total") ?: 0L } ?: 0L
+    TsCard(title = "Daily activity") {
+        Text(
+            "Tokens per day · cache included",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+        )
+        Spacer(Modifier.height(Space.s))
+        val bars = days.map { it["counters"]?.jsonObject?.long("total") ?: 0L }
+        Canvas(Modifier.fillMaxWidth().height(180.dp)) {
+            if (bars.isEmpty() || peak <= 0) return@Canvas
+            val gap = 2.dp.toPx()
+            val width = (size.width - gap * (bars.size - 1).coerceAtLeast(0)) / bars.size
+            val brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                listOf(colors.accent, colors.accent.copy(alpha = 0.55f)),
+            )
+            bars.forEachIndexed { index, total ->
+                val height = (total.toFloat() / peak) * size.height
+                drawRoundRect(
+                    brush = brush,
+                    topLeft = Offset(index * (width + gap), size.height - height),
+                    size = Size(width.coerceAtLeast(1f), height.coerceAtLeast(0f)),
+                    cornerRadius = CornerRadius(3.dp.toPx()),
+                )
+            }
+        }
+        Row {
+            Text(
+                days.firstOrNull()?.string("key") ?: "",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                days.lastOrNull()?.string("key") ?: "",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
+        }
+    }
+}
+
+/// One breakdown row: what it is, what it was worth, and how big a share
+/// of the largest shown row that is.
+@Composable
+private fun InsightRow(row: JsonObject, cut: Int, peak: Long) {
+    val colors = LocalTsColors.current
+    val value = row.long("valueMicros") ?: 0L
+    val share = if (peak > 0) (value.toFloat() / peak).coerceIn(0f, 1f) else 0f
+    val complete = ((row["unpricedModels"] as? JsonArray)?.size ?: 0) == 0
+    val estimated = row["estimated"]?.jsonPrimitive?.booleanOrNull == true
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(cardRadiusDp))
+            .background(colors.panel)
+            .border(1.dp, colors.border, RoundedCornerShape(cardRadiusDp))
+            .padding(Space.m),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (cut == 1) {
+                HarnessMark(id = row.string("key") ?: "")
+                Spacer(Modifier.width(Space.s))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    cutTitle(cut, row.string("key") ?: ""),
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+                val tokens = row["counters"]?.jsonObject?.long("total") ?: 0L
+                val events = row.long("events") ?: 0L
+                Text(
+                    "${compactTokens(tokens)} tokens, ${compactTokens(events)} events",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+            }
+            Spacer(Modifier.width(Space.s))
+            Text(moneyValue(value, estimated, complete), color = tsAccent(), style = TsType.numeric(14))
+        }
+        // A quiet share bar in the accent, not a system meter.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(50))
+                .background(colors.accentSoft),
+        ) {
+            val animated by animateFloatAsState(share, tween(320), label = "shareBar")
+            Box(
+                Modifier
+                    .fillMaxWidth(animated)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.accent.copy(alpha = 0.55f)),
+            )
+        }
     }
 }
 
@@ -1327,6 +1666,84 @@ private fun HostStatCell(title: String, value: String, modifier: Modifier = Modi
 
 
 
+// Typed confirmation rather than one tap. This is the one control in the
+// app that destroys data for every device on the account at once.
+@Composable
+private fun VaultDeleteDialog(
+    model: AppViewModel,
+    tier: String,
+    localKeys: List<JsonObject>,
+    onDismiss: () -> Unit,
+    onDeleted: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var typed by remember { mutableStateOf("") }
+    var working by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var stranded by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(Unit) {
+        // Keys whose private half only ever lived in the vault. Nothing
+        // recovers these, so they are named before the button, not after.
+        runCatching {
+            val answer = model.core(
+                "ssh.vault.record.list",
+                buildJsonObject { put("recovery", ""); put("tier", tier) },
+            ) as? JsonObject
+            val records = (answer?.get("records") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+            val names = mutableListOf<String>()
+            for (record in records) {
+                val key = vaultEnvelopeOf(record)?.get("key") as? JsonObject ?: continue
+                val id = key.string("id") ?: continue
+                val local = localKeys.firstOrNull { it.string("id") == id }
+                val hasLocal = local?.string("secretRef")?.let {
+                    withContext(Dispatchers.IO) { SshSecrets.get(context, it) }
+                } != null
+                val hasPulled = withContext(Dispatchers.IO) { SshSecrets.get(context, "android:$id") } != null
+                if (!hasLocal && !hasPulled) {
+                    names.add(key.string("label")?.takeIf { it.isNotBlank() } ?: id)
+                }
+            }
+            names
+        }.onSuccess { stranded = it }.onFailure { stranded = emptyList() }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete the vault and start over") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("For when the password is forgotten and no other device can open it.")
+                if (stranded?.isNotEmpty() == true) {
+                    Text("Nothing recovers these keys:", fontWeight = FontWeight.SemiBold)
+                    stranded!!.forEach { Text("· $it") }
+                }
+                OutlinedTextField(
+                    value = typed,
+                    onValueChange = { typed = it },
+                    label = { Text("Type DELETE to confirm") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = typed.trim().uppercase() == "DELETE" && !working,
+                onClick = {
+                    working = true
+                    scope.launch {
+                        runCatching { model.core("ssh.vault.reset") }
+                            .onSuccess { onDeleted() }
+                            .onFailure { error = it.message; working = false }
+                    }
+                },
+            ) { Text(if (working) "Deleting…" else "Delete vault") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 private fun AndroidSSHScreen(
@@ -1336,6 +1753,7 @@ private fun AndroidSSHScreen(
     onBack: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val tabs = listOf("Hosts", "Keys", "Snippets")
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var hosts by remember { mutableStateOf(JsonArray(emptyList())) }
@@ -1345,6 +1763,7 @@ private fun AndroidSSHScreen(
     var query by remember { mutableStateOf("") }
     var vault by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var vaultError by remember { mutableStateOf<String?>(null) }
     var addHost by remember { mutableStateOf(false) }
     var addSnippet by remember { mutableStateOf(false) }
     var addKey by remember { mutableStateOf(false) }
@@ -1356,14 +1775,46 @@ private fun AndroidSSHScreen(
     var confirmDrop by remember { mutableStateOf(false) }
     val vaultAllowed = state.vaultAllowed
 
-    suspend fun load() {
-        runCatching {
-            hosts = model.core("ssh.host.list") as? JsonArray ?: JsonArray(emptyList())
-            keys = model.core("ssh.key.list") as? JsonArray ?: JsonArray(emptyList())
-            snippets = model.core("ssh.snippet.list") as? JsonArray ?: JsonArray(emptyList())
-            folders = model.core("ssh.folder.list") as? JsonArray ?: JsonArray(emptyList())
-            if (vaultAllowed) vault = model.core("ssh.vault.status") as? JsonObject
-        }.onFailure { error = it.message }
+    suspend fun loadLists() {
+        hosts = model.core("ssh.host.list") as? JsonArray ?: JsonArray(emptyList())
+        keys = model.core("ssh.key.list") as? JsonArray ?: JsonArray(emptyList())
+        snippets = model.core("ssh.snippet.list") as? JsonArray ?: JsonArray(emptyList())
+        folders = model.core("ssh.folder.list") as? JsonArray ?: JsonArray(emptyList())
+        if (vaultAllowed) vault = model.core("ssh.vault.status") as? JsonObject
+    }
+
+    suspend fun load(syncAsked: Boolean = false) {
+        runCatching { loadLists() }.onFailure { error = it.message; return }
+        // An unlocked vault syncs on every arrival, like the iOS library:
+        // without the pull a second device unlocks into empty lists.
+        if (!vaultAllowed || vault?.bool("created") != true || vault?.bool("locked") == true) return
+        val tier = state.account?.string("tier")?.lowercase() ?: "legend"
+        val result = SshVaultSync.sync(
+            model = model,
+            context = context,
+            tier = tier,
+            hosts = hosts.filterIsInstance<JsonObject>(),
+            keys = keys.filterIsInstance<JsonObject>(),
+            snippets = snippets.filterIsInstance<JsonObject>(),
+            folders = folders.filterIsInstance<JsonObject>(),
+            asked = syncAsked,
+        )
+        result.error?.let { error = it }
+        vaultError = result.vaultError
+        if (result.changed) runCatching { loadLists() }.onFailure { error = it.message }
+    }
+
+    // Discard a vault that was just created here and never confirmed. No
+    // typing: there is nothing in it no other device could rebuild.
+    suspend fun dropFreshVault() {
+        runCatching { model.core("ssh.vault.reset") }
+            .onSuccess {
+                recoveryWords = null
+                showingRecovery = false
+                vaultSetup = false
+                load()
+            }
+            .onFailure { error = it.message }
     }
     LaunchedEffect(Unit) { load() }
 
@@ -1418,17 +1869,53 @@ private fun AndroidSSHScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (recoveryWords != null) {
                                 Button(onClick = { showingRecovery = true }) { Text("Show code") }
-                                TextButton(onClick = { confirmDrop = true }) { Text("Discard vault") }
+                                TextButton(onClick = { scope.launch { dropFreshVault() } }) { Text("Discard vault") }
                             } else if (vault?.bool("created") != true) {
                                 Button(onClick = { vaultSetup = true }) { Text("Set up") }
                             } else if (vault?.bool("locked") == true || vault?.bool("enrolled") != true) {
                                 Button(onClick = { vaultSetup = true }) { Text("Unlock") }
+                            } else {
+                                TextButton(onClick = { scope.launch { load(syncAsked = true) } }) { Text("Sync now") }
                             }
-                            if (vault?.bool("created") == true && recoveryWords == null) {
-                                TextButton(onClick = { confirmDrop = true }) { Text("Delete vault") }
+                        }
+                        // Deleting needs no password, no code and no key, so
+                        // it sits below its own rule rather than beside
+                        // Unlock: this destroys data for every device at once.
+                        if (vault?.bool("created") == true && recoveryWords == null) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            val locked = vault?.bool("locked") == true
+                            Text(
+                                "Delete the vault and start over",
+                                fontWeight = FontWeight.SemiBold,
+                                color = LocalTsColors.current.danger,
+                            )
+                            Text(
+                                if (locked) {
+                                    "You do not need the password or the recovery code for this. " +
+                                        "The vault is removed from the account, and anything in it that this " +
+                                        "device never received is gone for good."
+                                } else {
+                                    "The vault is removed from the account and every device is asked to set " +
+                                        "up a new one. This cannot be undone."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                "Everything saved on this device stays where it is, and a new vault can be " +
+                                    "filled from it. Nothing on any server changes.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(onClick = { confirmDrop = true }) {
+                                Text("Delete vault", color = LocalTsColors.current.danger)
                             }
                         }
                     }
+                }
+                vaultError?.let {
+                    Spacer(Modifier.height(10.dp))
+                    Banner(it, BannerSeverity.WARNING)
                 }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
@@ -1527,7 +2014,7 @@ private fun AndroidSSHScreen(
             scope.launch {
                 runCatching {
                     model.core("ssh.vault.create", buildJsonObject { put("password", password) }).jsonObject.string("recovery")!!
-                }.onSuccess { recoveryWords = it; showingRecovery = true; load(); vaultSetup = false }.onFailure { error = it.message }
+                }.onSuccess { recoveryWords = it; showingRecovery = true; load(syncAsked = true); vaultSetup = false }.onFailure { error = it.message }
             }
         },
         onUnlock = { password ->
@@ -1536,7 +2023,7 @@ private fun AndroidSSHScreen(
                     model.core("ssh.vault.unlock", buildJsonObject {
                         put("password", password); put("migrate", true)
                     }).jsonObject.string("recovery")?.let { recoveryWords = it; showingRecovery = true }
-                }.onSuccess { load(); vaultSetup = false }.onFailure { error = it.message }
+                }.onSuccess { load(syncAsked = true); vaultSetup = false }.onFailure { error = it.message }
             }
         },
         onReset = { code, password ->
@@ -1551,7 +2038,7 @@ private fun AndroidSSHScreen(
                         recoveryWords = code
                         showingRecovery = true
                     }
-                    load()
+                    load(syncAsked = true)
                     vaultSetup = false
                 }.onFailure { error = it.message }
             }
@@ -1563,24 +2050,21 @@ private fun AndroidSSHScreen(
             phrase,
             onDone = { recoveryWords = null; showingRecovery = false },
             onDismiss = { showingRecovery = false },
-            onDiscard = { showingRecovery = false; confirmDrop = true },
+            onDiscard = { showingRecovery = false; scope.launch { dropFreshVault() } },
         )
     }
-    if (confirmDrop) AlertDialog(
-        onDismissRequest = { confirmDrop = false },
-        title = { Text("Delete this vault?") },
-        text = { Text("Every encrypted SSH secret in the vault is permanently lost. Other devices will need to set up a new vault. This cannot be undone.") },
-        confirmButton = {
-            Button(onClick = {
-                confirmDrop = false
-                scope.launch {
-                    runCatching { model.core("ssh.vault.reset") }
-                        .onSuccess { recoveryWords = null; showingRecovery = false; vaultSetup = false; load() }
-                        .onFailure { error = it.message }
-                }
-            }) { Text("Delete vault") }
+    if (confirmDrop) VaultDeleteDialog(
+        model = model,
+        tier = state.account?.string("tier")?.lowercase() ?: "legend",
+        localKeys = keys.filterIsInstance<JsonObject>(),
+        onDismiss = { confirmDrop = false },
+        onDeleted = {
+            confirmDrop = false
+            recoveryWords = null
+            showingRecovery = false
+            vaultSetup = false
+            scope.launch { load() }
         },
-        dismissButton = { TextButton(onClick = { confirmDrop = false }) { Text("Cancel") } },
     )
     connecting?.let { host ->
         SshConnectDialog(
@@ -1812,9 +2296,23 @@ private fun WorkspacesScreen(
     pendingFolderId: String? = null,
     stores: HomeStores? = null,
     onPendingConsumed: () -> Unit = {},
+    onSetupWizard: (() -> Unit)? = null,
 ) {
+    // The host list the iOS model keeps: hosts only, without this phone
+    // (by account id and by its own key, for records that predate kinds),
+    // and without keyless records, which cannot be dialled.
+    var selfKey by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching { model.machineIdentity() }
+            .onSuccess { selfKey = it.string("key")?.lowercase() }
+    }
+    val thisId = state.account?.string("thisMachineId")
     val hosts = ((state.account?.get("machines") as? JsonArray) ?: JsonArray(emptyList()))
-        .map { it.jsonObject }.filter { it.string("kind") != "client" }
+        .map { it.jsonObject }
+        .filter { it.string("kind") != "client" }
+        .filter { thisId == null || it.string("id") != thisId }
+        .filter { key -> selfKey == null || key.string("publicIdentity")?.lowercase() != selfKey }
+        .filter { !it.string("publicIdentity").isNullOrEmpty() }
     var host by remember { mutableStateOf<JsonObject?>(null) }
     LaunchedEffect(pendingHostId, hosts) {
         val id = pendingHostId ?: return@LaunchedEffect
@@ -1910,7 +2408,7 @@ private fun WorkspacesScreen(
         )
     } else if (expanded && boundFolder != null && boundHost != null) {
         Row(Modifier.fillMaxSize()) {
-            WorkspaceList(hosts, boundHost, folders, { host = it }, { selectedFolder = it }, Modifier.width(340.dp), onClone = { cloning = true })
+            WorkspaceList(hosts, boundHost, folders, { host = it }, { selectedFolder = it }, Modifier.width(340.dp), onClone = { cloning = true }, onSetup = onSetupWizard)
             VerticalDivider()
             WorkspaceDetail(
                 model, boundHost, boundFolder, Modifier.weight(1f),
@@ -1930,6 +2428,7 @@ private fun WorkspacesScreen(
         WorkspaceList(
             hosts, host, folders, { host = it }, { selectedFolder = it }, Modifier.fillMaxSize(), error,
             onClone = if (host != null) ({ cloning = true }) else null,
+            onSetup = onSetupWizard,
         )
     }
 }
@@ -1942,9 +2441,29 @@ private fun WorkspaceList(
     onHost: (JsonObject) -> Unit, onFolder: (JsonObject) -> Unit,
     modifier: Modifier, error: String? = null,
     onClone: (() -> Unit)? = null,
+    onSetup: (() -> Unit)? = null,
 ) {
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text("Workspaces", style = MaterialTheme.typography.headlineSmall) }
+        if (hosts.isEmpty()) {
+            item {
+                EmptyState(
+                    icon = ActionIcon.Connect.vector,
+                    title = "No machine yet",
+                    message = "tokenstat runs agents on a machine that stays on. Connect " +
+                        "a computer you own, or give it a server and it sets one up.",
+                    art = { EmptyArt(EmptyArtKind.Connect) },
+                    action = if (onSetup != null) ({
+                        TsAccentButton(
+                            label = "Set up a machine",
+                            icon = ActionIcon.Connect.vector,
+                            onClick = onSetup,
+                        )
+                    }) else null,
+                )
+            }
+            return@LazyColumn
+        }
         if (selectedHost != null && onClone != null) {
             item {
                 TsSecondaryButton(
@@ -1956,16 +2475,36 @@ private fun WorkspaceList(
             }
         }
         item {
-            // A fourth machine must not become unreachable just because a
-            // segmented row was drawn for three, so the row scrolls.
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                SingleChoiceSegmentedButtonRow {
-                    hosts.forEachIndexed { index, machine ->
-                        SegmentedButton(
-                            selected = selectedHost == machine,
-                            onClick = { onHost(machine) },
-                            shape = SegmentedButtonDefaults.itemShape(index, hosts.size),
-                        ) { Text(machine.string("label") ?: "Host", maxLines = 1) }
+            // One capsule per host in the same language as the section picker,
+            // with the online dot the iOS cards carry: "select an awake
+            // computer" is only answerable when awake is visible. Capsules
+            // size to their labels, so a long machine name is read whole
+            // rather than cut at a segment boundary.
+            val colors = LocalTsColors.current
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                hosts.forEach { machine ->
+                    val selected = selectedHost == machine
+                    val online = machine.get("online")?.jsonPrimitive?.booleanOrNull
+                    val name = machine.string("label") ?: machine.string("id") ?: "Host"
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                    ) {
+                        Canvas(Modifier.size(9.dp)) {
+                            drawCircle(
+                                if (online == true) colors.accent
+                                else colors.textSecondary.copy(alpha = 0.35f),
+                            )
+                        }
+                        if (selected) {
+                            TsAccentButton(label = name, small = true, onClick = { onHost(machine) })
+                        } else {
+                            TsSecondaryButton(label = name, small = true, onClick = { onHost(machine) })
+                        }
                     }
                 }
             }
@@ -2041,7 +2580,9 @@ private fun WorkspaceDetail(
             section = section,
             protocol = HostContracts.protocolOf(host),
             folderName = folder.string("name") ?: "",
-            modifier = Modifier.verticalScroll(rememberScrollState()),
+            // The sections scroll themselves. A scrolled modifier here hands
+            // their LazyColumns infinite height and crashes on open.
+            modifier = Modifier.weight(1f),
             onOpenTerminal = onOpenTerminal,
             onOpenBrowser = onOpenBrowser,
             onOpenSection = { section = it },
@@ -2070,6 +2611,7 @@ private fun AccountDialog(
         Column(
             Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = Space.l)
                 .padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -2353,8 +2895,12 @@ private fun transportLabel(raw: String?): String = when (raw) {
     else -> raw ?: "Unknown"
 }
 
-@Composable private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) =
-    Column(modifier) { Stat(label = label, value = value, tint = tsAccent()) }
+@Composable
+private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) {
+    TsCard(modifier) {
+        Stat(label = label, value = value, tint = tsAccent())
+    }
+}
 
 /// One provider reading with its windows, the shape `usage.limits` actually
 /// returns: `windows[{label, percent, resetsAtMs}]` under a `source`. The
@@ -2371,54 +2917,118 @@ private fun LimitCard(reading: JsonObject) {
         stale -> "stale, ${RelativeClock.label(observedAt)}"
         else -> RelativeClock.label(observedAt)
     }
-    TsCard(
-        title = reading.string("source") ?: "Provider",
-        subtitle = reading.string("plan"),
-        accessory = {
-            Text(
-                observed,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (stale) colors.warning else colors.textSecondary,
-            )
-        },
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (windows.isEmpty()) {
-                Text(reading.string("note") ?: "No window data in this reading.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                windows.forEach { window ->
-                    val value = window.jsonObject
-                    val percent = value.doubleOrNull("percent") ?: 0.0
-                    // Severity is the renderer's decision, taken from the
-                    // core's thresholds rather than reinvented here.
-                    val gauge = when (LimitLogic.severityOf(value.string("severity"), percent)) {
-                        LimitLogic.Severity.CRITICAL -> colors.danger
-                        LimitLogic.Severity.WARNING -> colors.warning
-                        LimitLogic.Severity.NORMAL -> colors.accent
-                    }
-                    // Codex reports the account's own allowance beside the
-                    // running model's, and both are weekly. Without the scope
-                    // the two rows read as one limit stated twice.
-                    val label = value.string("label") ?: ""
-                    val scope = value.string("scope")
-                    val shown = when (scope) {
-                        null, "", "primary" -> label
-                        "secondary" -> "$label (all models)"
-                        "current model" -> "$label (secondary)"
-                        else -> "$label ($scope)"
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(shown, modifier = Modifier.width(140.dp), maxLines = 1)
-                        LinearProgressIndicator(
-                            progress = { (percent / 100.0).coerceIn(0.0, 1.0).toFloat() },
-                            modifier = Modifier.weight(1f),
-                            color = gauge,
+    val source = reading.string("source") ?: ""
+    TsCard {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                HarnessMark(id = source, size = 24.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        harnessName(source.ifEmpty { "Provider" }),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+                        color = colors.textPrimary,
+                        maxLines = 1,
+                    )
+                    reading.string("plan")?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                            maxLines = 1,
                         )
-                        Text("${percent.roundToInt()}%", modifier = Modifier.width(40.dp), color = gauge)
                     }
                 }
-                reading.string("note")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Text(
+                    observed,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (stale) colors.warning else colors.textSecondary,
+                    maxLines = 1,
+                )
             }
+            if (windows.isEmpty()) {
+                Text(
+                    reading.string("note") ?: "No window data in this reading.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+            } else {
+                windows.forEach { window ->
+                    LimitGauge(window.jsonObject)
+                }
+                reading.string("note")?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                }
+            }
+        }
+    }
+}
+
+/// One limit window, ported from `WindowGauge`: the label and the percent
+/// on one row, a capsule bar under it, and the reset date when the host
+/// sends one. Vertical, so a three-digit percent never wraps.
+@Composable
+private fun LimitGauge(value: JsonObject) {
+    val colors = LocalTsColors.current
+    val percent = value.doubleOrNull("percent") ?: 0.0
+    // Severity is the renderer's decision, taken from the core's
+    // thresholds rather than reinvented here.
+    val gauge = when (LimitLogic.severityOf(value.string("severity"), percent)) {
+        LimitLogic.Severity.CRITICAL -> colors.danger
+        LimitLogic.Severity.WARNING -> colors.warning
+        LimitLogic.Severity.NORMAL -> colors.accent
+    }
+    // Codex reports the account's own allowance beside the running
+    // model's, and both are weekly. Without the scope the two rows read
+    // as one limit stated twice.
+    val label = value.string("label") ?: ""
+    val scope = value.string("scope")
+    val shown = when (scope) {
+        null, "", "primary" -> label
+        "secondary" -> "$label (all models)"
+        "current model" -> "$label (secondary)"
+        else -> "$label ($scope)"
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                shown,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "${percent.roundToInt()}%",
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                color = gauge,
+                maxLines = 1,
+            )
+        }
+        val fraction = (percent / 100.0).coerceIn(0.0, 1.0).toFloat()
+        val animated by animateFloatAsState(fraction, tween(320), label = "limitGauge")
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(50))
+                .background(colors.border),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(animated)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(gauge),
+            )
+        }
+        val resetsAt = value.long("resetsAtMs")?.takeIf { it > 0 }
+        if (resetsAt != null) {
+            Text(
+                "resets ${RelativeClock.until(resetsAt)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textTertiary,
+            )
         }
     }
 }
@@ -2490,7 +3100,6 @@ private fun homeGreeting(account: JsonObject?, hasHistory: Boolean): String =
         account?.string("displayName") ?: account?.string("handle") ?: "there",
         hasHistory,
     )
-private fun money(micros: Long): String = NumberFormat.getCurrencyInstance().format(micros / 1_000_000.0)
 private fun JsonObject.string(key: String): String? = this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
 private fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
 private fun JsonObject.int(key: String): Int? = this[key]?.jsonPrimitive?.intOrNull

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.BarChart
@@ -103,7 +104,7 @@ enum class ActionIcon {
             Comment -> Icons.Default.Description
             Reopen -> Icons.Default.History
             Checkout -> Icons.Default.Download
-            Filter -> Icons.Default.Search
+            Filter -> Icons.AutoMirrored.Filled.Sort
             EnterFullScreen -> Icons.AutoMirrored.Filled.OpenInNew
             ExitFullScreen -> Icons.Default.Close
             Delete -> Icons.Default.Delete

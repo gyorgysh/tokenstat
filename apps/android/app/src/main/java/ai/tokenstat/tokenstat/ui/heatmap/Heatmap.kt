@@ -109,12 +109,28 @@ fun YearHeatmap(
         Column(Modifier.horizontalScroll(scroll)) {
             Box(Modifier.height(14.dp).width(gridWidthDp)) {
                 months.forEach { month ->
-                    val entry = month as? JsonArray ?: return@forEach
-                    val column = entry.firstOrNull()?.jsonPrimitive?.intOrNull ?: return@forEach
-                    val name = entry.getOrNull(1)?.jsonPrimitive?.contentOrNull ?: return@forEach
+                    // Objects from current hosts ({column, name}), arrays
+                    // from older ones ([column, name]).
+                    val column: Int?
+                    val name: String?
+                    when (month) {
+                        is JsonObject -> {
+                            column = month["column"]?.jsonPrimitive?.intOrNull
+                            name = month["name"]?.jsonPrimitive?.contentOrNull
+                        }
+                        is JsonArray -> {
+                            column = month.firstOrNull()?.jsonPrimitive?.intOrNull
+                            name = month.getOrNull(1)?.jsonPrimitive?.contentOrNull
+                        }
+                        else -> {
+                            column = null
+                            name = null
+                        }
+                    }
+                    if (column == null || name == null) return@forEach
                     Text(
                         name,
-                        style = TextStyle(fontSize = 10.sp),
+                        style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium),
                         color = colors.textSecondary,
                         modifier = Modifier.offset(x = (cellSize + cellGap) * column),
                     )

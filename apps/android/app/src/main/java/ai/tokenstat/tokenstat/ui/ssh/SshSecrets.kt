@@ -133,4 +133,11 @@ object SshSecrets {
         // nullable-get semantics.
         return openOrNull(ref, encoded)
     }
+
+    // Forgets one sealed secret. Removing a vault tombstone's row also
+    // removes its private half; anything else keeps working.
+    @Synchronized
+    fun delete(context: Context, ref: String) {
+        context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit().remove(ref).apply()
+    }
 }

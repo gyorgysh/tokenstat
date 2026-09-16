@@ -45,20 +45,103 @@ object HomeGreeting {
         )
 }
 
-/// Compact token counts, the way the Apple client renders them beside a model
-/// name: "1.6M" is a size, the full ten digits is a wall.
+/// Compact token counts, port of `formatTokens` in `Bridge/Models.swift`.
+/// Lowercase k, and whole thousands above ten thousand ("126k"), exactly
+/// like the Apple client.
 fun compactTokens(count: Long?): String = when {
     count == null || count <= 0 -> "0"
     count >= 1_000_000_000 -> "%.1fB".format(count / 1_000_000_000.0)
     count >= 1_000_000 -> "%.1fM".format(count / 1_000_000.0)
-    count >= 1_000 -> "%.1fK".format(count / 1_000.0)
+    count >= 10_000 -> "%.0fk".format(count / 1_000.0)
+    count >= 1_000 -> "%.1fk".format(count / 1_000.0)
     else -> count.toString()
 }
 
-private val currencyFormat: NumberFormat by lazy { NumberFormat.getCurrencyInstance() }
+/// Rates are published in US dollars, so the figure is formatted as one
+/// regardless of where the user is, like `Money` in `Bridge/Models.swift`.
+/// A Hungarian locale rendering a local amount would not match the `$6,786.57`
+/// the CLI prints for the very same archive.
+private val currencyFormat: NumberFormat by lazy {
+    NumberFormat.getCurrencyInstance(java.util.Locale.US).apply {
+        currency = java.util.Currency.getInstance("USD")
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
+    }
+}
 
-/// Micros to a localised currency string.
+/// Micros to a US dollar string. Never money billed: subscription usage is
+/// valued the same way.
 fun money(micros: Long): String = currencyFormat.format(micros / 1_000_000.0)
+
+/// A bucket value with its qualifier, port of `Money.formatted`: a floor
+/// reads "at least this much" (+), an estimate "about this much" (~).
+fun moneyValue(micros: Long, estimated: Boolean, complete: Boolean): String {
+    val amount = money(micros)
+    if (!complete) return "${amount}+"
+    if (estimated) return "~$amount"
+    return amount
+}
+
+/// Display name for a harness id, port of `harnessName` in
+/// `Bridge/Models.swift`. Same spelling tokenstat.ai uses.
+fun harnessName(id: String): String {
+    if (id == "opencode2") return "OpenCode 2"
+    return when (harnessCanonicalID(id)) {
+        "claude_code" -> "Claude Code"
+        "claude_code_rollup", "claude_code_estimate" -> "Claude Code (recovered)"
+        "codex" -> "Codex"
+        "grok" -> "Grok Build"
+        "opencode" -> "OpenCode"
+        "cline" -> "Cline"
+        "openclaw" -> "OpenClaw"
+        "muse" -> "Muse"
+        "devin" -> "Devin CLI"
+        "pi" -> "Pi"
+        "dsh" -> "DeepSeek Harness"
+        "zed" -> "Zed"
+        "copilot" -> "Copilot CLI"
+        "antigravity" -> "Antigravity"
+        "cursor" -> "Cursor"
+        "gemini" -> "Gemini"
+        "hermes" -> "Hermes Agent"
+        "kilo" -> "Kilo Code"
+        "kimi" -> "Kimi Code"
+        "qwen" -> "Qwen Code"
+        "" -> "unknown"
+        else -> harnessCanonicalID(id).ifEmpty { "unknown" }
+    }
+}
+
+/// Stored source id to brand id, port of `harnessCanonicalID`.
+fun harnessCanonicalID(id: String): String {
+    if (id == "agy") return "antigravity"
+    if (id.startsWith("antigravity")) return "antigravity"
+    if (id == "claude") return "claude_code"
+    if (id == "opencode2") return "opencode"
+    return id
+}
+
+/// Marks a sign-in URL as the Android client flow, the way
+/// `ClientWebAuth.start` tags `app=ios`: the site renders the phone variant
+/// of the approval page and redirects back to the app when it is approved.
+/// Harmless on a server that does not know the parameter yet.
+fun tagSignInUrl(url: String): String {
+    val separator = if (url.contains("?")) "&" else "?"
+    return "$url${separator}app=android&mobile=1"
+}
+
+/// "11 August", with the year only when it is not this one, port of
+/// `shortDate` in `ClientDates.swift`. Unparseable input passes through.
+fun shortDate(iso: String): String {
+    val date = try {
+        java.time.LocalDate.parse(iso, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+    } catch (e: Exception) {
+        return iso
+    }
+    val now = java.time.LocalDate.now()
+    val pattern = if (date.year == now.year) "d MMMM" else "d MMMM yyyy"
+    return date.format(java.time.format.DateTimeFormatter.ofPattern(pattern))
+}
 
 /// Copy for a tunnel that is mid-reconnect, not gone
 /// (`ClientTunnelCopy` in ClientRemote.swift).
