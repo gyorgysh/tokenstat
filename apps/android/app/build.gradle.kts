@@ -71,6 +71,13 @@ val generatePriceBook by tasks.registering(Exec::class) {
     commandLine("cargo", "run", "-q", "-p", "xtask", "--", "pricing-seed", output.get().asFile)
 }
 tasks.named("preBuild").configure { dependsOn(generatePriceBook) }
+val generateNotices by tasks.registering(Exec::class) {
+    val output = layout.buildDirectory.file("generated-assets/THIRD_PARTY_NOTICES.md")
+    outputs.file(output)
+    workingDir(rootProject.projectDir.resolve("../.."))
+    commandLine("scripts/notices-android.sh", output.get().asFile)
+}
+tasks.named("preBuild").configure { dependsOn(generateNotices) }
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
@@ -85,7 +92,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.navigation:navigation-compose:2.9.5")
     implementation("androidx.browser:browser:1.9.0")
-    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("com.android.billingclient:billing-ktx:9.1.0")

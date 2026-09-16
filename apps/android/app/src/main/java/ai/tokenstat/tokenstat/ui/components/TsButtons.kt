@@ -68,6 +68,34 @@ fun TsAccentButton(
     )
 }
 
+/// The prominent action: solid accent fill with white content, the port of
+/// SwiftUI `.borderedProminent` tinted with the accent. Used sparingly —
+/// on iOS it appears exactly once, on the host Connect button.
+@Composable
+fun TsProminentButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    small: Boolean = false,
+    enabled: Boolean = true,
+) {
+    val colors = LocalTsColors.current
+    TsCapsuleButton(
+        label = label,
+        icon = icon,
+        small = small,
+        enabled = enabled,
+        onClick = onClick,
+        modifier = modifier,
+        contentColor = Color.White,
+        fill = colors.accent,
+        pressedFill = colors.accent.copy(alpha = 0.85f),
+        stroke = BorderStroke(1.dp, Color.Transparent),
+        pressedStroke = BorderStroke(1.dp, Color.Transparent),
+    )
+}
+
 /// The secondary action: the same capsule family, but neutral — panel fill,
 /// hairline border, primary text. For revoke, forget and every action that is
 /// a real operation but not the one being offered.

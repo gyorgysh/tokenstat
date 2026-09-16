@@ -388,7 +388,7 @@ fun WorkflowRunHistory(
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            RelativeClock.label(run.startedAtMs),
+                            RelativeClock.abbreviated(run.startedAtMs),
                             style = TsType.caption,
                             color = LocalTsColors.current.textSecondary,
                         )

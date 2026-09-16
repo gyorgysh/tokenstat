@@ -3,7 +3,7 @@ package ai.tokenstat.tokenstat.ui.components
 
 import ai.tokenstat.tokenstat.ui.marks.SLOT_GAUGE_MAX_TILES
 import ai.tokenstat.tokenstat.ui.marks.TierKind
-import ai.tokenstat.tokenstat.ui.marks.avatarSlot
+import ai.tokenstat.tokenstat.ui.marks.avatarInitials
 import ai.tokenstat.tokenstat.ui.marks.countdownFraction
 import ai.tokenstat.tokenstat.ui.marks.scheduleFires
 import ai.tokenstat.tokenstat.ui.marks.slotGaugeDrawn
@@ -112,15 +112,15 @@ class SharedComponentsTest {
     }
 
     @Test
-    fun avatarSlotsAreStableAcrossCase() {
-        // djb2("ada") mod 5: the same seat on both platforms.
-        assertEquals(2, avatarSlot("Ada", 5))
-        assertEquals(2, avatarSlot("ADA", 5))
-        assertEquals(2, avatarSlot("ada", 5))
-        for (name in listOf("Ada", "bob smith", "Zoe", "?")) {
-            val slot = avatarSlot(name, 5)
-            assertEquals(true, slot in 0 until 5)
-        }
+    fun avatarInitialsMatchApple() {
+        // The first letters of the first two words, uppercased, like the
+        // Apple `Avatar.initials`: one word gives one letter, blank gives nil.
+        assertEquals("GY", avatarInitials("Gyorgy Yosh"))
+        assertEquals("G", avatarInitials("gyorgy"))
+        assertEquals("GY", avatarInitials("  gyorgy   yosh  "))
+        assertNull(avatarInitials(""))
+        assertNull(avatarInitials("   "))
+        assertNull(avatarInitials(null))
     }
 
     @Test

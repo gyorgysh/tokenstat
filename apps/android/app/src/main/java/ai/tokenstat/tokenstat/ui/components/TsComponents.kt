@@ -225,6 +225,16 @@ fun Stat(
     }
 }
 
+/// A screen section header: the feature mark on its tile beside a title-case
+/// headline. Ported from `ClientSectionTitle` in `GlassChrome.swift`.
+@Composable
+fun SectionTitle(title: String, mark: String, tint: Color = LocalTsColors.current.accent) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+        ai.tokenstat.tokenstat.ui.marks.FeatureMark(name = mark, tint = tint, size = 22)
+        Text(title, style = TsType.headline, color = LocalTsColors.current.textPrimary)
+    }
+}
+
 /// Uppercase group label with an optional count, as in the sidebar.
 @Composable
 fun SectionLabel(text: String, count: Int? = null, modifier: Modifier = Modifier) {

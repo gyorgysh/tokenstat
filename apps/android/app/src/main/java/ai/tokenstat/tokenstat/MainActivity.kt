@@ -11,7 +11,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import ai.tokenstat.tokenstat.ui.TokenstatApp
 
 class MainActivity : ComponentActivity() {
@@ -20,7 +19,8 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        // No splash API: the system dismisses its own launch image on the
+        // first frame, and the app opens on the loading mark like iOS.
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // Without this the agent-attention notifications are dropped in

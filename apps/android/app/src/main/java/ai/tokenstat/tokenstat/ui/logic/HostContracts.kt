@@ -77,34 +77,75 @@ object HostContracts {
 /// Relative time, port of Apple `RelativeTimeText.swift` (single 15s tick).
 /// Returns a short string; callers re-compose on a 15s ticker.
 object RelativeClock {
+    private fun unit(count: Long, singular: String): String =
+        "$count $singular${if (count == 1L) "" else "s"}"
+
+    /// "3 days ago", in full words the way Foundation's numeric relative
+    /// style phrases it: seconds, minutes, hours, days, then weeks to months
+    /// to years, each rounded to the nearest rather than floored, so a reset
+    /// 2.8 days out reads "in 3 days" here and on the Apple client alike.
     fun label(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
-        val delta = (nowMillis - epochMillis) / 1000
+        val delta = ((nowMillis - epochMillis) / 1000).coerceAtLeast(0)
         if (delta < 5) return "now"
-        if (delta < 60) return "${delta}s ago"
-        val minutes = delta / 60
-        if (minutes < 60) return "${minutes}m ago"
-        val hours = minutes / 60
-        if (hours < 24) return "${hours}h ago"
-        val days = hours / 24
-        if (days < 7) return "${days}d ago"
-        return java.text.SimpleDateFormat("MMM d", java.util.Locale.US)
-            .format(java.util.Date(epochMillis))
+        if (delta < 60) return "${unit(delta, "second")} ago"
+        val minutes = (delta + 30) / 60
+        if (minutes < 60) return "${unit(minutes, "minute")} ago"
+        val hours = (delta + 1800) / 3600
+        if (hours < 24) return "${unit(hours, "hour")} ago"
+        val days = (delta + 43200) / 86400
+        if (days < 7) return "${unit(days, "day")} ago"
+        if (days < 30) return "${unit((days + 3) / 7, "week")} ago"
+        if (days < 365) return "${unit((days + 15) / 30, "month")} ago"
+        return "${unit((days + 182) / 365, "year")} ago"
     }
 
-    /// Future mirror of `label`: "in 2 days", for limit reset dates.
+    /// "3 min ago", for chat rows and run times. The same abbreviated
+    /// units Foundation's abbreviated style draws: seconds, minutes and
+    /// hours shorten, days stay written out, weeks and up shorten again.
+    fun abbreviated(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
+        val delta = (nowMillis - epochMillis) / 1000
+        if (delta >= 0 && delta < 1) return "just now"
+        if (delta < 0) return abbreviatedFuture(-delta)
+        if (delta < 60) return "$delta sec ago"
+        val minutes = (delta + 30) / 60
+        if (minutes < 60) return "$minutes min ago"
+        val hours = (delta + 1800) / 3600
+        if (hours < 24) return "$hours hr ago"
+        val days = (delta + 43200) / 86400
+        if (days < 7) return "${unit(days, "day")} ago"
+        if (days < 30) return "${(days + 3) / 7} wk ago"
+        if (days < 365) return "${(days + 15) / 30} mo ago"
+        return "${(days + 182) / 365} yr ago"
+    }
+
+    private fun abbreviatedFuture(delta: Long): String {
+        if (delta < 60) return "in $delta sec"
+        val minutes = (delta + 30) / 60
+        if (minutes < 60) return "in $minutes min"
+        val hours = (delta + 1800) / 3600
+        if (hours < 24) return "in $hours hr"
+        val days = (delta + 43200) / 86400
+        if (days < 7) return "in ${unit(days, "day")}"
+        if (days < 30) return "in ${(days + 3) / 7} wk"
+        if (days < 365) return "in ${(days + 15) / 30} mo"
+        return "in ${(days + 182) / 365} yr"
+    }
+
+    /// Future mirror of `label`: "in 3 days", for limit reset dates.
     fun until(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
         val delta = (epochMillis - nowMillis) / 1000
         if (delta < 0) return label(epochMillis, nowMillis)
         if (delta < 5) return "now"
-        if (delta < 60) return "in ${delta}s"
-        val minutes = delta / 60
-        if (minutes < 60) return "in ${minutes}m"
-        val hours = minutes / 60
-        if (hours < 24) return "in ${hours}h"
-        val days = hours / 24
-        if (days < 7) return "in ${days}d"
-        return java.text.SimpleDateFormat("MMM d", java.util.Locale.US)
-            .format(java.util.Date(epochMillis))
+        if (delta < 60) return "in ${unit(delta, "second")}"
+        val minutes = (delta + 30) / 60
+        if (minutes < 60) return "in ${unit(minutes, "minute")}"
+        val hours = (delta + 1800) / 3600
+        if (hours < 24) return "in ${unit(hours, "hour")}"
+        val days = (delta + 43200) / 86400
+        if (days < 7) return "in ${unit(days, "day")}"
+        if (days < 30) return "in ${unit((days + 3) / 7, "week")}"
+        if (days < 365) return "in ${unit((days + 15) / 30, "month")}"
+        return "in ${unit((days + 182) / 365, "year")}"
     }
 }
 

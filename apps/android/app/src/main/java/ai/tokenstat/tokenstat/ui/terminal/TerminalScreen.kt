@@ -78,6 +78,7 @@ fun TerminalScreen(
     workspaceId: String,
     existingSessionId: String?,
     onClose: () -> Unit,
+    onSessionOpened: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -119,6 +120,7 @@ fun TerminalScreen(
 
     fun bind(id: String) {
         sessionId = id
+        onSessionOpened(id)
         scope.launch {
             // The header names the process and folder, like the Apple screen.
             // A failed info call is a transport hiccup: the read loop owns

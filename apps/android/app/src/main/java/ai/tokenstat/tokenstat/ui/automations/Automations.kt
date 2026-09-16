@@ -506,7 +506,7 @@ fun RunHistorySection(
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            ai.tokenstat.tokenstat.ui.logic.RelativeClock.label(run.startedAtMs),
+                            ai.tokenstat.tokenstat.ui.logic.RelativeClock.abbreviated(run.startedAtMs),
                             style = TsType.caption,
                             color = LocalTsColors.current.textSecondary,
                         )

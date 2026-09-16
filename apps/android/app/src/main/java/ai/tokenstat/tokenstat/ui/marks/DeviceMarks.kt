@@ -18,12 +18,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import ai.tokenstat.tokenstat.ui.logic.DeviceCopy
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 
 /// The distro brand a device row wears, ported from `distroBrandID` in
 /// `SSHHostPlatform.swift`. Short names match on token boundaries, so `arch`
@@ -72,25 +76,44 @@ fun distroBrandRes(label: String?, platform: String?): Int = when (distroBrandId
     else -> 0
 }
 
-/// Which platform glyph a device wears when no distro mark matches, the same
-/// decision `ClientDeviceIcon.symbol` makes: a tablet or phone name wins over
-/// the kind, servers stay racks, everything else is a laptop or a desktop.
-fun deviceGlyphVector(name: String?, isHost: Boolean): ImageVector {
-    val lower = (name ?: "").lowercase()
-    if (lower.contains("ipad") || lower.contains("tablet")) return Icons.Default.TabletAndroid
-    if (lower.contains("iphone") || lower.contains("phone") || lower.contains("android")) {
+/// Which machine a row is, at a glance. An exact port of
+/// `ClientDeviceIcon.symbol`: the kind comes from the name and the platform
+/// together, a tablet or phone name wins over the kind, servers stay racks,
+/// and a machine that says nothing is drawn as a desktop rather than guessed
+/// at. Distro brands never appear here; they belong to SSH host rows, which
+/// read the OS the host itself reported.
+fun deviceGlyphVector(name: String?, platform: String?, isHost: Boolean): ImageVector {
+    val lower = listOfNotNull(name?.trim(), platform?.trim())
+        .filter { it.isNotEmpty() }
+        .joinToString(" ")
+        .lowercase()
+    if (lower.contains("ipad") || lower.contains("ipados")) return Icons.Default.TabletAndroid
+    if (lower.contains("iphone") || lower.contains("ipod")) return Icons.Default.PhoneAndroid
+    if (!isHost) {
+        if (lower.contains("android") && (lower.contains("tablet") || lower.contains("tab "))) {
+            return Icons.Default.TabletAndroid
+        }
         return Icons.Default.PhoneAndroid
     }
-    if (lower.contains("mini") || lower.contains("studio") || lower.contains("pro")) {
+    if (lower.contains("macbook") || lower.contains("laptop") || lower.contains("thinkpad")) {
+        return Icons.Default.Laptop
+    }
+    if (lower.contains("imac") || lower.contains("mac studio") || lower.contains("mac mini") ||
+        lower.contains("mac pro") || lower.contains("desktop")
+    ) {
         return Icons.Default.Computer
     }
-    if (lower.contains("server") || lower.contains("rack")) return Icons.Default.Dns
-    return if (isHost) Icons.Default.Laptop else Icons.Default.PhoneAndroid
+    if (lower.contains("server") || lower.contains("linux") || lower.contains("ubuntu") ||
+        lower.contains("windows")
+    ) {
+        return Icons.Default.Dns
+    }
+    return Icons.Default.Computer
 }
 
-/// The device in the row: a distro brand where the platform names one,
-/// otherwise the platform glyph. The mark is drawn untinted, the glyph in the
-/// caller's tint, so brands keep their own colours.
+/// The device in the row: always the platform glyph, in the caller's tint.
+/// A list of identical grey rectangles is a list nobody reads, and the glyph
+/// is what tells a laptop from a rack at a glance.
 @Composable
 fun DeviceGlyph(
     name: String?,
@@ -101,22 +124,12 @@ fun DeviceGlyph(
     sizeDp: Int = 18,
     tint: Color = LocalTsColors.current.textSecondary,
 ) {
-    val brand = distroBrandRes(label, platform)
-    if (brand != 0) {
-        Icon(
-            painterResource(brand),
-            contentDescription = null,
-            modifier = modifier.size(sizeDp.dp),
-            tint = Color.Unspecified,
-        )
-    } else {
-        Icon(
-            deviceGlyphVector(name, isHost),
-            contentDescription = null,
-            modifier = modifier.size(sizeDp.dp),
-            tint = tint,
-        )
-    }
+    Icon(
+        deviceGlyphVector(label ?: name, platform, isHost),
+        contentDescription = null,
+        modifier = modifier.size(sizeDp.dp),
+        tint = tint,
+    )
 }
 
 /// The lit dot before a device name. The device in your hand is awake
@@ -132,6 +145,56 @@ fun AwakeDot(online: Boolean?, modifier: Modifier = Modifier) {
             ),
         ),
     )
+}
+
+private fun JsonObject.optString(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+
+/// This device first, then awake machines by spend, then everyone else by how
+/// recently they were last active. An exact port of the `sorted` comparator in
+/// `ClientDevicesView.swift`. Clients never rank on spend (they do not upload
+/// usage), so value only separates hosts, and unknown usage sorts below any
+/// real figure so a $0 phone does not float above a busy laptop.
+fun sortMachines(
+    machines: List<JsonObject>,
+    thisId: String?,
+    spendMicros: (JsonObject) -> Long?,
+): List<JsonObject> {
+    fun isThis(machine: JsonObject): Boolean =
+        !thisId.isNullOrEmpty() && machine.optString("id") == thisId
+    fun isAwake(machine: JsonObject): Boolean =
+        isThis(machine) || (machine["online"] as? JsonPrimitive)?.booleanOrNull == true
+    fun sortSpend(machine: JsonObject): Long {
+        if (machine.optString("kind") == "client") return -1
+        return spendMicros(machine) ?: -1
+    }
+    fun activityDate(machine: JsonObject): Long {
+        if (isThis(machine) || (machine["online"] as? JsonPrimitive)?.booleanOrNull == true) {
+            return Long.MAX_VALUE
+        }
+        return parseServerDate(machine.optString("lastSeenAt"))?.time
+            ?: parseServerDate(machine.optString("lastSyncAt"))?.time
+            ?: Long.MIN_VALUE
+    }
+    fun displayName(machine: JsonObject): String = DeviceCopy.displayName(
+        machine.optString("label"),
+        machine.optString("platform"),
+        machine.optString("kind") != "client",
+    )
+    return machines.sortedWith { a, b ->
+        val thisA = isThis(a)
+        val thisB = isThis(b)
+        if (thisA != thisB) return@sortedWith if (thisA) -1 else 1
+        val awakeA = isAwake(a)
+        val awakeB = isAwake(b)
+        if (awakeA != awakeB) return@sortedWith if (awakeA) -1 else 1
+        val spendA = sortSpend(a)
+        val spendB = sortSpend(b)
+        if (spendA != spendB) return@sortedWith spendB.compareTo(spendA)
+        val seenA = activityDate(a)
+        val seenB = activityDate(b)
+        if (seenA != seenB) return@sortedWith seenB.compareTo(seenA)
+        displayName(a).compareTo(displayName(b), ignoreCase = true)
+    }
 }
 
 private val serverDateParsers: List<SimpleDateFormat> = listOf(

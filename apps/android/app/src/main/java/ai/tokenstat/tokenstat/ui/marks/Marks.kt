@@ -8,7 +8,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,7 +19,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,11 +36,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ai.tokenstat.tokenstat.R
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.TsMotion
 import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
@@ -165,46 +180,142 @@ fun Wordmark(
     }
 }
 
-/// Which slot of the avatar ramp a name lands in. djb2 over the lowercased
-/// bytes, like Apple's `Avatar.tint`: `hashCode` is a different function, so
-/// the same person would wear a different colour on each platform.
-fun avatarSlot(name: String, slots: Int): Int {
-    require(slots > 0) { "avatar ramp must not be empty" }
-    var hash = 5381L
-    for (byte in name.lowercase().toByteArray(Charsets.UTF_8)) {
-        hash = hash * 33 + (byte.toLong() and 0xFF)
-    }
-    return (hash % slots).toInt()
+/// A product-owned vector mark for a feature surface, ported from
+/// `FeatureMark` in `Marks.swift`: the glyph at 62% on a tile of its own tint
+/// at 12%, cornered at 28%. Names are the Apple asset names (`mark_host`),
+/// resolved to the converted drawables.
+fun featureMarkRes(name: String): Int = when (name) {
+    "mark_account" -> R.drawable.feature_mark_account
+    "mark_activity" -> R.drawable.feature_mark_activity
+    "mark_agent" -> R.drawable.feature_mark_agent
+    "mark_archive" -> R.drawable.feature_mark_archive
+    "mark_automation" -> R.drawable.feature_mark_automation
+    "mark_cache" -> R.drawable.feature_mark_cache
+    "mark_chat" -> R.drawable.feature_mark_chat
+    "mark_day" -> R.drawable.feature_mark_day
+    "mark_delete" -> R.drawable.feature_mark_delete
+    "mark_device" -> R.drawable.feature_mark_device
+    "mark_done" -> R.drawable.feature_mark_done
+    "mark_examples" -> R.drawable.feature_mark_examples
+    "mark_folder" -> R.drawable.feature_mark_folder
+    "mark_host" -> R.drawable.feature_mark_host
+    "mark_insights" -> R.drawable.feature_mark_insights
+    "mark_license" -> R.drawable.feature_mark_license
+    "mark_local" -> R.drawable.feature_mark_local
+    "mark_note" -> R.drawable.feature_mark_note
+    "mark_paused" -> R.drawable.feature_mark_paused
+    "mark_pin" -> R.drawable.feature_mark_pin
+    "mark_plan" -> R.drawable.feature_mark_plan
+    "mark_running" -> R.drawable.feature_mark_running
+    "mark_scheduler" -> R.drawable.feature_mark_scheduler
+    "mark_sync" -> R.drawable.feature_mark_sync
+    "mark_terminal" -> R.drawable.feature_mark_terminal
+    "mark_todo" -> R.drawable.feature_mark_todo
+    "mark_week" -> R.drawable.feature_mark_week
+    "mark_workflow" -> R.drawable.feature_mark_workflow
+    else -> 0
 }
 
-/// A person's avatar seat, tinted deterministically from their name so the
-/// same person is the same colour everywhere (the Apple `Avatar` rule). The
-/// ramp leaves out the heat's first two quiet-day greys, which no letter can
-/// be read in, and ends on warning and danger. Initials stand in until a real
-/// image arrives.
 @Composable
-fun Avatar(name: String, size: Int = 28) {
-    val colors = LocalTsColors.current
-    val ramp = remember(colors) { colors.heat.drop(2) + listOf(colors.warning, colors.danger) }
-    val tint = ramp[avatarSlot(name, ramp.size)]
+fun FeatureMark(name: String, tint: Color = LocalTsColors.current.accent, size: Int = 18) {
+    val res = featureMarkRes(name)
     Box(
         Modifier
             .size(size.dp)
-            .clip(RoundedCornerShape(50))
-            .background(
-                androidx.compose.ui.graphics.Brush.verticalGradient(
-                    listOf(tint, tint.copy(alpha = 0.72f)),
-                ),
-            ),
+            .clip(RoundedCornerShape((size * 0.28f).dp))
+            .background(tint.copy(alpha = 0.12f)),
         contentAlignment = Alignment.Center,
     ) {
-        val initials = name.trim().split(Regex("\\s+")).take(2)
-            .mapNotNull { it.firstOrNull()?.uppercaseChar() }
-            .joinToString("")
-        Text(
-            initials.ifBlank { "?" },
-            style = TextStyle(fontSize = (size * 0.38).sp, fontWeight = FontWeight.SemiBold),
-            color = Color.White,
-        )
+        if (res != 0) {
+            Icon(
+                painterResource(res),
+                contentDescription = null,
+                modifier = Modifier.size((size * 0.62f).dp),
+                tint = tint,
+            )
+        }
+    }
+}
+
+/// Initials from a display name, the same function the Apple `Avatar` uses:
+/// the first letters of the first two words, uppercased. Nil when there is no
+/// name to take them from, so the caller falls through to the handle.
+fun avatarInitials(name: String?): String? {
+    val parts = (name ?: "").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    val first = parts.firstOrNull()?.firstOrNull() ?: return null
+    val second = if (parts.size > 1) parts[1].firstOrNull()?.toString().orEmpty() else ""
+    return "$first$second".uppercase()
+}
+
+/// The account, reached from the leading edge of every screen. Ported from
+/// `AvatarButton.swift`: the monogram on an accent-to-secondary gradient, the
+/// fetched picture over it once it has arrived, and a person glyph inside an
+/// accent ring when signed out. The picture reads the shared cache
+/// synchronously, so an already fetched face paints on the first frame instead
+/// of flashing the letter while a new fetch spins up.
+@Composable
+fun Avatar(name: String, size: Int = 28, avatarUrl: String? = null, signedIn: Boolean = true) {
+    val colors = LocalTsColors.current
+    val context = LocalContext.current
+    val raw = avatarUrl?.trim()?.takeIf { it.isNotEmpty() }
+    var picture: Bitmap? by remember(raw) { mutableStateOf(raw?.let { AvatarCache.cached(it) }) }
+    LaunchedEffect(raw) {
+        if (raw == null || picture != null) return@LaunchedEffect
+        val loaded = AvatarCache.image(context, raw)
+        // Only land while this URL is still the one on show, so a slow
+        // answer for the previous account cannot cover the new one.
+        if (loaded != null) picture = loaded
+    }
+    val drawn: Dp = size.dp
+    Box(
+        Modifier
+            .size(drawn)
+            .semantics { contentDescription = if (signedIn) "Account, $name" else "Sign in to tokenstat" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(drawn)
+                .clip(CircleShape)
+                .background(
+                    androidx.compose.ui.graphics.Brush.linearGradient(
+                        listOf(colors.accent, colors.secondary),
+                    ),
+                    alpha = if (signedIn) 1f else 0.14f,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (signedIn) {
+                Text(
+                    avatarInitials(name) ?: "t",
+                    style = TextStyle(fontSize = (size * 0.42f).sp, fontWeight = FontWeight.SemiBold),
+                    color = Color.White,
+                )
+            } else {
+                Icon(
+                    Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier.size((size * 0.44f).dp),
+                    tint = colors.accent,
+                )
+            }
+        }
+        if (signedIn && picture != null) {
+            // Over the monogram, not instead of it, so a slow or failed load
+            // shows the letter rather than a hole.
+            Image(
+                picture!!.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(drawn).clip(CircleShape),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        if (!signedIn) {
+            Box(
+                Modifier
+                    .size(drawn)
+                    .border(1.5.dp, colors.accent.copy(alpha = 0.55f), CircleShape),
+            )
+        }
     }
 }

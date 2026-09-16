@@ -81,6 +81,7 @@ import ai.tokenstat.tokenstat.ui.theme.Space
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -98,10 +99,15 @@ fun ChatSection(
     modifier: Modifier = Modifier,
     folderName: String = "",
     hostLabel: String = "",
+    onChatOpened: (String) -> Unit = {},
+    initialChatId: String? = null,
+    openConversationOnAppear: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var chats by remember(workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var openId by remember(workspace) { mutableStateOf<String?>(null) }
+    var creating by remember(workspace) { mutableStateOf(false) }
+    var didOpenConversation by remember(workspace, openConversationOnAppear) { mutableStateOf(false) }
     var events by remember(workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var approvals by remember(workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var error by remember(workspace) { mutableStateOf<String?>(null) }
@@ -143,9 +149,46 @@ fun ChatSection(
             approvals = (it as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
         }
     }
+    // Create, then open what was created. A "New chat" button that lands
+    // back on the list created the chat and hid it in the same motion.
+    suspend fun createAndOpen() {
+        if (creating) return
+        creating = true
+        runCatching {
+            model.workspaceSection(peer, "chat.create", buildJsonObject {
+                put("workspaceId", workspace); put("backend", "opencode")
+            }) as? JsonObject
+        }.onSuccess { created ->
+            val id = created?.str("id")
+            loadChats()
+            openId = id ?: chats.maxByOrNull {
+                (it["updatedAtMs"] as? JsonPrimitive)?.longOrNull ?: 0L
+            }?.str("id")
+        }.onFailure { error = friendlyError(it.message).message }
+        creating = false
+    }
     LaunchedEffect(workspace) { loadChats() }
+    // A navigation that named a conversation: open exactly it, even when
+    // this folder's list is already on screen.
+    LaunchedEffect(initialChatId, workspace) {
+        if (initialChatId != null) openId = initialChatId
+    }
+    // The launcher's promise: arriving to start work opens the conversation
+    // worth returning to, or starts one when there is none.
+    LaunchedEffect(loading, openConversationOnAppear) {
+        if (!openConversationOnAppear || didOpenConversation || loading || error != null) return@LaunchedEffect
+        didOpenConversation = true
+        if (chats.isEmpty()) {
+            createAndOpen()
+        } else {
+            openId = chats.maxByOrNull {
+                (it["updatedAtMs"] as? JsonPrimitive)?.longOrNull ?: 0L
+            }?.str("id")
+        }
+    }
     LaunchedEffect(openId) {
         val id = openId ?: return@LaunchedEffect
+        onChatOpened(id)
         while (true) {
             loadEvents(id)
             kotlinx.coroutines.delay(2000)
@@ -163,15 +206,12 @@ fun ChatSection(
         if (error != null) Banner(error!!, BannerSeverity.DANGER)
         if (openId == null) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TsAccentButton(label = "New chat", small = true, onClick = {
-                    scope.launch {
-                        runCatching {
-                            model.workspaceSection(peer, "chat.create", buildJsonObject {
-                                put("workspaceId", workspace); put("backend", "opencode")
-                            })
-                        }.onSuccess { loadChats() }
-                    }
-                })
+                TsAccentButton(
+                    label = if (creating) "Starting…" else "New chat",
+                    small = true,
+                    enabled = !creating,
+                    onClick = { scope.launch { createAndOpen() } },
+                )
                 TextButton(onClick = { scope.launch { loadChats() } }) { Text("Refresh") }
             }
             if (loading) { CircularProgressIndicator(Modifier, strokeWidth = 2.dp); return }
@@ -181,15 +221,12 @@ fun ChatSection(
                     "Start a chat",
                     "Ask an agent to explore, plan, or work in $place.",
                     action = {
-                        TsAccentButton(label = "New chat", small = true, onClick = {
-                            scope.launch {
-                                runCatching {
-                                    model.workspaceSection(peer, "chat.create", buildJsonObject {
-                                        put("workspaceId", workspace); put("backend", "opencode")
-                                    })
-                                }.onSuccess { loadChats() }
-                            }
-                        })
+                        TsAccentButton(
+                            label = if (creating) "Starting…" else "New chat",
+                            small = true,
+                            enabled = !creating,
+                            onClick = { scope.launch { createAndOpen() } },
+                        )
                     },
                 )
                 return

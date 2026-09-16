@@ -112,6 +112,9 @@ fun WorkspaceSection(
     onOpenTerminal: (String?) -> Unit,
     onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
     onOpenSection: (String) -> Unit = {},
+    onChatOpened: (String) -> Unit = {},
+    initialChatId: String? = null,
+    openConversationOnAppear: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var data by remember(section) { mutableStateOf<JsonElement?>(null) }
@@ -139,7 +142,7 @@ fun WorkspaceSection(
     val reload: () -> Unit = { scope.launch { load() } }
     when (section) {
         "Sessions" -> SessionsSection(data, error, loading, onOpenTerminal, reload, modifier)
-        "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel)
+        "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel, onChatOpened, initialChatId, openConversationOnAppear)
         "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel)
         "Changes" -> ChangesSection(model, peer, workspace, modifier, folderName, hostLabel, protocol, onChanged = reload)
         "History" -> HistorySection(model, peer, workspace, modifier, folderName, hostLabel)

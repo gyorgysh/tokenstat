@@ -3,25 +3,35 @@ package ai.tokenstat.tokenstat.ui.home
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -29,6 +39,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
@@ -52,9 +65,11 @@ import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.BrandCheckDisc
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
+import ai.tokenstat.tokenstat.ui.components.SectionTitle
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
+import ai.tokenstat.tokenstat.ui.components.tsPanel
 import ai.tokenstat.tokenstat.ui.logic.HomePreset
 import ai.tokenstat.tokenstat.ui.logic.HomeSection
 import ai.tokenstat.tokenstat.ui.logic.PinnedWork
@@ -67,6 +82,7 @@ import ai.tokenstat.tokenstat.ui.marks.EmptyArt
 import ai.tokenstat.tokenstat.ui.marks.EmptyArtKind
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 import ai.tokenstat.tokenstat.ui.components.TsType
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -134,11 +150,11 @@ class HomeStores(context: Context) {
 
     private fun scopeOf(handle: String): String = handle.trim()
 
-    fun places(handle: String): List<RecentPlaces.Place> {
+    fun places(identity: String?, host: String): List<RecentPlaces.Place> {
         revision.value
-        val scope = scopeOf(handle)
-        if (scope.isEmpty()) return emptyList()
-        val raw = prefs.getString(placesKey(scope), null) ?: return emptyList()
+        val scope = identity?.trim().orEmpty()
+        if (scope.isEmpty() || host.isEmpty()) return emptyList()
+        val raw = prefs.getString(placesKey(host, scope), null) ?: return emptyList()
         val stored = runCatching { json.decodeFromString<List<StoredPlace>>(raw) }.getOrNull()
             ?: return emptyList()
         return RecentPlaces.places(stored.mapNotNull { dto ->
@@ -152,16 +168,17 @@ class HomeStores(context: Context) {
     }
 
     fun recordPlace(
-        handle: String,
+        identity: String?,
+        host: String,
         peer: String,
         workspaceId: String?,
         workspaceName: String,
         kind: RecentPlaces.Kind,
         itemId: String? = null,
     ) {
-        val scope = scopeOf(handle)
-        if (scope.isEmpty()) return
-        val stored = readPlacesDto(scope)
+        val scope = identity?.trim().orEmpty()
+        if (scope.isEmpty() || host.isEmpty()) return
+        val stored = readPlacesDto(host, scope)
         val current = stored.mapNotNull { dto ->
             val dtoKind = placeKindOf(dto.kind) ?: return@mapNotNull null
             RecentPlaces.Place(
@@ -171,18 +188,18 @@ class HomeStores(context: Context) {
             )
         }
         val updated = RecentPlaces.record(current, peer, workspaceId, workspaceName, kind, itemId, System.currentTimeMillis())
-        prefs.edit().putString(placesKey(scope), json.encodeToString(updated.map {
+        prefs.edit().putString(placesKey(host, scope), json.encodeToString(updated.map {
             StoredPlace(it.id.peer, it.id.workspaceId, it.id.kind.key(), it.id.itemId, it.workspaceName, it.openedAtMs)
         })).apply()
         revision.value += 1
     }
 
-    private fun readPlacesDto(scope: String): List<StoredPlace> {
-        val raw = prefs.getString(placesKey(scope), null) ?: return emptyList()
+    private fun readPlacesDto(host: String, scope: String): List<StoredPlace> {
+        val raw = prefs.getString(placesKey(host, scope), null) ?: return emptyList()
         return runCatching { json.decodeFromString<List<StoredPlace>>(raw) }.getOrNull() ?: emptyList()
     }
 
-    private fun placesKey(scope: String): String = RecentPlaces.scopeKey("", scope)
+    private fun placesKey(host: String, scope: String): String = RecentPlaces.scopeKey(host, scope)
 
     fun pins(handle: String): List<PinnedWork.Pin> {
         revision.value
@@ -418,49 +435,84 @@ fun MachinesSection(
     val asleepDot = colors.textSecondary.copy(alpha = 0.35f)
     if (machines.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            SectionLabel("Machines", modifier = Modifier.weight(1f))
-            Text(
-                "Devices ›",
-                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                color = colors.accent,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+        ) {
+            SectionTitle("Machines", "mark_host")
+            Spacer(Modifier.weight(1f))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.clickable { onOpenDevices() }.padding(vertical = 12.dp),
-            )
+            ) {
+                Text(
+                    "Devices",
+                    style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.accent,
+                )
+                Icon(Icons.Default.ChevronRight, null, tint = colors.accent, modifier = Modifier.size(12.dp))
+            }
         }
-        // One card per machine, like the Apple home. A divided list reads
-        // as one thing with seams; these are separate computers.
-        machines.forEach { machine ->
-            TsCard {
+        // One card with ruled dividers, like the Apple home. The rows are one
+        // list with seams, not separate computers in separate panels.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .tsPanel(),
+        ) {
+            machines.forEachIndexed { index, machine ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().clickable { onOpenWork(machine.id) }.padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.m),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenWork(machine.id) }
+                        .heightIn(min = 60.dp)
+                        .padding(Space.m),
                 ) {
                     androidx.compose.foundation.Canvas(Modifier.size(9.dp)) {
                         drawCircle(color = if (machine.online == true) awakeDot else asleepDot)
                     }
-                    Spacer(Modifier.width(Space.m))
-                    DeviceGlyph(
-                        name = machine.name,
-                        label = machine.label,
-                        platform = machine.platform,
-                        isHost = true,
-                        sizeDp = 24,
-                    )
-                    Spacer(Modifier.width(Space.m))
-                    Column(Modifier.weight(1f)) {
-                        Text(machine.name, fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1)
+                    Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+                        DeviceGlyph(
+                            name = machine.name,
+                            label = machine.label,
+                            platform = machine.platform,
+                            isHost = true,
+                            sizeDp = 17,
+                        )
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            if (machine.online == true) "Awake" else "Status unknown",
-                            style = MaterialTheme.typography.bodySmall,
+                            machine.name,
+                            style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
+                            color = colors.textPrimary,
+                            maxLines = 1,
+                        )
+                        Text(
+                            machineState(machine.online),
+                            style = TsType.caption,
                             color = colors.textSecondary,
                             maxLines = 1,
                         )
                     }
-                    Icon(Icons.Default.ChevronRight, null, tint = colors.textSecondary)
+                    Icon(Icons.Default.ChevronRight, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
+                }
+                if (index != machines.lastIndex) {
+                    HorizontalDivider(color = colors.border, modifier = Modifier.padding(horizontal = Space.m))
                 }
             }
         }
     }
+}
+
+/// Awake, Asleep, or unknown, the same three words the Apple home reads.
+fun machineState(online: Boolean?): String = when (online) {
+    true -> "Awake"
+    false -> "Asleep"
+    else -> "Status unknown"
 }
 
 /// The shelf: up to eight folders and conversations, newest first. Rows open
@@ -575,39 +627,261 @@ fun ClearHomeCard() {
 }
 
 /// The phone's first run: signed in already, counting nothing yet.
+/// Where a step sits in a rail somebody is walking. Three states and no
+/// fourth: behind you, in front of you, or the one to do now.
+enum class GettingStartedState { DONE, NOW, NEXT }
+
+/// One step, and what it offers. The action is part of the step rather than
+/// something drawn under the rail, because if there is something to do, the
+/// button doing it belongs on the line that asks for it.
+data class GettingStartedStep(
+    val number: Int,
+    val title: String,
+    val body: String,
+    val state: GettingStartedState,
+    val actionTitle: String? = null,
+    val action: (() -> Unit)? = null,
+)
+
+/// The numbered rail a new account walks: one line, one live step, the rest
+/// ahead or struck behind. Ported from `GettingStartedRail.swift`. The
+/// connector is drawn on the step and not between two of them, so a step can
+/// be any height and the line still reaches the next disc.
+@Composable
+fun GettingStartedRail(steps: List<GettingStartedStep>) {
+    Column {
+        steps.forEachIndexed { index, step ->
+            GettingStartedRow(step, isLast = index == steps.lastIndex)
+        }
+    }
+}
+
+@Composable
+private fun GettingStartedRow(step: GettingStartedStep, isLast: Boolean) {
+    val colors = LocalTsColors.current
+    val reduceMotion = rememberReduceMotion()
+    Row(Modifier.height(IntrinsicSize.Min)) {
+        Column(
+            Modifier.width(30.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // The live step gets a halo. It is the one thing on the card
+            // that should catch the eye first, and a ring costs nothing
+            // next to making the disc itself louder than the title.
+            Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                if (step.state == GettingStartedState.NOW && !reduceMotion) {
+                    val pulse by rememberInfiniteTransition(label = "railPulse").animateFloat(
+                        initialValue = 0f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing)),
+                        label = "railPulse",
+                    )
+                    androidx.compose.foundation.Canvas(Modifier.size(30.dp)) {
+                        drawCircle(
+                            color = colors.accent.copy(alpha = 0.16f * (1f - pulse)),
+                            radius = size.minDimension / 2f * (1f + 0.42f * pulse),
+                        )
+                    }
+                }
+                androidx.compose.foundation.Canvas(Modifier.size(26.dp)) {
+                    val fill = when (step.state) {
+                        GettingStartedState.NEXT -> colors.accentSoft
+                        else -> colors.accent
+                    }
+                    drawCircle(color = fill, radius = size.minDimension / 2f)
+                    if (step.state == GettingStartedState.NEXT) {
+                        drawCircle(
+                            color = colors.border,
+                            radius = size.minDimension / 2f,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()),
+                        )
+                    }
+                }
+                when (step.state) {
+                    GettingStartedState.DONE -> Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = androidx.compose.ui.graphics.Color.White,
+                    )
+                    else -> Text(
+                        step.number.toString(),
+                        style = TsType.mono(11, FontWeight.Bold),
+                        color = if (step.state == GettingStartedState.NOW) {
+                            androidx.compose.ui.graphics.Color.White
+                        } else {
+                            colors.textSecondary
+                        },
+                    )
+                }
+            }
+            if (!isLast) {
+                // Below the disc rather than beside it, so the line starts
+                // where the circle ends whatever the row above is doing. A
+                // finished stretch reads finished; the rest fades out so it
+                // does not end in a hard stop.
+                val top = if (step.state == GettingStartedState.DONE) {
+                    colors.accent.copy(alpha = 0.5f)
+                } else {
+                    colors.border
+                }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .width(2.dp)
+                        .padding(vertical = 4.dp)
+                        .background(
+                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                listOf(top, top.copy(alpha = top.alpha * 0.25f)),
+                            ),
+                            RoundedCornerShape(50),
+                        ),
+                )
+            }
+        }
+        Spacer(Modifier.width(Space.m))
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(bottom = if (isLast) 0.dp else Space.l),
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+            Text(
+                step.title,
+                style = TsType.headline,
+                color = if (step.state == GettingStartedState.DONE) colors.textSecondary else colors.textPrimary,
+            )
+            Text(
+                step.body,
+                style = TsType.callout,
+                color = colors.textSecondary,
+                modifier = Modifier.widthIn(max = 420.dp),
+            )
+            if (step.actionTitle != null && step.action != null) {
+                TsAccentButton(
+                    label = step.actionTitle,
+                    icon = ActionIcon.Connect.vector,
+                    onClick = step.action,
+                    modifier = Modifier.padding(top = Space.xs),
+                )
+            }
+        }
+    }
+}
+
+/// The grid that is not there yet, drawn where it will be. Cells light in a
+/// wave across the weeks and fade, which is roughly what a real first sync
+/// looks like arriving. Ported from `GettingStartedGhostGrid`.
+@Composable
+fun GettingStartedGhostGrid(weeks: Int = 16, centered: Boolean = true) {
+    val colors = LocalTsColors.current
+    val reduceMotion = rememberReduceMotion()
+    val phase = if (reduceMotion) {
+        0f
+    } else {
+        rememberInfiniteTransition(label = "ghostPhase").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(3400, easing = LinearEasing)),
+            label = "ghostPhase",
+        ).value
+    }
+    Box(Modifier.fillMaxWidth(), contentAlignment = if (centered) Alignment.Center else Alignment.CenterStart) {
+        Canvas(
+            Modifier
+                .width((9 * weeks + 3 * (weeks - 1)).dp)
+                .height((9 * 7 + 3 * 6).dp),
+        ) {
+            val cell = 9.dp.toPx()
+            val gap = 3.dp.toPx()
+            val step = cell + gap
+            for (row in 0 until 7) {
+                for (week in 0 until weeks) {
+                    drawRoundRect(
+                        color = colors.accent.copy(alpha = ghostLevel(row, week, weeks, phase, reduceMotion)),
+                        topLeft = Offset(week * step, row * step),
+                        size = Size(cell, cell),
+                        cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/// A soft band over a floor of empty cells. The per-cell jitter keeps it from
+/// reading as a scanning bar: a real week is not one brightness.
+private fun ghostLevel(row: Int, week: Int, weeks: Int, phase: Float, reduceMotion: Boolean): Float {
+    val floor = 0.08f
+    if (reduceMotion) return floor
+    val position = week.toFloat() / maxOf(weeks - 1, 1)
+    var distance = kotlin.math.abs(position - phase)
+    distance = minOf(distance, 1f - distance)
+    val band = maxOf(0f, 1f - distance * 5f)
+    val jitter = ((row * 7 + week * 13) % 5) / 10f
+    return floor + band * (0.25f + jitter)
+}
+
+/// What to do next, on a phone whose account has nothing on it yet. Ported
+/// from `ClientGettingStarted.swift`: the rail opens already part finished
+/// instead of opening as a list of chores, and step three has no instruction
+/// because it is the picture of what arrives once step two is done.
 @Composable
 fun GettingStartedCard(phoneName: String?, onSetup: () -> Unit) {
     val colors = LocalTsColors.current
-    TsCard {
-        EmptyArt(EmptyArtKind.Waiting, modifier = Modifier.fillMaxWidth())
-        Text("Get tokenstat counting", style = TsType.cardTitle, color = colors.textPrimary)
-        Text(
-            "tokenstat counts on the computers you work on. This device shows what they counted, with every laptop shut.",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary,
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .tsPanel()
+            .padding(Space.m),
+        verticalArrangement = Arrangement.spacedBy(Space.m),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            EmptyArt(EmptyArtKind.GetCounting, modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp))
+            SectionTitle("Get tokenstat counting", "mark_activity")
+            Text(
+                "tokenstat counts on the computers you work on. This device shows " +
+                    "what they counted, with every laptop shut.",
+                style = TsType.subheadline,
+                color = colors.textSecondary,
+            )
+        }
+        GettingStartedRail(
+            listOf(
+                GettingStartedStep(
+                    number = 1,
+                    title = "Signed in",
+                    body = phoneName?.let { "This device is on your account as $it." }
+                        ?: "This device is on your account.",
+                    state = GettingStartedState.DONE,
+                ),
+                GettingStartedStep(
+                    number = 2,
+                    title = "Connect a machine",
+                    body = "A Mac you already work on, or a server tokenstat sets up " +
+                        "for you over SSH. Free includes two devices, so a machine " +
+                        "and this device fit.",
+                    state = GettingStartedState.NOW,
+                    actionTitle = "Set up a machine",
+                    action = onSetup,
+                ),
+            ),
         )
-        HorizontalDivider(color = colors.border)
-        Text("1 · Signed in", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-        Text(
-            if (phoneName != null) "This device is on your account as $phoneName." else "This device is on your account.",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary,
-        )
-        Text("2 · Connect a machine", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-        Text(
-            "A Mac you already work on, or a server tokenstat sets up for you over SSH. " +
-                "Free includes two devices, so a machine and this device fit.",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary,
-        )
-        TsAccentButton(label = "Set up a machine", onClick = onSetup, modifier = Modifier.fillMaxWidth())
-        HorizontalDivider(color = colors.border)
-        Text("Then there is nothing left to run", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-        Text(
-            "The first window of counters arrives on its own and fills this screen.",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.padding(top = Space.xs)) {
+            HorizontalDivider(color = colors.border)
+            Text(
+                "Then there is nothing left to run",
+                style = TsType.subheadline.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.textPrimary,
+            )
+            Text(
+                "The first window of counters arrives on its own and fills this screen.",
+                style = TsType.caption,
+                color = colors.textSecondary,
+            )
+            GettingStartedGhostGrid(weeks = 16)
+        }
     }
 }
 

@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.marks
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Laptop
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.TabletAndroid
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 /// The distro matcher must agree with `distroBrandID`: the same platform
@@ -52,5 +62,55 @@ class DeviceMarksTest {
         assertNull(parseServerDate(null))
         assertNull(formatRelativeDate("not a date"))
         assertEquals("not a date", formatServerDate("not a date"))
+    }
+
+    @Test
+    fun glyphsMatchClientDeviceIcon() {
+        // The same ladder `ClientDeviceIcon.symbol` climbs: tablets and
+        // phones by name, then laptop, desktop, and rack by name or platform.
+        assertSame(Icons.Default.TabletAndroid, deviceGlyphVector("iPad", null, false))
+        assertSame(Icons.Default.PhoneAndroid, deviceGlyphVector("iPhone 17", null, false))
+        assertSame(Icons.Default.Laptop, deviceGlyphVector("Gyorgy's MacBook Pro", null, true))
+        assertSame(Icons.Default.Computer, deviceGlyphVector("Mac mini", null, true))
+        assertSame(Icons.Default.Dns, deviceGlyphVector("Linux", null, true))
+        assertSame(Icons.Default.Dns, deviceGlyphVector("web-01", "Ubuntu 24.04 · x86_64", true))
+        assertSame(Icons.Default.Dns, deviceGlyphVector("build", "Windows 11", true))
+        // A bare "pro" is not a desktop: only the full Mac names claim one.
+        assertSame(Icons.Default.Laptop, deviceGlyphVector("MacBook Pro", null, true))
+        assertSame(Icons.Default.Computer, deviceGlyphVector("AirPods pro", null, true))
+        assertSame(Icons.Default.Computer, deviceGlyphVector("mystery", null, true))
+        assertSame(Icons.Default.PhoneAndroid, deviceGlyphVector("pixel", null, false))
+        assertSame(Icons.Default.TabletAndroid, deviceGlyphVector("android tablet", null, false))
+    }
+
+    @Test
+    fun machinesSortLikeClientDevicesView() {
+        fun machine(
+            id: String,
+            label: String,
+            kind: String? = "host",
+            online: Boolean? = null,
+            lastSeenAt: String? = null,
+        ) = buildJsonObject {
+            put("id", id)
+            put("label", label)
+            if (kind != null) put("kind", kind)
+            if (online != null) put("online", online)
+            if (lastSeenAt != null) put("lastSeenAt", lastSeenAt)
+        }
+        val spend = mapOf("busy" to 900L, "quiet" to 100L)
+        val machines = listOf(
+            machine("quiet", "Quiet host", online = true),
+            machine("phone", "Phone", kind = "client", online = true),
+            machine("old", "Old host", online = false, lastSeenAt = "2026-01-01T00:00:00Z"),
+            machine("mine", "This phone", kind = "client", online = false),
+            machine("busy", "Busy host", online = true),
+            machine("newer", "Newer host", online = false, lastSeenAt = "2026-09-01T00:00:00Z"),
+        )
+        val sorted = sortMachines(machines, "mine") { spend[it.getValue("id").jsonPrimitive.content] }
+        assertEquals(
+            listOf("mine", "busy", "quiet", "phone", "newer", "old"),
+            sorted.map { it.getValue("id").jsonPrimitive.content },
+        )
     }
 }

@@ -107,7 +107,13 @@ fun WorkSearchSheet(
                         val id = machineIds[pin.hostIdentity] ?: continue
                         known += SearchFolder(pin.hostIdentity, id, displayNames[pin.hostIdentity] ?: id, pin.workspaceId, pin.folderName, null)
                     }
-                    for (place in stores.places(handle)) {
+                    for (place in stores.places(
+                        RecentPlaces.accountIdentity(
+                            state.account?.string("handle"),
+                            state.account?.string("accountId"),
+                        ),
+                        state.account?.string("host").orEmpty(),
+                    )) {
                         if (place.id.kind != RecentPlaces.Kind.WORKSPACE) continue
                         val folderId = place.id.workspaceId ?: continue
                         if (known.any { it.folderId == folderId && it.peer == place.id.peer }) continue

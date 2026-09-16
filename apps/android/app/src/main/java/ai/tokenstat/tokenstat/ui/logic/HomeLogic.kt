@@ -72,9 +72,9 @@ object RecentPlaces {
     )
 
     /// Length-prefixed rather than encoded: no throwing, and "ab"+"c" never
-    /// shares a key with "a"+"bc". The host segment is empty on Android, where
-    /// the account payload carries no host name; the handle still scopes one
-    /// account's places away from another's after a sign-out.
+    /// shares a key with "a"+"bc". The host and the account identity scope
+    /// one account's places away from another's after a sign-out, the same
+    /// key the Apple client reads and writes.
     fun scopeKey(host: String, handle: String): String =
         "client.recentPlaces.v1.${host.length}:$host${handle.length}:$handle"
 
@@ -129,6 +129,15 @@ object RecentPlaces {
         Kind.WORKSPACE -> place.workspaceName
         Kind.CHAT -> "Chat in ${place.workspaceName}"
         Kind.TERMINAL -> if (place.id.workspaceId == null) "Terminal" else "Terminal in ${place.workspaceName}"
+    }
+
+    /// The handle when there is one, else the account id. Port of
+    /// `WorkReference.Scope.accountIdentity`: the display name is a label,
+    /// not an identity, and must never scope the store.
+    fun accountIdentity(handle: String?, id: String?): String? {
+        if (!handle.isNullOrBlank()) return handle.trim()
+        if (!id.isNullOrBlank()) return id.trim()
+        return null
     }
 }
 
@@ -415,4 +424,12 @@ object HostStatsFormat {
     }
 
     fun cpuLabel(cpu: Double): String = "${(cpu * 100).roundToInt()}%"
+
+    /// Nil when this process has not yet observed a path, so a machine
+    /// screen can stay quiet rather than invent Encrypted relay.
+    fun routeLabel(route: String?): String? = when (route) {
+        "direct" -> "Direct connection"
+        "relay" -> "Encrypted relay"
+        else -> null
+    }
 }

@@ -15,7 +15,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-data class PlanProduct(val details: ProductDetails, val label: String, val price: String)
+data class PlanProduct(val details: ProductDetails, val label: String, val price: String, val introCaption: String? = null)
 data class BillingState(val loading: Boolean = true, val products: List<PlanProduct> = emptyList(), val error: String? = null)
 
 class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingClientStateListener {
@@ -64,8 +64,14 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
             }
             mutableState.value = BillingState(false, found.productDetailsList.mapNotNull { details ->
                 val offer = details.subscriptionOfferDetails?.firstOrNull() ?: return@mapNotNull null
-                val phase = offer.pricingPhases.pricingPhaseList.lastOrNull() ?: return@mapNotNull null
-                PlanProduct(details, details.name, phase.formattedPrice)
+                val phases = offer.pricingPhases.pricingPhaseList
+                val phase = phases.lastOrNull() ?: return@mapNotNull null
+                PlanProduct(
+                    details,
+                    details.name,
+                    phase.formattedPrice,
+                    introCaption(phases.map { PhaseView(it.formattedPrice, it.billingPeriod) }),
+                )
             })
         }
     }
@@ -121,10 +127,14 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
 
     companion object {
         const val PACKAGE_NAME = "ai.tokenstat.tokenstat"
+        // The same catalog Apple sells: supporter is yearly only, patron and
+        // legend come in both intervals.
         val PRODUCT_IDS = listOf(
             "ai.tokenstat.supporter.yearly",
             "ai.tokenstat.patron.yearly",
             "ai.tokenstat.legend.yearly",
+            "ai.tokenstat.patron.monthly",
+            "ai.tokenstat.legend.monthly",
         )
     }
 }

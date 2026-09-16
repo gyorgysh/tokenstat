@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -275,6 +276,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun machineIdentity(): JsonObject =
         CoreClient.call("machine.identity") as? JsonObject ?: buildJsonObject {}
 
+    suspend fun machinePeers(): JsonArray =
+        CoreClient.call("machine.peers") as? JsonArray ?: JsonArray(emptyList())
+
     suspend fun prepareHost(peer: String, label: String) {
         CoreClient.call("machine.pair", buildJsonObject {
             put("key", peer)
@@ -289,6 +293,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun hostStats(peer: String): JsonObject =
         CoreClient.remote(peer, "host.stats") as? JsonObject ?: buildJsonObject {}
+
+    /// Direct vs relay for a live peer, from this device's `remote.status`.
+    /// Missing stays missing: never invent a path nobody observed.
+    suspend fun peerRoute(peer: String): String? {
+        val status = runCatching { CoreClient.call("remote.status") as? JsonObject }.getOrNull()
+        val peers = ((status?.get("traffic") as? JsonObject)?.get("peers") as? JsonArray)
+            .orEmpty().mapNotNull { it as? JsonObject }
+        return peers.find { (it["peer"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull.equals(peer, ignoreCase = true) }
+            ?.let { (it["route"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+            ?.takeIf { it == "direct" || it == "relay" }
+    }
 
     suspend fun workspaceSection(peer: String, method: String, params: JsonObject): JsonElement =
         CoreClient.remote(peer, method, params)

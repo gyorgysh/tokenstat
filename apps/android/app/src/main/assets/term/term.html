@@ -36,10 +36,15 @@
     cursorAccent: "#F7F7F8",
     selectionBackground: "#F0ECFF"
   };
+  // The page paints for the system appearance from the first frame, so a
+  // light phone never flashes the dark theme while Kotlin's push crosses
+  // the bridge. The push below only handles later appearance changes.
+  var pageDark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)").matches : true;
+  document.body.style.background = pageDark ? DARK.background : LIGHT.background;
   var term = new Terminal({
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: 12,
-    theme: DARK,
+    theme: pageDark ? DARK : LIGHT,
     // Same 4,000 line scrollback as the Apple client's SwiftTerm view.
     scrollback: 4000
   });
@@ -52,8 +57,15 @@
   // terminal view. Kotlin calls this once the page loads and again when the
   // appearance changes.
   function termSetTheme(dark) {
-    term.options.theme = dark ? DARK : LIGHT;
+    // The DOM first: even if the emulator object is gone, the page behind
+    // it is the right colour instead of the CSS fallback.
     document.body.style.background = dark ? DARK.background : LIGHT.background;
+    document.documentElement.style.background = dark ? DARK.background : LIGHT.background;
+    if (typeof term === "undefined" || !term) return;
+    term.options.theme = dark ? DARK : LIGHT;
+    // The options assignment does not always repaint a live canvas in this
+    // xterm build, so nudge the rows it owns.
+    try { term.refresh(0, term.rows - 1); } catch (e) {}
   }
 
   var lastRows = -1;

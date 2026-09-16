@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.BatteryStd
+import androidx.compose.material.icons.filled.Bolt
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -9,13 +15,14 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 class HostWorkspacesTest {
     @Test
     fun harnessFromCommand() {
-        assertEquals("claude_code", harnessIdForCommand("/Users/gyorgy/.local/bin/claude"))
-        assertEquals("opencode", harnessIdForCommand("/Users/gyorgy/.opencode/bin/opencode2"))
+        assertEquals("claude_code", harnessIdForCommand("/home/someone/.local/bin/claude"))
+        assertEquals("opencode", harnessIdForCommand("/home/someone/.opencode/bin/opencode2"))
         assertEquals("codex", harnessIdForCommand("codex"))
         assertNull(harnessIdForCommand("/bin/zsh"))
         assertNull(harnessIdForCommand(""))
@@ -53,5 +60,26 @@ class HostWorkspacesTest {
                 },
             ),
         )
+    }
+
+    @Test
+    fun pathsTruncateInTheMiddle() {
+        assertEquals("/a/b", middleTruncate("/a/b"))
+        val long = "/home/someone/git/some-very-long-project-name/src/main"
+        val cut = middleTruncate(long, 24)
+        assertEquals(24, cut.length)
+        assertEquals(true, cut.startsWith("/home/someone/g"))
+        assertEquals(true, cut.endsWith("rc/main"))
+        assertEquals(true, "…" in cut)
+    }
+
+    @Test
+    fun powerIconsMatchReading() {
+        assertSame(Icons.Default.BatteryChargingFull, powerIconVector(true, 10, "battery"))
+        assertSame(Icons.Default.Bolt, powerIconVector(false, null, "ac"))
+        assertSame(Icons.Default.BatteryFull, powerIconVector(false, 95, "battery"))
+        assertSame(Icons.Default.BatteryStd, powerIconVector(false, 50, "battery"))
+        assertSame(Icons.Default.BatteryAlert, powerIconVector(false, 5, "battery"))
+        assertSame(Icons.Default.Bolt, powerIconVector(false, null, null))
     }
 }

@@ -310,14 +310,36 @@ class PortedLogicTest {
     }
 
     // RelativeClock.label — the shared phrasing behind RelativeTimeText.
+    // Full words like Foundation's numeric relative style, rounded to the
+    // nearest, with weeks past six days so older stamps stay relative.
     @Test
     fun relativeClockLabels() {
         val now = 1_700_000_000_000L
         assertEquals("now", RelativeClock.label(now - 3_000, now))
-        assertEquals("30s ago", RelativeClock.label(now - 30_000, now))
-        assertEquals("3m ago", RelativeClock.label(now - 3 * 60_000, now))
-        assertEquals("2h ago", RelativeClock.label(now - 2 * 3_600_000, now))
-        assertEquals("3d ago", RelativeClock.label(now - 3 * 86_400_000, now))
+        assertEquals("30 seconds ago", RelativeClock.label(now - 30_000, now))
+        assertEquals("1 minute ago", RelativeClock.label(now - 60_000, now))
+        assertEquals("3 minutes ago", RelativeClock.label(now - 3 * 60_000, now))
+        assertEquals("2 hours ago", RelativeClock.label(now - 2 * 3_600_000, now))
+        assertEquals("3 days ago", RelativeClock.label(now - 3 * 86_400_000, now))
+        assertEquals("2 weeks ago", RelativeClock.label(now - 14 * 86_400_000, now))
+        assertEquals("2 months ago", RelativeClock.label(now - 60L * 86_400_000L, now))
+        assertEquals("in 3 days", RelativeClock.until(now + (2 * 86_400 + 70_000) * 1000, now))
+        assertEquals("in 1 week", RelativeClock.until(now + 8 * 86_400_000, now))
+    }
+
+    @Test
+    fun relativeClockAbbreviated() {
+        val now = 1_700_000_000_000L
+        assertEquals("just now", RelativeClock.abbreviated(now, now))
+        assertEquals("30 sec ago", RelativeClock.abbreviated(now - 30_000, now))
+        assertEquals("3 min ago", RelativeClock.abbreviated(now - 3 * 60_000, now))
+        assertEquals("2 hr ago", RelativeClock.abbreviated(now - 2 * 3_600_000, now))
+        assertEquals("3 days ago", RelativeClock.abbreviated(now - 3 * 86_400_000, now))
+        assertEquals("2 wk ago", RelativeClock.abbreviated(now - 14 * 86_400_000, now))
+        assertEquals("Direct connection", HostStatsFormat.routeLabel("direct"))
+        assertEquals("Encrypted relay", HostStatsFormat.routeLabel("relay"))
+        assertNull(HostStatsFormat.routeLabel("smoke"))
+        assertNull(HostStatsFormat.routeLabel(null))
     }
 
     // RunOutcome.tint — every status in RunVisuals.swift maps to the same
