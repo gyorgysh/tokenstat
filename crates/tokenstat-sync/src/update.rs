@@ -1686,6 +1686,18 @@ fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
     Ok(())
 }
 
+/// Whether a zip entry name is absolute, in either slash direction or with
+/// a Windows drive prefix. Zip names are slash-separated by spec, but hostile
+/// archives are not written to spec, and backslashes and drive letters are
+/// exactly what they try.
+fn is_absolute_zip_name(name: &str) -> bool {
+    if name.starts_with(['/', '\\']) {
+        return true;
+    }
+    let bytes = name.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
 fn extract_zip(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
     let file = fs::File::open(archive)?;
     let mut zip = zip::ZipArchive::new(file)
@@ -1701,7 +1713,17 @@ fn extract_zip(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
         let mut entry = zip
             .by_index(index)
             .map_err(|e| UpdateError::Message(format!("could not read zip entry: {e}")))?;
-        // `enclosed_name` returns None for absolute paths and `..`: the same
+        // zip 7 strips a leading root or drive prefix instead of refusing it:
+        // `/tmp/evil` comes back from `enclosed_name` as `tmp/evil` and lands
+        // in the sandbox renamed. That stays inside the sandbox, but this
+        // extractor promises a refusal, so absolute entries are rejected on
+        // the raw name before the crate gets to sanitize them.
+        if is_absolute_zip_name(entry.name()) {
+            return Err(UpdateError::Message(
+                "zip entry escapes its directory; refusing to extract".into(),
+            ));
+        }
+        // `enclosed_name` returns None for `..` that climbs out: the same
         // traversal refusal as the tar path, from the crate itself.
         let name = entry
             .enclosed_name()
@@ -2266,6 +2288,7 @@ mod tests {
         for (tag, name) in [
             ("zip-dotdot", "../evil"),
             ("zip-absolute", "/tmp/tokenstat-evil"),
+            ("zip-drive", "C:/evil"),
         ] {
             let dir = scratch(tag);
             let archive = dir.join("rel.zip");
