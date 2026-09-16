@@ -10,6 +10,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -97,13 +98,41 @@ fun TerminalScreen(
     // terminal view, using the same TerminalPalette shades on both sides.
     LaunchedEffect(dark) { bridge.pushTheme(dark) }
 
+    fun fail(message: String) {
+        bridge.fatalError = message
+        bridge.alive = false
+        bridge.onProgress()
+    }
+
+    /// A fresh shell after a dead session or a failed spawn. The page
+    /// reload re-runs the bind flow from the top.
+    fun retryFreshShell() {
+        sessionId = null
+        bridge.fatalError = null
+        bridge.transportError = null
+        bridge.exitCode = null
+        bridge.alive = true
+        bridge.sessionBound = false
+        bridge.onProgress()
+        bridge.webView?.reload()
+    }
+
     fun bind(id: String) {
         sessionId = id
         scope.launch {
             // The header names the process and folder, like the Apple screen.
+            // A failed info call is a transport hiccup: the read loop owns
+            // that case with its backoff. But an answer that names a dead
+            // session ends here with a way out, instead of the blank
+            // terminal a dead attach used to draw.
             runCatching {
-                val info = model.workspaceSection(peer, "pty.info", buildJsonObject { put("id", id) })
-                bridge.readInfo(info as? JsonObject)
+                model.workspaceSection(peer, "pty.info", buildJsonObject { put("id", id) })
+            }.onSuccess { element ->
+                bridge.readInfo(element as? JsonObject)
+                if (bridge.exitCode != null || !bridge.alive) {
+                    fail("This session has ended.")
+                    return@launch
+                }
             }
             bridge.startReadLoop(model, peer, id, scope)
             bridge.pumpInput(model, peer, id, scope)
@@ -156,6 +185,20 @@ fun TerminalScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s),
                 )
             }
+            bridge.fatalError?.let { error ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = Space.s, vertical = Space.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
+                    Text(
+                        error,
+                        color = LocalTsColors.current.danger,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { retryFreshShell() }) { Text("New shell") }
+                }
+            }
         }
         AndroidView(
             modifier = Modifier.weight(1f).fillMaxSize(),
@@ -164,6 +207,7 @@ fun TerminalScreen(
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
+                    webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String?) {
                             bridge.webView = view
@@ -176,7 +220,7 @@ fun TerminalScreen(
                             } else {
                                 scope.launch {
                                     runCatching {
-                                        val info = model.workspaceSection(peer, "pty.spawn", buildJsonObject {
+                                        model.workspaceSection(peer, "pty.spawn", buildJsonObject {
                                             put("workspaceId", workspaceId)
                                             put("command", "/bin/bash")
                                             put("args", kotlinx.serialization.json.JsonArray(emptyList()))
@@ -185,13 +229,21 @@ fun TerminalScreen(
                                             put("noColor", false)
                                             put("dark", dark)
                                         })
+                                    }.onSuccess { info ->
                                         val id = (info as? JsonObject)?.get("id")
                                             ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
                                         if (id != null) {
                                             bind(id)
                                         } else {
-                                            bridge.alive = false
+                                            fail("The host would not start a shell.")
                                         }
+                                    }.onFailure { error ->
+                                        fail(
+                                            ai.tokenstat.tokenstat.ui.logic.TunnelCopy.display(
+                                                error.message ?: "The request failed.",
+                                                hostLabel,
+                                            ),
+                                        )
                                     }
                                 }
                             }
@@ -253,6 +305,16 @@ private fun copyToClipboard(context: Context, text: String) {
     if (text.isEmpty()) return
     val manager = context.getSystemService(ClipboardManager::class.java) ?: return
     manager.setPrimaryClip(ClipData.newPlainText("terminal", text))
+}
+
+/// Forwards the xterm page's console to logcat. A blank terminal with a
+/// JavaScript error used to be undiagnosable; now the reason is one grep
+/// away under the TermWeb tag.
+private object TermChromeClient : android.webkit.WebChromeClient() {
+    override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
+        android.util.Log.d("TermWeb", "${message.lineNumber()}: ${message.message()}")
+        return true
+    }
 }
 
 private fun bridgeTitle(bridge: TerminalBridge): String =
@@ -342,6 +404,7 @@ fun SshTerminalScreen(
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
+                    webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String?) {
                             bridge.webView = view
@@ -514,6 +577,9 @@ class TerminalBridge {
     @Volatile var droppedOutput = false
     @Volatile var outputPaused = false
     @Volatile var transportError: String? = null
+    /// A spawn or attach that failed before any output. The screen shows
+    /// this with a retry instead of a blank terminal that explains nothing.
+    @Volatile var fatalError: String? = null
     @Volatile var exitCode: Int? = null
     @Volatile var command = ""
     @Volatile var cwd = ""

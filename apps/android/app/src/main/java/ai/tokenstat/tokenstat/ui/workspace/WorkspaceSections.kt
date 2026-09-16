@@ -59,6 +59,7 @@ import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
+import ai.tokenstat.tokenstat.ui.components.SkeletonRows
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
@@ -77,6 +78,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -86,11 +88,11 @@ import kotlinx.serialization.json.put
 /// Shared JSON readers for the workspace sections. Internal so each section
 /// file reads the host answers the same way.
 internal fun JsonObject.str(key: String): String? =
-    this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
+    (this[key] as? JsonPrimitive)?.contentOrNull
 
-internal fun JsonObject.bol(key: String): Boolean = this[key]?.jsonPrimitive?.booleanOrNull == true
+internal fun JsonObject.bol(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull == true
 
-internal fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
+internal fun JsonObject.long(key: String): Long? = (this[key] as? JsonPrimitive)?.longOrNull
 
 internal fun asObjects(element: JsonElement?): List<JsonObject> =
     (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()/// One workspace section, rendered as its own surface instead of a raw JSON
@@ -184,6 +186,7 @@ private fun SessionsSection(
             TsAccentButton(label = "New shell", small = true, onClick = { onOpen(null) })
         }
         if (error != null) item { SectionError(error) }
+        if (loading && sessions.isEmpty()) item { SkeletonRows(count = 3) }
         if (!loading && sessions.isEmpty()) {
             item {
                 EmptyState(
@@ -265,6 +268,7 @@ private fun TodoSection(
                 }
             }
         }
+        if (loading && cards.isEmpty()) item { SkeletonRows(count = 3) }
         if (!loading && cards.isEmpty()) {
             item {
                 EmptyState(
@@ -418,6 +422,7 @@ private fun WorkflowsSection(
         item {
             TsSecondaryButton(label = "Open workflows", small = true, onClick = { workbench = true })
         }
+        if (loading && workflows.isEmpty()) item { SkeletonRows(count = 3) }
         if (!loading && workflows.isEmpty()) {
             item {
                 EmptyState(
@@ -580,6 +585,7 @@ private fun AutomationsSection(
         item {
             TsSecondaryButton(label = "Open automations", small = true, onClick = { workbench = true })
         }
+        if (loading && automations.isEmpty()) item { SkeletonRows(count = 3) }
         if (!loading && automations.isEmpty()) {
             item {
                 EmptyState(

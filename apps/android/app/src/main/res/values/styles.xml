@@ -8,4 +8,13 @@
         <item name="android:navigationBarColor">@color/ts_window</item>
         <item name="android:statusBarColor">@color/ts_window</item>
     </style>
+
+    <!-- Launch theme: the system draws this before the first frame. The bars
+         rise on the same paper the app opens on, so there is no flash. -->
+    <style name="Theme.Tokenstat.Launch" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ts_window</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_bars_animated</item>
+        <item name="windowSplashScreenAnimationDuration">800</item>
+        <item name="postSplashScreenTheme">@style/Theme.Tokenstat</item>
+    </style>
 </resources>

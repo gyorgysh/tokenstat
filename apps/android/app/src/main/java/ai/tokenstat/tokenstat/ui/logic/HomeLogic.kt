@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.marks.formatServerDate
 import kotlin.math.roundToInt
 
 /// Home-plane pure logic ported 1:1 from the Apple client so both platforms
@@ -338,6 +339,18 @@ object DeviceCopy {
     fun shortId(id: String): String {
         if (id.length <= 12) return id
         return "${id.take(6)}…${id.takeLast(4)}"
+    }
+
+    /// The second line: status alone on named rows, with a short id on
+    /// unnamed ones so two "Linux computer" rows do not look identical.
+    fun caption(label: String?, id: String?, status: String): String {
+        if (!label.isNullOrEmpty() || id == null) return status
+        return "${shortId(id)} · $status"
+    }
+
+    fun lastSync(reportsArchiveSync: Boolean, lastSyncAt: String?): String {
+        if (!reportsArchiveSync) return "—"
+        return formatServerDate(lastSyncAt) ?: "never"
     }
 
     fun reach(isThisDevice: Boolean, online: Boolean?, hasKey: Boolean): String {

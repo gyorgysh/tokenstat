@@ -3,14 +3,21 @@ package ai.tokenstat.tokenstat.ui.ssh
 
 import android.content.Context
 import android.util.Base64
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +67,14 @@ fun SshConnectDialog(
     val username = host.sshString("username") ?: "root"
     val port = host["port"]?.jsonPrimitive?.content?.toIntOrNull() ?: 22
     val hostKeys = (host["hostKeys"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
+    val savedKeys = remember(keys) { keys.filterIsInstance<JsonObject>() }
+    // The host's own choice first, like the iOS connect form. A key that is
+    // no longer in the library selects nothing rather than a missing id.
+    val storedRef = host.sshString("credentialId") ?: host.sshString("keyId") ?: host.sshString("identity")
+    var selectedKeyId by remember(host) {
+        mutableStateOf(storedRef?.takeIf { ref -> savedKeys.any { it.sshString("id") == ref } } ?: "")
+    }
+    var authOpen by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -67,21 +82,60 @@ fun SshConnectDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text("$hostname:$port", color = colors.textSecondary)
-                OutlinedTextField(
-                    password,
-                    { password = it },
-                    label = { Text("Password") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    passphrase,
-                    { passphrase = it },
-                    label = { Text("Key passphrase (if any)") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+                // "Use": the password, or one of the saved keys. Passwords
+                // are used for this connection and are never saved.
+                Box {
+                    OutlinedTextField(
+                        value = if (selectedKeyId.isEmpty()) "Password"
+                        else savedKeys.find { it.sshString("id") == selectedKeyId }?.sshString("label") ?: "Password",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Use") },
+                        trailingIcon = {
+                            IconButton(onClick = { authOpen = true }) {
+                                Icon(ActionIcon.More.vector, "Choose authentication")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().clickable { authOpen = true },
+                        singleLine = true,
+                    )
+                    DropdownMenu(expanded = authOpen, onDismissRequest = { authOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Password") },
+                            onClick = { selectedKeyId = ""; authOpen = false },
+                        )
+                        savedKeys.forEach { key ->
+                            val label = key.sshString("label") ?: "Key"
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = { selectedKeyId = key.sshString("id") ?: ""; authOpen = false },
+                            )
+                        }
+                    }
+                }
+                if (selectedKeyId.isEmpty()) {
+                    OutlinedTextField(
+                        password,
+                        { password = it },
+                        label = { Text("Password") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                } else {
+                    OutlinedTextField(
+                        passphrase,
+                        { passphrase = it },
+                        label = { Text("Key passphrase (if any)") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                }
+                Text(
+                    "Passwords are used for this connection and are never saved.",
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
                 )
                 error?.let { Text(it, color = colors.danger) }
             }
@@ -116,10 +170,13 @@ fun SshConnectDialog(
                                 }
                                 model.core("ssh.host.save", saved)
                             }
-                            val keyRef = host.sshString("keyId") ?: host.sshString("identity")
+                            val keyRef = selectedKeyId.takeIf { it.isNotEmpty() }
                             val pem = keyRef?.let { id ->
-                                val rec = keys.filterIsInstance<JsonObject>().find { it.sshString("id") == id }
+                                val rec = savedKeys.find { it.sshString("id") == id }
                                 rec?.sshString("secretRef")?.let { withContext(Dispatchers.IO) { SshSecrets.get(context, it) } }
+                            }
+                            if (keyRef != null && pem.isNullOrBlank()) {
+                                throw IllegalStateException("The saved key has no private material on this device.")
                             }
                             val auth = if (!pem.isNullOrBlank()) {
                                 buildJsonObject {
@@ -148,6 +205,57 @@ fun SshConnectDialog(
                             ) as JsonObject
                             opened.sshString("id") ?: throw IllegalStateException("The session opened without an id.")
                         }.onSuccess(onOpened).onFailure { error = it.message }
+                        busy = false
+                    }
+                },
+            )
+        },
+        dismissButton = { TsSecondaryButton(label = "Cancel", small = true, onClick = onDismiss) },
+    )
+}
+
+/// Rename a saved key. The private half is never shown here: it lives in
+/// the device store under `secretRef`, and the fingerprint and public half
+/// are copied from the row menu instead.
+@Composable
+fun SshKeyRenameDialog(model: AppViewModel, key: JsonObject, onDismiss: () -> Unit, onSaved: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val colors = LocalTsColors.current
+    var label by remember(key) { mutableStateOf(key.sshString("label") ?: "") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename key") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                OutlinedTextField(
+                    label,
+                    { label = it },
+                    label = { Text("Label") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                key.sshString("fingerprint")?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = androidx.compose.material3.MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                }
+                error?.let { Text(it, color = colors.danger) }
+            }
+        },
+        confirmButton = {
+            TsAccentButton(
+                label = if (busy) "Saving…" else "Save",
+                small = true,
+                enabled = !busy && label.isNotBlank(),
+                onClick = {
+                    scope.launch {
+                        busy = true
+                        error = null
+                        runCatching {
+                            val map = key.toMutableMap()
+                            map["label"] = JsonPrimitive(label.trim())
+                            model.core("ssh.key.save", JsonObject(map))
+                        }.onSuccess { onSaved() }.onFailure { error = it.message }
                         busy = false
                     }
                 },

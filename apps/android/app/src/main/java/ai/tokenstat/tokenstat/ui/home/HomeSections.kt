@@ -3,8 +3,11 @@ package ai.tokenstat.tokenstat.ui.home
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,11 +18,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +62,7 @@ import ai.tokenstat.tokenstat.ui.logic.RecentPlaces
 import ai.tokenstat.tokenstat.ui.logic.RelativeClock
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
 import ai.tokenstat.tokenstat.ui.logic.normalizeHomeLayout
+import ai.tokenstat.tokenstat.ui.marks.DeviceGlyph
 import ai.tokenstat.tokenstat.ui.marks.EmptyArt
 import ai.tokenstat.tokenstat.ui.marks.EmptyArtKind
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
@@ -381,7 +394,14 @@ fun ContinueSection(
     }
 }
 
-data class HomeMachine(val id: String, val peer: String?, val name: String, val online: Boolean?)
+data class HomeMachine(
+    val id: String,
+    val peer: String?,
+    val name: String,
+    val online: Boolean?,
+    val label: String? = null,
+    val platform: String? = null,
+)
 
 /// Which of your computers is awake right now. Account plane only, so this
 /// draws with every laptop shut. Asleep ones stay off this screen: the list
@@ -419,7 +439,13 @@ fun MachinesSection(
                         drawCircle(color = if (machine.online == true) awakeDot else asleepDot)
                     }
                     Spacer(Modifier.width(Space.m))
-                    Icon(ActionIcon.Device.vector, null, tint = colors.textSecondary, modifier = Modifier.width(24.dp))
+                    DeviceGlyph(
+                        name = machine.name,
+                        label = machine.label,
+                        platform = machine.platform,
+                        isHost = true,
+                        sizeDp = 24,
+                    )
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
                         Text(machine.name, fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1)
@@ -649,6 +675,8 @@ fun HomeEditor(
                     )
                 }
             }
+            Spacer(Modifier.height(Space.s))
+            HomeLayoutPreview(sections = visible)
             Text(
                 "A starting arrangement. It moves the cards and nothing else.",
                 style = MaterialTheme.typography.bodySmall,
@@ -659,6 +687,13 @@ fun HomeEditor(
         itemsIndexed(visible, key = { _, section -> section.key }) { _, section ->
             TsCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        homeSectionGlyph(section),
+                        null,
+                        tint = colors.accent,
+                        modifier = Modifier.width(24.dp),
+                    )
+                    Spacer(Modifier.width(Space.s))
                     Column(Modifier.weight(1f)) {
                         Text(section.label, fontWeight = FontWeight.Medium, color = colors.textPrimary)
                         Text(
@@ -670,11 +705,11 @@ fun HomeEditor(
                     IconButton(
                         onClick = { move(section, -1) },
                         enabled = visible.first() != section,
-                    ) { Text("↑", color = colors.accent) }
+                    ) { Icon(Icons.Default.KeyboardArrowUp, "Move up", tint = colors.accent) }
                     IconButton(
                         onClick = { move(section, 1) },
                         enabled = visible.last() != section,
-                    ) { Text("↓", color = colors.accent) }
+                    ) { Icon(Icons.Default.KeyboardArrowDown, "Move down", tint = colors.accent) }
                     BrandCheckDisc(on = true, modifier = Modifier.clickable {
                         draftHidden = draftHidden + section
                         draftPreset = null
@@ -688,6 +723,13 @@ fun HomeEditor(
             itemsIndexed(draftOrder.filter { it in draftHidden }, key = { _, section -> section.key }) { _, section ->
                 TsCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            homeSectionGlyph(section),
+                            null,
+                            tint = colors.textSecondary,
+                            modifier = Modifier.width(24.dp),
+                        )
+                        Spacer(Modifier.width(Space.s))
                         Column(Modifier.weight(1f)) {
                             Text(section.label, color = colors.textSecondary)
                             Text(
@@ -741,6 +783,70 @@ fun HomeEditor(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+        }
+    }
+}
+
+/// One glyph per Home card, the Material reading of `HomeSection.symbol`.
+/// The editor rows and the preview strip share them.
+fun homeSectionGlyph(section: HomeSection): ImageVector = when (section) {
+    HomeSection.CONTINUE -> ActionIcon.History.vector
+    HomeSection.PINNED -> ActionIcon.Pinned.vector
+    HomeSection.MACHINES -> ActionIcon.Device.vector
+    HomeSection.USAGE -> ActionIcon.Calculate.vector
+    HomeSection.ACTIVITY -> ActionIcon.Layout.vector
+    HomeSection.LIMITS -> Icons.Default.Speed
+}
+
+/// Home at a glance: one bar per visible card, in order. Port of
+/// `HomeLayoutPreview`. Not a rendering of the real cards: a miniature that
+/// pretended to be the screen would be wrong the moment any of them had
+/// nothing to say.
+@Composable
+fun HomeLayoutPreview(sections: List<HomeSection>) {
+    val colors = LocalTsColors.current
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.background)
+            .border(1.dp, colors.border, RoundedCornerShape(10.dp))
+            .padding(Space.s),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        // The greeting, which is not a card and cannot be moved. Drawn so
+        // the bars below read as a screen rather than a stack.
+        Box(
+            Modifier.width(84.dp).height(8.dp)
+                .clip(CircleShape)
+                .background(colors.accent.copy(alpha = 0.35f)),
+        )
+        if (sections.isEmpty()) {
+            Text(
+                "Your Home is clear",
+                style = TextStyle(fontSize = 12.sp),
+                color = colors.textSecondary,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            )
+        } else {
+            sections.forEach { section ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                        .height(if (section == HomeSection.ACTIVITY) 30.dp else 20.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(colors.accent.copy(alpha = 0.10f))
+                        .padding(horizontal = 6.dp),
+                ) {
+                    Icon(homeSectionGlyph(section), null, tint = colors.accent, modifier = Modifier.size(10.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        section.label,
+                        style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Medium),
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }

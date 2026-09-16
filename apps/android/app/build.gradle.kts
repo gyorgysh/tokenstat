@@ -85,6 +85,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.navigation:navigation-compose:2.9.5")
     implementation("androidx.browser:browser:1.9.0")
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("com.android.billingclient:billing-ktx:9.1.0")

@@ -254,8 +254,7 @@ private fun SearchFolderRow(folder: SearchFolder, onClick: () -> Unit) {
 }
 
 private fun JsonObject.string(key: String): String? {
-    val element = get(key) ?: return null
-    if (element is kotlinx.serialization.json.JsonNull) return null
-    return element.jsonPrimitive.contentOrNull
+    val element = get(key) as? kotlinx.serialization.json.JsonPrimitive ?: return null
+    return element.contentOrNull
 }
 

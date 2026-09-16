@@ -855,13 +855,13 @@ private fun PullDetailDialog(
                         color = LocalTsColors.current.textSecondary,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        view.get("additions")?.jsonPrimitive?.longOrNull?.let {
+                        view.long("additions")?.let {
                             Text("+$it", style = TsType.numeric(12), color = LocalTsColors.current.diffAdded)
                         }
-                        view.get("deletions")?.jsonPrimitive?.longOrNull?.let {
+                        view.long("deletions")?.let {
                             Text("−$it", style = TsType.numeric(12), color = LocalTsColors.current.diffRemoved)
                         }
-                        view.get("changedFiles")?.jsonPrimitive?.longOrNull?.let {
+                        view.long("changedFiles")?.let {
                             Text("$it files", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
                         }
                     }
