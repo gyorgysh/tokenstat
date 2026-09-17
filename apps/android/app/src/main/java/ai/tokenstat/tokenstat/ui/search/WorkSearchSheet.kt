@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.search
 
+import androidx.compose.foundation.layout.fillMaxHeight
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -150,9 +153,18 @@ fun WorkSearchSheet(
     }
     LaunchedEffect(Unit) { learn() }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // Full height: this is a search, so the keyboard takes the bottom half
+    // the moment you type. Opening half way left three results visible.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(bottom = Space.xl),
+            // Fills the sheet, not just its width: `skipPartiallyExpanded`
+            // stops the half-height drag state but a short column still
+            // wraps, so an empty search opened as a strip at the bottom and
+            // the first typed letter pushed it about under the keyboard.
+            Modifier.fillMaxWidth().fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             Text("Search", style = TsType.title3.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
@@ -233,7 +245,7 @@ private fun SearchPlaceRow(place: SearchPlace, onClick: () -> Unit) {
             Text(place.title, style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
             Text(place.detail, style = TsType.caption, color = colors.textSecondary)
         }
-        Icon(ActionIcon.Next.vector, null, tint = colors.textTertiary)
+        Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
     }
 }
 
@@ -255,7 +267,7 @@ private fun SearchFolderRow(folder: SearchFolder, onClick: () -> Unit) {
                 maxLines = 1,
             )
         }
-        Icon(ActionIcon.Next.vector, null, tint = colors.textTertiary)
+        Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
     }
 }
 

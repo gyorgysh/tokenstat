@@ -64,6 +64,13 @@ object HostContracts {
     fun supportsWorkflowEditing(protocol: Long?): Boolean =
         protocol == null || protocol >= WORKFLOW_EDITING_MIN_PROTOCOL
 
+    /// Version 14 added the host self-update check and apply, mirroring
+    /// `RemoteHostFeature.hostUpdate`.
+    const val HOST_UPDATE_MIN_PROTOCOL = 14
+
+    fun supportsHostUpdate(protocol: Long?): Boolean =
+        protocol == null || protocol >= HOST_UPDATE_MIN_PROTOCOL
+
     /// A transport error fails open, preserving the screen's offline and
     /// retry behaviour. Only a definite older protocol becomes the update
     /// state, mirroring `RemoteHostFeatureGate`.
@@ -97,6 +104,24 @@ object RelativeClock {
         if (days < 30) return "${unit((days + 3) / 7, "week")} ago"
         if (days < 365) return "${unit((days + 15) / 30, "month")} ago"
         return "${unit((days + 182) / 365, "year")} ago"
+    }
+
+    /// "4h ago", the tightest form, for a row that already carries a title
+    /// and an agent name beside it. The iPhone's conversation list uses this
+    /// one: "5 hours ago" spent a third of the row saying what "5h ago"
+    /// says, and the row has better uses for the width.
+    fun compact(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
+        val delta = ((nowMillis - epochMillis) / 1000).coerceAtLeast(0)
+        if (delta < 60) return "now"
+        val minutes = (delta + 30) / 60
+        if (minutes < 60) return "${minutes}m ago"
+        val hours = (delta + 1800) / 3600
+        if (hours < 24) return "${hours}h ago"
+        val days = (delta + 43200) / 86400
+        if (days < 7) return "${days}d ago"
+        if (days < 30) return "${(days + 3) / 7}w ago"
+        if (days < 365) return "${(days + 15) / 30}mo ago"
+        return "${(days + 182) / 365}y ago"
     }
 
     /// "3 min ago", for chat rows and run times. The same abbreviated

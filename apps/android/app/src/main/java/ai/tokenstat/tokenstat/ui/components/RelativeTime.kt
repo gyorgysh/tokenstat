@@ -68,8 +68,12 @@ fun RelativeTimeText(
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
     color: Color = Color.Unspecified,
+    /// "4h ago" instead of "4 hours ago", for a row that is already carrying
+    /// a title and an agent name and has no width to spare.
+    compact: Boolean = false,
 ) {
     RelativeTick.start()
     val now by RelativeTick.now.collectAsStateWithLifecycle()
-    Text(RelativeClock.label(epochMillis, now), modifier, color = color, style = style)
+    val text = if (compact) RelativeClock.compact(epochMillis, now) else RelativeClock.label(epochMillis, now)
+    Text(text, modifier, color = color, style = style)
 }

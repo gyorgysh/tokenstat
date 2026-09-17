@@ -20,12 +20,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,15 +53,26 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ai.tokenstat.tokenstat.core.CoreClient
+import ai.tokenstat.tokenstat.ui.components.SkeletonRows
 import ai.tokenstat.tokenstat.ui.components.TsType
+import ai.tokenstat.tokenstat.ui.components.tsPanel
 import ai.tokenstat.tokenstat.ui.logic.RelativeClock
+import ai.tokenstat.tokenstat.ui.logic.compactTokens
+import ai.tokenstat.tokenstat.ui.logic.harnessName
 import ai.tokenstat.tokenstat.ui.logic.money
+import ai.tokenstat.tokenstat.ui.marks.HarnessMark
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import ai.tokenstat.tokenstat.ui.theme.TsColors
+import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -67,10 +80,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 
 private val cellSize = 15.dp
 private val cellGap = 3.5.dp
@@ -137,14 +152,20 @@ fun YearHeatmap(
     val gridWidthDp = (cellSize + cellGap) * weeks - cellGap
     val scroll = rememberScrollState()
 
-    // The activity ramp, with a quiet day that can actually be seen. Step
-    // zero of the shared ramp all but vanishes on a white card at arm's
-    // length, so the phone overrides it; the four active steps stay the
-    // brand's own, like `PhoneHeatmap.heatPalette`.
-    val heat = remember(colors) {
-        colors.heat.toMutableList().also {
-            it[0] = if (colors.isDark) Color(0xFF221E36) else Color(0xFFDEDAEA)
-        }
+    // The activity ramp, with a quiet day that can actually be seen.
+    val heat = remember(colors) { phoneHeat(colors) }
+
+    // Shades for cells whose host never sent a level. The grid's own values
+    // are all here even then: only the levels are missing, so the breaks
+    // come from the same days on screen.
+    val fallbackScale = remember(rows) {
+        heatFallbackScale(
+            rows.flatMap { row ->
+                (row as? JsonArray).orEmpty().mapNotNull { day ->
+                    (day as? JsonObject)?.get("value")?.jsonPrimitive?.longOrNull
+                }
+            },
+        )
     }
 
     // Open on the latest week, which is the part anybody wants first.
@@ -378,7 +399,8 @@ fun YearHeatmap(
                             val week = row as? JsonArray ?: return@forEachIndexed
                             week.forEachIndexed { col, day ->
                                 if (day !is JsonObject) return@forEachIndexed
-                                val level = (day["level"]?.jsonPrimitive?.intOrNull ?: fallbackLevel(day))
+                                val value = day["value"]?.jsonPrimitive?.longOrNull ?: 0L
+                                val level = (day["level"]?.jsonPrimitive?.intOrNull ?: fallbackLevel(value, fallbackScale))
                                     .coerceIn(0, 4)
                                 var paint = heat[level]
                                 if (day["locked"]?.jsonPrimitive?.booleanOrNull == true) {
@@ -411,45 +433,217 @@ fun YearHeatmap(
     }
 }
 
-/// Quantile bands need the whole year, which an older host never sent, so a
-/// cell without a level falls back to absolute spend. The bands only have to
-/// be plausible: current hosts always send the real level.
-private fun fallbackLevel(day: JsonObject): Int = when (val v = day["value"]?.jsonPrimitive?.longOrNull ?: 0L) {
-    0L -> 0
-    in 1..49_999 -> 1
-    in 50_000..499_999 -> 2
-    in 500_000..4_999_999 -> 3
-    else -> 4
+/// Where the four shades change when the host sent values but no levels.
+///
+/// Quartile breaks over the positive daily values, the same bands the core
+/// `Scale` draws: a quarter of the days worked sit in each shade whatever
+/// the amounts are, so one outlier day cannot flatten the grid to a single
+/// shade. With fewer than four active days there are no quartiles to take,
+/// so the shade is the value's share of the largest day instead.
+sealed interface HeatFallbackScale {
+    /// Upper bound of levels 1, 2 and 3. A day above the last one is level 4.
+    data class Quartiles(val breaks: List<Long>) : HeatFallbackScale
+    /// Too few active days for quartiles: shade by value over this maximum.
+    data class MaxRatio(val max: Long) : HeatFallbackScale
+    /// No active day at all. Every cell is quiet.
+    data object Empty : HeatFallbackScale
 }
 
-/// The tapped-day sheet, standing in for `DayDetailSheet.swift`: everything
-/// the calendar cell carries, at reading size.
+/// The fallback scale for a grid of day values in microdollars, newest or
+/// oldest first, zeros included. Positive values only set the breaks: quiet
+/// days are level 0 under every scale.
+fun heatFallbackScale(values: List<Long>): HeatFallbackScale {
+    val active = values.filter { it > 0 }.sorted()
+    if (active.isEmpty()) return HeatFallbackScale.Empty
+    if (active.size < 4) return HeatFallbackScale.MaxRatio(active.last())
+    // Nearest-rank quartiles, rank for rank what `Scale::from_days` takes:
+    // the ceiling of n*q, one-indexed into the ascending values.
+    fun at(q: Double): Long {
+        val rank = kotlin.math.ceil(active.size * q).toInt()
+        return active[(rank - 1).coerceIn(0, active.lastIndex)]
+    }
+    return HeatFallbackScale.Quartiles(listOf(at(0.25), at(0.5), at(0.75)))
+}
+
+/// A day's shade under a fallback scale. Zero is quiet; otherwise the first
+/// quartile break at or above the value wins, and anything past the last
+/// break is level 4, exactly like `Scale::level`.
+fun fallbackLevel(value: Long, scale: HeatFallbackScale): Int {
+    if (value <= 0) return 0
+    return when (scale) {
+        HeatFallbackScale.Empty -> 1
+        is HeatFallbackScale.Quartiles -> {
+            val i = scale.breaks.indexOfFirst { value <= it }
+            if (i >= 0) i + 1 else 4
+        }
+        is HeatFallbackScale.MaxRatio -> {
+            if (scale.max <= 0) return 1
+            val ratio = value.toDouble() / scale.max
+            when {
+                ratio <= 0.25 -> 1
+                ratio <= 0.5 -> 2
+                ratio <= 0.75 -> 3
+                else -> 4
+            }
+        }
+    }
+}
+
+/// The activity ramp, with a quiet day that can actually be seen.
+///
+/// Port of `PhoneHeatmap.heatPalette`: step zero of the shared ramp all but
+/// vanishes on a white card at arm's length, so the phone overrides it; the
+/// four active steps stay the brand's own, so a busy week on the phone is
+/// the same colour as a busy week on the site.
+fun phoneHeat(colors: TsColors): List<Color> =
+    colors.heat.toMutableList().also {
+        it[0] = if (colors.isDark) Color(0xFF221E36) else Color(0xFFDEDAEA)
+    }
+
+/// Params for the `activity.day` call behind the tapped-day sheet: the same
+/// scope and weeks the grid was drawn with, so the answer describes the
+/// squares on screen. See `Bridge.dayDetail` on the Apple client.
+fun dayDetailParams(date: String): JsonObject = buildJsonObject {
+    put("date", date)
+    put("weeks", 53)
+    put("scope", "account")
+}
+
+/// A count with locale grouping, port of Swift's `.formatted()` on the day
+/// sheet's totals line: "1,214,203 tokens" in the reader's own grouping.
+fun groupedCount(count: Long): String =
+    NumberFormat.getIntegerInstance(Locale.getDefault()).format(count)
+
+/// "12 events, 1,214,203 tokens": the sheet's totals line, in the Apple
+/// client's shape. Events stay ungrouped there, tokens are grouped.
+fun dayTotalsLine(events: Long, tokens: Long): String =
+    "$events events, ${groupedCount(tokens)} tokens"
+
+/// The `model x harness` rows of an `activity.day` answer. Null (a quiet day,
+/// which the host answers with JSON null) and a missing rows array both mean
+/// no rows, and anything that is not an object is skipped rather than
+/// crashing the sheet.
+fun dayPartRows(detail: JsonObject?): List<JsonObject> =
+    (detail?.get("rows") as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+
+/// One day, tapped out of the heatmap.
+///
+/// A port of `DayDetailSheet.swift`: the date, the day's total at list rates,
+/// the event plus token counts, and one row per model. Sized to its content,
+/// scrolling when a day has more models than fit.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
     if (day == null) return
+    val colors = LocalTsColors.current
+    val date = day["date"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val locked = day["locked"]?.jsonPrimitive?.booleanOrNull == true
+    var detail by remember(date) { mutableStateOf<JsonObject?>(null) }
+    var isLoading by remember(date) { mutableStateOf(!locked) }
+    LaunchedEffect(date, locked) {
+        if (locked) return@LaunchedEffect
+        // Account scope, because the grid this was tapped out of is the
+        // account's. A local answer here would describe a machine whose
+        // squares are not the ones on screen.
+        detail = runCatching { CoreClient.call("activity.day", dayDetailParams(date)) }
+            .getOrNull() as? JsonObject
+        isLoading = false
+    }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = Space.l)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Space.m)
                 .padding(bottom = Space.xl),
-            verticalArrangement = Arrangement.spacedBy(Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Text(
-                spokenDate(day["date"]?.jsonPrimitive?.contentOrNull.orEmpty()),
-                style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
-                color = LocalTsColors.current.textPrimary,
-            )
-            val value = day["value"]?.jsonPrimitive?.longOrNull ?: 0L
-            Text(money(value), style = TsType.numeric(30, FontWeight.Medium), color = LocalTsColors.current.accent)
-            if (day["locked"]?.jsonPrimitive?.booleanOrNull == true) {
+            Text(spokenDate(date), style = TsType.headline, color = colors.textPrimary)
+            DayDetailHeader(day, detail)
+            if (locked) {
                 Text(
                     "Locked history shows the shape of the year only.",
-                    style = TextStyle(fontSize = 13.sp),
-                    color = LocalTsColors.current.textSecondary,
+                    style = TsType.subheadline,
+                    color = colors.textSecondary,
                 )
+            } else if (isLoading) {
+                SkeletonRows(count = 2)
+            } else {
+                val rows = dayPartRows(detail)
+                if (rows.isEmpty()) {
+                    // A quiet day is an answer. It must not read as a
+                    // failure to look.
+                    Text(
+                        "Nothing recorded on this day.",
+                        style = TsType.subheadline,
+                        color = colors.textSecondary,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    rows.forEach { DayPartRow(it) }
+                }
             }
         }
+    }
+}
+
+/// The sheet's header: the day's total at list rates, then the event plus
+/// token counts once the detail lands. The figure comes from the grid cell,
+/// so it is on screen before the fetch finishes.
+@Composable
+private fun DayDetailHeader(day: JsonObject, detail: JsonObject?) {
+    val colors = LocalTsColors.current
+    val value = day["value"]?.jsonPrimitive?.longOrNull ?: 0L
+    Column(
+        Modifier.semantics(mergeDescendants = true) {},
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(money(value), style = TsType.numeric(34, FontWeight.SemiBold), color = colors.accent)
+        Text("at list rates", style = TsType.caption, color = colors.textSecondary)
+        if (detail != null) {
+            val events = detail["events"]?.jsonPrimitive?.longOrNull ?: 0L
+            val tokens = detail["tokens"]?.jsonPrimitive?.longOrNull ?: 0L
+            Text(
+                dayTotalsLine(events, tokens),
+                style = TsType.caption,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+    }
+}
+
+/// One `model x harness` slice of the day: the harness mark, the model and
+/// harness names, and the compact token count.
+@Composable
+private fun DayPartRow(row: JsonObject) {
+    val colors = LocalTsColors.current
+    val model = row["model"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val src = row["src"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val tokens = row["tokens"]?.jsonPrimitive?.longOrNull ?: 0L
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$model on ${harnessName(src)}, ${compactTokens(tokens)} tokens"
+            }
+            .tsPanel()
+            .padding(Space.s)
+            .heightIn(min = 44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        HarnessMark(id = src, size = 26.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                model,
+                style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
+                color = colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(harnessName(src), style = TsType.caption, color = colors.textSecondary)
+        }
+        Text(compactTokens(tokens), style = TsType.numeric(16), color = colors.textSecondary)
     }
 }

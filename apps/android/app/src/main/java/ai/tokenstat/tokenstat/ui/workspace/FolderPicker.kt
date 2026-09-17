@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
+
+import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
+
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
@@ -13,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -70,6 +76,9 @@ fun FolderPickerScreen(
     onClose: () -> Unit,
     onAdded: (JsonObject) -> Unit,
 ) {
+    // Its own header and its own way out, so the app chrome steps aside.
+    HideTopBar()
+    HideTabBar()
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
     var listing by remember { mutableStateOf<JsonObject?>(null) }
@@ -181,7 +190,7 @@ fun FolderPickerScreen(
         val entries = (listing?.get("entries") as? JsonArray).orEmpty()
             .mapNotNull { it as? JsonObject }
             .filter { showHidden || it.bol("hidden") != true }
-        LazyColumn(Modifier.weight(1f)) {
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset)) {
             if (entries.isEmpty() && !loading) {
                 item {
                     Text(

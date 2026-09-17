@@ -1,16 +1,29 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.Box
+
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material3.AlertDialog
@@ -29,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.AppViewModel
@@ -218,6 +232,8 @@ fun NotesSection(
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Something worth remembering") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { save() }),
                 )
                 TsAccentButton(label = "Add", small = true, enabled = draft.trim().isNotEmpty(), onClick = ::save)
             }
@@ -254,7 +270,7 @@ fun NotesSection(
                 art = { EmptyArt(EmptyArtKind.Notes) },
             )
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        LazyColumn(contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             items(notes, key = { it.id }) { note ->
                 val pending = note.id.startsWith("pending:")
                 Column(
@@ -288,15 +304,52 @@ fun NotesSection(
                         )
                     }
                     if (!pending) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                            TextButton(onClick = { move(note, !showingArchive) }) {
-                                Text(if (showingArchive) "Restore" else "Archive")
+                        // One overflow, the way the SSH host row does it.
+                        // Four bare text links read as a sentence that
+                        // happened to be tappable and gave no sign which one
+                        // was destructive; four buttons wrapped onto two
+                        // lines and made every note twice as tall. A menu
+                        // names each action with its glyph and costs one row.
+                        var menu by remember(note.id) { mutableStateOf(false) }
+                        Box {
+                            TsSecondaryButton(
+                                label = "Actions",
+                                icon = ActionIcon.More.vector,
+                                small = true,
+                                onClick = { menu = true },
+                            )
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(if (showingArchive) "Restore" else "Archive") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (showingArchive) ActionIcon.Restore.vector else ActionIcon.Archive.vector,
+                                            null,
+                                        )
+                                    },
+                                    onClick = { menu = false; move(note, !showingArchive) },
+                                )
+                                if (!showingArchive) {
+                                    DropdownMenuItem(
+                                        text = { Text("Make a task") },
+                                        leadingIcon = { Icon(ActionIcon.Move.vector, null) },
+                                        onClick = { menu = false; convert(note) },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Edit") },
+                                        leadingIcon = { Icon(ActionIcon.Edit.vector, null) },
+                                        onClick = { menu = false; editing = note },
+                                    )
+                                }
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Delete", color = LocalTsColors.current.danger) },
+                                    leadingIcon = {
+                                        Icon(ActionIcon.Delete.vector, null, tint = LocalTsColors.current.danger)
+                                    },
+                                    onClick = { menu = false; pendingDelete = note },
+                                )
                             }
-                            if (!showingArchive) {
-                                TextButton(onClick = { convert(note) }) { Text("Make a task") }
-                                TextButton(onClick = { editing = note }) { Text("Edit") }
-                            }
-                            TextButton(onClick = { pendingDelete = note }) { Text("Delete") }
                         }
                     }
                 }

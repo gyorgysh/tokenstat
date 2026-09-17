@@ -899,3 +899,21 @@ data class WorkflowDesignResult(val workflow: WorkflowGraph, val transcript: Str
         )
     }
 }
+
+/// "3 workflows · 1 running", the workflows library summary.
+fun workflowListSummary(total: Int, running: Int): String = "$total workflows · $running running"
+
+/// Library search covers the graph name, like the Apple client.
+fun graphMatchesQuery(graph: WorkflowGraph, query: String): Boolean {
+    val q = query.trim()
+    if (q.isEmpty()) return true
+    return graph.name.contains(q, ignoreCase = true)
+}
+
+/// The run the detail leads with: the graph's recorded last run, else the
+/// first retained run. Port of `ClientWorkflowSession.lastRun(for:)`.
+fun lastWorkflowRun(runs: List<WorkflowRunRecord>, graph: WorkflowGraph): WorkflowRunRecord? {
+    val id = graph.lastRunID
+    if (id != null) runs.firstOrNull { it.id == id }?.let { return it }
+    return runs.firstOrNull { it.workflowID == graph.id }
+}

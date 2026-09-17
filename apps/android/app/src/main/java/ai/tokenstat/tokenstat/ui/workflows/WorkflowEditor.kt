@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workflows
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -85,6 +87,46 @@ fun WorkflowEditorDialog(
     timezone: String,
     onSaved: () -> Unit,
     onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        WorkflowEditorScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            workspaceID = workspaceID,
+            folderName = folderName,
+            existing = existing,
+            backends = backends,
+            backendRefs = backendRefs,
+            automations = automations,
+            folders = folders,
+            defaultBudget = defaultBudget,
+            timezone = timezone,
+            onSaved = onSaved,
+            onBack = onDismiss,
+        )
+    }
+}
+
+/// The workflow editor as a full page on the app background.
+@Composable
+fun WorkflowEditorScreen(
+    model: AppViewModel,
+    peer: String,
+    hostLabel: String,
+    protocol: Long?,
+    workspaceID: String,
+    folderName: String,
+    existing: WorkflowGraph?,
+    backends: List<AgentBackend>,
+    backendRefs: List<BackendRef>,
+    automations: List<AutomationJob>,
+    folders: List<FolderRef>,
+    defaultBudget: Long,
+    timezone: String,
+    onSaved: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val supportsEdits = HostContracts.supportsWorkflowEditing(protocol)
@@ -261,7 +303,7 @@ fun WorkflowEditorDialog(
             confirmingDelete = false
             notice = "Deleted."
             onSaved()
-            onDismiss()
+            onBack()
         }.onFailure {
             error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
         }
@@ -309,9 +351,18 @@ fun WorkflowEditorDialog(
     val canCreate = isCreate && loaded && !working && pendingID == null && created == null && fields.validation == null
     val recipes = remember(backends) { WorkflowRecipes.recipes(backends) }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().padding(Space.m).verticalScroll(rememberScrollState())) {
+    BackHandler { onBack() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(LocalTsColors.current.background)
+            .padding(Space.m)
+            .verticalScroll(rememberScrollState()),
+    ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
+                }
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (isCreate) "New workflow" else "Workflow",
@@ -319,9 +370,6 @@ fun WorkflowEditorDialog(
                         color = LocalTsColors.current.textPrimary,
                     )
                     Text(folderName.ifBlank { hostLabel }, style = TsType.caption, color = LocalTsColors.current.textSecondary)
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(ActionIcon.Dismiss.vector, "Close", tint = LocalTsColors.current.controlGlyph)
                 }
             }
             if (!supportsEdits && !isCreate) {
@@ -477,7 +525,7 @@ fun WorkflowEditorDialog(
             }
             Spacer(Modifier.padding(top = Space.s))
             if (created != null) {
-                TsAccentButton(label = "Done", onClick = onDismiss)
+                TsAccentButton(label = "Done", onClick = onBack)
             } else if (pendingID != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     TsSecondaryButton(label = "Check", enabled = !working, onClick = { scope.launch { checkCreated() } })
@@ -516,12 +564,11 @@ fun WorkflowEditorDialog(
                 }
             }
         }
-    }
     if (confirmingDelete && base != null) {
         AlertDialog(
             onDismissRequest = { confirmingDelete = false },
-            title = { Text("Delete workflow?") },
-            text = { Text("Delete \"${base.name}\"? Its run history stays on the computer.") },
+            title = { Text("Delete ${base.name}?") },
+            text = { Text("The graph is removed. Past runs stay on this computer.") },
             confirmButton = { Button(onClick = { scope.launch { delete() } }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },
         )

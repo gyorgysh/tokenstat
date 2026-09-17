@@ -8,6 +8,7 @@ import ai.tokenstat.tokenstat.core.CoreClient
 import ai.tokenstat.tokenstat.core.CoreFailure
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
 import ai.tokenstat.tokenstat.ui.logic.tagSignInUrl
+import ai.tokenstat.tokenstat.ui.ssh.SshConnectionState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -93,6 +94,16 @@ private fun signInPollFailure(error: Exception): SignInPollFailure {
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val mutableState = MutableStateFlow(ClientState())
     val state = mutableState.asStateFlow()
+
+    /// The live SSH shells, in one place. Held here so navigating between
+    /// tabs cannot orphan a shell: a refresh reconciles against what the host
+    /// is holding and never drops a live connection. See `SshConnectionState`.
+    val sshConnections = SshConnectionState(::core)
+
+    /// The workspaces session: which host is dialled and what it loaded.
+    /// Held here for the same reason as the shells, so leaving the tab does
+    /// not dial again on return. See `WorkspacesConnectionState`.
+    val workspacesConnection = ai.tokenstat.tokenstat.ui.workspace.WorkspacesConnectionState()
 
     init { refresh() }
 
@@ -280,12 +291,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         CoreClient.call("machine.peers") as? JsonArray ?: JsonArray(emptyList())
 
     suspend fun prepareHost(peer: String, label: String) {
+        // Pair once: a peer this store already approves is paired, and
+        // re-pairing on every connect would redo its grant bookkeeping for
+        // nothing. Anything else (unknown, pending, revoked) pairs, which is
+        // also what re-approves a peer the owner un-revoked elsewhere.
+        val approved = runCatching {
+            machinePeers().any {
+                val entry = it as? JsonObject
+                entry?.get("key")?.jsonPrimitive?.content == peer &&
+                    entry.get("trust")?.jsonPrimitive?.content == "approved"
+            }
+        }.getOrNull() == true
+        if (!approved) {
+            CoreClient.call("machine.pair", buildJsonObject {
+                put("key", peer)
+                put("label", label)
+                put("address", "")
+            })
+        }
+        CoreClient.call("remote.serve", buildJsonObject { put("tunnel", true) })
+    }
+
+    /// Approve one machine key, and nothing else. Setup pairs the key that
+    /// arrived over the verified SSH session so its own tunnel calls are not
+    /// refused as unapproved; it does not turn on serving, which is a
+    /// separate decision the Mac door owns.
+    suspend fun pairPeer(peer: String, label: String) {
         CoreClient.call("machine.pair", buildJsonObject {
             put("key", peer)
             put("label", label)
             put("address", "")
         })
-        CoreClient.call("remote.serve", buildJsonObject { put("tunnel", true) })
     }
 
     suspend fun workspaces(peer: String): JsonArray =

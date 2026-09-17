@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.tasks
 
+import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
+
+import androidx.compose.foundation.clickable
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -91,6 +97,40 @@ fun TaskBoardDialog(
     onOpenSection: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        TaskBoardScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            fixedFolder = fixedFolder,
+            folderName = folderName,
+            onOpenTerminal = onOpenTerminal,
+            onOpenSection = onOpenSection,
+            onBack = onDismiss,
+        )
+    }
+}
+
+/// The task board as a full page on the app background. Creation, editing
+/// and run/result are full pages too, pushed over the board like the Apple
+/// client's full-screen covers.
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun TaskBoardScreen(
+    model: AppViewModel,
+    peer: String,
+    hostLabel: String,
+    protocol: Long?,
+    fixedFolder: String?,
+    folderName: String,
+    onOpenTerminal: (String) -> Unit,
+    onOpenSection: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    // The board has its own header, its own back and its own add. Two
+    // headers with two back arrows is what stacking them looked like.
+    OwnSectionHeader()
     val scope = rememberCoroutineScope()
     val canEdit = HostContracts.supportsTaskEditing(protocol)
     val canDelete = HostContracts.supportsTaskDeletion(protocol)
@@ -234,9 +274,67 @@ fun TaskBoardDialog(
         (cards.map { it.backend } + filter.backend).filter { it.isNotEmpty() }.toSet() + backends.map { it.id }
     }.sorted()
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().padding(Space.m)) {
+    BackHandler {
+        when {
+            composing -> composing = false
+            editing != null -> editing = null
+            viewingRun != null -> viewingRun = null
+            deleting != null -> deleting = null
+            else -> onBack()
+        }
+    }
+    val editingCard = editing
+    val run = viewingRun
+    when {
+        composing -> TaskCreateScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            initialFolder = when (val folder = filter.folder) {
+                is TaskBoardFolder.Folder -> folder.id
+                else -> fixedFolder ?: ""
+            },
+            defaultBudget = queueBudget,
+            backends = backends,
+            folders = folders,
+            onCreated = { scope.launch { load(includeOptions = false) } },
+            onBack = { composing = false },
+        )
+        editingCard != null -> TaskEditorScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            cardId = editingCard.id,
+            backends = backends,
+            folders = folders,
+            onViewRun = { runID, workspaceID -> viewingRun = runID to workspaceID },
+            onOpenTerminal = onOpenTerminal,
+            onSaved = { scope.launch { load(includeOptions = false) } },
+            onBack = { editing = null },
+        )
+        run != null -> TaskRunScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            runID = run.first,
+            workspaceID = run.second,
+            folderName = folders.firstOrNull { it.id == run.second }?.name ?: folderName,
+            onOpenTerminal = onOpenTerminal,
+            onOpenSection = { onOpenSection(it); viewingRun = null },
+            onBack = { viewingRun = null },
+        )
+        else -> Column(
+            Modifier
+                .fillMaxSize()
+                .background(LocalTsColors.current.background)
+                .padding(Space.m),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
+                }
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (fixedFolder == null) "All tasks" else "Tasks",
@@ -251,9 +349,6 @@ fun TaskBoardDialog(
                 }
                 IconButton(onClick = { composing = true }, enabled = !composing && editing == null) {
                     Icon(ActionIcon.Create.vector, "New task", tint = LocalTsColors.current.accent)
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(ActionIcon.Dismiss.vector, "Close", tint = LocalTsColors.current.controlGlyph)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -394,39 +489,6 @@ fun TaskBoardDialog(
             }
         }
     }
-    if (composing) {
-        TaskCreateDialog(
-            model = model,
-            peer = peer,
-            hostLabel = hostLabel,
-            protocol = protocol,
-            initialFolder = when (val folder = filter.folder) {
-                is TaskBoardFolder.Folder -> folder.id
-                else -> fixedFolder ?: ""
-            },
-            defaultBudget = queueBudget,
-            backends = backends,
-            folders = folders,
-            onCreated = { scope.launch { load(includeOptions = false) } },
-            onDismiss = { composing = false },
-        )
-    }
-    val editingCard = editing
-    if (editingCard != null) {
-        TaskEditorDialog(
-            model = model,
-            peer = peer,
-            hostLabel = hostLabel,
-            protocol = protocol,
-            cardId = editingCard.id,
-            backends = backends,
-            folders = folders,
-            onViewRun = { runID, workspaceID -> viewingRun = runID to workspaceID },
-            onOpenTerminal = onOpenTerminal,
-            onSaved = { scope.launch { load(includeOptions = false) } },
-            onDismiss = { editing = null },
-        )
-    }
     val deletingCard = deleting
     if (deletingCard != null) {
         AlertDialog(
@@ -437,20 +499,6 @@ fun TaskBoardDialog(
                 Button(onClick = { scope.launch { delete(deletingCard) } }) { Text("Delete task") }
             },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
-        )
-    }
-    val run = viewingRun
-    if (run != null) {
-        TaskRunDialog(
-            model = model,
-            peer = peer,
-            hostLabel = hostLabel,
-            runID = run.first,
-            workspaceID = run.second,
-            folderName = folders.firstOrNull { it.id == run.second }?.name ?: folderName,
-            onOpenTerminal = onOpenTerminal,
-            onOpenSection = { onOpenSection(it); viewingRun = null },
-            onDismiss = { viewingRun = null },
         )
     }
 }
@@ -477,8 +525,18 @@ private fun TaskRow(
     val canEarlier = !newestFirst && !working && canEdit && index > 0
     val canLater = !newestFirst && !working && canEdit && index >= 0 && index < visibleInColumn.size - 1
     TsCard {
-        Column(Modifier.fillMaxWidth().padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-            TextButton(onClick = onEdit, modifier = Modifier.fillMaxWidth()) {
+        // `TsCard` already pads by `cardPaddingDp`; padding again inside it
+        // was a second margin on all four sides, which is most of why these
+        // cards stood so tall with so little in them.
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            // A clickable column, not a `TextButton`: the button imposes
+            // Material's 48dp minimum height and centres what is inside it,
+            // which left every card tall with its title floating in the
+            // middle and a band of empty space above and below.
+            Column(
+                Modifier.fillMaxWidth().clickable(onClick = onEdit),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     Text(
                         card.title,

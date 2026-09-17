@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -141,7 +143,7 @@ fun CloneRepositoryScreen(
         val active = sessionId
         if (active == null) {
             Column(
-                Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(Space.m),
+                Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(Space.m).padding(bottom = TabBarChrome.contentBottomInset),
                 verticalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 Text("Clone onto $hostLabel", style = TsType.title2.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
@@ -173,7 +175,7 @@ fun CloneRepositoryScreen(
                                 modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                                 maxLines = 1,
                             )
-                            Icon(ActionIcon.Next.vector, null, tint = colors.textTertiary)
+                            Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
                         }
                         Text("Folder name", style = TsType.caption, color = colors.textSecondary)
                         OutlinedTextField(
@@ -391,7 +393,7 @@ fun FolderPickerScreen(
             }
         },
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset)) {
             if (path != null) {
                 item {
                     Row(
@@ -429,7 +431,7 @@ fun FolderPickerScreen(
                         color = colors.textPrimary,
                     )
                     Spacer(Modifier.weight(1f))
-                    Icon(ActionIcon.Next.vector, null, tint = colors.textTertiary)
+                    Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
                 }
             }
         }

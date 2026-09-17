@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.screen
 
+import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
+
+import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
+
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.BitmapFactory
@@ -72,6 +76,9 @@ fun ScreenViewerScreen(
     hostLabel: String,
     onClose: () -> Unit,
 ) {
+    // Its own header and its own way out, so the app chrome steps aside.
+    HideTopBar()
+    HideTabBar()
     val colors = LocalTsColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.browser
 
+import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
+
+import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
+
 import android.annotation.SuppressLint
 import android.net.http.SslError
 import android.os.Build
@@ -62,6 +66,9 @@ fun PortBrowserScreen(
     port: Int,
     onClose: () -> Unit,
 ) {
+    // Its own header and its own way out, so the app chrome steps aside.
+    HideTopBar()
+    HideTabBar()
     val scope = rememberCoroutineScope()
     var progress by remember { mutableFloatStateOf(0f) }
     var address by remember { mutableStateOf(url) }

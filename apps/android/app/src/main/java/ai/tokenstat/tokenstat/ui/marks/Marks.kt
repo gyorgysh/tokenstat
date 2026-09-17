@@ -35,9 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -71,6 +69,28 @@ object UiSignals {
     fun beganRefreshing() = synchronized(listeners) { listeners.forEach { it() } }
 }
 
+/// The logo bar timings, transcribed from `LogoMark` in the Apple client's
+/// `Marks.swift` so the launch loop, the one-shot rise and the refresh dip
+/// move the same way on both platforms. Pinned by `LaunchMotionTest`.
+object LogoMotion {
+    /// Repeating launch loop: easeInOut 0.62s autoreverse, staggered 0.14s.
+    const val loopMs = 620
+    const val loopStaggerMs = 140
+
+    /// One rise that lands and holds: easeInOut 1.2s, staggered 0.15s.
+    const val oneShotMs = 1200
+    const val oneShotStaggerMs = 150L
+
+    /// Refresh dip: easeInOut 0.26s, staggered 0.07s, down to 0.35 and back.
+    const val dipMs = 260
+    const val dipStaggerMs = 70L
+    const val dipScale = 0.35f
+
+    /// How long the dip is held before the bars come back up. Apple sleeps
+    /// 300ms between setting and clearing the pulse.
+    const val dipHoldMs = 300L
+}
+
 /// The 3-bar tokenstat logo, hand-drawn geometry transcribed from the website
 /// SVG via the Apple client's `Marks.swift`. Bars rise in turn out of the
 /// baseline they share.
@@ -94,7 +114,12 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
         }
         onDispose { unsubscribe() }
     }
-    LaunchedEffectPulse(pulse) { if (pulse) { delay(300); pulse = false } }
+    LaunchedEffect(pulse) {
+        if (pulse) {
+            delay(LogoMotion.dipHoldMs)
+            pulse = false
+        }
+    }
 
     Box(Modifier.size(size.dp)) {
         bars.forEachIndexed { index, (y, height, color) ->
@@ -103,23 +128,23 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
             val looped = if (animated && loops && !reduceMotion) {
                 val transition = rememberInfiniteTransition(label = "logo")
                 val v by transition.animateFloat(
-                    initialValue = 0.35f,
+                    initialValue = LogoMotion.dipScale,
                     targetValue = 1f,
                     animationSpec = infiniteRepeatable(
-                        animation = tween(620, easing = TsMotion.easeInOut),
+                        animation = tween(LogoMotion.loopMs, easing = TsMotion.easeInOut),
                         repeatMode = RepeatMode.Reverse,
-                        initialStartOffset = StartOffset(index * 140),
+                        initialStartOffset = StartOffset(index * LogoMotion.loopStaggerMs),
                     ),
                     label = "logoBar",
                 )
                 v
             } else {
-                val land = remember { Animatable(if (animated && !reduceMotion) 0.35f else 1f) }
+                val land = remember { Animatable(if (animated && !reduceMotion) LogoMotion.dipScale else 1f) }
                 LaunchedEffect(animated, index) {
                     if (animated && !reduceMotion) {
-                        land.snapTo(0.35f)
-                        kotlinx.coroutines.delay(index * 150L)
-                        land.animateTo(1f, tween(1200, easing = TsMotion.easeInOut))
+                        land.snapTo(LogoMotion.dipScale)
+                        kotlinx.coroutines.delay(index * LogoMotion.oneShotStaggerMs)
+                        land.animateTo(1f, tween(LogoMotion.oneShotMs, easing = TsMotion.easeInOut))
                     } else {
                         land.snapTo(1f)
                     }
@@ -130,29 +155,29 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
             // 260ms, a beat after the one before it, like `Marks.swift`.
             val dip = remember { Animatable(1f) }
             LaunchedEffect(pulse) {
-                delay(index * 70L)
-                dip.animateTo(if (pulse) 0.35f else 1f, tween(260, easing = TsMotion.easeInOut))
+                delay(index * LogoMotion.dipStaggerMs)
+                dip.animateTo(
+                    if (pulse) LogoMotion.dipScale else 1f,
+                    tween(LogoMotion.dipMs, easing = TsMotion.easeInOut),
+                )
             }
             val scale = if (pulse || dip.value != 1f) dip.value else looped
+            // The dip drives the geometry, not a layer transform: the bars
+            // shorten toward the baseline they share, so a scale the renderer
+            // drops cannot leave them standing. Same picture as a bottom
+            // pivoted scaleY, corner radius included.
+            val barHeight = height * scale
             Box(
                 Modifier
                     .align(Alignment.TopStart)
-                    .offset(x = ((11 + index * 15 - 11) * unit).dp, y = ((y - 10) * unit).dp)
-                    .size((12 * unit).dp, (height * unit).dp)
-                    .clip(RoundedCornerShape((3.5 * unit).dp))
-                    .background(color)
-                    .graphicsLayer(
-                        scaleY = scale,
-                        transformOrigin = TransformOrigin(0.5f, 1f),
-                    ),
+                    .offset(x = ((11 + index * 15 - 11) * unit).dp, y = ((y - 10 + height - barHeight) * unit).dp)
+                    .size((12 * unit).dp, (barHeight * unit).dp)
+                    .clip(RoundedCornerShape((3.5 * unit * scale).dp))
+                    .background(color),
             )
         }
     }
 }
-
-@Composable
-private fun LaunchedEffectPulse(key: Boolean, block: suspend () -> Unit) =
-    androidx.compose.runtime.LaunchedEffect(key) { block() }
 
 /// The lowercase wordmark. `token` in primary, `stat` in the accent, matching
 /// `Marks.swift`. The phone toolbar passes a larger size; the bars are optional
@@ -219,6 +244,10 @@ fun featureMarkRes(name: String): Int = when (name) {
 @Composable
 fun FeatureMark(name: String, tint: Color = LocalTsColors.current.accent, size: Int = 18) {
     val res = featureMarkRes(name)
+    // A name with no drawing behind it used to paint the tile anyway, which
+    // is a blank accent square: worse than nothing, and it looks like the
+    // image failed to load rather than like a typo in a mark name.
+    if (res == 0) return
     Box(
         Modifier
             .size(size.dp)

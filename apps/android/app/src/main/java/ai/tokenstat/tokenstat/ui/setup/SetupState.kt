@@ -2,6 +2,8 @@
 package ai.tokenstat.tokenstat.ui.setup
 
 import ai.tokenstat.tokenstat.core.CoreFailure
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 
 /// Setup journey state, ported from `ClientSetupState.swift`.
 ///
@@ -70,14 +72,14 @@ enum class SetupAction {
         CHECK_CREDENTIAL -> SetupStep.CREDENTIAL
         CHECK_SERVER -> SetupStep.FINISH
         NEW_CODE -> SetupStep.INSTALL
-        SIGN_IN_AGENT -> SetupStep.PROJECT
+        SIGN_IN_AGENT -> SetupStep.AGENT
         SIGN_IN_ACCOUNT, UPDATE_MACHINE, RETRY -> null
     }
 }
 
 enum class SetupStep {
     WHERE, CREDENTIAL, FINGERPRINT, CHECK, INSTALL, FINISH,
-    PROJECT, NEED_SERVER, BY_HAND, CLOUD, MAC, SERVER,
+    AGENT, PROJECT, NEED_SERVER, BY_HAND, CLOUD, MAC, SERVER,
 }
 
 data class SetupFailure(
@@ -189,3 +191,99 @@ data class SetupFailure(
  *  change they have to review before they have seen the place. */
 const val SETUP_FIRST_TASK =
     "Give me a short tour of this project: what it does, how it is laid out, and where you would start."
+
+/** How the wizard will sign in to the server it is setting up. Ported from
+ *  `SetupCredential`: a key already in the vault, or a password typed once,
+ *  used for the connection, and never written down. */
+sealed interface SetupCredential {
+    data object None : SetupCredential
+    data class Key(val id: String) : SetupCredential
+    data object Password : SetupCredential
+
+    fun ready(password: String): Boolean = when (this) {
+        is None -> false
+        is Password -> password.isNotEmpty()
+        is Key -> true
+    }
+}
+
+/** Whether an agent on a machine can actually start work. Ported from
+ *  `AgentReadiness`: `unknown` is a real answer and the default for anything
+ *  unestablished, including every host too old to have been asked. Sending
+ *  somebody to redo a sign-in that was fine is as bad as letting them send a
+ *  prompt into an auth error. */
+enum class AgentReadiness {
+    NOT_INSTALLED, NEEDS_SIGN_IN, SIGNED_IN, EXPIRED, UNKNOWN;
+
+    fun summary(): String = when (this) {
+        NOT_INSTALLED -> "Not installed"
+        NEEDS_SIGN_IN -> "Not signed in"
+        SIGNED_IN -> "Signed in"
+        EXPIRED -> "Sign-in expired"
+        UNKNOWN -> "Sign-in not checked"
+    }
+
+    companion object {
+        /** A state never heard of decodes as unknown rather than failing the
+         *  whole machine's status. */
+        fun parse(raw: String?): AgentReadiness = when (raw) {
+            "notInstalled" -> NOT_INSTALLED
+            "needsSignIn" -> NEEDS_SIGN_IN
+            "signedIn" -> SIGNED_IN
+            "expired" -> EXPIRED
+            else -> UNKNOWN
+        }
+    }
+}
+
+/** One agent on the machine, as `launcher.catalog` reports it. */
+data class SetupAgent(
+    val id: String,
+    val name: String,
+    val installed: Boolean,
+    val readiness: AgentReadiness,
+    val signInSupported: Boolean,
+) {
+    companion object {
+        fun of(item: kotlinx.serialization.json.JsonObject): SetupAgent? {
+            val id = item.stringOrNull("id") ?: return null
+            val signIn = item["signIn"] as? kotlinx.serialization.json.JsonObject
+            return SetupAgent(
+                id = id,
+                name = item.stringOrNull("name")?.takeIf { it.isNotBlank() } ?: id,
+                installed = (item["installed"] as? kotlinx.serialization.json.JsonPrimitive)
+                    ?.booleanOrNull == true,
+                readiness = AgentReadiness.parse(item.stringOrNull("readiness")),
+                signInSupported = (signIn?.get("supported") as? kotlinx.serialization.json.JsonPrimitive)
+                    ?.booleanOrNull == true,
+            )
+        }
+    }
+
+    /** Whether tapping Sign in can do anything: the agent wants one, the
+     *  host offers the terminal handoff, and the host speaks it. */
+    fun canSignIn(protocol: Long?): Boolean =
+        installed && (readiness == AgentReadiness.NEEDS_SIGN_IN || readiness == AgentReadiness.EXPIRED) &&
+            signInSupported && (protocol == null || protocol >= AGENT_SIGN_IN_MIN_PROTOCOL)
+}
+
+/** Version 9 added agent readiness on `launcher.catalog` and the
+ *  `launcher.signIn` terminal handoff. Mirrors `RemoteHostFeature.agentSignIn`
+ *  alongside the `HostContracts` minimums. */
+const val AGENT_SIGN_IN_MIN_PROTOCOL = 9L
+
+private fun kotlinx.serialization.json.JsonObject.stringOrNull(key: String): String? =
+    (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+
+/** Offer a distinct name when the account already has a server with it.
+ *  Ported from `chooseAvailableMachineName`. */
+fun availableMachineName(want: String, labels: Set<String>): String {
+    val stem = want.trim().ifEmpty { "server" }
+    var candidate = stem
+    var suffix = 2
+    while (labels.contains(candidate)) {
+        candidate = "${stem.take(54)}-$suffix"
+        suffix += 1
+    }
+    return candidate
+}

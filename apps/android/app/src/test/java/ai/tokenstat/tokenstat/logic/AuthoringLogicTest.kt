@@ -19,13 +19,22 @@ import ai.tokenstat.tokenstat.ui.tasks.taskRunReadiness
 import ai.tokenstat.tokenstat.ui.tasks.FolderRef
 import ai.tokenstat.tokenstat.ui.automations.AutomationEditorDraft
 import ai.tokenstat.tokenstat.ui.automations.AutomationJob
+import ai.tokenstat.tokenstat.ui.automations.AutomationQueue
+import ai.tokenstat.tokenstat.ui.automations.AutomationRun
 import ai.tokenstat.tokenstat.ui.automations.AutomationSchedule
 import ai.tokenstat.tokenstat.ui.automations.BudgetFields
 import ai.tokenstat.tokenstat.ui.automations.HostScheduleClock
+import ai.tokenstat.tokenstat.ui.automations.JobCopy
 import ai.tokenstat.tokenstat.ui.automations.JobScheduleCopy
+import ai.tokenstat.tokenstat.ui.automations.QueueCopy
+import ai.tokenstat.tokenstat.ui.automations.QueueDraft
 import ai.tokenstat.tokenstat.ui.automations.QueueValidation
 import ai.tokenstat.tokenstat.ui.automations.ScheduleFields
 import ai.tokenstat.tokenstat.ui.automations.ScheduleKind
+import ai.tokenstat.tokenstat.ui.automations.automationListSummary
+import ai.tokenstat.tokenstat.ui.automations.jobMatchesQuery
+import ai.tokenstat.tokenstat.ui.automations.lastAutomationRun
+import ai.tokenstat.tokenstat.ui.tasks.allRunsLabel
 import ai.tokenstat.tokenstat.ui.workflows.AgentBackend
 import ai.tokenstat.tokenstat.ui.workflows.WorkflowEdge
 import ai.tokenstat.tokenstat.ui.workflows.WorkflowEdgeWhen
@@ -37,7 +46,10 @@ import ai.tokenstat.tokenstat.ui.workflows.WorkflowNode
 import ai.tokenstat.tokenstat.ui.workflows.WorkflowNodeKind
 import ai.tokenstat.tokenstat.ui.workflows.WorkflowRecipes
 import ai.tokenstat.tokenstat.ui.workflows.WorkflowRunRecord
+import ai.tokenstat.tokenstat.ui.workflows.graphMatchesQuery
+import ai.tokenstat.tokenstat.ui.workflows.lastWorkflowRun
 import ai.tokenstat.tokenstat.ui.workflows.workflowContentMatches
+import ai.tokenstat.tokenstat.ui.workflows.workflowListSummary
 import ai.tokenstat.tokenstat.ui.editor.EditorFind
 import ai.tokenstat.tokenstat.ui.editor.EditorGutterMap
 import ai.tokenstat.tokenstat.ui.editor.SyntaxSpan
@@ -569,5 +581,111 @@ class AuthoringLogicTest {
         )
         assertEquals(2, RunHistory.remaining(total = 7, shown = 5))
         assertEquals(listOf("live", "new-done"), RunHistory.page(runs, 2).map { it.id })
+    }
+
+    @Test
+    fun runHistoryPreviewGateAndLatest() {
+        assertTrue(!RunHistory.showsAllRuns(5))
+        assertTrue(RunHistory.showsAllRuns(6))
+        assertEquals("live", RunHistory.latest(listOf(RunRef("done", 9, false), RunRef("live", 2, true)))?.id)
+        assertNull(RunHistory.latest(emptyList()))
+        assertEquals("All runs", allRunsLabel(1))
+        assertEquals("All 6 runs", allRunsLabel(6))
+    }
+
+    @Test
+    fun jobConfirmCopy() {
+        assertEquals("Starts Nightly in Site on Mac.", JobCopy.run("Nightly", "Site", "Mac"))
+        assertEquals("Stops the run of Nightly in Site on Mac.", JobCopy.stop("Nightly", "Site", "Mac"))
+        assertEquals("Lets Nightly continue in Site on Mac.", JobCopy.continueGate("Nightly", "Site", "Mac"))
+        assertEquals("No time limit", JobCopy.budget(0))
+        assertEquals("1 minute", JobCopy.budget(60))
+        assertEquals("2 minutes", JobCopy.budget(120))
+        assertEquals("1 hour", JobCopy.budget(3600))
+        assertEquals("3 hours", JobCopy.budget(10_800))
+        assertEquals("Never run", JobCopy.lastRunWhen(null))
+        assertEquals("Never run", JobCopy.lastRunWhen(0))
+        assertEquals("2 min ago", JobCopy.lastRunWhen(1_700_000_000_000 - 90_000, 1_700_000_000_000))
+    }
+
+    @Test
+    fun schedulerCardCopy() {
+        assertEquals("No time limit · 2 at once", QueueCopy.summary(0, 2))
+        assertEquals("3h per job · No cap", QueueCopy.summary(10_800, 0))
+        assertEquals("15m per job · 1 at once", QueueCopy.summary(900, 1))
+        assertEquals("10 min per job · 2 at once", QueueCopy.summary(600, 2))
+        assertEquals("On Mac, not just Site", QueueCopy.scope("Mac", "Site"))
+        assertEquals("Every folder on the connected computer", QueueCopy.scope("", ""))
+        assertEquals("Every folder on Mac", QueueCopy.scope("Mac", ""))
+        assertEquals("Every folder, not just Site", QueueCopy.scope("", "Site"))
+        assertEquals("Every folder on Mac", QueueCopy.scope("Mac", "Site", compact = true))
+        assertEquals("Every folder", QueueCopy.scope("", "", compact = true))
+        assertEquals(
+            "How queued jobs run on Mac, not just Site.",
+            QueueCopy.editorScope("Mac", "Site"),
+        )
+        assertEquals(
+            "How queued jobs run on the connected computer. This applies to every folder.",
+            QueueCopy.editorScope("", ""),
+        )
+        assertEquals("The clock on Mac is New York.", QueueCopy.clockCaption("Mac", "America/New_York"))
+        assertEquals(
+            "The clock is on the connected computer, not this device.",
+            QueueCopy.clockCaption("", "unknown"),
+        )
+    }
+
+    @Test
+    fun queueValidationMatchesApple() {
+        assertEquals(32L, QueueValidation.maxConcurrent("32"))
+        assertNull(QueueValidation.maxConcurrent("33"))
+        assertEquals("At most 32 jobs can run at once.", QueueValidation.maxConcurrentError("33"))
+        assertEquals("Jobs at once must be a whole number, or No cap.", QueueValidation.maxConcurrentError("many"))
+        assertEquals(
+            "Enter a positive time limit, or choose No limit.",
+            QueueValidation.budgetError(false, "0"),
+        )
+        assertTrue(QueueValidation.isBudgetPreset(false, "180"))
+        assertTrue(!QueueValidation.isBudgetPreset(false, "181"))
+        assertTrue(!QueueValidation.isBudgetPreset(true, "180"))
+        assertTrue(QueueValidation.isConcurrentPreset("0"))
+        assertTrue(QueueValidation.isConcurrentPreset("8"))
+        assertTrue(!QueueValidation.isConcurrentPreset("3"))
+        assertTrue(QueueDraft("180", false, "2").matches(AutomationQueue(10_800, 2, null)))
+        assertTrue(!QueueDraft("30", false, "2").matches(AutomationQueue(10_800, 2, null)))
+    }
+
+    @Test
+    fun librarySummariesAndSearch() {
+        assertEquals("2 enabled · 1 running", automationListSummary(2, 1))
+        assertEquals("3 workflows · 0 running", workflowListSummary(3, 0))
+        val job = AutomationJob(id = "j", name = "Nightly", prompt = "run the tests")
+        assertTrue(jobMatchesQuery(job, ""))
+        assertTrue(jobMatchesQuery(job, "night"))
+        assertTrue(jobMatchesQuery(job, "TESTS"))
+        assertTrue(!jobMatchesQuery(job, "nope"))
+        val graph = WorkflowGraph(id = "g", name = "Deploy")
+        assertTrue(graphMatchesQuery(graph, ""))
+        assertTrue(graphMatchesQuery(graph, "dep"))
+        assertTrue(!graphMatchesQuery(graph, "tests"))
+    }
+
+    @Test
+    fun lastRunSelection() {
+        val runs = listOf(
+            AutomationRun(id = "r1", jobId = "a", startedAtMs = 100, status = "ok"),
+            AutomationRun(id = "r2", jobId = "a", startedAtMs = 50, status = "running"),
+            AutomationRun(id = "r3", jobId = "b", startedAtMs = 300, status = "ok"),
+        )
+        assertEquals("r2", lastAutomationRun(runs, AutomationJob(id = "a", lastRunID = "r1"))?.id)
+        assertEquals("r3", lastAutomationRun(runs, AutomationJob(id = "missing", lastRunID = "r3"))?.id)
+        assertNull(lastAutomationRun(runs, AutomationJob(id = "missing")))
+        val workflows = listOf(
+            WorkflowRunRecord(id = "w1", workflowID = "g", startedAtMs = 100),
+            WorkflowRunRecord(id = "w2", workflowID = "g", startedAtMs = 200),
+        )
+        assertEquals("w2", lastWorkflowRun(workflows, WorkflowGraph(id = "g", lastRunID = "w2"))?.id)
+        assertEquals("w1", lastWorkflowRun(workflows, WorkflowGraph(id = "g"))?.id)
+        assertNull(lastWorkflowRun(workflows, WorkflowGraph(id = "missing")))
     }
 }

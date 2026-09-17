@@ -25,8 +25,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Laptop
@@ -61,7 +64,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.marks.LogoMark
-import ai.tokenstat.tokenstat.ui.marks.Wordmark
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.TsMotion
@@ -73,7 +75,7 @@ import kotlin.math.sin
 /// Which picture an onboarding page draws. Titles live next door, so a page
 /// can change its words without this file knowing the pitch.
 enum class OnboardingArtKind {
-    Intro, Heatmap, Devices, Spend, Remaining, Workspaces, Sessions, OnTheGo, Privacy, Control,
+    Intro, Agents, Heatmap, Devices, Spend, Remaining, Workspaces, Sessions, OnTheGo, Privacy, Control,
 }
 
 /// The moving picture on an onboarding page. Compose shapes, the brand
@@ -89,7 +91,8 @@ fun OnboardingScene(kind: OnboardingArtKind, active: Boolean) {
         contentAlignment = Alignment.Center,
     ) {
         when (kind) {
-            OnboardingArtKind.Intro -> IntroArt(reduceMotion)
+            OnboardingArtKind.Intro -> IntroArt(reduceMotion, active)
+            OnboardingArtKind.Agents -> AgentsArt(reduceMotion, active)
             OnboardingArtKind.Heatmap -> HeatmapArt(reduceMotion, active)
             OnboardingArtKind.Devices -> DevicesArt(reduceMotion, active)
             OnboardingArtKind.Spend -> SpendArt(reduceMotion, active)
@@ -104,10 +107,143 @@ fun OnboardingScene(kind: OnboardingArtKind, active: Boolean) {
 }
 
 @Composable
-private fun IntroArt(reduceMotion: Boolean) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.m)) {
-        LogoMark(size = 72, animated = !reduceMotion, loops = false)
-        Wordmark(size = 26, showsMark = false)
+private fun IntroArt(reduceMotion: Boolean, active: Boolean) {
+    val colors = LocalTsColors.current
+    // Apple's spring(response 0.5, dampingFraction 0.82), staggered per tile.
+    val spring = TsMotion.tunedSpring<Float>(0.5f, 0.82f)
+    val tiles = listOf(
+        Triple("Agents", Icons.Default.Forum, 0),
+        Triple("Projects", Icons.Default.Folder, 80),
+        Triple("Usage", Icons.Default.BarChart, 160),
+    )
+    Column(
+        Modifier.width(320.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Space.m),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LogoMark(size = 32, animated = !reduceMotion, loops = false)
+            Text(
+                "Your work, together",
+                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                color = colors.textPrimary,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            tiles.forEach { (title, icon, delayMs) ->
+                var shown by remember(active) { mutableStateOf(reduceMotion || !active) }
+                LaunchedEffect(active, reduceMotion) {
+                    if (reduceMotion || !active) {
+                        shown = true
+                    } else {
+                        shown = false
+                        delay(delayMs.toLong())
+                        shown = true
+                    }
+                }
+                val fade by animateFloatAsState(if (shown) 1f else 0f, animationSpec = spring, label = "introFade$title")
+                val rise by animateFloatAsState(if (shown) 0f else 12f, animationSpec = spring, label = "introRise$title")
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .offset(y = rise.dp)
+                        .alpha(fade)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(colors.accentSoft)
+                        .padding(vertical = Space.m),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
+                    Icon(icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(25.dp))
+                    Text(
+                        title,
+                        style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                        color = colors.textPrimary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/// An illustrative conversation, with the review step visible rather than a
+/// picture of an agent silently making changes. Port of `AgentsArt`.
+@Composable
+private fun AgentsArt(reduceMotion: Boolean, active: Boolean) {
+    val colors = LocalTsColors.current
+    var shown by remember(active) { mutableStateOf(reduceMotion || !active) }
+    LaunchedEffect(active, reduceMotion) {
+        if (reduceMotion || !active) {
+            shown = true
+        } else {
+            shown = false
+            delay(200)
+            shown = true
+        }
+    }
+    // Apple's easeOut over 0.5s, after the prompt is already on screen.
+    val fade by animateFloatAsState(
+        if (shown) 1f else 0f,
+        animationSpec = tween(500, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)),
+        label = "agentsFade",
+    )
+    val rise by animateFloatAsState(
+        if (shown) 0f else 8f,
+        animationSpec = tween(500, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)),
+        label = "agentsRise",
+    )
+    Column(
+        Modifier
+            .width(320.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.panel)
+            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+            .padding(Space.m),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            Icon(Icons.Default.Folder, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
+            Text(
+                "Your project",
+                style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                color = colors.textPrimary,
+            )
+            Spacer(Modifier.weight(1f))
+            Icon(Icons.Default.Forum, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
+        }
+        Text(
+            "Let\u2019s work on the next idea.",
+            style = TextStyle(fontSize = 14.sp),
+            color = colors.textPrimary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.accentSoft)
+                .padding(Space.s),
+        )
+        Row(
+            Modifier
+                .offset(y = rise.dp)
+                .alpha(fade),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Ready for your review",
+                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                    color = colors.textPrimary,
+                )
+                Text(
+                    "Read the changes. Decide what comes next.",
+                    style = TextStyle(fontSize = 12.sp),
+                    color = colors.textSecondary,
+                )
+            }
+        }
     }
 }
 

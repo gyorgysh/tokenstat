@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launch animation: the bars rise from the baseline one after another,
+     the same 0.14s stagger as the in-app logo loop. Total under a second,
+     after which the splash holds the risen mark until the first frame. -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedResources"
+    android:drawable="@drawable/splash_bars">
+    <target android:name="barShort">
+        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
+            <objectAnimator
+                android:propertyName="scaleY"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:startOffset="0"
+                android:duration="400"
+                android:interpolator="@android:interpolator/fast_out_slow_in" />
+        </aapt:attr>
+    </target>
+    <target android:name="barMid">
+        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
+            <objectAnimator
+                android:propertyName="scaleY"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:startOffset="140"
+                android:duration="400"
+                android:interpolator="@android:interpolator/fast_out_slow_in" />
+        </aapt:attr>
+    </target>
+    <target android:name="barTall">
+        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
+            <objectAnimator
+                android:propertyName="scaleY"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:startOffset="280"
+                android:duration="400"
+                android:interpolator="@android:interpolator/fast_out_slow_in" />
+        </aapt:attr>
+    </target>
+</animated-vector>

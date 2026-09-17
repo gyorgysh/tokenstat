@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -133,7 +134,13 @@ fun PaywallSheet(billing: PlayBillingManager, onDismiss: () -> Unit, currentTier
     val billingState by billing.state.collectAsStateWithLifecycle()
     var monthly by rememberSaveable { mutableStateOf(false) }
     val catalog = if (monthly) pitches.filter { it.monthlyId != null } else pitches
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // Full height. This is a list of plans with a paragraph each; opening it
+    // half way over the sheet that launched it showed one and a half cards
+    // and made comparing them a scroll inside a scroll inside a sheet.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()

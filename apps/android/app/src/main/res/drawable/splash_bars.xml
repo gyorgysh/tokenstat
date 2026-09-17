@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash glyph: the three bars on transparency, one group each so the
+     launch animation rises them in turn. The canvas is the 288dp splash
+     viewport and the bars are the middle 44dp, the exact geometry of the
+     `LogoMark(size = 44)` the LoadingScreen holds centered behind the
+     splash. Same size, same place, so the handoff is seamless instead of
+     a shrink. The splash background comes from the launch theme. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedResources"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <group
+        android:name="barShort"
+        android:pivotX="128.29"
+        android:pivotY="166">
+        <path
+            android:fillColor="#C3B0FF"
+            android:pathData="M125.67,147.14 h5.23 a3.67,3.67 0 0 1 3.67,3.67 v11.52 a3.67,3.67 0 0 1 -3.67,3.67 h-5.23 a3.67,3.67 0 0 1 -3.67,-3.67 v-11.52 a3.67,3.67 0 0 1 3.67,-3.67 z" />
+    </group>
+    <group
+        android:name="barMid"
+        android:pivotX="144"
+        android:pivotY="166">
+        <path
+            android:fillColor="#8B5CF6"
+            android:pathData="M141.38,134.57 h5.23 a3.67,3.67 0 0 1 3.67,3.67 v24.09 a3.67,3.67 0 0 1 -3.67,3.67 h-5.23 a3.67,3.67 0 0 1 -3.67,-3.67 v-24.09 a3.67,3.67 0 0 1 3.67,-3.67 z" />
+    </group>
+    <group
+        android:name="barTall"
+        android:pivotX="159.71"
+        android:pivotY="166">
+        <path
+            android:fillColor="#E879F9"
+            android:pathData="M157.10,122 h5.23 a3.67,3.67 0 0 1 3.67,3.67 v36.66 a3.67,3.67 0 0 1 -3.67,3.67 h-5.23 a3.67,3.67 0 0 1 -3.67,-3.67 v-36.66 a3.67,3.67 0 0 1 3.67,-3.67 z" />
+    </group>
+</vector>

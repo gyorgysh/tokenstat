@@ -3,6 +3,7 @@ package ai.tokenstat.tokenstat
 
 import android.app.Application
 import android.os.Build
+import android.util.Log
 import ai.tokenstat.tokenstat.core.CoreClient
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +32,12 @@ class TokenstatApplication : Application() {
                 }
                 CoreClient.call("pricing.seed", buildJsonObject { put("path", seed.absolutePath) })
                 CoreClient.call("pricing.refresh")
+            }.onFailure {
+                // Every money figure prices against this book. A silent
+                // failure here is a day of wrong numbers with nothing in
+                // the log saying why, which is what hid a 26-day-stale
+                // book behind a same-day fetch.
+                Log.w("ts-pricing", "price refresh failed, money is priced against the old book", it)
             }
         }
     }

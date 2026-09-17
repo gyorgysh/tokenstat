@@ -362,6 +362,19 @@ object DeviceCopy {
         return formatServerDate(lastSyncAt) ?: "never"
     }
 
+    /// Whether the account's platform string names a machine with no display
+    /// layer, port of `isHeadlessPlatform`. Only the fallback: the live
+    /// `host.provisionStatus` probe answers first, and this covers a host
+    /// that cannot answer. Empty stays false, never hiding the row for a
+    /// machine that never said what it runs.
+    fun isHeadlessPlatform(platform: String?): Boolean {
+        val lower = (platform ?: "").lowercase()
+        if (lower.isEmpty()) return false
+        if ("linux" in lower) return true
+        return listOf("ubuntu", "debian", "fedora", "alpine", "arch", "centos", "rocky", "almalinux")
+            .any { it in lower }
+    }
+
     fun reach(isThisDevice: Boolean, online: Boolean?, hasKey: Boolean): String {
         if (isThisDevice) return "This is the device you are holding."
         if (online == true) {

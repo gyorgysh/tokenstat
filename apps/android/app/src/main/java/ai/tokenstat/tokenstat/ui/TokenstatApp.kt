@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui
 
+import ai.tokenstat.tokenstat.ui.components.TsDangerButton
+
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.shape.CircleShape
+
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.browser.customtabs.CustomTabsIntent
@@ -24,11 +29,15 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -99,13 +108,21 @@ import ai.tokenstat.tokenstat.ui.logic.RecentPlaces
 import ai.tokenstat.tokenstat.ui.logic.RelativeClock
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
+import ai.tokenstat.tokenstat.ui.logic.groupedCount
+import ai.tokenstat.tokenstat.ui.logic.deviceHistoryDays
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
 import ai.tokenstat.tokenstat.ui.logic.harnessName
+import ai.tokenstat.tokenstat.ui.logic.insightFactPanels
 import ai.tokenstat.tokenstat.ui.logic.money
 import ai.tokenstat.tokenstat.ui.logic.moneyValue
 import ai.tokenstat.tokenstat.ui.logic.shortDate
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
 import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
+import ai.tokenstat.tokenstat.ui.devices.DeviceDetailScreen
+import ai.tokenstat.tokenstat.ui.devices.DevicesHeader
+import ai.tokenstat.tokenstat.ui.logic.DeviceUsage
+import ai.tokenstat.tokenstat.ui.insights.InsightStatPanels
+import ai.tokenstat.tokenstat.ui.sample.SampleSheet
 import ai.tokenstat.tokenstat.ui.search.SearchOpen
 import ai.tokenstat.tokenstat.ui.search.WorkSearchSheet
 import ai.tokenstat.tokenstat.ui.setup.SetupWizard
@@ -124,10 +141,19 @@ import ai.tokenstat.tokenstat.ui.workspace.WorkspaceFolderRow
 import ai.tokenstat.tokenstat.ui.workspace.WorkspaceLayoutStore
 import ai.tokenstat.tokenstat.ui.workspace.WorkspaceSection
 import ai.tokenstat.tokenstat.ui.workspace.WorkspaceSessionRow
+import ai.tokenstat.tokenstat.ui.workspace.WorkspaceHub
 import ai.tokenstat.tokenstat.ui.workspace.WorkspacesEditor
 import ai.tokenstat.tokenstat.ui.chrome.ConnectionChip
+import ai.tokenstat.tokenstat.ui.components.TsSearchField
 import ai.tokenstat.tokenstat.ui.chrome.FloatingTabBar
+import ai.tokenstat.tokenstat.ui.chrome.LocalTabBarPresence
+import ai.tokenstat.tokenstat.ui.chrome.TabBarPresence
+import ai.tokenstat.tokenstat.ui.chrome.backdropSource
+import ai.tokenstat.tokenstat.ui.chrome.rememberBackdrop
+import ai.tokenstat.tokenstat.ui.chrome.rememberTabBarMinimizeScroll
+import ai.tokenstat.tokenstat.ui.chrome.rememberTabBarMinimizeState
 import ai.tokenstat.tokenstat.ui.chrome.SharedPrefsTabs
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import ai.tokenstat.tokenstat.ui.chrome.TabCustomization
 import ai.tokenstat.tokenstat.ui.chrome.TabDef
 import ai.tokenstat.tokenstat.ui.chrome.TabEditorSheet
@@ -145,7 +171,12 @@ import ai.tokenstat.tokenstat.ui.ssh.SshHostRow
 import ai.tokenstat.tokenstat.ui.ssh.SshKeyImportDialog
 import ai.tokenstat.tokenstat.ui.ssh.SshKeyRenameDialog
 import ai.tokenstat.tokenstat.ui.ssh.SshKeyRow
+import ai.tokenstat.tokenstat.ui.ssh.SshOpenSessionsSection
+import ai.tokenstat.tokenstat.ui.ssh.SshSessionEntry
 import ai.tokenstat.tokenstat.ui.ssh.SshSnippetRow
+import ai.tokenstat.tokenstat.ui.ssh.TunnelStatusBanner
+import ai.tokenstat.tokenstat.ui.ssh.VaultLockRow
+import ai.tokenstat.tokenstat.ui.ssh.startupCommands
 import ai.tokenstat.tokenstat.ui.marks.EmptyArt
 import ai.tokenstat.tokenstat.ui.marks.EmptyArtKind
 import ai.tokenstat.tokenstat.ui.marks.FeatureMark
@@ -175,12 +206,15 @@ import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 import ai.tokenstat.tokenstat.ui.theme.smoothEnter
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -285,8 +319,18 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
     fun openPage(url: String) {
         CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
     }
+    // Edge-to-edge draws behind the status bar; safeDrawing keeps the card
+    // clear of the clock. The column caps at a phone-like width so a tablet
+    // reads as a centred card, not a stretched row.
+    Box(
+        Modifier.fillMaxSize().background(colors.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(horizontal = 32.dp, vertical = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
     Column(
-        Modifier.fillMaxSize().padding(32.dp),
+        Modifier.widthIn(max = 480.dp).fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -374,6 +418,7 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
             modifier = Modifier.fillMaxWidth(),
         )
     }
+    }
 }
 
 @Composable
@@ -435,15 +480,15 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     val expanded = with(density) {
         LocalWindowInfo.current.containerSize.width.toDp() >= 840.dp
     }
-    // This device's tabs, arranged by the person holding it. A tablet has
-    // room, so SSH joins from the start; the phone bar stays the familiar
-    // four until it is switched on in the tab editor.
-    val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
-    val customization = remember(context, tablet) {
+    // This device's tabs, arranged by the person holding it. Every tab is
+    // shown to begin with, SSH included, which is the bar the iPhone gets.
+    // Somebody who does not live in servers can still put it away in the tab
+    // editor, and a phone that already stored a choice keeps it.
+    val customization = remember(context) {
         TabCustomization(
             SharedPrefsTabs(context),
             Destination.entries.map { it.id },
-            if (tablet) emptySet() else setOf(Destination.Ssh.id),
+            emptySet(),
         )
     }
     val displayed = customization.displayed(selected.id)
@@ -454,11 +499,28 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     LaunchedEffect(customization.visibleTabs) {
         if (displayed.none { it == selected }) selected = displayed.first()
     }
+    // The tab bar gets out of the way while a list scrolls, like iOS, and
+    // comes back at the top, on a tap, or when the tab changes.
+    val tabBar = rememberTabBarMinimizeState()
+    val tabBarScroll = rememberTabBarMinimizeScroll(tabBar)
+    // A pushed screen (a conversation) takes the bar off the screen, the
+    // way `clientTabBarHidden` does on iOS. Held here so the bar can read it
+    // and any depth of screen can claim it.
+    val tabBarPresence = remember { TabBarPresence() }
+    // What the floating bar is glass over. Recorded from the tab content
+    // only: the bar is its sibling, never its child, or the blur would be
+    // sampling itself.
+    val backdrop = rememberBackdrop()
+    LaunchedEffect(selected) { tabBar.expand() }
 
     val colors = LocalTsColors.current
+    CompositionLocalProvider(LocalTabBarPresence provides tabBarPresence) {
     Scaffold(
         containerColor = colors.background,
         topBar = {
+            // A pushed screen brings its own header. Stacking the wordmark
+            // above it was two headers and a fifth of the screen.
+            if (tabBarPresence.topHidden) return@Scaffold
             TopAppBar(
                 // Avatar leading, wordmark centred: the same chrome shape as
                 // the Apple client's toolbar.
@@ -474,18 +536,47 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     }
                 },
                 navigationIcon = {
+                    // Ringed, the way the Apple toolbar rings it: the photo
+                    // needs an edge of its own or it bleeds into the
+                    // background on a light theme.
                     IconButton(onClick = { accountOpen = true }) {
+                        Box(
+                            Modifier
+                                .size(38.dp)
+                                .shadow(2.dp, CircleShape)
+                                .clip(CircleShape)
+                                .background(colors.panel),
+                            contentAlignment = Alignment.Center,
+                        ) {
                         Avatar(
                             state.account?.string("displayName") ?: state.account?.string("handle") ?: "your account",
                             size = 34,
                             avatarUrl = state.account?.string("avatar"),
                             signedIn = state.signedIn,
                         )
+                        }
                     }
                 },
                 actions = {
+                    // A chip, not a naked glyph. On iPhone this is a circular
+                    // raised surface and it reads as a control; the bare icon
+                    // beside a wordmark read as part of the decoration.
                     IconButton(onClick = { searchOpen = true }) {
-                        Icon(ActionIcon.Search.vector, "Search", tint = colors.controlGlyph)
+                        Box(
+                            Modifier
+                                .size(34.dp)
+                                .shadow(2.dp, CircleShape)
+                                .clip(CircleShape)
+                                .background(colors.panel),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                ActionIcon.Search.vector,
+                                "Search",
+                                tint = colors.accent,
+                                modifier = Modifier.size(19.dp),
+                            )
+                        }
                     }
                     ConnectionChip(state.connection, onRetry = { model.retryConnection() })
                     // No refresh button: like iOS, every tab refreshes with
@@ -493,17 +584,15 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 },
             )
         },
-        bottomBar = {
-            if (!expanded) {
-                FloatingTabBar(
-                    selected = displayed.indexOf(selected).coerceAtLeast(0),
-                    tabs = displayed.map { TabSpec(it.label, it.icon) },
-                    onSelect = { selected = displayed[it] },
-                )
-            }
-        },
     ) { padding ->
-        Row(Modifier.fillMaxSize().padding(padding)) {
+        // The bar floats over the tab content like the iOS 26 dock: rows
+        // scroll behind its glass, and every scrollable under it ends at
+        // `TabBarChrome.contentBottomInset` so the last row rests clear of it.
+        Box(
+            Modifier.fillMaxSize()
+                .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()),
+        ) {
+        Row(Modifier.fillMaxSize().backdropSource(backdrop)) {
             if (expanded) {
                 NavigationRail(containerColor = colors.tabStrip, contentColor = colors.textSecondary) {
                     Spacer(Modifier.height(8.dp))
@@ -540,6 +629,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                         model = model,
                         state = state,
                         stores = homeStores,
+                        tabBarScroll = tabBarScroll,
                         onOpenWork = { hostId, folderId ->
                             pendingWorkHostId = hostId
                             pendingWorkFolderId = folderId
@@ -560,6 +650,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                             model = model,
                             state = state,
                             expanded = expanded,
+                            tabBarScroll = tabBarScroll,
                             pendingHostId = pendingWorkHostId,
                             pendingFolderId = pendingWorkFolderId,
                             stores = homeStores,
@@ -576,10 +667,11 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     } else {
                         RemotePaywall { accountOpen = true }
                     }
-                    Destination.Insights -> InsightsScreen(model, state, onHome = { selected = Destination.Home })
+                    Destination.Insights -> InsightsScreen(model, state, onHome = { selected = Destination.Home }, tabBarScroll = tabBarScroll)
                     Destination.Devices -> DevicesScreen(
                         model,
                         state,
+                        tabBarScroll = tabBarScroll,
                         onPlans = { accountOpen = true },
                         onOpenWork = { id ->
                             pendingWorkHostId = id
@@ -592,11 +684,24 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     )
                     // Saved servers, for somebody who lives in them. No back
                     // button: the bar behind it is the way out.
-                    Destination.Ssh -> AndroidSSHScreen(model, state, onPlans = { accountOpen = true })
+                    Destination.Ssh -> AndroidSSHScreen(model, state, onPlans = { accountOpen = true }, tabBarScroll = tabBarScroll)
                 }
                 }
             }
         }
+        if (!expanded && !tabBarPresence.hidden) {
+            FloatingTabBar(
+                selected = displayed.indexOf(selected).coerceAtLeast(0),
+                tabs = displayed.map { TabSpec(it.label, it.icon) },
+                onSelect = { selected = displayed[it] },
+                minimized = tabBar.minimized,
+                onExpandRequest = { tabBar.expand() },
+                backdrop = backdrop,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+        }
+    }
     }
     if (searchOpen) {
         WorkSearchSheet(
@@ -677,6 +782,7 @@ private fun HomeScreen(
     onOpenDevices: () -> Unit,
     onSetupWizard: (() -> Unit)? = null,
     onSignIn: (() -> Unit)? = null,
+    tabBarScroll: NestedScrollConnection? = null,
 ) {
     val calendar = state.home
     val rows = calendar?.get("rows") as? JsonArray
@@ -772,11 +878,11 @@ private fun HomeScreen(
     PullToRefreshBox(
         isRefreshing = refreshing,
         onRefresh = { retry() },
-        modifier = Modifier.fillMaxSize(),
+        modifier = if (tabBarScroll == null) Modifier.fillMaxSize() else Modifier.fillMaxSize().nestedScroll(tabBarScroll),
     ) {
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(cardPaddingDp),
+        contentPadding = PaddingValues(start = cardPaddingDp, top = cardPaddingDp, end = cardPaddingDp, bottom = cardPaddingDp + TabBarChrome.contentBottomInset),
         verticalArrangement = Arrangement.spacedBy(Space.m),
         userScrollEnabled = !pickingDay,
     ) {
@@ -1097,7 +1203,12 @@ private fun spendSince(cells: List<JsonObject>, last: String?, days: Int): Long 
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun InsightsScreen(model: AppViewModel, state: ClientState, onHome: () -> Unit) {
+private fun InsightsScreen(
+    model: AppViewModel,
+    state: ClientState,
+    onHome: () -> Unit,
+    tabBarScroll: NestedScrollConnection? = null,
+) {
     val colors = LocalTsColors.current
     val reduceMotion = rememberReduceMotion()
     // Three cuts only — Models/Harnesses/Days — the privacy boundary the iOS
@@ -1163,28 +1274,33 @@ private fun InsightsScreen(model: AppViewModel, state: ClientState, onHome: () -
     PullToRefreshBox(
         isRefreshing = isLoading,
         onRefresh = { scope.launch { TsRefresh.run("insights") { cached.clear(); fetch(cut) } } },
-        modifier = Modifier.fillMaxSize(),
+        modifier = if (tabBarScroll == null) Modifier.fillMaxSize() else Modifier.fillMaxSize().nestedScroll(tabBarScroll),
     ) {
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(cardPaddingDp),
+        contentPadding = PaddingValues(start = cardPaddingDp, top = cardPaddingDp, end = cardPaddingDp, bottom = cardPaddingDp + TabBarChrome.contentBottomInset),
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         item {
-            Text("Insights", style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
+            // The field first, then the cut: long identifiers are exactly
+            // the thing worth filtering. The prompt names the cut in
+            // lowercase, where "Filter models" reads as a description of
+            // the field and "Filter Models" would read as a command.
+            // The app's own search field, not a bare Material box: every
+            // other place you type a filter here has a magnifier in front of
+            // it and a clear button once there is something to clear, and
+            // this one looked like a stray text input beside them.
+            TsSearchField(
+                prompt = "Filter ${cutNames[cut].lowercase()}",
+                query = query,
+                onQueryChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+            )
             Spacer(Modifier.height(Space.s))
             SegmentedCapsulePicker(
                 options = cutNames.mapIndexed { i, name -> Triple(i, name, null as ImageVector?) },
                 selection = cut,
                 onSelect = { cut = it },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.s))
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                placeholder = { Text("Search") },
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -1258,12 +1374,12 @@ private fun InsightsScreen(model: AppViewModel, state: ClientState, onHome: () -
                 item {
                     Text(
                         "Nothing matches \"$term\".",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = TsType.subheadline,
                         color = colors.textSecondary,
                     )
                 }
             } else {
-                item { SectionLabel(cutNames[cut]) }
+                item { SectionTitle(cutNames[cut], "mark_insights") }
                 itemsIndexed(shown) { index, row ->
                     Arrive(reduceMotion, staggerIndex = index.coerceAtMost(8)) {
                         InsightRow(row = row, cut = cut, peak = peak)
@@ -1294,41 +1410,30 @@ private fun InsightSummary(rows: List<JsonObject>, cutName: String, stale: Boole
     val complete = rows.all { ((it["unpricedModels"] as? JsonArray)?.size ?: 0) == 0 }
     val tokens = rows.sumOf { it["counters"]?.jsonObject?.long("total") ?: 0L }
     val events = rows.sumOf { it.long("events") ?: 0L }
-    TsCard(title = "This period") {
-        Text(
-            moneyValue(total, estimated, complete),
-            style = TsType.numeric(26, FontWeight.Medium),
-            color = tsAccent(),
-            maxLines = 1,
-        )
-        Text(
-            "at list rates, across every device",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary,
-        )
-        Spacer(Modifier.height(Space.s))
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            InsightFactPanel(label = "Tokens", value = compactTokens(tokens), modifier = Modifier.weight(1f))
-            InsightFactPanel(label = "Events", value = compactTokens(events), modifier = Modifier.weight(1f))
-            InsightFactPanel(label = cutName, value = rows.size.toString(), modifier = Modifier.weight(1f))
-        }
-        if (stale && fetchedAtMs != null) {
+    TsCard {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+            SectionTitle("This period", "mark_insights")
             Text(
-                "The refresh did not go through. Showing what this device last fetched, " +
-                    "${RelativeClock.label(fetchedAtMs, System.currentTimeMillis())}.",
-                style = MaterialTheme.typography.bodySmall,
+                moneyValue(total, estimated, complete),
+                style = TsType.numeric(34, FontWeight.SemiBold),
+                color = tsAccent(),
+                maxLines = 1,
+            )
+            Text(
+                "at list rates, across every device",
+                style = TsType.caption,
                 color = colors.textSecondary,
             )
+            InsightStatPanels(insightFactPanels(tokens, events, rows.size, cutName) { compactTokens(it) })
+            if (stale && fetchedAtMs != null) {
+                Text(
+                    "The refresh did not go through. Showing what this device last fetched, " +
+                        "${RelativeClock.label(fetchedAtMs, System.currentTimeMillis())}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+            }
         }
-    }
-}
-
-@Composable
-private fun InsightFactPanel(label: String, value: String, modifier: Modifier = Modifier) {
-    val colors = LocalTsColors.current
-    Column(modifier) {
-        Text(value, style = TsType.numeric(16, FontWeight.Medium), color = colors.accent, maxLines = 1)
-        Text(label, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1)
     }
 }
 
@@ -1339,14 +1444,15 @@ private fun InsightDayChart(rows: List<JsonObject>) {
     val colors = LocalTsColors.current
     val days = rows.sortedBy { it.string("key") ?: "" }
     val peak = days.maxOfOrNull { it["counters"]?.jsonObject?.long("total") ?: 0L } ?: 0L
-    TsCard(title = "Daily activity") {
+    TsCard {
+        val bars = days.map { it["counters"]?.jsonObject?.long("total") ?: 0L }
+        Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        SectionTitle("Daily activity", "mark_activity")
         Text(
             "Tokens per day · cache included",
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary,
         )
-        Spacer(Modifier.height(Space.s))
-        val bars = days.map { it["counters"]?.jsonObject?.long("total") ?: 0L }
         Canvas(Modifier.fillMaxWidth().height(180.dp)) {
             if (bars.isEmpty() || peak <= 0) return@Canvas
             val gap = 2.dp.toPx()
@@ -1377,6 +1483,7 @@ private fun InsightDayChart(rows: List<JsonObject>) {
                 color = colors.textSecondary,
             )
         }
+        }
     }
 }
 
@@ -1406,19 +1513,20 @@ private fun InsightRow(row: JsonObject, cut: Int, peak: Long) {
             Column(Modifier.weight(1f)) {
                 Text(
                     cutTitle(cut, row.string("key") ?: ""),
+                    style = TsType.subheadline,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                 )
                 val tokens = row["counters"]?.jsonObject?.long("total") ?: 0L
                 val events = row.long("events") ?: 0L
                 Text(
-                    "${compactTokens(tokens)} tokens, ${compactTokens(events)} events",
-                    style = MaterialTheme.typography.bodySmall,
+                    "${compactTokens(tokens)} tokens, ${groupedCount(events)} events",
+                    style = TsType.caption,
                     color = colors.textSecondary,
                 )
             }
             Spacer(Modifier.width(Space.s))
-            Text(moneyValue(value, estimated, complete), color = tsAccent(), style = TsType.numeric(14))
+            Text(moneyValue(value, estimated, complete), color = tsAccent(), style = TsType.numeric(16))
         }
         // A quiet share bar in the accent, not a system meter.
         Box(
@@ -1450,6 +1558,7 @@ private fun DevicesScreen(
     sshOpenSignal: Int = 0,
     pendingDeviceId: String? = null,
     onPendingDeviceConsumed: () -> Unit = {},
+    tabBarScroll: NestedScrollConnection? = null,
 ) {
     var sshOpen by rememberSaveable { mutableStateOf(false) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -1468,13 +1577,9 @@ private fun DevicesScreen(
     val thisId = state.account?.string("thisMachineId")
     // Each host's share of spend, fetched once when the screen opens like
     // `ClientDevicesModel`: one request per device on the host's side.
-    var usageByMachine by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+    var usageByMachine by remember { mutableStateOf<Map<String, DeviceUsage>>(emptyMap()) }
     var usageError by remember { mutableStateOf<String?>(null) }
-    val tierDays = when (state.account?.string("tier")?.lowercase()) {
-        "legend", "patron" -> 3650
-        "supporter" -> 365
-        else -> 30
-    }
+    val tierDays = deviceHistoryDays(state.account?.string("tier"))
     LaunchedEffect(unsorted, tierDays) {
         val ids = unsorted.mapNotNull { (it as? JsonObject)?.takeIf { m -> m.string("kind") != "client" }?.string("id") }
         if (ids.isEmpty()) {
@@ -1491,7 +1596,16 @@ private fun DevicesScreen(
                 },
             ) as JsonArray
         }.onSuccess { rows ->
-            usageByMachine = rows.mapNotNull { (it as? JsonObject)?.let { row -> row.string("machine")?.let { m -> m to (row.long("valueMicros") ?: 0L) } } }.toMap()
+            usageByMachine = rows.mapNotNull { (it as? JsonObject)?.let { row ->
+                row.string("machine")?.let { m ->
+                    m to DeviceUsage(
+                        valueMicros = row.long("valueMicros") ?: 0L,
+                        events = row.long("events") ?: 0L,
+                        activeDays = row.int("activeDays") ?: 0,
+                        days = row.int("days") ?: tierDays,
+                    )
+                }
+            } }.toMap()
             usageError = null
         }.onFailure {
             // The list still drew. What failed is the share of spend beside
@@ -1506,9 +1620,25 @@ private fun DevicesScreen(
         sortMachines(
             unsorted.mapNotNull { it as? JsonObject },
             thisId,
-        ) { machine -> machine.string("id")?.let { usageByMachine[it] } }
+        ) { machine -> machine.string("id")?.let { usageByMachine[it]?.valueMicros } }
     }
     val selected = machines.find { it.string("id") == selectedId }
+    // The iPhone leads this screen with a search field. Eight devices fit;
+    // the limit is ten and people run more than one account's worth of
+    // machines, so the list is one the eye has to hunt through without it.
+    var deviceQuery by rememberSaveable { mutableStateOf("") }
+    val shownMachines = remember(machines, deviceQuery) {
+        val q = deviceQuery.trim()
+        if (q.isEmpty()) {
+            machines
+        } else {
+            machines.filter {
+                (it.string("label") ?: "").contains(q, ignoreCase = true) ||
+                    (it.string("platform") ?: "").contains(q, ignoreCase = true) ||
+                    (it.string("id") ?: "").contains(q, ignoreCase = true)
+            }
+        }
+    }
     BackHandler(enabled = sshOpen || selected != null) {
         if (sshOpen) sshOpen = false else selectedId = null
     }
@@ -1519,6 +1649,8 @@ private fun DevicesScreen(
             state = state,
             machine = selected,
             thisId = thisId,
+            usage = selected.string("id")?.let { usageByMachine[it] },
+            accountTotalMicros = usageByMachine.values.sumOf { it.valueMicros },
             onBack = { selectedId = null },
             onPlans = onPlans,
             onOpenWork = { selected.string("id")?.let(onOpenWork) },
@@ -1532,18 +1664,19 @@ private fun DevicesScreen(
                     refreshing = false
                 }
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = if (tabBarScroll == null) Modifier.fillMaxSize() else Modifier.fillMaxSize().nestedScroll(tabBarScroll),
         ) {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + TabBarChrome.contentBottomInset),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
             item {
-                    Text(
-                        "Devices",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = LocalTsColors.current.textPrimary,
+                    TsSearchField(
+                        prompt = "Search devices",
+                        query = deviceQuery,
+                        onQueryChange = { deviceQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 item {
@@ -1560,7 +1693,7 @@ private fun DevicesScreen(
                                     color = colors.textSecondary,
                                 )
                             }
-                            Icon(ActionIcon.Next.vector, null, tint = colors.controlGlyph)
+                            Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
                         }
                     }
                 }
@@ -1574,11 +1707,30 @@ private fun DevicesScreen(
                                 Text("SSH hosts", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                                 Text("Connect to a saved server", color = colors.textSecondary)
                             }
-                            Icon(ActionIcon.Next.vector, null, tint = colors.controlGlyph)
+                            Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
                         }
                     }
                 }
-                items(machines) { value ->
+                // The count belongs above the list it counts, which is where
+                // the iPhone puts it, rather than above the two rows that add
+                // to it.
+                item {
+                    DevicesHeader(
+                        machineCount = machines.size,
+                        machineLimit = state.account?.int("machineLimit"),
+                        canRemote = state.canRemote,
+                    )
+                }
+                if (shownMachines.isEmpty() && deviceQuery.isNotBlank()) {
+                    item {
+                        Text(
+                            "No device matches \"${deviceQuery.trim()}\".",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalTsColors.current.textSecondary,
+                        )
+                    }
+                }
+                items(shownMachines) { value ->
                     val isHost = value.string("kind") != "client"
                     val online = value.get("online")?.jsonPrimitive?.booleanOrNull
                     val isThis = thisId != null && value.string("id") == thisId
@@ -1620,7 +1772,7 @@ private fun DevicesScreen(
                                 )
                             }
                             if (showsSpend) {
-                                val micros = value.string("id")?.let { usageByMachine[it] }
+                                val micros = value.string("id")?.let { usageByMachine[it]?.valueMicros }
                                 // Not zero. A device whose share has not been
                                 // fetched has not been shown to have spent
                                 // nothing.
@@ -1644,7 +1796,7 @@ private fun DevicesScreen(
                                 }
                                 Spacer(Modifier.width(8.dp))
                             }
-                            Icon(ActionIcon.Next.vector, null, tint = colors.controlGlyph)
+                            Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
                         }
                     }
                 }
@@ -1664,284 +1816,6 @@ private fun DevicesScreen(
         }
     }
 }
-
-@Composable
-private fun DeviceDetailScreen(
-    model: AppViewModel,
-    state: ClientState,
-    machine: JsonObject,
-    thisId: String?,
-    onBack: () -> Unit,
-    onPlans: () -> Unit,
-    onOpenWork: () -> Unit,
-) {
-    val isThis = thisId != null && machine.string("id") == thisId
-    val isHost = machine.string("kind") != "client"
-    val peer = machine.string("publicIdentity")
-    val online = machine.get("online")?.jsonPrimitive?.booleanOrNull
-    val hasKey = !peer.isNullOrEmpty()
-    val label = DeviceCopy.displayName(machine.string("label"), machine.string("platform"), isHost)
-    var viewing by remember { mutableStateOf(false) }
-    val detailScope = rememberCoroutineScope()
-    // Naming a device, in the row where the name is read. Empty is the undo
-    // rather than an error: the machine goes back to naming itself.
-    var renaming by remember { mutableStateOf(false) }
-    var draft by remember { mutableStateOf("") }
-    var savingName by remember { mutableStateOf(false) }
-    var renameError by remember { mutableStateOf<String?>(null) }
-    var renamedTo by remember { mutableStateOf<String?>(null) }
-    val currentName = renamedTo ?: machine.string("label") ?: label
-    fun saveName() {
-        val id = machine.string("id")
-        if (id.isNullOrEmpty()) {
-            renameError = "This device has no id on the account yet."
-            return
-        }
-        savingName = true
-        detailScope.launch {
-            runCatching {
-                model.core(
-                    "account.renameMachine",
-                    buildJsonObject {
-                        put("id", id)
-                        put("name", draft.trim())
-                    },
-                )
-            }.onSuccess {
-                renamedTo = draft.trim().ifEmpty { null }
-                renameError = null
-                renaming = false
-                model.refresh()
-            }.onFailure {
-                renameError = friendlyError(it.message).message
-            }
-            savingName = false
-        }
-    }
-    if (viewing && !peer.isNullOrEmpty()) {
-        ScreenViewerScreen(
-            model = model,
-            peer = peer,
-            hostLabel = currentName,
-            onClose = { viewing = false },
-        )
-        return
-    }
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Text(currentName, style = MaterialTheme.typography.headlineSmall)
-        }
-        if (!isThis && !peer.isNullOrEmpty() && online == true) {
-            HostStatsBar(model, peer)
-        }
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Reach", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    DeviceCopy.reach(isThis, online, hasKey),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("What this is", style = MaterialTheme.typography.titleMedium)
-                if (renaming) {
-                    Text("Name", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedTextField(
-                        value = draft,
-                        onValueChange = { draft = it },
-                        placeholder = { Text("Name this device") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TsAccentButton(
-                            label = if (savingName) "Saving…" else "Save",
-                            enabled = !savingName,
-                            onClick = { saveName() },
-                        )
-                        TsSecondaryButton(
-                            label = "Cancel",
-                            onClick = { renaming = false; renameError = null },
-                        )
-                    }
-                    Text(
-                        "Empty puts back the name the device gives itself.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Name", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                machine.string("label")?.ifEmpty { null } ?: "not named on this account",
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        // Any device on the account, not only this phone. A
-                        // Linux server with nothing but the CLI on it has no
-                        // other way to be named.
-                        TsSecondaryButton(
-                            label = "Rename",
-                            small = true,
-                            onClick = {
-                                draft = machine.string("label") ?: ""
-                                renaming = true
-                            },
-                        )
-                    }
-                }
-                renameError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                machine.string("platform")?.let {
-                    Column {
-                        Text("What it runs", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(it, color = MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-                machine.string("id")?.let {
-                    Column {
-                        Text("Device id", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-                // Hosts upload an archive, so their sync time is a product
-                // fact. Phones never do: lastSyncAt there is not a fact.
-                if (isHost) {
-                    Column {
-                        Text("Last sync", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            DeviceCopy.lastSync(true, machine.string("lastSyncAt")),
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                } else {
-                    formatRelativeDate(machine.string("lastSeenAt"))?.let { seen ->
-                        Column {
-                            Text("Last used", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(seen, color = MaterialTheme.colorScheme.onSurface)
-                        }
-                    }
-                }
-            }
-        }
-        if (!isThis && isHost && !peer.isNullOrEmpty()) {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("From this device", style = MaterialTheme.typography.titleMedium)
-                    if (state.canRemote) {
-                        TsAccentButton(label = "Open work", onClick = onOpenWork, modifier = Modifier.fillMaxWidth())
-                        Text(
-                            if (online == true) "Folders, terminals and sessions on this computer."
-                            else "It is asleep. Opening this will wake nothing, but it will try.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        Text("Opening folders and terminals on this computer is on Patron.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TsAccentButton(label = "See plans", onClick = onPlans)
-                    }
-                    TsSecondaryButton(
-                        label = "View screen",
-                        onClick = { viewing = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        if ((state.account?.string("tier") ?: "").equals("legend", ignoreCase = true)) {
-                            "End-to-end encrypted from this device."
-                        } else {
-                            "Requires Legend."
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun HostStatsBar(model: AppViewModel, peer: String) {
-    val colors = LocalTsColors.current
-    var stats by remember { mutableStateOf<JsonObject?>(null) }
-    var failed by remember { mutableStateOf(false) }
-    var route by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(peer) {
-        runCatching { model.prepareHost(peer, "Host") }
-        runCatching { model.core("remote.status") as? JsonObject }
-            .onSuccess { status ->
-                val peers = ((status?.get("traffic") as? JsonObject)?.get("peers") as? JsonArray)
-                    .orEmpty().mapNotNull { it as? JsonObject }
-                // Missing stays missing: never invent a path nobody observed.
-                route = peers.find { (it.string("peer") ?: "").equals(peer, ignoreCase = true) }
-                    ?.string("route")?.takeIf { it == "direct" || it == "relay" }
-            }
-        while (true) {
-            runCatching { model.hostStats(peer) }
-                .onSuccess { stats = it; failed = false }
-                .onFailure { if (stats == null) failed = true }
-            delay(2500)
-        }
-    }
-    // Missing readings stay off the bar rather than drawing as zero.
-    val power = HostStatsFormat.powerLabel(
-        charging = stats?.bool("charging") == true,
-        percent = stats?.int("percent"),
-        power = stats?.string("power"),
-        failed = failed,
-        hadStats = stats != null,
-    )
-    val cpu = stats?.doubleOrNull("cpu")?.let { HostStatsFormat.cpuLabel(it) }
-        ?: if (stats == null && !failed) "…" else "n/a"
-    val ram = run {
-        val used = stats?.long("ramUsedBytes")
-        val total = stats?.long("ramTotalBytes")
-        if (used != null && total != null && total > 0) HostStatsFormat.ramLabel(used, total)
-        else if (stats == null && !failed) "…"
-        else "n/a"
-    }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                HostStatCell(title = "Power", value = power, modifier = Modifier.weight(1f))
-                HostStatCell(title = "CPU", value = cpu, modifier = Modifier.weight(1f))
-                HostStatCell(title = "Memory", value = ram, modifier = Modifier.weight(1f))
-            }
-            // The same wording and colours the screen viewer uses.
-            when (route) {
-                "direct" -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(7.dp).background(colors.success, RoundedCornerShape(4.dp)))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Direct connection", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                }
-                "relay" -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(7.dp).background(colors.warning, RoundedCornerShape(4.dp)))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Encrypted relay", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                }
-            }
-            Text(
-                "Read from this computer over the encrypted tunnel. It is not uploaded with usage.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun HostStatCell(title: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(value, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
-        Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-
 
 // Typed confirmation rather than one tap. This is the one control in the
 // app that destroys data for every device on the account at once.
@@ -2028,6 +1902,7 @@ private fun AndroidSSHScreen(
     state: ClientState,
     onPlans: () -> Unit,
     onBack: (() -> Unit)? = null,
+    tabBarScroll: NestedScrollConnection? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -2045,7 +1920,12 @@ private fun AndroidSSHScreen(
     var addSnippet by remember { mutableStateOf(false) }
     var addKey by remember { mutableStateOf(false) }
     var connecting by remember { mutableStateOf<JsonObject?>(null) }
-    var sshSession by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // Shells live in the host process and outlast this screen: the model
+    // holds them, so leaving SSH and coming back finds them still listed.
+    val connections = model.sshConnections
+    val openSessions by connections.sessions.collectAsState()
+    val selectedSessionId by connections.selectedId.collectAsState()
+    var startupBySession by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
     var vaultSetup by remember { mutableStateOf(false) }
     var recoveryWords by remember { mutableStateOf<String?>(null) }
     var showingRecovery by remember { mutableStateOf(false) }
@@ -2102,16 +1982,24 @@ private fun AndroidSSHScreen(
             }
             .onFailure { error = it.message }
     }
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) {
+        load()
+        connections.reconcile()
+    }
 
-    val live = sshSession
+    val live = openSessions.firstOrNull { it.id == selectedSessionId }
     if (live != null) {
         SshTerminalScreen(
             model = model,
-            sessionId = live.first,
-            hostLabel = live.second,
+            sessionId = live.id,
+            hostLabel = live.label,
             snippets = snippets,
-            onClose = { sshSession = null },
+            onClose = { connections.dismiss() },
+            startup = startupBySession[live.id].orEmpty(),
+            onEnded = {
+                scope.launch { connections.close(live) }
+                startupBySession = startupBySession - live.id
+            },
         )
         return
     }
@@ -2122,67 +2010,59 @@ private fun AndroidSSHScreen(
                 if (onBack != null) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 }
-                Text("SSH", style = MaterialTheme.typography.headlineSmall)
+                // No title: the tab that opened this already says SSH, and
+                // repeating it cost a row the host list wanted. The pushed
+                // form (reached from Devices) still needs one, because there
+                // the tab bar says Devices.
+                if (onBack != null) {
+                    Text("SSH", style = MaterialTheme.typography.headlineSmall)
+                }
             }
             if (!vaultAllowed) {
                 Spacer(Modifier.height(10.dp))
                 VaultUpgradeCard(onPlans)
-            } else if (vaultAllowed) {
+            } else {
                 Spacer(Modifier.height(10.dp))
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.EnhancedEncryption, null, tint = tsAccent())
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    when {
-                                        recoveryWords != null -> "Recovery code not confirmed"
-                                        vault?.bool("locked") == true -> "Encrypted vault · locked"
-                                        vault?.bool("created") == true -> "Encrypted vault ready"
-                                        else -> "Encrypted cross-device vault"
-                                    },
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Text(
-                                    if (recoveryWords != null) "Close is allowed. Confirm the code when you have stored it, or discard the vault and create a new one."
-                                    else "One password protects every saved server and key, on all your devices.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                // The row shows the last-known state at once; the actions
+                // stay visible until the vault needs nothing, then tuck away
+                // behind a tap.
+                val vaultNeedsAction = recoveryWords != null ||
+                    vault?.bool("created") != true ||
+                    vault?.bool("locked") == true ||
+                    vault?.bool("enrolled") != true
+                // What the comment above always meant: open while the vault
+                // wants something, behind the row once it does not. It was
+                // hard-coded open, so a vault with nothing to do still put
+                // three buttons under its own row.
+                var vaultActions by remember(vaultNeedsAction) { mutableStateOf(vaultNeedsAction) }
+                VaultLockRow(
+                    status = vault,
+                    canWrite = state.account?.string("tier")?.lowercase() in listOf("supporter", "patron", "legend"),
+                    unconfirmedRecovery = recoveryWords != null,
+                    onOpen = { vaultActions = !vaultActions },
+                )
+                if (vaultActions && (vaultNeedsAction || vault?.bool("created") == true)) {
+                    Spacer(Modifier.height(10.dp))
+                    TsCard {
+                        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (recoveryWords != null) {
+                                    TsAccentButton(label = "Show code", small = true, onClick = { showingRecovery = true })
+                                    TsSecondaryButton(label = "Discard vault", small = true, onClick = { scope.launch { dropFreshVault() } })
+                                } else if (vault?.bool("created") != true) {
+                                    TsAccentButton(label = "Set up", small = true, onClick = { vaultSetup = true })
+                                } else if (vault?.bool("locked") == true || vault?.bool("enrolled") != true) {
+                                    TsAccentButton(label = "Unlock", small = true, onClick = { vaultSetup = true })
+                                }
                             }
-                            // Sync and delete live in the popup menu, not as
-                            // full-width sections: this card is a status, and
-                            // the typed confirmation dialog still carries the
-                            // destroy-everywhere warning where it is read.
+                            // Sync and delete stay one tap away on a vault
+                            // that exists: the typed confirmation dialog still
+                            // carries the destroy-everywhere warning.
                             if (vault?.bool("created") == true && recoveryWords == null) {
-                                var vaultMenu by remember { mutableStateOf(false) }
-                                IconButton(onClick = { vaultMenu = true }) {
-                                    Icon(ActionIcon.More.vector, "Vault actions")
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TsSecondaryButton(label = "Sync now", small = true, onClick = { scope.launch { load(syncAsked = true) } })
+                                    TsSecondaryButton(label = "Delete vault", small = true, onClick = { confirmDrop = true })
                                 }
-                                DropdownMenu(expanded = vaultMenu, onDismissRequest = { vaultMenu = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Sync now") },
-                                        onClick = {
-                                            vaultMenu = false
-                                            scope.launch { load(syncAsked = true) }
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Delete vault", color = LocalTsColors.current.danger) },
-                                        onClick = { vaultMenu = false; confirmDrop = true },
-                                    )
-                                }
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (recoveryWords != null) {
-                                Button(onClick = { showingRecovery = true }) { Text("Show code") }
-                                TextButton(onClick = { scope.launch { dropFreshVault() } }) { Text("Discard vault") }
-                            } else if (vault?.bool("created") != true) {
-                                Button(onClick = { vaultSetup = true }) { Text("Set up") }
-                            } else if (vault?.bool("locked") == true || vault?.bool("enrolled") != true) {
-                                Button(onClick = { vaultSetup = true }) { Text("Unlock") }
                             }
                         }
                     }
@@ -2194,27 +2074,47 @@ private fun AndroidSSHScreen(
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
         }
-        PrimaryTabRow(selectedTabIndex = tab) {
-            tabs.forEachIndexed { index, title -> Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) }) }
+        if (openSessions.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            SshOpenSessionsSection(
+                state = connections,
+                onOpen = { connections.select(it) },
+                onEnd = { scope.launch { connections.close(it) } },
+            )
         }
+        SegmentedCapsulePicker(
+            options = tabs.mapIndexed { i, name -> Triple(i, name, null as ImageVector?) },
+            selection = tab,
+            onSelect = { tab = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        )
+        Spacer(Modifier.height(Space.s))
+        // Search across the width and Add as a button beside it. A bare text
+        // link next to a labelled Material field sat on a different baseline
+        // and read as a caption rather than the way to add a host.
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
-                query,
-                { query = it },
-                Modifier.weight(1f),
-                label = { Text("Search ${tabs[tab].lowercase()}") },
-                singleLine = true,
+            TsSearchField(
+                prompt = "Search ${tabs[tab].lowercase()}",
+                query = query,
+                onQueryChange = { query = it },
+                modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = {
-                if (tab == 0) addHost = true
-                else if (tab == 2) addSnippet = true
-                else addKey = true
-            }) { Text("Add") }
+            TsAccentButton(
+                label = "Add",
+                icon = ActionIcon.Create.vector,
+                small = true,
+                onClick = {
+                    if (tab == 0) addHost = true
+                    else if (tab == 2) addSnippet = true
+                    else addKey = true
+                },
+            )
         }
+        Spacer(Modifier.height(Space.s))
         val all = when (tab) { 0 -> hosts; 1 -> keys; else -> snippets }
         // Searching looks at everything a person might remember about a record:
         // its name, where it points, and what it runs.
@@ -2247,7 +2147,11 @@ private fun AndroidSSHScreen(
                 }
             }
         } else {
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(
+                if (tabBarScroll == null) Modifier.weight(1f) else Modifier.weight(1f).nestedScroll(tabBarScroll),
+                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + TabBarChrome.contentBottomInset),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 items(rows) { value ->
                     val item = value.jsonObject
                     val folderName = item.string("folderId")?.let { id ->
@@ -2268,7 +2172,10 @@ private fun AndroidSSHScreen(
                             onDelete = {
                                 scope.launch {
                                     runCatching {
-                                        item.string("id")?.let { model.core("ssh.host.delete", buildJsonObject { put("id", it) }) }
+                                        item.string("id")?.let {
+                                            model.core("ssh.host.delete", buildJsonObject { put("id", it) })
+                                            model.sshConnections.closeAll(it)
+                                        }
                                         load()
                                     }.onFailure { error = it.message }
                                 }
@@ -2423,7 +2330,15 @@ private fun AndroidSSHScreen(
             onOpened = { id ->
                 val label = host.string("label") ?: host.string("hostname") ?: "SSH"
                 connecting = null
-                sshSession = id to label
+                connections.adopt(
+                    SshSessionEntry(
+                        id = id,
+                        hostId = host.string("id"),
+                        label = label,
+                        alive = true,
+                    ),
+                )
+                startupBySession = startupBySession + (id to startupCommands(host.string("id"), snippets))
             },
         )
     }
@@ -2704,6 +2619,7 @@ private fun WorkspacesScreen(
     onPendingConsumed: () -> Unit = {},
     onSetupWizard: (() -> Unit)? = null,
     onOpenDevice: (String) -> Unit = {},
+    tabBarScroll: NestedScrollConnection? = null,
 ) {
     // The host list the iOS model keeps: hosts only, without this phone
     // (by account id and by its own key, for records that predate kinds),
@@ -2725,17 +2641,29 @@ private fun WorkspacesScreen(
     val layoutStore = remember(context) { WorkspaceLayoutStore(context) }
     var layoutOrder by remember { mutableStateOf(layoutStore.order()) }
     var layoutHidden by remember { mutableStateOf(layoutStore.hidden()) }
-    // The connected machine is one at a time. Selecting shows the card;
-    // connecting dials it, and only a connected host loads work.
-    var host by remember { mutableStateOf<JsonObject?>(null) }
-    var connectedPeer by remember { mutableStateOf<String?>(null) }
+    // The session lives on the model, so leaving the tab does not dial
+    // again on return. The tunnel underneath never dropped; only the screen
+    // went away. The stored host is re-resolved against the live account
+    // list, so a rename or a presence flip behind our back still reads
+    // current the moment it arrives.
+    val session = model.workspacesConnection
+    val storedHost by session.host.collectAsStateWithLifecycle()
+    val connectedPeer by session.connectedPeer.collectAsStateWithLifecycle()
+    val allowed by session.allowed.collectAsStateWithLifecycle()
+    val folders by session.folders.collectAsStateWithLifecycle()
+    val sessions by session.sessions.collectAsStateWithLifecycle()
+    val chats by session.chats.collectAsStateWithLifecycle()
+    val error by session.error.collectAsStateWithLifecycle()
+    val requestNotice by session.requestNotice.collectAsStateWithLifecycle()
+    val host = hosts.find { it.string("publicIdentity") == storedHost?.string("publicIdentity") } ?: storedHost
     var connectingPeer by remember { mutableStateOf<String?>(null) }
-    var folders by remember { mutableStateOf(JsonArray(emptyList())) }
-    var sessions by remember { mutableStateOf(JsonArray(emptyList())) }
-    var chats by remember { mutableStateOf(JsonArray(emptyList())) }
-    var allowed by remember { mutableStateOf<Boolean?>(null) }
     var requesting by remember { mutableStateOf(false) }
-    var requestNotice by remember { mutableStateOf<String?>(null) }
+    // Automatic dials fail silently into the log until they settle. The
+    // account refreshes every couple of minutes and each one redials, so a
+    // transient first failure used to flash red for a frame on its way to a
+    // connection nobody could read. Three in a row is stable, and stable
+    // failures surface with a retry.
+    var autoFailures by remember { mutableStateOf(0) }
     var search by remember { mutableStateOf("") }
     var customizing by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
@@ -2747,73 +2675,101 @@ private fun WorkspacesScreen(
     var pendingChatId by remember { mutableStateOf<String?>(null) }
     var pendingOpenConversation by remember { mutableStateOf(false) }
     var autoTick by remember { mutableStateOf(0) }
-    var selectedFolder by remember { mutableStateOf<JsonObject?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
+    // The open folder by id, resolved against the session's folder list, so
+    // leaving the tab neither closes the workspace nor dials again on
+    // return: the tunnel underneath never dropped, and a reconnect
+    // re-reading the same folders reopens it. Saveable, so a process death
+    // restores it once the folders reload.
+    var selectedFolderId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedFolder = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == selectedFolderId }
 
     suspend fun requestAccess(peer: String) {
         requesting = true
         runCatching {
             model.workspaceSection(peer, "workspace.access.ask", buildJsonObject {}) as JsonObject
         }.onSuccess { answer ->
-            requestNotice = if (answer.bool("granted")) {
+            session.setRequestNotice(if (answer.bool("granted")) {
                 "This device already has access. Pull to refresh."
             } else {
                 "Asked. On that computer run `tokenstat host access approve` (over SSH is fine) and pick this device."
-            }
-        }.onFailure { requestNotice = it.message }
+            })
+        }.onFailure {
+            if (it is CancellationException) throw it
+            session.setRequestNotice(it.message)
+        }
         requesting = false
     }
 
-    suspend fun connect(machine: JsonObject) {
+    suspend fun connect(machine: JsonObject, automatic: Boolean = false) {
         val peer = machine.string("publicIdentity") ?: return
         if (connectingPeer != null) return
         connectingPeer = peer
-        host = machine
-        allowed = null
-        error = null
-        requestNotice = null
-        // The work still on screen belongs to the previous host; showing it
-        // beside the new host's name is one lie waiting to be clicked.
-        folders = JsonArray(emptyList())
-        sessions = JsonArray(emptyList())
-        chats = JsonArray(emptyList())
-        runCatching {
-            model.prepareHost(peer, machine.string("label") ?: "Host")
-            // Asked before anything is loaded. Being paired is not being let
-            // in: that computer allows each device to open its work
-            // explicitly.
-            val check = model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
-            allowed = check?.bool("allowed")
-            if (allowed != true) {
-                if (requestNotice == null) requestAccess(peer)
-                return@runCatching
+        // Cleared in `finally`, because this dial does not always run to
+        // the last line. Setting `connectingPeer` changes a key of the
+        // effect that starts an automatic dial, so that effect cancels
+        // the very coroutine it just started, and leaving the screen
+        // cancels a manual one. Either way the clear used to be skipped,
+        // the card kept saying "Connecting…" for the rest of the
+        // session, and the guard above then refused every later tap for
+        // every host.
+        try {
+            session.setHost(machine)
+            session.setAllowed(null)
+            // An explicit dial clears the readable failure it retries. An
+            // automatic one leaves it: clearing on every account refresh is
+            // what made failures flash past unreadably.
+            if (!automatic) {
+                session.setError(null)
+                autoFailures = 0
             }
-            folders = model.workspaces(peer)
-            sessions = runCatching {
-                model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
-            }.getOrNull() ?: JsonArray(emptyList())
-            chats = runCatching {
-                model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
-            }.getOrNull() ?: JsonArray(emptyList())
-            connectedPeer = peer
-            layoutStore.setLastConnectedHost(peer)
-        }.onFailure {
-            android.util.Log.e("ts-workspaces", "connect failed: ${it::class.java.name}", it)
-            error = it.message
-            allowed = null
-            connectedPeer = null
+            session.setRequestNotice(null)
+            // The work still on screen belongs to the previous host; showing it
+            // beside the new host's name is one lie waiting to be clicked.
+            session.clearLists()
+            runCatching {
+                model.prepareHost(peer, machine.string("label") ?: "Host")
+                // Asked before anything is loaded. Being paired is not being let
+                // in: that computer allows each device to open its work
+                // explicitly.
+                val check = model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
+                session.setAllowed(check?.bool("allowed"))
+                if (check?.bool("allowed") != true) {
+                    if (session.requestNotice.value == null) requestAccess(peer)
+                    return@runCatching
+                }
+                val loadedSessions = runCatching {
+                    model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
+                }.getOrNull() ?: JsonArray(emptyList())
+                val loadedChats = runCatching {
+                    model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
+                }.getOrNull() ?: JsonArray(emptyList())
+                session.setLists(model.workspaces(peer), loadedSessions, loadedChats)
+                session.setConnected(peer, true)
+                autoFailures = 0
+                session.setError(null)
+                layoutStore.setLastConnectedHost(peer)
+            }.onFailure {
+                // Leaving the screen mid-dial cancels the scope. That is not a
+                // failure worth recording: the session keeps whatever it had.
+                if (it is CancellationException) throw it
+                android.util.Log.e("ts-workspaces", "connect failed: ${it::class.java.name}", it)
+                if (automatic) {
+                    autoFailures += 1
+                    if (autoFailures >= 3) session.setError(it.message)
+                } else {
+                    session.setError(it.message)
+                    autoFailures = 0
+                }
+                session.setConnected(null, null)
+            }
+        } finally {
+            connectingPeer = null
         }
-        connectingPeer = null
     }
 
     fun disconnect() {
-        connectedPeer = null
-        allowed = null
-        requestNotice = null
-        folders = JsonArray(emptyList())
-        sessions = JsonArray(emptyList())
-        chats = JsonArray(emptyList())
-        selectedFolder = null
+        session.disconnect()
+        selectedFolderId = null
     }
 
     fun refreshHost() {
@@ -2823,13 +2779,21 @@ private fun WorkspacesScreen(
     // The one place that dials without being asked: the last host, when it
     // is awake and its switch is on. Fires as the host list arrives and as
     // machines wake, which is what makes "keep trying until online" work.
-    LaunchedEffect(hosts, connectedPeer, connectingPeer) {
+    LaunchedEffect(hosts, connectedPeer, connectingPeer, autoFailures) {
         if (connectedPeer != null || connectingPeer != null) return@LaunchedEffect
+        // Three silent failures already surfaced as a readable error with a
+        // retry. Dialling on behind it would flash that card on every
+        // account refresh; the next dial is the user's tap.
+        if (autoFailures >= 3) return@LaunchedEffect
         val last = layoutStore.lastConnectedHost() ?: return@LaunchedEffect
         if (!layoutStore.isAutoConnectEnabled(last)) return@LaunchedEffect
         val machine = hosts.find { it.string("publicIdentity") == last } ?: return@LaunchedEffect
         if (machine.get("online")?.jsonPrimitive?.booleanOrNull == false) return@LaunchedEffect
-        connect(machine)
+        // On the composition scope, not this effect's: the first thing the
+        // dial does is move `connectingPeer`, which is a key here, and an
+        // effect cannot survive cancelling itself halfway through its own
+        // work.
+        scope.launch { connect(machine, automatic = true) }
     }
     // Somebody who walks over, approves and comes back is not looking at the
     // same refusal with no sign that anything changed: while refused, ask
@@ -2844,7 +2808,9 @@ private fun WorkspacesScreen(
                 (model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject)?.bool("allowed")
             }.getOrNull()
             if (now == true) {
-                connect(machine)
+                // Same reason as the automatic dial above: `connect` clears
+                // `allowed` on its way in, and `allowed` is a key here.
+                scope.launch { connect(machine, automatic = true) }
                 return@LaunchedEffect
             }
         }
@@ -2852,7 +2818,7 @@ private fun WorkspacesScreen(
     LaunchedEffect(pendingHostId, hosts) {
         val id = pendingHostId ?: return@LaunchedEffect
         val match = hosts.find { it.string("id") == id } ?: return@LaunchedEffect
-        host = match
+        session.setHost(match)
         if (connectedPeer != match.string("publicIdentity")) connect(match)
         if (pendingFolderId == null) onPendingConsumed()
     }
@@ -2865,7 +2831,7 @@ private fun WorkspacesScreen(
         val folderId = pendingFolderId ?: return@LaunchedEffect
         val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == folderId }
             ?: return@LaunchedEffect
-        selectedFolder = match
+        selectedFolderId = match.string("id")
         onPendingConsumed()
     }
     // Home reads device history: opening a folder files it on the continue
@@ -2889,7 +2855,7 @@ private fun WorkspacesScreen(
         val id = pendingSelectFolderId ?: return@LaunchedEffect
         val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == id }
             ?: return@LaunchedEffect
-        selectedFolder = match
+        selectedFolderId = match.string("id")
         pendingSelectFolderId = null
     }
     LaunchedEffect(folderRefresh) {
@@ -2942,7 +2908,7 @@ private fun WorkspacesScreen(
     fun openChat(chat: JsonObject) {
         val folder = folders.mapNotNull { it as? JsonObject }
             .find { it.string("id") == chat.string("workspaceId") } ?: return
-        selectedFolder = folder
+        selectedFolderId = folder.string("id")
         initialSection = "Chat"
         pendingChatId = chat.string("id")
         pendingOpenConversation = false
@@ -2965,12 +2931,13 @@ private fun WorkspacesScreen(
                     wsRefreshing = false
                 }
             },
-            modifier = modifier,
+            modifier = if (tabBarScroll == null) modifier else modifier.nestedScroll(tabBarScroll),
         ) {
             WorkspaceList(
             model = model,
             hosts = hosts,
             thisMachine = thisMachine,
+            dialledHost = host,
             connectedPeer = connectedPeer,
             connectingPeer = connectingPeer,
             folders = folders,
@@ -2991,7 +2958,7 @@ private fun WorkspacesScreen(
             },
             onConnect = { scope.launch { connect(it) } },
             onDisconnect = { disconnect() },
-            onFolder = { selectedFolder = it; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
+            onFolder = { selectedFolderId = it.string("id"); initialSection = null; pendingChatId = null; pendingOpenConversation = false },
             onSession = { openSession(it) },
             onChat = { openChat(it) },
             onNewChat = { choosingFor = "Chat" },
@@ -3002,6 +2969,7 @@ private fun WorkspacesScreen(
             onCustomize = { customizing = true },
             onOpenDevice = onOpenDevice,
             onSetup = onSetupWizard,
+            onRetry = host?.let { h -> { scope.launch { connect(h) } } },
             modifier = Modifier.fillMaxSize(),
             )
         }
@@ -3067,7 +3035,7 @@ private fun WorkspacesScreen(
         WorkspaceDetail(
             model, boundHost, boundFolder, Modifier.fillMaxSize(),
             initialSection = initialSection,
-            onBack = { selectedFolder = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
+            onBack = { selectedFolderId = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
             onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Host") },
             onOpenBrowser = { url, port -> browser = url to port },
             onRecordChat = ::recordChatOpened,
@@ -3102,7 +3070,7 @@ private fun WorkspacesScreen(
             title = if (section == "Chat") "New chat in…" else "New session in…",
             folders = folders.mapNotNull { it as? JsonObject },
             onPick = { folder ->
-                selectedFolder = folder
+                selectedFolderId = folder.string("id")
                 initialSection = section
                 pendingChatId = null
                 pendingOpenConversation = section == "Chat"
@@ -3120,6 +3088,10 @@ private fun WorkspaceList(
     model: AppViewModel,
     hosts: List<JsonObject>,
     thisMachine: JsonObject?,
+    /// The machine this screen is about, which is the one being dialled and
+    /// not always the one in `connectedPeer`. A refused dial leaves the
+    /// previous host connected, so the two disagree exactly when it matters.
+    dialledHost: JsonObject?,
     connectedPeer: String?,
     connectingPeer: String?,
     folders: JsonArray,
@@ -3148,6 +3120,7 @@ private fun WorkspaceList(
     onCustomize: () -> Unit,
     onOpenDevice: (String) -> Unit,
     onSetup: (() -> Unit)?,
+    onRetry: (() -> Unit)?,
     modifier: Modifier,
 ) {
     val colors = LocalTsColors.current
@@ -3157,9 +3130,20 @@ private fun WorkspaceList(
     val chatRows = chats.mapNotNull { it as? JsonObject }
     val visibleSections = layoutOrder.filter { it !in layoutHidden }
     var chatsExpanded by remember { mutableStateOf(false) }
-    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { Text("Workspaces", style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary) }
-        error?.let { item { ErrorCard(it) } }
+    LazyColumn(modifier, contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        error?.let { message ->
+            item {
+                // A stable failure stays readable with its retry, the way
+                // `ClientErrorCard` does. Transient dials never land here,
+                // so this card cannot flash past on the way to a connection.
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    ErrorCard(friendlyError(message).message)
+                    if (onRetry != null) {
+                        TsSecondaryButton(label = "Try again", small = true, onClick = onRetry)
+                    }
+                }
+            }
+        }
         if (hosts.isEmpty()) {
             item {
                 EmptyState(
@@ -3236,20 +3220,34 @@ private fun WorkspaceList(
                 }
             }
         }
+        // Above the `connectedHost` gate, and resolved against the dialled
+        // host: a refused dial leaves `connectedPeer` on the host before it,
+        // so reading the name off that one put another computer's name on
+        // this card and pointed Request access at that computer. It cannot
+        // replace the gate either. `disconnect` clears `connectedPeer` and
+        // leaves the dialled host set on purpose, so a list gated on the
+        // dialled host would offer Choose folder for a host nobody is on.
+        if (allowed == false) {
+            val refused = dialledHost ?: connectedHost
+            if (refused != null) {
+                item {
+                    RequestAccessCard(
+                        hostName = DeviceCopy.displayName(
+                            refused.string("label"),
+                            refused.string("platform"),
+                            true,
+                        ),
+                        requesting = requesting,
+                        notice = requestNotice,
+                        onRequest = { onRequestAccess(refused.string("publicIdentity") ?: "") },
+                    )
+                }
+                return@LazyColumn
+            }
+        }
         val host = connectedHost ?: return@LazyColumn
         val hostName = DeviceCopy.displayName(host.string("label"), host.string("platform"), true)
         val peer = host.string("publicIdentity") ?: ""
-        if (allowed == false) {
-            item {
-                RequestAccessCard(
-                    hostName = hostName,
-                    requesting = requesting,
-                    notice = requestNotice,
-                    onRequest = { onRequestAccess(peer) },
-                )
-            }
-            return@LazyColumn
-        }
         if (connectingPeer != null) {
             item { SkeletonRows(count = 3) }
             return@LazyColumn
@@ -3261,13 +3259,14 @@ private fun WorkspaceList(
             return@LazyColumn
         }
         item {
-            OutlinedTextField(
-                value = search,
-                onValueChange = onSearch,
+            // The app's search field, like every other one. A Material box
+            // with a floating label was the odd control out on a screen made
+            // of cards.
+            TsSearchField(
+                prompt = "Search folders or paths",
+                query = search,
+                onQueryChange = onSearch,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Search folders or paths") },
-                leadingIcon = { Icon(ActionIcon.Search.vector, null) },
-                singleLine = true,
             )
         }
         visibleSections.forEach { section ->
@@ -3398,23 +3397,6 @@ private fun WorkspaceList(
     }
 }
 
-private data class WorkspacePart(val label: String, val method: String, val icon: ImageVector, val kind: String? = null)
-private val workspaceParts = listOf(
-    WorkspacePart("Sessions", "pty.list", Icons.Default.Terminal),
-    WorkspacePart("Chat", "chat.list", Icons.Default.ChatBubble),
-    WorkspacePart("Pulls", "pulls.list", Icons.Default.MergeType),
-    WorkspacePart("Changes", "workspace.status", Icons.Default.Difference),
-    WorkspacePart("History", "workspace.log", Icons.Default.History),
-    WorkspacePart("Tasks", "todo.list", Icons.Default.Checklist),
-    // Notes share the todo board's method; the Apple client filters the same
-    // answer down to note cards, so the tab is not a second Tasks.
-    WorkspacePart("Notes", "todo.list", Icons.AutoMirrored.Filled.Notes, kind = "note"),
-    WorkspacePart("Workflows", "workflow.list", Icons.Default.AccountTree),
-    WorkspacePart("Automations", "automation.list", Icons.Default.Bolt),
-    WorkspacePart("Files", "workspace.tree", Icons.Default.FolderOpen),
-    WorkspacePart("Browser", "proxy.listen", Icons.Default.Language),
-)
-
 @Composable
 private fun WorkspaceDetail(
     model: AppViewModel, host: JsonObject, folder: JsonObject, modifier: Modifier,
@@ -3426,49 +3408,19 @@ private fun WorkspaceDetail(
     initialChatId: String? = null,
     openConversationOnAppear: Boolean = false,
 ) {
-    var section by rememberSaveable(folder.string("id"), initialSection) { mutableStateOf(initialSection ?: "Sessions") }
-    val peer = host.string("publicIdentity") ?: ""
-    val workspace = folder.string("id") ?: ""
-    Column(modifier.padding(cardPaddingDp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Column {
-                Text(folder.string("name") ?: "Workspace", style = MaterialTheme.typography.headlineSmall, color = LocalTsColors.current.textPrimary)
-                Text(section, style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary)
-            }
-        }
-        Spacer(Modifier.height(Space.s))
-        // Section picker in the app's own capsule language.
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-            workspaceParts.forEach { part ->
-                val selectedChip = section == part.label
-                if (selectedChip) {
-                    TsAccentButton(label = part.label, small = true, onClick = { section = part.label })
-                } else {
-                    TsSecondaryButton(label = part.label, small = true, onClick = { section = part.label })
-                }
-            }
-        }
-        Spacer(Modifier.height(Space.m))
-        WorkspaceSection(
-            model = model,
-            peer = peer,
-            workspace = workspace,
-            hostLabel = host.string("label") ?: "Host",
-            section = section,
-            protocol = HostContracts.protocolOf(host),
-            folderName = folder.string("name") ?: "",
-            // The sections scroll themselves. A scrolled modifier here hands
-            // their LazyColumns infinite height and crashes on open.
-            modifier = Modifier.weight(1f),
-            onOpenTerminal = onOpenTerminal,
-            onOpenBrowser = onOpenBrowser,
-            onOpenSection = { section = it },
-            onChatOpened = onRecordChat,
-            initialChatId = initialChatId,
-            openConversationOnAppear = openConversationOnAppear,
-        )
-    }
+    WorkspaceHub(
+        model = model,
+        host = host,
+        folder = folder,
+        modifier = modifier.padding(cardPaddingDp),
+        initialSection = initialSection,
+        onBack = onBack,
+        onOpenTerminal = onOpenTerminal,
+        onOpenBrowser = onOpenBrowser,
+        onRecordChat = onRecordChat,
+        initialChatId = initialChatId,
+        openConversationOnAppear = openConversationOnAppear,
+    )
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -3492,7 +3444,14 @@ private fun AccountDialog(
     // Account, this device, legal: the same three panes the iOS sheet has,
     // so a setting is found in the same place on both phones.
     var pane by rememberSaveable { mutableStateOf(0) }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // Full height, not half. The Apple sheet fills the screen, and the panes
+    // behind these tabs are long: relay usage alone is a card with a progress
+    // bar, five rows and a disclosure. Opening halfway put every one of them
+    // in the bottom third and made the sheet a scroll inside a scroll.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -3501,30 +3460,6 @@ private fun AccountDialog(
                 .padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-            ) {
-                Avatar(
-                    state.account?.string("displayName") ?: state.account?.string("handle") ?: "your account",
-                    size = 44,
-                    avatarUrl = state.account?.string("avatar"),
-                    signedIn = state.signedIn,
-                )
-                Column {
-                    Text(
-                        state.account?.string("displayName")
-                            ?: state.account?.string("handle") ?: "Account",
-                        style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
-                        color = colors.textPrimary,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        TierMark((state.account?.string("tier") ?: "free").lowercase(), markSize = 16)
-                        TierBadge(state.account?.string("tier") ?: "free")
-                        Text("${(state.account?.get("machines") as? JsonArray)?.size ?: 0} linked devices", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-                    }
-                }
-            }
             SegmentedCapsulePicker(
                 options = listOf(
                     Triple(0, "Account", null as ImageVector?),
@@ -3537,14 +3472,20 @@ private fun AccountDialog(
             )
             when (pane) {
                 0 -> {
-                    TsAccentButton(
-                        label = "See plans",
-                        onClick = { paywall = true },
+                    AccountIdentityCard(state = state, onOpen = ::open)
+                    AccountPlanCard(state = state, onPlans = { paywall = true })
+                    RelayUsageCard(state.account, onRefresh = { scope.launch { TsRefresh.run("relay") { model.refresh() } } })
+                    // Sync privacy lives under Legal now, with the documents
+                    // it belongs to. Leaving a copy here would be the same
+                    // claim in two places, free to drift apart.
+                    AccountLastSyncCard(state)
+                    AccountDevicesCard(state)
+                    TsDangerButton(
+                        label = "Sign out",
+                        icon = ActionIcon.SignOut.vector,
+                        onClick = { model.signOut(); onDismiss() },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    RelayUsageCard(state.account, onRefresh = { scope.launch { TsRefresh.run("relay") { model.refresh() } } })
-                    SyncPrivacyCard()
-                    TsSecondaryButton(label = "Sign out", onClick = { model.signOut(); onDismiss() }, modifier = Modifier.fillMaxWidth())
                     // Ending the account, kept apart from everything above
                     // it. It is not a document, so it lives at the end of
                     // the account rather than under Legal.
@@ -3554,56 +3495,80 @@ private fun AccountDialog(
                         style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
                         color = colors.danger,
                     )
-                    Text(
-                        "Permanent. Confirmed on the website's data settings. The account, linked providers, sessions and usage are removed outright.",
-                        style = TextStyle(fontSize = 12.sp),
-                        color = colors.textSecondary,
-                    )
-                    TsSecondaryButton(
-                        label = "Delete on website…",
-                        onClick = { open("https://tokenstat.ai/settings/data?mobile=1&focus=delete#delete") },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                1 -> {
-                    // Notifications first. That switch is why most people
-                    // open this pane.
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Notify this device", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                    TsCard(
+                        title = "Delete this account",
+                        mark = "mark_delete",
+                        markTint = colors.danger,
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                             Text(
-                                "When an agent run or a chat on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work.",
-                                style = TextStyle(fontSize = 12.sp),
+                                if (state.account?.let {
+                                        (it["billing"] as? JsonObject)?.string("provider")?.lowercase() == "google_play"
+                                    } == true
+                                ) {
+                                    "Permanent. You can delete immediately on the website. Deletion does not cancel the Google Play subscription, so Google may keep charging until you cancel it separately."
+                                } else {
+                                    "Permanent. Confirmed on the website's data settings. The account, linked providers, sessions and usage are removed outright."
+                                },
+                                style = TextStyle(fontSize = 14.sp),
                                 color = colors.textSecondary,
                             )
+                            TsDangerButton(
+                                label = "Delete on website…",
+                                icon = ActionIcon.Delete.vector,
+                                onClick = { open("https://tokenstat.ai/settings/data?mobile=1&focus=delete#delete") },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                         }
-                        TsBrandSwitch(
-                            checked = notifyOn,
-                            onCheckedChange = { on ->
-                                scope.launch {
-                                    runCatching {
-                                        if (on) PushRegistrar.enable() else PushRegistrar.disable()
-                                    }.onSuccess { notifyOn = PushRegistrar.isOn(); notifyError = null }
-                                        .onFailure { notifyError = it.message }
-                                }
-                            },
-                        )
                     }
-                    if (notifyOn) {
-                        TsSecondaryButton(
-                            label = "Send a test",
-                            small = true,
-                            onClick = {
-                                scope.launch {
-                                    runCatching { PushRegistrar.test() }
-                                        .onSuccess { notifyError = it }
-                                        .onFailure { notifyError = it.message }
-                                }
-                            },
-                        )
+                }
+                1 -> {
+                    // Notifications, Tabs, then this machine's traffic: the
+                    // order the Apple sheet uses, and each in a card with a
+                    // mark. The switch used to be a bare row above the cards,
+                    // so the pane opened on an unlabelled toggle.
+                    TsCard(title = "Notifications", mark = "mark_device") {
+                        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Notify this device",
+                                    color = colors.textPrimary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TsBrandSwitch(
+                                    checked = notifyOn,
+                                    onCheckedChange = { on ->
+                                        scope.launch {
+                                            runCatching {
+                                                if (on) PushRegistrar.enable() else PushRegistrar.disable()
+                                            }.onSuccess { notifyOn = PushRegistrar.isOn(); notifyError = null }
+                                                .onFailure { notifyError = it.message }
+                                        }
+                                    },
+                                )
+                            }
+                            Text(
+                                "When an agent run or a chat on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work.",
+                                style = TextStyle(fontSize = 13.sp),
+                                color = colors.textSecondary,
+                            )
+                            if (notifyOn) {
+                                TsSecondaryButton(
+                                    label = "Send a test",
+                                    icon = ActionIcon.Send.vector,
+                                    small = true,
+                                    onClick = {
+                                        scope.launch {
+                                            runCatching { PushRegistrar.test() }
+                                                .onSuccess { notifyError = it }
+                                                .onFailure { notifyError = it.message }
+                                        }
+                                    },
+                                )
+                            }
+                            notifyError?.let { Text(it, color = colors.warning) }
+                        }
                     }
-                    notifyError?.let { Text(it, color = colors.warning) }
-                    LocalTrafficCard(model)
                     // This device's tab bar and rail, arranged by the person
                     // holding it, where the other device-local choices live.
                     var tabsOpen by remember { mutableStateOf(false) }
@@ -3615,6 +3580,7 @@ private fun AccountDialog(
                         ),
                         onOpen = { tabsOpen = true },
                     )
+                    LocalTrafficCard(model)
                     if (tabsOpen) {
                         TabEditorSheet(
                             tabs = customization.order.mapNotNull { id ->
@@ -3629,16 +3595,45 @@ private fun AccountDialog(
                     Text("Identity and credentials stay in Android's no-backup app storage.", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
                 }
                 else -> {
-                    TsSecondaryButton(label = "Terms", onClick = { open("https://tokenstat.ai/terms?mobile=1") }, modifier = Modifier.fillMaxWidth())
-                    TsSecondaryButton(label = "Privacy", onClick = { open("https://tokenstat.ai/privacy?mobile=1") }, modifier = Modifier.fillMaxWidth())
+                    var sampleOpen by remember { mutableStateOf(false) }
+                    // "Help" is the card's title, not a label floating above
+                    // it, which is how the Apple sheet builds this pane.
+                    TsCard(title = "Help") {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Space.m),
+                            modifier = Modifier.fillMaxWidth().clickable { sampleOpen = true },
+                        ) {
+                            Icon(ActionIcon.Run.vector, null, tint = colors.accent)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                                Text("See a sample", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                                Text(
+                                    "Explore a workspace with invented data, right on this device.",
+                                    style = TextStyle(fontSize = 12.sp),
+                                    color = colors.textSecondary,
+                                )
+                            }
+                            Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
+                        }
+                    }
+                    if (sampleOpen) SampleSheet(onDismiss = { sampleOpen = false })
+                    // One card with two rows, named the way the documents are
+                    // named. Two full-width buttons labelled "Terms" and
+                    // "Privacy" said less and looked like actions rather than
+                    // links off the device.
+                    TsCard(title = "Terms and privacy", mark = "mark_license") {
+                        Column {
+                            LegalLinkRow("Privacy policy") { open("https://tokenstat.ai/privacy?mobile=1") }
+                            HorizontalDivider(color = colors.border)
+                            LegalLinkRow("Terms of service") { open("https://tokenstat.ai/terms?mobile=1") }
+                        }
+                    }
                     var licensesOpen by remember { mutableStateOf(false) }
                     LicensesCard(onOpen = { licensesOpen = true })
                     if (licensesOpen) LicensesSheet(onDismiss = { licensesOpen = false })
-                    Text(
-                        "Everything happens on your machine. tokenstat reads your local logs, extracts counters, and discards the rest. Only aggregate numbers are eligible for sync.",
-                        style = TextStyle(fontSize = 12.sp),
-                        color = colors.textSecondary,
-                    )
+                    // Where the Apple sheet keeps it: the privacy claim reads
+                    // as part of the documents, not as a footnote under them.
+                    SyncPrivacyCard()
                 }
             }
         }
@@ -3658,7 +3653,7 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
     val supported = usage?.string("policy") == "rolling_30_utc_days"
         && usage?.int("windowDays") == 30
         && usage?.string("timezone") == "UTC"
-    TsCard(title = "Relay usage", subtitle = "One allowance across your devices") {
+    TsCard(title = "Relay usage", subtitle = "One allowance across your devices", mark = "mark_activity") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             if (usage == null || !supported) {
                 Text(
@@ -3700,12 +3695,52 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
                     .mapNotNull { it as? JsonObject }
                     .filter { (it.long("bytes") ?: 0L) > 0L }
                     .reversed()
-                Text("Daily usage (UTC)", fontWeight = FontWeight.SemiBold, color = LocalTsColors.current.textPrimary)
-                if (days.isEmpty()) {
-                    Text("No relayed traffic in this window.", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
-                } else {
-                    days.forEach { day ->
-                        UsageRow(day.string("day") ?: "", day.long("bytes") ?: 0L)
+                // Thirty rows of bytes are a reference, not a headline, and
+                // laid out flat they pushed the caption that dates the whole
+                // card off the screen. Collapsed to start, like the
+                // `DisclosureGroup` the Apple clients wrap it in.
+                var daysExpanded by remember { mutableStateOf(false) }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { daysExpanded = !daysExpanded }
+                        .semantics {
+                            contentDescription =
+                                if (daysExpanded) "Daily usage, expanded" else "Daily usage, collapsed"
+                        },
+                ) {
+                    Text(
+                        "Daily usage (UTC)",
+                        fontWeight = FontWeight.SemiBold,
+                        color = LocalTsColors.current.textPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        if (daysExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = LocalTsColors.current.textTertiary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                AnimatedVisibility(
+                    visible = daysExpanded,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                        if (days.isEmpty()) {
+                            Text(
+                                "No relayed traffic in this window.",
+                                style = TextStyle(fontSize = 12.sp),
+                                color = LocalTsColors.current.textSecondary,
+                            )
+                        } else {
+                            days.forEach { day ->
+                                UsageRow(day.string("day") ?: "", day.long("bytes") ?: 0L)
+                            }
+                        }
                     }
                 }
                 val asOf = usage.string("asOf")?.take(10).orEmpty()
@@ -3723,7 +3758,7 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
 
 @Composable
 private fun LocalTrafficCard(model: AppViewModel) {
-    var traffic by remember { mutableStateOf<JsonObject?>(null) }
+    var status by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
@@ -3732,7 +3767,7 @@ private fun LocalTrafficCard(model: AppViewModel) {
             loading = true
             runCatching { model.core("remote.status") as? JsonObject ?: error("The host answered remote.status with an unexpected shape.") }
                 .onSuccess {
-                    traffic = it["traffic"] as? JsonObject
+                    status = it
                     error = null
                 }
                 .onFailure { error = it.message ?: "Could not load local traffic." }
@@ -3740,10 +3775,11 @@ private fun LocalTrafficCard(model: AppViewModel) {
         }
     }
     LaunchedEffect(Unit) { load() }
-    TsCard(title = "This device", subtitle = "How connections leave this machine") {
+    TsCard(title = "This device", subtitle = "How connections leave this machine", mark = "mark_activity") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             error?.let { Text(it, color = LocalTsColors.current.warning) }
-            val snapshot = traffic
+            TunnelStatusBanner(status = status)
+            val snapshot = status?.get("traffic") as? JsonObject
             if (snapshot == null && !loading && error == null) {
                 Text(
                     "This host does not report local traffic yet.",
@@ -4004,19 +4040,19 @@ private fun LimitGauge(value: JsonObject) {
 
 @Composable
 private fun VaultUpgradeCard(onPlans: () -> Unit) {
-    ElevatedCard(Modifier.fillMaxWidth()) {
+    TsCard {
         Column(
-            Modifier.padding(20.dp),
+            Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-                    EmptyArt(EmptyArtKind.Vault)
+            EmptyArt(EmptyArtKind.Vault)
             Text("Sync SSH between your devices", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
                 "An encrypted vault keeps hosts and keys on every device signed in to this account. Supporter and above.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = LocalTsColors.current.textSecondary,
             )
-            Button(onClick = onPlans) { Text("See plans") }
+            TsAccentButton(label = "See plans", onClick = onPlans)
         }
     }
 }
@@ -4074,3 +4110,291 @@ private fun JsonObject.long(key: String): Long? = (this[key] as? JsonPrimitive)?
 private fun JsonObject.int(key: String): Int? = (this[key] as? JsonPrimitive)?.intOrNull
 private fun JsonObject.doubleOrNull(key: String): Double? = this[key]?.jsonPrimitive?.doubleOrNull
 private fun JsonObject.bool(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull == true
+
+
+/// Who is signed in, as a card. Port of `identityCard` in
+/// `ClientAccountSheet.swift`.
+///
+/// It was a bare row with a tier chip and a device count, which said less
+/// than the Apple sheet and said it in a shape that did not match anything
+/// else on the screen. The handle and the way to the public profile are the
+/// two things people actually come here for.
+@Composable
+private fun AccountIdentityCard(state: ClientState, onOpen: (String) -> Unit) {
+    val colors = LocalTsColors.current
+    val tier = (state.account?.string("tier") ?: "free").lowercase()
+    val handle = state.account?.string("handle")?.ifBlank { null }
+    TsCard(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+            ) {
+                Avatar(
+                    state.account?.string("displayName") ?: handle ?: "your account",
+                    size = 56,
+                    avatarUrl = state.account?.string("avatar"),
+                    signedIn = state.signedIn,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                    ) {
+                        Text(
+                            state.account?.string("displayName") ?: handle ?: "Signed in",
+                            style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
+                            color = colors.textPrimary,
+                            maxLines = 2,
+                        )
+                        TierMark(tier, markSize = 18)
+                    }
+                    handle?.let {
+                        Text("@$it", style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
+                    }
+                    Text(
+                        tier.replaceFirstChar { it.uppercase() } + " plan",
+                        style = TextStyle(fontSize = 13.sp),
+                        color = colors.textSecondary,
+                    )
+                }
+            }
+            handle?.let {
+                val host = state.account?.string("host")?.ifBlank { null } ?: "https://tokenstat.ai"
+                TsAccentButton(
+                    label = "View public profile",
+                    icon = ActionIcon.External.vector,
+                    onClick = { onOpen("$host/$it?mobile=1") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/// What the account is paying for, and where that is managed. Port of
+/// `planCard`.
+///
+/// The sheet used to jump straight from the identity row to a "See plans"
+/// button, so somebody on a paid plan could not see which plan, when it
+/// renews, or that it is managed on the web rather than by Apple.
+@Composable
+private fun AccountPlanCard(state: ClientState, onPlans: () -> Unit) {
+    val colors = LocalTsColors.current
+    val tier = (state.account?.string("tier") ?: "free").lowercase()
+    val billing = state.account?.get("billing") as? JsonObject
+    val provider = billing?.string("provider")?.lowercase()
+    val paid = tier in listOf("supporter", "patron", "legend")
+    TsCard(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+            ) {
+                TierMark(tier, markSize = 22)
+                Text(
+                    "Plan",
+                    style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
+                    color = colors.textPrimary,
+                )
+            }
+            val period = when {
+                billing?.string("interval") == "month" -> " monthly"
+                paid -> " yearly"
+                else -> ""
+            }
+            val until = billing?.string("periodEnd")?.let { shortDay(it) }?.let { " · until $it" }.orEmpty()
+            Text(
+                tier.replaceFirstChar { it.uppercase() } + period + until,
+                style = TextStyle(fontSize = 14.sp),
+                color = colors.textSecondary,
+            )
+            // Where it is managed decides what can be done from here, so it
+            // is a sentence rather than a guess at a button. Mirrors
+            // `isAppleBilled` / `isPaddleBilled` / `isWebManagedPlan` in
+            // `Models.swift`, with Google Play standing where the App Store
+            // stands on the iPhone: a provider alone is not enough, the
+            // subscription also has to be live, or founder and family access
+            // reads as a store purchase nobody can cancel.
+            val live = billing?.bool("hasLiveSub") == true ||
+                billing?.string("status") in listOf("active", "trialing", "past_due") ||
+                billing?.bool("entitled") == true
+            when {
+                provider == "google_play" && live -> {
+                    Text(
+                        "Bought on Google Play. See every plan here, then change or cancel in Play Store subscriptions.",
+                        style = TextStyle(fontSize = 14.sp),
+                        color = colors.textSecondary,
+                    )
+                    billing.string("scheduledTier")?.ifBlank { null }?.let { next ->
+                        val nextPeriod = if (billing.string("scheduledInterval") == "month") " monthly" else " yearly"
+                        Text(
+                            "Switches to ${next.replaceFirstChar { it.uppercase() }}$nextPeriod at the next renewal.",
+                            style = TextStyle(fontSize = 12.sp),
+                            color = colors.accent,
+                        )
+                    }
+                    TsAccentButton(
+                        label = "See plans",
+                        icon = ActionIcon.Plans.vector,
+                        onClick = onPlans,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                provider == "paddle" && live -> Text(
+                    "You subscribed on the website. Manage that plan there.",
+                    style = TextStyle(fontSize = 14.sp),
+                    color = colors.textSecondary,
+                )
+                paid -> Text(
+                    "This plan is not a Google Play purchase. Manage it on the web.",
+                    style = TextStyle(fontSize = 14.sp),
+                    color = colors.textSecondary,
+                )
+                else -> {
+                    Text(
+                        "The app stays free. A yearly plan unlocks more devices, longer history, and remote management.",
+                        style = TextStyle(fontSize = 14.sp),
+                        color = colors.textSecondary,
+                    )
+                    TsAccentButton(
+                        label = "See plans",
+                        icon = ActionIcon.Plans.vector,
+                        onClick = onPlans,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+
+/// "Aug 26, 2026" from an ISO instant, in the reader's own zone. Port of
+/// `ClientAccountSheet.shortDay`. Taking the first ten characters of the
+/// string instead reads the UTC day, which is the wrong one either side of
+/// midnight.
+private fun shortDay(iso: String): String = runCatching {
+    val instant = java.time.Instant.parse(iso)
+    java.time.format.DateTimeFormatter
+        .ofPattern("MMM d, yyyy")
+        .withZone(java.time.ZoneId.systemDefault())
+        .format(instant)
+}.getOrElse { iso.take(10) }
+
+
+/// One document that opens off the device. The arrow says it leaves the app,
+/// which a plain row does not.
+@Composable
+private fun LegalLinkRow(label: String, onOpen: () -> Unit) {
+    val colors = LocalTsColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .padding(vertical = Space.s),
+    ) {
+        Text(label, color = colors.textPrimary, modifier = Modifier.weight(1f))
+        Icon(
+            ActionIcon.External.vector,
+            null,
+            tint = colors.textTertiary,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+
+/// When anything last put numbers on the account. Port of `lastSync`.
+///
+/// A phone reads the archive and never writes one, and this card is where
+/// that is said. Without it the Account pane went from the relay allowance
+/// straight to Sign out.
+@Composable
+private fun AccountLastSyncCard(state: ClientState) {
+    val colors = LocalTsColors.current
+    TsCard(title = "Last sync", mark = "mark_sync") {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                Text("From any device", style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
+                val at = state.account?.string("lastSyncAt")
+                Text(
+                    at?.let { formatRelativeDate(it) } ?: "Never",
+                    style = TsType.numeric(14),
+                    color = colors.textPrimary,
+                )
+            }
+            Text(
+                "This device reads that data. It does not upload an archive of its own.",
+                style = TextStyle(fontSize = 14.sp),
+                color = colors.textSecondary,
+            )
+        }
+    }
+}
+
+/// Every machine on the account, with the one in your hand marked. Port of
+/// `devices`. The Devices tab lists them too, but somebody checking what is
+/// linked to an account is in the account, not in a tab about machines.
+@Composable
+private fun AccountDevicesCard(state: ClientState) {
+    val colors = LocalTsColors.current
+    val machines = ((state.account?.get("machines") as? JsonArray) ?: JsonArray(emptyList()))
+        .mapNotNull { it as? JsonObject }
+    val thisId = state.account?.string("thisMachineId")
+    TsCard(title = "Devices", mark = "mark_device") {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            Text(
+                if (machines.isEmpty()) {
+                    "None linked yet. Install tokenstat on a computer and sign in there."
+                } else {
+                    "${machines.size} linked to this account"
+                },
+                style = TextStyle(fontSize = 14.sp),
+                color = colors.textSecondary,
+            )
+            machines.forEachIndexed { index, machine ->
+                if (index > 0) HorizontalDivider(color = colors.border)
+                val isThis = thisId != null && machine.string("id") == thisId
+                val isHost = machine.string("kind") != "client"
+                val name = DeviceCopy.displayName(machine.string("label"), machine.string("platform"), isHost)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.m),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    DeviceGlyph(
+                        name = name,
+                        label = machine.string("label"),
+                        platform = machine.string("platform"),
+                        isHost = isHost,
+                        tint = if (isThis) colors.accent else colors.textSecondary,
+                    )
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                name,
+                                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                                color = colors.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (isThis) {
+                                Text("this device", style = TextStyle(fontSize = 12.sp), color = colors.accent)
+                            }
+                        }
+                        Text(
+                            formatRelativeDate(machine.string("lastSeenAt")) ?: "Never used",
+                            style = TextStyle(fontSize = 12.sp),
+                            color = colors.textSecondary,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

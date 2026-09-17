@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -10,6 +11,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -195,6 +197,28 @@ fun folderSubtitle(folder: JsonObject): String? {
         val partial = git.bol("partial") == true
         val stat = "+$added" + (if (removed > 0) " −$removed" else "") + (if (partial) "+" else "")
         parts.add(stat)
+    }
+    return parts.joinToString(" ").takeIf { it.isNotEmpty() }
+}
+
+/// The same ahead, behind and diff figures as `folderSubtitle`, without the
+/// branch name. For a row that already says which branch it is on: the folder
+/// header repeated "main" beside "Branch main" and then said nothing about
+/// what was actually waiting in it.
+fun folderGitStats(folder: JsonObject): String? {
+    val git = folder["git"] as? JsonObject ?: return null
+    if (git.bol("isRepo") != true) return null
+    val parts = mutableListOf<String>()
+    val ahead = (git["ahead"] as? JsonPrimitive)?.intOrNull ?: 0
+    val behind = (git["behind"] as? JsonPrimitive)?.intOrNull ?: 0
+    if (ahead > 0) parts.add("⇡$ahead")
+    if (behind > 0) parts.add("⇣$behind")
+    val files = (git["files"] as? JsonArray)?.size ?: 0
+    if (files > 0) {
+        val added = (git["added"] as? JsonPrimitive)?.intOrNull ?: 0
+        val removed = (git["removed"] as? JsonPrimitive)?.intOrNull ?: 0
+        val partial = git.bol("partial") == true
+        parts.add("+$added" + (if (removed > 0) " −$removed" else "") + (if (partial) "+" else ""))
     }
     return parts.joinToString(" ").takeIf { it.isNotEmpty() }
 }
@@ -776,7 +800,7 @@ fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit) {
                 }
             }
         }
-        Icon(ActionIcon.Next.vector, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
+        Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
     }
 }
 
@@ -908,7 +932,7 @@ fun WorkspacesEditor(
         rest.add(target, section)
         draftOrder = rest + draftOrder.filter { it in draftHidden }
     }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    LazyColumn(contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         item {
             WorkspacesLayoutPreview(sections = visible)
         }

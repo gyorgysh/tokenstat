@@ -45,6 +45,13 @@ object HomeGreeting {
         )
 }
 
+/// Full grouped counts, the reading of Swift's `.formatted()` on an integer.
+/// The Insights row subtitle keeps every event ("34,346 events"), unlike the
+/// stat chips above it which compact. Device locale, like the Apple client:
+/// money is pinned to US dollars but a count groups the way the user reads.
+fun groupedCount(count: Long?): String =
+    NumberFormat.getIntegerInstance().format(count ?: 0L)
+
 /// Compact token counts, port of `formatTokens` in `Bridge/Models.swift`.
 /// Lowercase k, and whole thousands above ten thousand ("126k"), exactly
 /// like the Apple client.

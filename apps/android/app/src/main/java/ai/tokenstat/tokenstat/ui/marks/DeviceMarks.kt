@@ -4,6 +4,7 @@ package ai.tokenstat.tokenstat.ui.marks
 import ai.tokenstat.tokenstat.R
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -134,14 +135,27 @@ fun DeviceGlyph(
 
 /// The lit dot before a device name. The device in your hand is awake
 /// whatever the directory last recorded: the app asking is running on it.
+/// Three states and three appearances, like `AwakeDot` in
+/// `ClientDevicesView.swift`: a server that never reported presence is a
+/// hollow ring, not a dot, because "no answer" and "asleep" differ.
 @Composable
 fun AwakeDot(online: Boolean?, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
     Box(
         modifier.then(
             Modifier.size(9.dp).background(
-                if (online == true) colors.accent else colors.textSecondary.copy(alpha = 0.35f),
+                when (online) {
+                    true -> colors.accent
+                    false -> colors.textSecondary.copy(alpha = 0.35f)
+                    null -> Color.Transparent
+                },
                 CircleShape,
+            ).then(
+                if (online == null) {
+                    Modifier.border(1.dp, colors.textSecondary.copy(alpha = 0.5f), CircleShape)
+                } else {
+                    Modifier
+                },
             ),
         ),
     )

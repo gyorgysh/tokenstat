@@ -71,11 +71,11 @@ import kotlinx.serialization.json.put
 /// the three doors as a quiet button rather than a fourth card, so it never
 /// reads as a fourth way to set up.
 ///
-/// The interactive SSH provisioning flow (`ClientSetupServerSteps`) has no
-/// Android counterpart yet: the server door offers the existing SSH screen
-/// plus running the install by hand. The draft resume card is likewise
-/// absent: without the SSH steps there is no half-finished remote state to
-/// resume.
+/// The server door walks the six provisioning steps (`SetupServerSteps`,
+/// ported from `ClientSetupServerSteps`): which server, how to sign in, the
+/// host key, the check, the install, and the wait. The draft resume card is
+/// absent: setup left half-finished restarts from the address, and every
+/// remote step re-asks the server rather than assuming.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupWizard(
@@ -86,6 +86,7 @@ fun SetupWizard(
     onOpenWork: (hostId: String, folderId: String) -> Unit,
 ) {
     var path by remember { mutableStateOf(listOf<SetupStep>()) }
+    val connect = remember { SetupConnectState() }
     BackHandler {
         if (path.isEmpty()) onClose() else path = path.dropLast(1)
     }
@@ -105,7 +106,18 @@ fun SetupWizard(
         },
     ) { padding ->
         androidx.compose.foundation.layout.Box(Modifier.padding(padding)) {
-            SetupStepBody(path.lastOrNull(), model, state, onClose, onOpenSsh, onOpenWork, onDoor = { path = listOf(it) }, onPush = { path = path + it })
+            SetupStepBody(
+                path.lastOrNull(),
+                model,
+                state,
+                connect,
+                onClose,
+                onOpenSsh,
+                onOpenWork,
+                onDoor = { path = listOf(it) },
+                onPush = { path = path + it },
+                onPath = { path = it },
+            )
         }
     }
 }
@@ -115,12 +127,22 @@ private fun SetupStepBody(
     step: SetupStep?,
     model: AppViewModel,
     state: ai.tokenstat.tokenstat.ClientState,
+    connect: SetupConnectState,
     onClose: () -> Unit,
     onOpenSsh: () -> Unit,
     onOpenWork: (hostId: String, folderId: String) -> Unit,
     onDoor: (SetupStep) -> Unit,
     onPush: (SetupStep) -> Unit,
+    onPath: (List<SetupStep>) -> Unit,
 ) {
+    // A changed key is re-established from scratch: it has to be looked at,
+    // not carried forward from a record that no longer fits the server.
+    val onRecover: (SetupAction) -> Unit = { action ->
+        if (action == SetupAction.REVIEW_FINGERPRINT) connect.resetServer()
+        connect.failure = null
+        recoverSetupPath(action)?.let { onPath(it) }
+    }
+    val onByHand: () -> Unit = { onPush(SetupStep.BY_HAND) }
         when (step) {
             null -> SetupDoors(state = state, onDoor = onDoor, onClose = onClose)
             SetupStep.MAC -> SetupMacDoor(state = state)
@@ -131,12 +153,62 @@ private fun SetupStepBody(
             )
             SetupStep.NEED_SERVER -> SetupServerGuide(onHaveServer = { onDoor(SetupStep.SERVER) })
             SetupStep.SERVER -> SetupServerDoor(
-                onSsh = onOpenSsh,
+                onConnect = { onDoor(SetupStep.WHERE) },
                 onByHand = { onPush(SetupStep.BY_HAND) },
+            )
+            SetupStep.WHERE -> SetupWhereStep(
+                model = model,
+                connect = connect,
+                onPush = onPush,
+                onByHand = onByHand,
+                onRecover = onRecover,
+            )
+            SetupStep.CREDENTIAL -> SetupCredentialStep(
+                model = model,
+                connect = connect,
+                onPush = onPush,
+                onRecover = onRecover,
+            )
+            SetupStep.FINGERPRINT -> SetupFingerprintStep(
+                model = model,
+                connect = connect,
+                onPush = onPush,
+                onRecover = onRecover,
+            )
+            SetupStep.CHECK -> SetupCheckStep(
+                model = model,
+                connect = connect,
+                onPush = onPush,
+                onByHand = onByHand,
+                onRecover = onRecover,
+            )
+            SetupStep.INSTALL -> SetupInstallStep(
+                model = model,
+                state = state,
+                connect = connect,
+                onPush = onPush,
+                onByHand = onByHand,
+                onRecover = onRecover,
+            )
+            SetupStep.FINISH -> SetupFinishStep(
+                model = model,
+                connect = connect,
+                onPush = onPush,
+                onRecover = onRecover,
+            )
+            SetupStep.AGENT -> SetupAgentStep(
+                model = model,
+                state = state,
+                connect = connect,
+                onPush = onPush,
+                onRecover = onRecover,
             )
             SetupStep.BY_HAND -> SetupByHand(
                 model = model,
-                onRanIt = { onPush(SetupStep.PROJECT) },
+                onRanIt = {
+                    connect.startManualInstall()
+                    onPush(SetupStep.FINISH)
+                },
             )
             SetupStep.PROJECT -> SetupProjectStep(
                 model = model,
@@ -147,7 +219,6 @@ private fun SetupStepBody(
                 },
                 onNotNow = onClose,
             )
-            else -> SetupDoors(state = state, onDoor = onDoor, onClose = onClose)
         }
 }
 
@@ -284,12 +355,11 @@ private fun GuideBullet(text: String) {
 
 /// Door two: a server somebody already has.
 ///
-/// The Apple client's SSH provisioning steps have no Android counterpart
-/// yet, so this door offers the two routes this device can honestly run:
-/// the SSH screen with its key vault and live session, or the install line
-/// run by hand for a server where handing over a key is not on.
+/// Two routes: the provisioning steps, which ask which server and how to
+/// sign in before anything is written, or the install line run by hand for
+/// a server where handing over a key is not on.
 @Composable
-private fun SetupServerDoor(onSsh: () -> Unit, onByHand: () -> Unit) {
+private fun SetupServerDoor(onConnect: () -> Unit, onByHand: () -> Unit) {
     val colors = LocalTsColors.current
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Space.m),
@@ -311,10 +381,10 @@ private fun SetupServerDoor(onSsh: () -> Unit, onByHand: () -> Unit) {
         )
         SetupDoorCard(
             title = "Connect over SSH",
-            body = "Use a saved server or add one. Keys stay in this device's vault, and you watch the whole install in a terminal.",
+            body = "Choose a server and how to sign in. Setup verifies it, checks it, and installs tokenstat while you watch.",
             requirement = null,
             icon = { Icon(ActionIcon.Source.vector, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
-            onClick = onSsh,
+            onClick = onConnect,
         )
         SetupDoorCard(
             title = "Run it yourself",
@@ -484,17 +554,12 @@ private fun SetupProjectStep(
     onNotNow: () -> Unit,
 ) {
     val colors = LocalTsColors.current
-    val machines = (state.account?.get("machines") as? JsonArray ?: JsonArray(emptyList()))
-        .map { it.jsonObject }
-        .filter {
-            it.get("kind")?.jsonPrimitive?.contentOrNull != "client" &&
-                !it.get("publicIdentity")?.jsonPrimitive?.contentOrNull.isNullOrEmpty()
-        }
-    var peer by remember { mutableStateOf(machines.singleOrNull()?.peer()) }
+    val machines = remember(state.account) { setupMachines(state.account) }
+    var peer by remember { mutableStateOf(machines.singleOrNull()?.setupPeer()) }
     var route by remember { mutableStateOf<ProjectRoute?>(null) }
     BackHandler(enabled = route != null) { route = null }
-    val hostLabel = machines.find { it.peer() == peer }?.hostLabel() ?: "the machine"
-    val hostId = machines.find { it.peer() == peer }?.machineId()
+    val hostLabel = machines.find { it.setupPeer() == peer }?.setupHostLabel() ?: "the machine"
+    val hostId = machines.find { it.setupPeer() == peer }?.setupMachineId()
     when (route) {
         ProjectRoute.CLONE -> if (peer != null) {
             ai.tokenstat.tokenstat.ui.workspace.CloneRepositoryScreen(
@@ -548,17 +613,17 @@ private fun SetupProjectStep(
                     Text("Machine", style = TsType.caption, color = colors.textSecondary)
                     machines.forEach { machine ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { peer = machine.peer() }.padding(vertical = 4.dp),
+                            Modifier.fillMaxWidth().clickable { peer = machine.setupPeer() }.padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Space.s),
                         ) {
                             Text(
-                                machine.hostLabel(),
+                                machine.setupHostLabel(),
                                 style = TsType.body,
-                                color = if (machine.peer() == peer) colors.accent else colors.textPrimary,
+                                color = if (machine.setupPeer() == peer) colors.accent else colors.textPrimary,
                                 modifier = Modifier.weight(1f),
                             )
-                            if (machine.peer() == peer) Icon(ActionIcon.Done.vector, null, tint = colors.accent)
+                            if (machine.setupPeer() == peer) Icon(ActionIcon.Done.vector, null, tint = colors.accent)
                         }
                     }
                 }
@@ -588,15 +653,6 @@ private fun SetupProjectStep(
 }
 
 private enum class ProjectRoute { CLONE, EXISTING }
-
-private fun JsonObject.peer(): String? = get("publicIdentity")?.jsonPrimitive?.contentOrNull
-
-private fun JsonObject.machineId(): String? = get("id")?.jsonPrimitive?.contentOrNull
-
-private fun JsonObject.hostLabel(): String =
-    get("label")?.jsonPrimitive?.contentOrNull?.ifEmpty { null }
-        ?: get("displayName")?.jsonPrimitive?.contentOrNull?.ifEmpty { null }
-        ?: "Host"
 
 
 @Composable
@@ -698,7 +754,7 @@ private fun SetupDoorCard(
                     )
                 }
             }
-            Icon(ActionIcon.Next.vector, null, tint = colors.textTertiary)
+            Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
         }
     }
 }

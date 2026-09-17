@@ -8,4 +8,7 @@
         <item name="android:navigationBarColor">@color/ts_window</item>
         <item name="android:statusBarColor">@color/ts_window</item>
     </style>
+    <!-- Below Android 12 there is no system splash: the launch theme is a
+         plain alias, and values-night-v31 adds the animated icon. -->
+    <style name="Theme.Tokenstat.Launch" parent="Theme.Tokenstat" />
 </resources>

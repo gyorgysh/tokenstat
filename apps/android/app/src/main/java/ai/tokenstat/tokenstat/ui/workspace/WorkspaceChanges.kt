@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import androidx.compose.material3.Icon
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
+
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -32,12 +42,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
-import ai.tokenstat.tokenstat.ui.components.BrandCheckbox
+import ai.tokenstat.tokenstat.ui.components.BrandCheckDisc
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
@@ -99,7 +107,58 @@ fun ChangesSection(
     val files = state.files
     val allPaths = files.mapNotNull { it.str("path") }.toSet()
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    val editingTop = editPath
+    if (editingTop != null) {
+        WorkspaceFileEditorPage(
+            model = model,
+            peer = peer,
+            workspace = workspace,
+            folderName = folderName,
+            hostLabel = hostLabel,
+            path = editingTop,
+            modifier = modifier,
+            onClose = { editPath = null },
+            onSavedFile = { scope.launch { load() } },
+        )
+        return
+    }
+    val diffTop = diffPath
+    if (diffTop != null) {
+        FileDiffPage(
+            model = model,
+            peer = peer,
+            workspace = workspace,
+            hostLabel = hostLabel,
+            path = diffTop,
+            modifier = modifier,
+            onBack = { diffPath = null },
+            onEdit = { editPath = diffTop },
+        )
+        return
+    }
+    if (showingReviewAll) {
+        ReviewAllPage(
+            model = model,
+            peer = peer,
+            workspace = workspace,
+            hostLabel = hostLabel,
+            files = files,
+            modifier = modifier,
+            onBack = { showingReviewAll = false },
+            onOpenFile = { path ->
+                showingReviewAll = false
+                diffPath = path
+            },
+        )
+        return
+    }
+
+    // The bar floats over this screen, so the docked rows reserve its height
+    // rather than sliding under it. The list takes what is left.
+    Column(
+        modifier.padding(bottom = TabBarChrome.contentBottomInset),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 state.branch ?: "Changes",
@@ -142,16 +201,33 @@ fun ChangesSection(
                 folderName = folderName,
                 hostLabel = hostLabel,
             )
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            // Weighted, so the selection count, Review and commit, and Push
+            // sit on the bottom edge the way the iPhone docks them. Unweighted
+            // the list took its natural height and pushed all three past the
+            // end of a ninety-six file scroll: the doc comment above called
+            // that "push rides below the fold", which is a bug with a
+            // sentence in front of it.
+            LazyColumn(
+                Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = Space.xs),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
                 items(files, key = { it.str("path") ?: it.hashCode().toString() }) { file ->
                     val path = file.str("path") ?: return@items
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        BrandCheckbox(
-                            checked = state.selection.contains(path),
-                            onToggle = { state.select(path) },
-                            label = "Select $path",
-                            modifier = Modifier.weight(0.001f),
-                        )
+                        // A bare disc: the file row carries the name, and the
+                        // disc carries its own touch target because tapping
+                        // the row opens the diff instead.
+                        val picked = state.selection.contains(path)
+                        Box(
+                            Modifier
+                                .size(44.dp)
+                                .clickable(role = Role.Checkbox, onClick = { state.select(path) })
+                                .semantics { contentDescription = "Select $path, ${if (picked) "on" else "off"}" },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BrandCheckDisc(on = picked)
+                        }
                         ChangedFileRow(
                             file = file,
                             modifier = Modifier.weight(1f),
@@ -219,45 +295,6 @@ fun ChangesSection(
             },
         )
     }
-    if (showingReviewAll) {
-        ReviewAllDialog(
-            model = model,
-            peer = peer,
-            workspace = workspace,
-            hostLabel = hostLabel,
-            files = files,
-            onDismiss = { showingReviewAll = false },
-            onOpenFile = { path ->
-                showingReviewAll = false
-                diffPath = path
-            },
-        )
-    }
-    val open = diffPath
-    if (open != null) {
-        FileDiffDialog(
-            model = model,
-            peer = peer,
-            workspace = workspace,
-            hostLabel = hostLabel,
-            path = open,
-            onEdit = { editPath = open },
-            onDismiss = { diffPath = null },
-        )
-    }
-    val editing = editPath
-    if (editing != null) {
-        ai.tokenstat.tokenstat.ui.editor.EditorDialog(
-            model = model,
-            peer = peer,
-            workspace = workspace,
-            folderName = folderName,
-            hostLabel = hostLabel,
-            initial = listOf(ai.tokenstat.tokenstat.ui.editor.EditorOpen(editing)),
-            onSavedFile = { scope.launch { load() } },
-            onDismiss = { editPath = null },
-        )
-    }
 }
 
 /// One changed file, and the way into its diff: name, directory, kind word,
@@ -288,7 +325,7 @@ private fun ChangedFileRow(file: JsonObject, modifier: Modifier = Modifier, onOp
             )
             if (directory.isNotEmpty()) {
                 Text(
-                    directory,
+                    middleTruncate(directory, maxChars = 40),
                     style = TextStyle(fontSize = 11.sp),
                     color = LocalTsColors.current.textSecondary,
                     maxLines = 1,
@@ -316,26 +353,37 @@ private fun ChangedFileRow(file: JsonObject, modifier: Modifier = Modifier, onOp
                 color = LocalTsColors.current.diffRemoved,
             )
         }
+        // The row opens the diff, so it says so. Every other row in the app
+        // that pushes somewhere carries this chevron.
+        Icon(
+            ActionIcon.Disclosure.vector,
+            null,
+            tint = LocalTsColors.current.textTertiary,
+            modifier = Modifier.size(16.dp),
+        )
     }
 }
 
-/// One file's current working-copy diff, read from the owning machine.
-/// Renders hunk rows (one gutter, marker carries the side) like
+/// One file's current working-copy diff as a full page, read from the owning
+/// machine. Renders hunk rows (one gutter, marker carries the side) like
 /// `ClientDiffView`; binary and empty states use Apple's words.
 @Composable
-fun FileDiffDialog(
+fun FileDiffPage(
     model: AppViewModel,
     peer: String,
     workspace: String,
     hostLabel: String,
     path: String,
+    modifier: Modifier = Modifier,
     onEdit: (() -> Unit)? = null,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var diff by remember(path) { mutableStateOf<JsonObject?>(null) }
     var error by remember(path) { mutableStateOf<String?>(null) }
     var loading by remember(path) { mutableStateOf(true) }
-    LaunchedEffect(path) {
+    suspend fun load() {
+        loading = true
         runCatching {
             model.workspaceSection(peer, "workspace.diff", buildJsonObject {
                 put("id", workspace); put("path", path)
@@ -344,29 +392,33 @@ fun FileDiffDialog(
             .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
         loading = false
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(Space.m)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
-            Text(path, style = TsType.mono(13), color = LocalTsColors.current.textPrimary)
-            if (error != null) Banner(error!!, BannerSeverity.DANGER)
-            if (loading) {
-                Text("Loading…", color = LocalTsColors.current.textSecondary)
-            } else if (diff != null) {
-                HunkDiffView(diff!!)
-            } else if (error == null) {
-                Text("That file is not in this folder any more.", color = LocalTsColors.current.textSecondary)
+    LaunchedEffect(path) { load() }
+    Column(
+        modifier.verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack, modifier = Modifier.weight(1f)) {
+                Text("← Changes", modifier = Modifier.fillMaxWidth())
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                if (onEdit != null && diff != null && !diff!!.bol("binary")) {
-                    TsAccentButton(label = "Edit", small = true, onClick = { onDismiss(); onEdit() })
-                }
-                TsSecondaryButton(label = "Close", small = true, onClick = onDismiss)
+            if (onEdit != null && diff != null && diff!!.bol("binary") != true) {
+                TsAccentButton(label = "Edit", small = true, onClick = onEdit)
             }
+        }
+        Text(path, style = TsType.mono(13), color = LocalTsColors.current.textPrimary)
+        if (error != null) {
+            StickyErrorCard(
+                message = error!!,
+                onRetry = { scope.launch { load() } },
+                onDismiss = { error = null },
+            )
+        }
+        if (loading) {
+            Text("Loading…", color = LocalTsColors.current.textSecondary)
+        } else if (diff != null) {
+            HunkDiffView(diff!!)
+        } else if (error == null) {
+            Text("That file is not in this folder any more.", color = LocalTsColors.current.textSecondary)
         }
     }
 }

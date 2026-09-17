@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.automations
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -80,6 +82,40 @@ fun AutomationEditorDialog(
     timezone: String,
     onSaved: () -> Unit,
     onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        AutomationEditorScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            workspaceID = workspaceID,
+            folderName = folderName,
+            existing = existing,
+            backends = backends,
+            defaultBudget = defaultBudget,
+            timezone = timezone,
+            onSaved = onSaved,
+            onBack = onDismiss,
+        )
+    }
+}
+
+/// The automation editor as a full page on the app background.
+@Composable
+fun AutomationEditorScreen(
+    model: AppViewModel,
+    peer: String,
+    hostLabel: String,
+    protocol: Long?,
+    workspaceID: String,
+    folderName: String,
+    existing: AutomationJob?,
+    backends: List<BackendRef>,
+    defaultBudget: Long,
+    timezone: String,
+    onSaved: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val supportsReceipts = HostContracts.supportsAutomationReceipts(protocol)
@@ -314,7 +350,7 @@ fun AutomationEditorDialog(
             confirmingDelete = false
             notice = "Deleted."
             onSaved()
-            onDismiss()
+            onBack()
         }.onFailure {
             error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
         }
@@ -329,9 +365,18 @@ fun AutomationEditorDialog(
     val canSave = loaded && !working && !missing && !conflict && !pendingEdit && created == null && pendingCreation == null && fields.validation == null && dirty
     val canCreate = isCreate && loaded && !working && pendingCreation == null && created == null && fields.validation == null
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().padding(Space.m).verticalScroll(rememberScrollState())) {
+    BackHandler { onBack() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(LocalTsColors.current.background)
+            .padding(Space.m)
+            .verticalScroll(rememberScrollState()),
+    ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
+                }
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (isCreate) "New automation" else "Automation",
@@ -339,9 +384,6 @@ fun AutomationEditorDialog(
                         color = LocalTsColors.current.textPrimary,
                     )
                     Text(folderName.ifBlank { hostLabel }, style = TsType.caption, color = LocalTsColors.current.textSecondary)
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(ActionIcon.Dismiss.vector, "Close", tint = LocalTsColors.current.controlGlyph)
                 }
             }
             if (error != null) {
@@ -441,7 +483,7 @@ fun AutomationEditorDialog(
             }
             Spacer(Modifier.padding(top = Space.s))
             if (created != null) {
-                TsAccentButton(label = "Done", onClick = onDismiss)
+                TsAccentButton(label = "Done", onClick = onBack)
             } else if (pendingCreation != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     TsSecondaryButton(label = "Check", enabled = !working, onClick = { scope.launch { readCreation() } })
@@ -473,12 +515,11 @@ fun AutomationEditorDialog(
                 }
             }
         }
-    }
     if (confirmingDelete && base != null) {
         AlertDialog(
             onDismissRequest = { confirmingDelete = false },
-            title = { Text("Delete job?") },
-            text = { Text("Delete \"${base.name}\"? Its run history stays on the computer.") },
+            title = { Text("Delete ${base.name}?") },
+            text = { Text("The schedule goes with it. Runs it already produced stay.") },
             confirmButton = { Button(onClick = { scope.launch { delete() } }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },
         )

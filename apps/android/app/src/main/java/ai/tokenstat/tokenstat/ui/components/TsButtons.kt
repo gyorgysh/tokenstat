@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -124,6 +125,37 @@ fun TsSecondaryButton(
     )
 }
 
+/// An action that ends something: sign out, delete, revoke.
+///
+/// The Apple sheet draws these in the danger colour on a danger-tinted fill,
+/// and that is the whole point of them: Sign out and Delete on website read
+/// as ordinary secondary buttons otherwise, sitting in a row of ordinary
+/// secondary buttons.
+@Composable
+fun TsDangerButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    small: Boolean = false,
+    enabled: Boolean = true,
+) {
+    val colors = LocalTsColors.current
+    TsCapsuleButton(
+        label = label,
+        icon = icon,
+        small = small,
+        enabled = enabled,
+        onClick = onClick,
+        modifier = modifier,
+        contentColor = colors.danger,
+        fill = colors.danger.copy(alpha = 0.10f),
+        pressedFill = colors.danger.copy(alpha = 0.18f),
+        stroke = BorderStroke(1.dp, colors.danger.copy(alpha = 0.35f)),
+        pressedStroke = BorderStroke(1.dp, colors.danger.copy(alpha = 0.55f)),
+    )
+}
+
 @Composable
 private fun TsCapsuleButton(
     label: String,
@@ -140,13 +172,16 @@ private fun TsCapsuleButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    // Full-size actions meet the 48dp touch minimum, the port of the
+    // client's `.controlSize(.large)` footer. Small row buttons stay dense.
     Box(
         modifier
             .clip(buttonShape)
             .background(if (pressed) pressedFill else fill)
             .border(if (pressed) pressedStroke else stroke, buttonShape)
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
-            .padding(horizontal = if (small) 10.dp else 14.dp, vertical = if (small) 4.dp else 6.dp)
+            .heightIn(min = if (small) 0.dp else 48.dp)
+            .padding(horizontal = if (small) 10.dp else 20.dp, vertical = if (small) 4.dp else 6.dp)
             .alpha(if (pressed) 0.85f else 1f),
         contentAlignment = Alignment.Center,
     ) {

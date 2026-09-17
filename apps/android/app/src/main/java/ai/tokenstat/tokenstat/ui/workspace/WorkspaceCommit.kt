@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -100,7 +103,7 @@ fun CommitComposerDialog(
             Modifier
                 .fillMaxWidth()
                 .padding(Space.m)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             Column {
@@ -460,7 +463,7 @@ private fun PushSheet(
             Modifier
                 .fillMaxWidth()
                 .padding(Space.m)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             Column {
@@ -574,6 +577,10 @@ fun BranchRow(
     branch: String?,
     isRepo: Boolean,
     onChanged: () -> Unit,
+    /// Ahead, behind and the diff stat, when there is anything waiting. The
+    /// Apple folder header carries them on this row rather than making you
+    /// open Changes to find out whether there is anything to open it for.
+    stats: String? = null,
 ) {
     var showing by remember { mutableStateOf(false) }
     if (!isRepo) return
@@ -591,6 +598,12 @@ fun BranchRow(
             "Branch ${branch ?: "detached"}",
             style = TextStyle(fontSize = 12.sp),
             color = LocalTsColors.current.accent,
+            maxLines = 1,
+        )
+        Text(
+            stats.orEmpty(),
+            style = TextStyle(fontSize = 12.sp),
+            color = LocalTsColors.current.accent.copy(alpha = 0.75f),
             modifier = Modifier.weight(1f),
             maxLines = 1,
         )
@@ -725,13 +738,14 @@ private fun BranchDialog(
 /// commit. Bounded twice: at most twenty files, sixty lines each, with a
 /// Full diff link per file for the rest.
 @Composable
-fun ReviewAllDialog(
+fun ReviewAllPage(
     model: AppViewModel,
     peer: String,
     workspace: String,
     hostLabel: String,
     files: List<JsonObject>,
-    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    onBack: () -> Unit,
     onOpenFile: (String) -> Unit,
 ) {
     val shown = files.take(ReviewClip.MAX_FILES)
@@ -755,14 +769,13 @@ fun ReviewAllDialog(
         failures = missed
         loaded = true
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(Space.m)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
+    Column(
+        modifier.verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
+        verticalArrangement = Arrangement.spacedBy(Space.m),
+    ) {
+            TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                Text("← Changes", modifier = Modifier.fillMaxWidth())
+            }
             Text("Review all", style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
             if (!loaded) {
                 Text("Loading…", color = LocalTsColors.current.textSecondary)
@@ -835,7 +848,5 @@ fun ReviewAllDialog(
                     )
                 }
             }
-            TsSecondaryButton(label = "Close", small = true, onClick = onDismiss)
-        }
     }
 }

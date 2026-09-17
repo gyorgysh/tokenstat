@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,7 +23,6 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,13 +37,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.EmptyState
-import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.logic.FileIcons
@@ -57,12 +54,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/// Folder drill with per-type icons, file open, and a single-file editor.
+/// Folder drill with per-type icons and file open, port of `ClientFilesView`.
 ///
-/// Ports `ClientFilesView` (phone file list, no editor tabs: those are the
-/// iPad presentation) and the `ClientFileEditor` save contract (dirty dot,
-/// Save disabled until dirty, discard confirm). The editor names the folder
-/// it returns to, so Back lands in context rather than on a bare path.
+/// Tapping a file opens the full-page `WorkspaceFileEditorPage`, the port of
+/// the iOS phone editor (find and replace, save states, conflict handling,
+/// discard confirm). The editor names the folder it returns to, so Back
+/// lands in context rather than on a bare path.
 @Composable
 fun FilesSection(
     model: AppViewModel,
@@ -77,7 +74,7 @@ fun FilesSection(
     var entries by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var editor by remember { mutableStateOf<List<ai.tokenstat.tokenstat.ui.editor.EditorOpen>?>(null) }
+    var editing by remember { mutableStateOf<String?>(null) }
 
     suspend fun load(at: String) {
         loading = true
@@ -93,8 +90,29 @@ fun FilesSection(
     }
     LaunchedEffect(path) { load(path) }
 
-    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        item { Breadcrumb(folderName.ifBlank { "Files" }, path, onJump = { path = it }) }
+    val open = editing
+    if (open != null) {
+        WorkspaceFileEditorPage(
+            model = model,
+            peer = peer,
+            workspace = workspace,
+            folderName = folderName,
+            hostLabel = hostLabel,
+            path = open,
+            modifier = modifier,
+            onClose = { editing = null },
+            onSavedFile = { scope.launch { load(path) } },
+        )
+        return
+    }
+
+    LazyColumn(modifier, contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        // At the root the breadcrumb is just the folder name, which the
+        // pushed header above already shows as its subtitle. It earns its row
+        // once you are inside something.
+        if (path.isNotEmpty()) {
+            item { Breadcrumb(folderName.ifBlank { "Files" }, path, onJump = { path = it }) }
+        }
         if (path.isNotEmpty()) {
             item {
                 TsSecondaryButton(label = "Up", small = true, onClick = {
@@ -125,7 +143,7 @@ fun FilesSection(
                             if (dir) {
                                 path = child
                             } else {
-                                editor = listOf(ai.tokenstat.tokenstat.ui.editor.EditorOpen(child))
+                                editing = child
                             }
                         }
                         .padding(vertical = Space.xs),
@@ -151,19 +169,6 @@ fun FilesSection(
                 HorizontalDivider(color = LocalTsColors.current.border)
             }
         }
-    }
-    val open = editor
-    if (open != null) {
-        ai.tokenstat.tokenstat.ui.editor.EditorDialog(
-            model = model,
-            peer = peer,
-            workspace = workspace,
-            folderName = folderName,
-            hostLabel = hostLabel,
-            initial = open,
-            onSavedFile = { scope.launch { load(path) } },
-            onDismiss = { editor = null },
-        )
     }
 }
 

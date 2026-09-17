@@ -3,8 +3,11 @@ package ai.tokenstat.tokenstat.ui.components
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -61,6 +64,7 @@ enum class ActionIcon {
     External, Next, Latest, Back, More, Search, SearchAll, Reveal, Docs, Source, Profile, Home, Help,
     Send, Attach, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
+    Disclosure,
     ;
 
     val vector: ImageVector
@@ -93,7 +97,7 @@ enum class ActionIcon {
             Run -> Icons.Default.PlayArrow
             Stop -> Icons.Default.Stop
             History -> Icons.Default.History
-            Archive -> Icons.Default.Archive
+            Archive -> Icons.Outlined.Archive
             Restore -> Icons.Default.History
             // A pin is a kept favourite. No pin glyph ships in the core set,
             // so the star stands in until a verified extended-set import lands.
@@ -109,6 +113,10 @@ enum class ActionIcon {
             ExitFullScreen -> Icons.Default.Close
             Delete -> Icons.Default.Delete
             Next -> Icons.AutoMirrored.Filled.ArrowForward
+            // A row that opens something, not a Next button. The Apple
+            // clients draw every one of these as `chevron.right`, and an
+            // arrow among chevrons reads as a different kind of action.
+            Disclosure -> Icons.AutoMirrored.Filled.KeyboardArrowRight
             Latest -> Icons.Default.KeyboardArrowDown
             Back -> Icons.AutoMirrored.Filled.ArrowBack
             More -> Icons.Default.MoreVert
@@ -118,7 +126,9 @@ enum class ActionIcon {
             Home -> Icons.Default.Home
             Help -> Icons.AutoMirrored.Filled.HelpOutline
             Send, Apply -> Icons.AutoMirrored.Filled.Send
-            Attach -> Icons.Default.Description
+            // A paperclip, like the composer on every other client. A
+            // document sheet reads as "a file", not as "add a file".
+            Attach -> Icons.Default.AttachFile
             Persona -> Icons.Default.Person
             Plan -> Icons.Default.Description
             Allow -> Icons.Default.Check

@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
+import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
+
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -33,15 +38,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.CommitTagPills
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.RelativeTimeText
-import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
@@ -99,15 +101,37 @@ fun HistorySection(
 
     val place = hostLabel.ifBlank { "the computer" }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "History",
-                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                color = LocalTsColors.current.textPrimary,
-                modifier = Modifier.weight(1f),
+    val opened = openId
+    if (opened != null) {
+        val commit = commits.firstOrNull { it.str("id") == opened }
+        if (commit != null) {
+            CommitDetailPage(
+                model = model,
+                peer = peer,
+                workspace = workspace,
+                hostLabel = hostLabel,
+                commit = commit,
+                modifier = modifier,
+                onBack = { openId = null },
             )
-            TextButton(onClick = { scope.launch { load() } }) { Text("Refresh") }
+            return
+        }
+    }
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        // No second "History": the pushed header above already names the
+        // section, and repeating it cost a row for nothing.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            TsSecondaryButton(
+                label = "Refresh",
+                icon = ActionIcon.Refresh.vector,
+                small = true,
+                onClick = { scope.launch { load() } },
+            )
         }
         if (error != null) Banner(error!!, BannerSeverity.DANGER)
         if (!exists) {
@@ -132,25 +156,11 @@ fun HistorySection(
                 art = { EmptyArt(EmptyArtKind.History) },
             )
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            LazyColumn(contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 items(commits, key = { it.str("id") ?: it.hashCode().toString() }) { commit ->
                     CommitRow(commit, onOpen = { openId = commit.str("id") })
                 }
             }
-        }
-    }
-    val opened = openId
-    if (opened != null) {
-        val commit = commits.firstOrNull { it.str("id") == opened }
-        if (commit != null) {
-            CommitDetailDialog(
-                model = model,
-                peer = peer,
-                workspace = workspace,
-                hostLabel = hostLabel,
-                commit = commit,
-                onDismiss = { openId = null },
-            )
         }
     }
 }
@@ -204,16 +214,18 @@ private fun CommitRow(commit: JsonObject, onOpen: () -> Unit) {
     }
 }
 
-/// One commit in full: what it says, then every file it changed.
+/// One commit as a full page: what it says, then every file it changed.
 @Composable
-private fun CommitDetailDialog(
+private fun CommitDetailPage(
     model: AppViewModel,
     peer: String,
     workspace: String,
     hostLabel: String,
     commit: JsonObject,
-    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    onBack: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var detail by remember(commit) { mutableStateOf<JsonObject?>(null) }
     var error by remember(commit) { mutableStateOf<String?>(null) }
     var loaded by remember(commit) { mutableStateOf(false) }
@@ -246,16 +258,21 @@ private fun CommitDetailDialog(
     val added = detail?.get("added")?.jsonPrimitive?.longOrNull ?: 0L
     val removed = detail?.get("removed")?.jsonPrimitive?.longOrNull ?: 0L
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(Space.m)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
+    Column(
+        modifier.verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+            TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                Text("← History", modifier = Modifier.fillMaxWidth())
+            }
             Text(shortId(id), style = TsType.mono(13), color = LocalTsColors.current.textSecondary)
-            if (error != null) Banner(error!!, BannerSeverity.DANGER)
+            if (error != null) {
+                StickyErrorCard(
+                    message = error!!,
+                    onRetry = { scope.launch { load() } },
+                    onDismiss = { error = null },
+                )
+            }
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -340,7 +357,5 @@ private fun CommitDetailDialog(
                     }
                 }
             }
-            TsSecondaryButton(label = "Close", small = true, onClick = onDismiss)
-        }
     }
 }

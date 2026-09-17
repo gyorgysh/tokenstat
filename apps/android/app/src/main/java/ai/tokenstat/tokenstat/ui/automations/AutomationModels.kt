@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.automations
 
+import ai.tokenstat.tokenstat.ui.tasks.RunHistory
+import ai.tokenstat.tokenstat.ui.tasks.RunRef
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -334,6 +336,119 @@ object HostScheduleClock {
     }
 }
 
+/// Confirm copy for starting or stopping work on another machine.
+///
+/// One helper so workflows and automations cannot word the same threat
+/// differently. Port of `ClientJobCopy`.
+object JobCopy {
+    fun run(name: String, folder: String, host: String): String =
+        "Starts $name in $folder on $host."
+
+    fun stop(name: String, folder: String, host: String): String =
+        "Stops the run of $name in $folder on $host."
+
+    fun continueGate(name: String, folder: String, host: String): String =
+        "Lets $name continue in $folder on $host."
+
+    fun budget(seconds: Long): String {
+        if (seconds == 0L) return "No time limit"
+        val minutes = seconds / 60
+        if (minutes >= 60 && minutes % 60 == 0L) {
+            val hours = minutes / 60
+            return "$hours hour${if (hours == 1L) "" else "s"}"
+        }
+        return "$minutes minute${if (minutes == 1L) "" else "s"}"
+    }
+
+    /// Fact-row value. The label is already "Last", so no prefix.
+    /// Port of `ClientJobCopy.lastRunWhen`.
+    fun lastRunWhen(epochMs: Long?, nowMs: Long = System.currentTimeMillis()): String {
+        if (epochMs == null || epochMs <= 0) return "Never run"
+        return ai.tokenstat.tokenstat.ui.logic.RelativeClock.abbreviated(epochMs, nowMs)
+    }
+}
+
+/// Scheduler card and editor copy. Port of `AutomationQueueDraft.summary`,
+/// `ClientSchedulerCard` scope, and the queue editor captions.
+object QueueCopy {
+    fun summary(budgetSeconds: Long, maxConcurrent: Long): String {
+        val budget = if (budgetSeconds == 0L) {
+            "No time limit"
+        } else {
+            val minutes = maxOf(1, budgetSeconds / 60)
+            when (minutes) {
+                15L -> "15m per job"
+                30L -> "30m per job"
+                60L -> "1h per job"
+                180L -> "3h per job"
+                480L -> "8h per job"
+                else -> "$minutes min per job"
+            }
+        }
+        val slots = if (maxConcurrent == 0L) "No cap" else "$maxConcurrent at once"
+        return "$budget · $slots"
+    }
+
+    /// The list may be one folder. The copy must not be.
+    fun scope(hostName: String, folderName: String, compact: Boolean = false): String {
+        val host = hostName.trim()
+        val folder = folderName.trim()
+        if (compact) {
+            if (host.isEmpty()) return "Every folder"
+            return "Every folder on $host"
+        }
+        if (host.isEmpty() && folder.isEmpty()) return "Every folder on the connected computer"
+        if (folder.isEmpty()) return "Every folder on $host"
+        if (host.isEmpty()) return "Every folder, not just $folder"
+        return "On $host, not just $folder"
+    }
+
+    fun editorScope(hostName: String, folderName: String): String {
+        val host = hostName.trim()
+        val folder = folderName.trim()
+        if (host.isEmpty() && folder.isEmpty()) {
+            return "How queued jobs run on the connected computer. This applies to every folder."
+        }
+        if (folder.isEmpty()) {
+            return "How queued jobs run on $host. This applies to every folder."
+        }
+        if (host.isEmpty()) {
+            return "How queued jobs run on the connected computer, not just $folder."
+        }
+        return "How queued jobs run on $host, not just $folder."
+    }
+
+    fun clockCaption(hostName: String, timezone: String?): String {
+        val host = hostName.trim()
+        val place = HostScheduleClock.place(timezone)
+        if (place != null) {
+            if (host.isEmpty()) return "The clock on the connected computer is $place."
+            return "The clock on $host is $place."
+        }
+        if (host.isEmpty()) return "The clock is on the connected computer, not this device."
+        return "The clock is on $host, not this device."
+    }
+}
+
+/// "2 enabled · 1 running", the automations library summary.
+fun automationListSummary(enabled: Int, running: Int): String = "$enabled enabled · $running running"
+
+/// Library search covers the name and the prompt, like the Apple client.
+fun jobMatchesQuery(job: AutomationJob, query: String): Boolean {
+    val q = query.trim()
+    if (q.isEmpty()) return true
+    return job.name.contains(q, ignoreCase = true) || job.prompt.contains(q, ignoreCase = true)
+}
+
+/// The run the detail leads with: the live-first latest, else the job's
+/// recorded last run. Port of `ClientAutomationSession.lastRun(for:)`.
+fun lastAutomationRun(runs: List<AutomationRun>, job: AutomationJob): AutomationRun? {
+    val jobRuns = runs.filter { it.jobId == job.id }
+    val ordered = RunHistory.ordered(jobRuns.map { RunRef(it.id, it.startedAtMs, it.isRunning) })
+    ordered.firstOrNull()?.let { ref -> return jobRuns.firstOrNull { it.id == ref.id } }
+    return job.lastRunID?.let { id -> runs.firstOrNull { it.id == id } }
+}
+
 /// One agent automation. Port of `Automation` (revision defaults to 0 on
 /// hosts before protocol 21).
 data class AutomationJob(
@@ -487,6 +602,8 @@ data class AutomationQueue(
 
 /// Queue editor validation. Port of `AutomationsModel.saveQueue`.
 object QueueValidation {
+    const val HOST_CAP = 32L
+
     fun budgetSeconds(noLimit: Boolean, minutesText: String): Long? {
         if (noLimit) return 0
         val minutes = minutesText.trim().toLongOrNull() ?: return null
@@ -497,13 +614,25 @@ object QueueValidation {
     }
 
     fun budgetError(noLimit: Boolean, minutesText: String): String? =
-        if (budgetSeconds(noLimit, minutesText) == null) "Time limit must be a whole number of minutes." else null
+        if (budgetSeconds(noLimit, minutesText) == null) "Enter a positive time limit, or choose No limit." else null
 
     fun maxConcurrent(countText: String): Long? =
-        countText.trim().toLongOrNull()?.takeIf { it >= 0 }
+        countText.trim().toLongOrNull()?.takeIf { it in 0..HOST_CAP }
 
-    fun maxConcurrentError(countText: String): String? =
-        if (maxConcurrent(countText) == null) "Max concurrent jobs must be a whole number." else null
+    fun maxConcurrentError(countText: String): String? {
+        val count = countText.trim().toLongOrNull()
+        if (count == null || count < 0) return "Jobs at once must be a whole number, or No cap."
+        if (count > HOST_CAP) return "At most $HOST_CAP jobs can run at once."
+        return null
+    }
+
+    fun isBudgetPreset(noLimit: Boolean, minutesText: String): Boolean {
+        if (noLimit) return false
+        return minutesText.trim().toIntOrNull() in listOf(15, 30, 60, 180, 480)
+    }
+
+    fun isConcurrentPreset(countText: String): Boolean =
+        countText.trim().toLongOrNull() in listOf(0L, 1L, 2L, 4L, 8L)
 }
 
 /// One completed or still-running agent run. Port of `RunRecord`.

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.marks
 
+import androidx.compose.material.icons.filled.Terminal
+
+import androidx.compose.material.icons.Icons
+
 import ai.tokenstat.tokenstat.ui.logic.harnessCanonicalID
 import ai.tokenstat.tokenstat.ui.logic.harnessName
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
@@ -42,6 +46,21 @@ fun HarnessMark(id: String, size: Dp = 26.dp) {
         } else {
             context.resources.getIdentifier("brand_$canonical", "drawable", context.packageName)
         }
+    }
+    // A shell is not a brand, so it has no artwork and fell through to the
+    // initial-letter path: the launch grid showed a plain "S" where every
+    // other tile showed a mark. The Apple grid draws it as a terminal glyph
+    // with no brand tile behind it, because there is no brand to tile.
+    if (canonical == "shell") {
+        Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.Default.Terminal,
+                harnessName(id),
+                tint = colors.accent,
+                modifier = Modifier.size(size * 0.82f),
+            )
+        }
+        return
     }
     Box(
         Modifier

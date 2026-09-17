@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.logic
 
 import ai.tokenstat.tokenstat.ui.logic.DeviceCopy
+import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.HomeGreeting
 import ai.tokenstat.tokenstat.ui.logic.HomePreset
 import ai.tokenstat.tokenstat.ui.logic.HomeSection
@@ -15,6 +16,7 @@ import ai.tokenstat.tokenstat.ui.logic.normalizeHomeLayout
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
+import ai.tokenstat.tokenstat.ui.logic.groupedCount
 import ai.tokenstat.tokenstat.ui.logic.harnessCanonicalID
 import ai.tokenstat.tokenstat.ui.logic.harnessName
 import ai.tokenstat.tokenstat.ui.logic.money
@@ -100,6 +102,23 @@ class PortedLogicTest {
         assertEquals("126k", compactTokens(125_844))
         assertEquals("1.6M", compactTokens(1_600_000))
         assertEquals("2.0B", compactTokens(2_000_000_000))
+    }
+
+    // groupedCount — the reading of Swift's `.formatted()`: full grouped
+    // counts for the Insights row subtitle, never compacted.
+    @Test
+    fun eventCountsGroup() {
+        val previous = java.util.Locale.getDefault()
+        java.util.Locale.setDefault(java.util.Locale.US)
+        try {
+            assertEquals("0", groupedCount(0))
+            assertEquals("0", groupedCount(null))
+            assertEquals("999", groupedCount(999))
+            assertEquals("34,346", groupedCount(34_346))
+            assertEquals("1,500,000", groupedCount(1_500_000))
+        } finally {
+            java.util.Locale.setDefault(previous)
+        }
     }
 
     @Test
@@ -526,6 +545,28 @@ class PortedLogicTest {
         assertEquals(true, DeviceCopy.reach(false, true, true).startsWith("Awake and reachable"))
         assertEquals(true, DeviceCopy.reach(false, false, true).contains("Always-on host"))
         assertEquals(true, DeviceCopy.reach(false, false, false).contains("Reach devices from anywhere"))
+    }
+
+    // isHeadlessPlatform — port of the Apple fallback: Linux and the server
+    // distros hide View screen, everything else (and silence) keeps it.
+    @Test
+    fun headlessPlatformsHideTheScreenRow() {
+        assertEquals(true, DeviceCopy.isHeadlessPlatform("Linux · x86_64"))
+        assertEquals(true, DeviceCopy.isHeadlessPlatform("Ubuntu 24.04"))
+        assertEquals(true, DeviceCopy.isHeadlessPlatform("debian"))
+        assertEquals(false, DeviceCopy.isHeadlessPlatform("macOS 15"))
+        assertEquals(false, DeviceCopy.isHeadlessPlatform("Windows 11"))
+        assertEquals(false, DeviceCopy.isHeadlessPlatform(null))
+        assertEquals(false, DeviceCopy.isHeadlessPlatform(""))
+    }
+
+    // HostContracts — the host-update gate mirrors RemoteHostFeature at 14.
+    @Test
+    fun hostUpdateNeedsProtocol14() {
+        assertEquals(true, HostContracts.supportsHostUpdate(null))
+        assertEquals(false, HostContracts.supportsHostUpdate(13))
+        assertEquals(true, HostContracts.supportsHostUpdate(14))
+        assertEquals(true, HostContracts.supportsHostUpdate(22))
     }
 
     // LimitLogic — closest to full first, core thresholds for severity.

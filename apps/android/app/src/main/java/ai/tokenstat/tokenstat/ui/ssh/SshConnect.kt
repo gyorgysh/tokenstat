@@ -201,6 +201,13 @@ fun SshConnectDialog(
                                     put("rows", 24)
                                     put("cols", 80)
                                     put("auth", auth)
+                                    // Carried so `ssh.session.list` can name
+                                    // what it is holding. The host never dials
+                                    // with either: it reaches the server by
+                                    // hostname and username the way it always
+                                    // did.
+                                    host.sshString("id")?.let { put("hostId", it) }
+                                    put("label", host.sshString("label") ?: hostname)
                                 },
                             ) as JsonObject
                             opened.sshString("id") ?: throw IllegalStateException("The session opened without an id.")

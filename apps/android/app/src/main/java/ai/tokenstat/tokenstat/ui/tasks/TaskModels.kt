@@ -457,4 +457,12 @@ object RunHistory {
     fun preview(runs: List<RunRef>): List<RunRef> = ordered(runs).take(PREVIEW_COUNT)
 
     fun remaining(total: Int, shown: Int): Int = maxOf(0, total - maxOf(0, shown))
+
+    fun showsAllRuns(total: Int): Boolean = total > PREVIEW_COUNT
+
+    fun latest(runs: List<RunRef>): RunRef? = ordered(runs).firstOrNull()
 }
+
+/// The row that opens the complete run history from a short preview.
+/// Port of `ClientAllRunsRow`.
+fun allRunsLabel(count: Int): String = if (count == 1) "All runs" else "All $count runs"

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.tasks
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -185,6 +187,38 @@ fun TaskEditorDialog(
     onOpenTerminal: (String) -> Unit,
     onSaved: () -> Unit,
     onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        TaskEditorScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            cardId = cardId,
+            backends = backends,
+            folders = folders,
+            onViewRun = onViewRun,
+            onOpenTerminal = onOpenTerminal,
+            onSaved = onSaved,
+            onBack = onDismiss,
+        )
+    }
+}
+
+/// The task detail editor as a full page on the app background.
+@Composable
+fun TaskEditorScreen(
+    model: AppViewModel,
+    peer: String,
+    hostLabel: String,
+    protocol: Long?,
+    cardId: String,
+    backends: List<BackendRef>,
+    folders: List<FolderRef>,
+    onViewRun: (runID: String, workspaceID: String) -> Unit,
+    onOpenTerminal: (String) -> Unit,
+    onSaved: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val supportsExecution = HostContracts.supportsTaskExecution(protocol)
@@ -438,15 +472,21 @@ fun TaskEditorDialog(
         base?.delegate?.isRunning != true && readiness == null
     val delegate = base?.delegate
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().padding(Space.m).verticalScroll(rememberScrollState())) {
+    BackHandler { onBack() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(LocalTsColors.current.background)
+            .padding(Space.m)
+            .verticalScroll(rememberScrollState()),
+    ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Task", style = TsType.cardTitle, color = LocalTsColors.current.textPrimary)
                     Text(hostLabel, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                 }
-                IconButton(onClick = onDismiss) {
-                    Icon(ActionIcon.Dismiss.vector, "Close", tint = LocalTsColors.current.controlGlyph)
+                IconButton(onClick = onBack) {
+                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
                 }
             }
             if (error != null) {
@@ -607,7 +647,6 @@ fun TaskEditorDialog(
             }
         }
     }
-}
 
 private data class PendingTaskRun(
     val operationID: String,
@@ -632,6 +671,36 @@ fun TaskCreateDialog(
     folders: List<FolderRef>,
     onCreated: () -> Unit,
     onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        TaskCreateScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            initialFolder = initialFolder,
+            defaultBudget = defaultBudget,
+            backends = backends,
+            folders = folders,
+            onCreated = onCreated,
+            onBack = onDismiss,
+        )
+    }
+}
+
+/// Task creation as a full page on the app background.
+@Composable
+fun TaskCreateScreen(
+    model: AppViewModel,
+    peer: String,
+    hostLabel: String,
+    protocol: Long?,
+    initialFolder: String,
+    defaultBudget: Long,
+    backends: List<BackendRef>,
+    folders: List<FolderRef>,
+    onCreated: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val supported = HostContracts.supportsTaskCreation(protocol)
@@ -732,15 +801,21 @@ fun TaskCreateDialog(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().padding(Space.m).verticalScroll(rememberScrollState())) {
+    BackHandler { onBack() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(LocalTsColors.current.background)
+            .padding(Space.m)
+            .verticalScroll(rememberScrollState()),
+    ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("New task", style = TsType.cardTitle, color = LocalTsColors.current.textPrimary)
                     Text(hostLabel, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                 }
-                IconButton(onClick = onDismiss) {
-                    Icon(ActionIcon.Dismiss.vector, "Close", tint = LocalTsColors.current.controlGlyph)
+                IconButton(onClick = onBack) {
+                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
                 }
             }
             if (!supported) {
@@ -755,7 +830,7 @@ fun TaskCreateDialog(
             }
             if (outcome != null) {
                 Text("Task added.", style = TsType.body, color = LocalTsColors.current.textPrimary)
-                TsAccentButton(label = "Done", onClick = onDismiss)
+                TsAccentButton(label = "Done", onClick = onBack)
             } else {
                 TaskFields(
                     fields = fields,
@@ -789,7 +864,6 @@ fun TaskCreateDialog(
             }
         }
     }
-}
 
 /// The exact task run, with a door into that folder's files and history.
 /// Port of `ClientTaskResultView` (phone layout): header, live transcript,
@@ -805,6 +879,34 @@ fun TaskRunDialog(
     onOpenTerminal: (String) -> Unit,
     onOpenSection: (String) -> Unit,
     onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        TaskRunScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            runID = runID,
+            workspaceID = workspaceID,
+            folderName = folderName,
+            onOpenTerminal = onOpenTerminal,
+            onOpenSection = onOpenSection,
+            onBack = onDismiss,
+        )
+    }
+}
+
+/// The exact task run as a full page on the app background.
+@Composable
+fun TaskRunScreen(
+    model: AppViewModel,
+    peer: String,
+    hostLabel: String,
+    runID: String,
+    workspaceID: String,
+    folderName: String,
+    onOpenTerminal: (String) -> Unit,
+    onOpenSection: (String) -> Unit,
+    onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var run by remember { mutableStateOf<JsonObject?>(null) }
@@ -871,9 +973,18 @@ fun TaskRunDialog(
         hostName = hostLabel,
         folderMissing = false,
     )
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().padding(Space.m).verticalScroll(rememberScrollState())) {
+    BackHandler { onBack() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(LocalTsColors.current.background)
+            .padding(Space.m)
+            .verticalScroll(rememberScrollState()),
+    ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
+                }
                 Text(
                     run?.optStr("name") ?: "Result",
                     style = TsType.cardTitle,
@@ -881,7 +992,7 @@ fun TaskRunDialog(
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                 )
-                TextButton(onClick = onDismiss) { Text("Done") }
+                TextButton(onClick = onBack) { Text("Done") }
             }
             if (error != null) {
                 Banner(error!!, BannerSeverity.DANGER)
@@ -962,7 +1073,6 @@ fun TaskRunDialog(
             }
         }
     }
-}
 
 private fun runStatusLabel(status: String): String = when (status) {
     "starting" -> "Starting"

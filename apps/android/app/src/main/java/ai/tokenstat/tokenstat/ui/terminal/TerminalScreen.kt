@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.terminal
 
+import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
+
+import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
+
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -80,6 +84,9 @@ fun TerminalScreen(
     onClose: () -> Unit,
     onSessionOpened: (String) -> Unit = {},
 ) {
+    // Its own header and its own way out, so the app chrome steps aside.
+    HideTopBar()
+    HideTabBar()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val dark = isSystemInDarkTheme()
@@ -342,7 +349,12 @@ fun SshTerminalScreen(
     hostLabel: String,
     snippets: kotlinx.serialization.json.JsonArray = kotlinx.serialization.json.JsonArray(emptyList()),
     onClose: () -> Unit,
+    startup: List<String> = emptyList(),
+    onEnded: () -> Unit = {},
 ) {
+    // Its own header and its own way out, so the app chrome steps aside.
+    HideTopBar()
+    HideTabBar()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val dark = isSystemInDarkTheme()
@@ -355,6 +367,14 @@ fun SshTerminalScreen(
     bridge.onProgress = { tick++ }
     var confirmEnd by remember { mutableStateOf(false) }
     var filling by remember { mutableStateOf<JsonObject?>(null) }
+    // On-connect commands, once the shell is there to hear them. The channel
+    // is buffered, so this survives the page still loading.
+    LaunchedEffect(sessionId) {
+        if (startup.isNotEmpty()) {
+            delay(600)
+            startup.forEach { bridge.sendBytes(ai.tokenstat.tokenstat.ui.ssh.SnippetRun.runBytes(it)) }
+        }
+    }
 
     fun runSnippet(item: JsonObject) {
         val command = (item["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return
@@ -455,10 +475,11 @@ fun SshTerminalScreen(
                 TextButton(onClick = {
                     confirmEnd = false
                     scope.launch {
-                        runCatching {
+                        val ended = runCatching {
                             model.core("ssh.session.close", buildJsonObject { put("id", sessionId) })
-                        }
+                        }.isSuccess
                         bridge.killed = true
+                        if (ended) onEnded()
                         onClose()
                     }
                 }) { Text("End session") }

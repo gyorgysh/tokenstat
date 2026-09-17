@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
+import ai.tokenstat.tokenstat.ui.marks.FeatureMark
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -154,6 +156,13 @@ fun TsCard(
     subtitle: String? = null,
     accessory: (@Composable RowScope.() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /// The glyph the Apple `Card(title:subtitle:mark:)` leads with. Named
+    /// cards on both clients carry one; a titled card without it is the odd
+    /// one out on a screen where every other card has a mark.
+    mark: String? = null,
+    /// The mark's colour. Danger for a card that ends something, so the tile
+    /// says what the card is before the words do.
+    markTint: Color? = null,
     content: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
@@ -167,6 +176,10 @@ fun TsCard(
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (mark != null) {
+                FeatureMark(name = mark, tint = markTint ?: colors.accent, size = 22)
+                Spacer(Modifier.width(Space.s))
+            }
             Column(Modifier.weight(1f)) {
                 Text(title, style = TsType.cardTitle, color = colors.textPrimary)
                 if (subtitle != null) {
@@ -235,15 +248,21 @@ fun SectionTitle(title: String, mark: String, tint: Color = LocalTsColors.curren
     }
 }
 
-/// Uppercase group label with an optional count, as in the sidebar.
+/// A group heading with an optional count.
+///
+/// Title case in the app's own words, not upper-cased chrome. The Apple
+/// clients write `Text("Run an agent").font(ClientType.sectionTitle)` and
+/// leave the string alone, so "Run an agent" and "Sessions" read as headings
+/// there while Android shouted "RUN AN AGENT" and "SESSIONS" in small grey
+/// tertiary. Same words, one of them a heading and the other an eyebrow.
 @Composable
 fun SectionLabel(text: String, count: Int? = null, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(text.uppercase(), style = TsType.sectionHeader, color = colors.textTertiary)
+        Text(text, style = TsType.headline, color = colors.textPrimary)
         Spacer(Modifier.weight(1f))
         if (count != null) {
-            Text(count.toString(), style = TsType.numeric(11), color = colors.textTertiary.copy(alpha = 0.55f))
+            Text(count.toString(), style = TsType.numeric(13), color = colors.textSecondary)
         }
     }
 }
