@@ -17,6 +17,11 @@ use crate::snapshot::{self, Fetched, moved_over_half, validate_effective_from};
 /// rejecting forever is worse: hostd and the app would keep pricing against an
 /// outdated snapshot until someone typed `tokenstat pricing --refresh --force`.
 /// That is what pinned machines on the 2026-07-28 book after the feed rewrite.
+///
+/// File age is only half the rule. When the feed publishes sporadically a
+/// freshly fetched book can carry weeks-old rates, so content older than
+/// yesterday accepts too (`content_allows_large_moves`). That is what pinned
+/// a phone on the 2026-08-21 book after the 2026-09-16 publish.
 const STALE_ACCEPT_LARGE_MOVES: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -105,8 +110,12 @@ fn refresh_from_url_at(url: &str, path: &Path, force: bool) -> anyhow::Result<Pr
     let snapshot = parse_snapshot(&body)?;
     let large_moves = detect_large_moves(path, &snapshot);
     // Age is measured before the write, against the book we are about to replace.
-    let accepted_stale =
-        !large_moves.is_empty() && !force && age_allows_large_moves(local_age(path));
+    let today = jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date();
+    let stale = age_allows_large_moves(local_age(path))
+        || local_effective_from(path).is_some_and(|from| content_allows_large_moves(&from, today));
+    let accepted_stale = !large_moves.is_empty() && !force && stale;
     if !large_moves.is_empty() && !force && !accepted_stale {
         anyhow::bail!(
             "pricing snapshot moved >50% for {} model(s), e.g. {}. Re-run with --force to accept, or wait until the local book is a day old (auto-refresh accepts then).",
@@ -147,6 +156,28 @@ fn age_allows_large_moves(local_age: Option<Duration>) -> bool {
         None => true,
         Some(age) => age >= STALE_ACCEPT_LARGE_MOVES,
     }
+}
+
+/// The local book's own dating, when it can be read. `None` keeps the
+/// previous mtime-only behavior: an unreadable book never widens the gate.
+fn local_effective_from(path: &Path) -> Option<String> {
+    load_snapshot(path).ok().map(|s| s.effective_from)
+}
+
+/// Whether the local book's rates are old enough that large moves are
+/// ordinary repricing rather than a poisoned feed.
+///
+/// The file's mtime measures when the bytes landed, which is the wrong clock
+/// when the feed publishes sporadically: a book fetched this morning can
+/// still carry weeks-old rates, and every later refresh then trips the move
+/// guard until the bytes are a day old. The book's `effective_from` says
+/// what the rates actually are, so content older than yesterday accepts.
+/// Pure so the policy is unit-tested without touching the network.
+fn content_allows_large_moves(effective_from: &str, today: jiff::civil::Date) -> bool {
+    let Ok(from) = effective_from.parse::<jiff::civil::Date>() else {
+        return false;
+    };
+    from < today - jiff::Span::new().days(1)
 }
 
 fn load_snapshot(path: &Path) -> anyhow::Result<OutSnapshot> {
@@ -421,5 +452,38 @@ mod tests {
         assert!(age_allows_large_moves(Some(Duration::from_secs(
             7 * 24 * 60 * 60
         ))));
+    }
+
+    #[test]
+    fn large_moves_are_accepted_once_the_local_rates_are_stale() {
+        let today = jiff::civil::date(2026, 9, 16);
+        assert!(
+            content_allows_large_moves("2026-08-21", today),
+            "weeks-old rates accept, however young the bytes are"
+        );
+        assert!(
+            content_allows_large_moves("2026-09-14", today),
+            "older than yesterday accepts"
+        );
+        assert!(
+            !content_allows_large_moves("2026-09-15", today),
+            "yesterday's book stays guarded"
+        );
+        assert!(
+            !content_allows_large_moves("2026-09-16", today),
+            "today's book stays guarded"
+        );
+        assert!(
+            !content_allows_large_moves("2026-09-17", today),
+            "a future book stays guarded"
+        );
+        assert!(
+            !content_allows_large_moves("whenever", today),
+            "an undated book never widens the gate"
+        );
+        assert!(
+            !content_allows_large_moves("", today),
+            "an undated book never widens the gate"
+        );
     }
 }
