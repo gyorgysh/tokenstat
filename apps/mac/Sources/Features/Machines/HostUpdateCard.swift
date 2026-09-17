@@ -220,18 +220,18 @@ struct HostUpdateCard: View {
                 // would be offering work that is already done.
                 if phase == .done {
                     if applied?.restartPending == true, state.canRestart {
-                        Button(restartTitle, .refresh) { Task { await apply(restartNow: true) } }
+                        Button("Restart", .refresh) { Task { await apply(restartNow: true) } }
                             .buttonStyle(AccentButtonStyle())
                     }
                 } else if state.restartPending {
                     // The only thing left is the restart, and it ends whatever
                     // that machine is running, so it is never automatic here.
                     if state.canRestart {
-                        Button(restartTitle, .refresh) { Task { await apply(restartNow: true) } }
+                        Button("Restart", .refresh) { Task { await apply(restartNow: true) } }
                             .buttonStyle(AccentButtonStyle())
                     }
                 } else if state.newer, !state.appManaged {
-                    Button("Install \(state.latest)", .download) { Task { await apply(restartNow: false) } }
+                    Button("Install", .download) { Task { await apply(restartNow: false) } }
                         .buttonStyle(AccentButtonStyle())
                 } else if state.appManaged, state.newer {
                     Button(fetchTitle, .download) { Task { await apply(restartNow: false) } }
@@ -243,12 +243,8 @@ struct HostUpdateCard: View {
         }
     }
 
-    private var restartTitle: String {
-        local ? "Restart the helper" : "Restart it there"
-    }
-
     private var fetchTitle: String {
-        local ? "Download it" : "Fetch it there"
+        local ? "Download" : "Fetch"
     }
 
     /// Where a restart has to happen, in the words that fit the machine being

@@ -98,10 +98,10 @@ struct UpdateCard: View {
                 .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Theme.Space.s) {
-                Button("Restart now", .refresh) { update.relaunch() }
+                Button("Restart", .refresh) { update.relaunch() }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .help("Restarts tokenstat to finish the update. Save your work first.")
-                Button("Skip this version", .dismiss) { update.skipThisVersion() }
+                Button("Skip", .dismiss) { update.skipThisVersion() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .help("Stops this card until you check for updates yourself.")
             }

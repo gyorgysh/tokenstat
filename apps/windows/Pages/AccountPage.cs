@@ -776,7 +776,7 @@ internal sealed class AccountPage : Page
             body.Children.Add(ActionIconGlyph.Button("Retry", ActionIcon.Refresh, async (_, _) => await update.RetryAsync()));
             if (!string.IsNullOrEmpty(update.HtmlUrl))
             {
-                body.Children.Add(ActionIconGlyph.Button("Download page", ActionIcon.External, (_, _) =>
+                body.Children.Add(ActionIconGlyph.Button("Manual", ActionIcon.External, (_, _) =>
                     Open(update.HtmlUrl)));
             }
         }
@@ -790,7 +790,7 @@ internal sealed class AccountPage : Page
             {
                 body.Children.Add(new TextBlock { Text = update.CheckNotice, Opacity = 0.8 });
             }
-            body.Children.Add(ActionIconGlyph.Button("Check for updates", ActionIcon.Refresh, async (_, _) => await update.CheckNowAsync()));
+            body.Children.Add(ActionIconGlyph.Button("Check", ActionIcon.Refresh, async (_, _) => await update.CheckNowAsync()));
         }
         return Chrome.Card("Updates", body, "SHA-256 against the release. Publisher check only when this build is signed.");
     }
