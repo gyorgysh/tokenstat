@@ -210,8 +210,17 @@ fn pair(params: &str) -> Result<Value, String> {
 /// report a pairing that actually happened as an error.
 fn grant_work(key: &tokenstat_identity::PublicKey, allow: bool) {
     // The canonical hex, not what a caller typed: the policy file is keyed by
-    // the form `remote_peer` hands out.
-    if let Err(error) = crate::workspace_policy::set_allowed(&tokenstat_identity::hex(key), allow) {
+    // the form `remote_peer` hands out. No account fetch for the audit label:
+    // pairing runs on every phone connect, and a stalled directory fetch
+    // would stall the connect on it. The locked helper falls back to the
+    // cache-only lookup, which is all an audit line needs.
+    let hex = tokenstat_identity::hex(key);
+    if let Err(error) = crate::workspace_policy::set_allowed_by_with_label(
+        &hex,
+        allow,
+        crate::access_audit::Authority::Console,
+        None,
+    ) {
         eprintln!("remote: could not record workspace access: {error}");
     }
 }

@@ -3402,10 +3402,15 @@ mod tests {
         );
         assert!(peers.approve(&phone.public_key()));
         peers.save().unwrap();
-        // Keep optional device-label lookup cache-only. This isolated test
-        // never fetches an account directory or opens a relay connection.
-        *last_directory_miss().lock().unwrap() = jiff::Timestamp::now().as_millisecond();
-        crate::workspace_policy::set_allowed(&phone_key, true).unwrap();
+        // The grant never fetches: the label is best-effort from the held
+        // directory, so this isolated test opens no relay connection.
+        crate::workspace_policy::set_allowed_by_with_label(
+            &phone_key,
+            true,
+            crate::access_audit::Authority::Console,
+            None,
+        )
+        .unwrap();
         assert_eq!(
             local("host.setPolicy", serde_json::json!({"alwaysOn": true}))["ok"],
             true
@@ -3469,7 +3474,13 @@ mod tests {
             search["result"]["hits"][0]["reference"]["hostIdentity"],
             host.public_key_hex()
         );
-        crate::workspace_policy::set_allowed(&phone_key, false).unwrap();
+        crate::workspace_policy::set_allowed_by_with_label(
+            &phone_key,
+            false,
+            crate::access_audit::Authority::Console,
+            None,
+        )
+        .unwrap();
         let denied_search = rpc(
             &mut connection,
             "work.search",

@@ -319,29 +319,19 @@ fn allowed_now() -> Option<std::sync::Arc<HashSet<String>>> {
     Some(allowed)
 }
 
-/// Let a device in, or shut it out.
-///
-/// Called by the toggle in Devices, by answering a request, and by approving a
-/// device with a pairing code, which is the one place approval and this grant
-/// are the same act.
-pub(crate) fn set_allowed(peer_id: &str, allow: bool) -> Result<(), String> {
-    set_allowed_by(peer_id, allow, Authority::Console)
-}
-
 static MUTATION: Mutex<()> = Mutex::new(());
 
 fn mutation_lock() -> Result<crate::identity_storage::Guard, String> {
     crate::identity_storage::lock("workspace-policy.lock", &MUTATION)
 }
 
-pub(crate) fn set_allowed_by(peer_id: &str, allow: bool, by: Authority) -> Result<(), String> {
-    // Label resolved outside the lock; the locked helper falls back to the
-    // cache-only lookup if none was supplied.
-    let label = crate::remote::account_peer_label_hex(peer_id);
-    set_allowed_by_with_label(peer_id, allow, by, label)
-}
-
-fn set_allowed_by_with_label(
+/// Let a device in, or shut it out.
+///
+/// Called by the toggle in Devices, by answering a request, and by pairing,
+/// which grants the work alongside the trust. The label is best-effort from
+/// the held directory, never a fetch: pairing runs on every phone connect,
+/// and a stalled fetch would stall the connect on an audit line.
+pub(crate) fn set_allowed_by_with_label(
     peer_id: &str,
     allow: bool,
     by: Authority,
@@ -1167,7 +1157,7 @@ mod tests {
             account_holds(&mine, "iPhone");
             let code = invite_code();
             redeem(&mine, &code).unwrap();
-            set_allowed_by(&mine, false, Authority::Console).unwrap();
+            set_allowed_by_with_label(&mine, false, Authority::Console, None).unwrap();
             let entries = call("workspace.access.log", "{}").unwrap().unwrap();
             let events: Vec<&str> = entries
                 .as_array()
