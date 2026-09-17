@@ -166,6 +166,8 @@ fun DeviceDetailScreen(
             model = model,
             peer = peer,
             hostLabel = currentName,
+            tier = state.account?.string("tier"),
+            onPlans = onPlans,
             onClose = { viewing = false },
         )
         return

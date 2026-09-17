@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.browser
 
+import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
 
 import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
@@ -75,6 +76,11 @@ fun PortBrowserScreen(
     var shownHost by remember { mutableStateOf(BrowserPolicy.title(url)) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var view by remember { mutableStateOf<WebView?>(null) }
+    // A pushed screen owns the system back. Without it the gesture falls
+    // through to the activity and closes the app instead of stepping back.
+    // History first: followed links and address-bar loads are pages, and
+    // back walks them before it leaves the screen.
+    BackHandler { if (view?.canGoBack() == true) view?.goBack() else onClose() }
     DisposableEffect(peer, port) {
         onDispose {
             scope.launch {

@@ -17,6 +17,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonArray
@@ -69,6 +70,16 @@ data class ClientState(
             ?.jsonPrimitive
             ?.content
             ?.takeIf { it.isNotBlank() }
+
+    /// Whether this account has already had its one trial, on any store. The
+    /// gate is account-scoped on the server, so a trial taken on the App Store
+    /// or through the website counts here too.
+    val trialUsed: Boolean
+        get() = (account?.get("billing") as? JsonObject)
+            ?.get("trialUsed")
+            ?.takeUnless { it is JsonNull }
+            ?.jsonPrimitive
+            ?.content == "true"
 }
 
 data class PendingLogin(val url: String, val code: String)
@@ -310,6 +321,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             })
         }
         CoreClient.call("remote.serve", buildJsonObject { put("tunnel", true) })
+    }
+
+    /// Tell the tunnel the app is back, port of `Bridge.nudgeTunnel`. A
+    /// plain nudge wakes the supervisor and starts a session that is not
+    /// running. `reconnect` drops a live socket after a path change left
+    /// it answering nothing. Without this a fresh process holds no tunnel
+    /// session and the first dial fails with "tunnel session is not
+    /// running" instead of opening.
+    suspend fun nudgeTunnel(reconnect: Boolean = false) {
+        runCatching {
+            CoreClient.call("remote.nudge", buildJsonObject { put("reconnect", reconnect) })
+        }
+    }
+
+    /// The nudge for coming back to the foreground, port of
+    /// `Bridge.nudgeTunnelOnForeground`. Asking what the tunnel thinks
+    /// first costs one local call and drops a socket only when the tunnel
+    /// already says it is not connected, so a healthy session keeps its
+    /// channels.
+    suspend fun nudgeTunnelOnForeground() {
+        val offline = runCatching {
+            val status = CoreClient.call("remote.status") as? JsonObject
+            (status?.get("tunnelOnline") as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull == false
+        }.getOrNull() == true
+        nudgeTunnel(reconnect = offline)
     }
 
     /// Approve one machine key, and nothing else. Setup pairs the key that

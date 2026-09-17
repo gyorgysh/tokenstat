@@ -16,6 +16,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import ai.tokenstat.tokenstat.notifications.NotificationOpen
+import ai.tokenstat.tokenstat.notifications.VisibleChat
 import ai.tokenstat.tokenstat.ui.TokenstatApp
 import ai.tokenstat.tokenstat.ui.logic.SplashHold
 
@@ -43,6 +47,13 @@ class MainActivity : ComponentActivity() {
         ) {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        // A notification tap carries the push reason plus the machine id and
+        // nothing else. Chat reasons wait in NotificationOpen until the
+        // workspaces screen can resolve them. Anything else is dropped here,
+        // and the app simply opens. Fresh launches only: the activity keeps
+        // its intent across recreation, so without this a rotation re-offers
+        // an already consumed tap.
+        if (savedInstanceState == null) NotificationOpen.offerFromIntent(intent)
         setContent { TokenstatApp(model) }
     }
 
@@ -88,12 +99,35 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         // Every return to a live app re-reads the account. That covers both
         // a notification tap, which carries the push reason plus the machine
         // id and nothing else, and the sign-in callback: nothing about the
         // token travels through the redirect, the device-flow poll picks it
         // up on its next turn, and this refresh covers the case where it
-        // already did while the browser was in front.
+        // already did while the browser was in front. The tap itself waits
+        // in NotificationOpen until the workspaces screen resolves it.
+        NotificationOpen.offerFromIntent(intent)
         model.refresh()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Nobody is looking at a transcript now, so chat pushes notify
+        // again. Without this a backgrounded app would keep swallowing the
+        // finished-turn banner for whatever was last open.
+        VisibleChat.hidden()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The tunnel nudge for coming back to the foreground, port of the
+        // `scenePhase` handler in `ClientRootView`. A fresh or suspended
+        // process holds no tunnel session, and without this the first dial
+        // fails with "tunnel session is not running". Signed in only, like
+        // there: nudging while logged out would only plant a tunnel error.
+        if (model.state.value.signedIn) {
+            lifecycleScope.launch { model.nudgeTunnelOnForeground() }
+        }
     }
 }

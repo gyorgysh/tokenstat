@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
 import ai.tokenstat.tokenstat.ui.chrome.LocalTabBarPresence
 
@@ -218,7 +219,12 @@ fun WorkspaceHubMenu(
     }
     LaunchedEffect(peer, workspace) { reload() }
 
-    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(space.m)) {
+    Column(
+        modifier
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = ai.tokenstat.tokenstat.ui.chrome.TabBarChrome.contentBottomInset),
+        verticalArrangement = Arrangement.spacedBy(space.m),
+    ) {
         if (error != null) {
             StickyErrorCard(
                 message = error!!,
@@ -302,6 +308,9 @@ fun WorkspaceHub(
     // the conversation worth returning to, even on an already-open Chat page.
     var chatNonce by rememberSaveable(folder.str("id")) { mutableStateOf(0) }
     val section = openSection
+    // A section is a push inside the folder, and the folder is a push inside
+    // Workspaces. Back steps out one at a time rather than closing the app.
+    BackHandler(enabled = section != null) { openSection = null }
     // A folder is a push, like the Apple clients push it: this screen owns
     // the header from here down, so the app toolbar steps aside.
     HideTopBar()
@@ -366,6 +375,7 @@ fun WorkspaceHub(
                 openConversationOnAppear = openConversationOnAppear,
                 conversationNonce = chatNonce,
                 onStartChat = { openSection = "Chat"; chatNonce += 1 },
+                machineId = host.str("id"),
             )
         }
     }

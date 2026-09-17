@@ -113,14 +113,19 @@ class MachinePlaneTest {
         assertTrue(ScreenFrames.isParameterSet(units[1]))
     }
 
+    /// MediaCodec reads the byte stream, so units are repacked behind start
+    /// codes. Four-byte lengths are what VideoToolbox is told to expect, and
+    /// feeding them here is what left every Android picture black.
     @Test
-    fun avccPrefixesLengths() {
+    fun annexBPrefixesStartCodes() {
         val a = byteArrayOf(0x65, 0x02)
         val b = byteArrayOf(0x61, 0x03, 0x04)
-        val avcc = ScreenFrames.toAvcc(listOf(a, b))
-        assertEquals(4 + 2 + 4 + 3, avcc.size)
-        assertEquals(2, avcc[3].toInt())
-        assertEquals(3, avcc[4 + 2 + 3].toInt())
+        val stream = ScreenFrames.toAnnexB(listOf(a, b))
+        assertEquals(4 + 2 + 4 + 3, stream.size)
+        assertEquals(listOf<Byte>(0, 0, 0, 1), stream.take(4))
+        assertEquals(listOf<Byte>(0, 0, 0, 1), stream.drop(6).take(4))
+        assertEquals(0x65, stream[4].toInt())
+        assertEquals(0x61, stream[10].toInt())
     }
 
     @Test

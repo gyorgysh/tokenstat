@@ -30,4 +30,31 @@ class BillingPhasesTest {
             introCaption(listOf(PhaseView("Free", "P3D"), PhaseView("$99.00", "P1Y"))),
         )
     }
+
+    @Test
+    fun periodDecidesTabNotId() {
+        // The yearly plan is `annual` on patron and supporter but `yearly`
+        // on legend: the id cannot be trusted, the period can.
+        assertEquals("year", intervalOfBasePlan("annual", "P1Y"))
+        assertEquals("year", intervalOfBasePlan("yearly", "P1Y"))
+        assertEquals("month", intervalOfBasePlan("monthly", "P1M"))
+        assertEquals("month", intervalOfBasePlan("monthly", "P6M"))
+        // A misnamed id loses to a readable period, whichever way round.
+        assertEquals("year", intervalOfBasePlan("monthly", "P1Y"))
+        assertEquals("month", intervalOfBasePlan("annual", "P1M"))
+    }
+
+    @Test
+    fun unreadablePeriodFallsBackToKnownIds() {
+        assertEquals("month", intervalOfBasePlan("monthly", ""))
+        assertEquals("year", intervalOfBasePlan("annual", "P2W3D"))
+        assertEquals("year", intervalOfBasePlan(" Yearly ", "nonsense"))
+        assertNull(intervalOfBasePlan("launch-promo", ""))
+    }
+
+    @Test
+    fun weeklyAndDailyPlansBelongToNeitherTab() {
+        assertNull(intervalOfBasePlan("monthly", "P1W"))
+        assertNull(intervalOfBasePlan("annual", "P3D"))
+    }
 }

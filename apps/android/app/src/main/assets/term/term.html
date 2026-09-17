@@ -51,7 +51,6 @@
   var fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(document.getElementById("term"));
-  try { fit.fit(); } catch (e) {}
 
   // Paint for the system appearance, the way the Apple client repaints its
   // terminal view. Kotlin calls this once the page loads and again when the
@@ -67,6 +66,41 @@
     // xterm build, so nudge the rows it owns.
     try { term.refresh(0, term.rows - 1); } catch (e) {}
   }
+
+  // The keyboard has to land somewhere.
+  //
+  // xterm types into a hidden textarea inside the page, and the Android soft
+  // keyboard only appears for a focused editable. Without this the WebView
+  // took focus, the IME opened against an input type of zero, and every
+  // keystroke went nowhere: a shell that showed its first prompt and then
+  // never moved again.
+  function termFocus() {
+    try {
+      term.focus();
+      if (term.textarea) term.textarea.focus();
+    } catch (e) {}
+  }
+
+  function termBlur() {
+    try {
+      if (term.textarea) term.textarea.blur();
+      term.blur();
+    } catch (e) {}
+  }
+
+  // Tapping the picture is how a terminal is focused everywhere else, so a
+  // tap here focuses the textarea and asks Kotlin to raise the keyboard.
+  // A tap that selects text does neither: raising the keyboard over a
+  // selection is how copying from the transcript is interrupted.
+  document.getElementById("term").addEventListener("click", function () {
+    var selected = "";
+    try {
+      selected = window.getSelection ? window.getSelection().toString() : "";
+    } catch (e) {}
+    if (selected) return;
+    termFocus();
+    if (window.TermBridge && TermBridge.onWantsKeyboard) TermBridge.onWantsKeyboard();
+  });
 
   var lastRows = -1;
   var lastCols = -1;
@@ -114,10 +148,48 @@
     }
   }
 
-  window.addEventListener("resize", function () {
-    try { fit.fit(); } catch (e) {}
+  // Fit to the space there actually is, and refuse a size that says there is
+  // none.
+  //
+  // A WebView inside Compose is loaded before it is measured, so the page's
+  // first layout can report a height of zero. The fit addon floors that to
+  // one row, and one row is a terminal that shows the last line of everything
+  // and the whole of nothing: the shell's prompt, then every command's output
+  // scrolling past it. Nothing re-fitted afterwards, so it stayed one row for
+  // the life of the session. A degenerate measurement is now declined and the
+  // observers below re-fit when the real size arrives.
+  function termFit() {
+    var proposed = null;
+    try {
+      proposed = fit.proposeDimensions();
+    } catch (e) {
+      return false;
+    }
+    if (!proposed || !proposed.rows || proposed.rows < 2 || !proposed.cols) return false;
+    if (proposed.rows !== term.rows || proposed.cols !== term.cols) {
+      try {
+        term.resize(proposed.cols, proposed.rows);
+      } catch (e) {
+        return false;
+      }
+    }
     pushSize();
-  });
+    return true;
+  }
+
+  // `resize` on the window is not enough. The WebView keeps its own viewport
+  // size and does not always report the layout that gives the page its
+  // height, so the element itself is what gets watched.
+  if (window.ResizeObserver) {
+    new ResizeObserver(function () { termFit(); }).observe(document.getElementById("term"));
+  }
+  window.addEventListener("resize", function () { termFit(); });
+
+  // The face decides the cell size, so a fit measured against the fallback
+  // font is measured against the wrong one.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { termFit(); });
+  }
 
   // Kotlin hands us base64 so no escaping can corrupt the byte stream.
   function termWriteB64(base64) {
@@ -128,7 +200,10 @@
     pushSize();
   }
 
-  setTimeout(pushSize, 50);
+  // The belt to the observers' braces: a device that reports no size for a
+  // moment gets a few more chances before the terminal is left as it is.
+  termFit();
+  [50, 200, 600, 1500].forEach(function (delay) { setTimeout(termFit, delay); });
 </script>
 </body>
 </html>

@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.tasks
 
 import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
+import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 
 import androidx.compose.foundation.clickable
 
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -452,7 +454,11 @@ fun TaskBoardScreen(
                 )
             }
             PullToRefreshBox(isRefreshing = loading && loaded, onRefresh = { scope.launch { load() } }, modifier = Modifier.weight(1f)) {
-                LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
                     val columns = if (filter.archived) listOf(Triple("archive", "Archive", "archive")) else BOARD_COLUMNS
                     columns.forEach { (id, title, _) ->
                         item(key = "header-$id") {

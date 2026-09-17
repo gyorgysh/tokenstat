@@ -49,8 +49,8 @@ import ai.tokenstat.tokenstat.ui.theme.Space
 /// allowances are captions, not feats: they share one window with everything
 /// else the connection carries, not a line in the feature list.
 private data class Pitch(
-    val yearlyId: String,
-    val monthlyId: String?,
+    val productId: String,
+    val hasMonthly: Boolean,
     val tier: String,
     val title: String,
     val summary: String,
@@ -61,7 +61,7 @@ private data class Pitch(
 private val pitches = listOf(
     Pitch(
         "ai.tokenstat.supporter.yearly",
-        null,
+        false,
         "supporter",
         "Supporter",
         "A year of heatmap across your devices, encrypted vault sync, and a public profile worth sharing.",
@@ -76,7 +76,7 @@ private val pitches = listOf(
     ),
     Pitch(
         "ai.tokenstat.patron.yearly",
-        "ai.tokenstat.patron.monthly",
+        true,
         "patron",
         "Patron",
         "For people running agents on everything they own, and reaching those machines from anywhere.",
@@ -92,7 +92,7 @@ private val pitches = listOf(
     ),
     Pitch(
         "ai.tokenstat.legend.yearly",
-        "ai.tokenstat.legend.monthly",
+        true,
         "legend",
         "Legend",
         "The top plan. View and control your own screen remotely, plus more devices, faster sync, and the read API.",
@@ -128,12 +128,18 @@ private val compareFeatures = listOf(
 /// sheet stays the purchase. Supporter is yearly only, like on Apple.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PaywallSheet(billing: PlayBillingManager, onDismiss: () -> Unit, currentTier: String? = null) {
+fun PaywallSheet(
+    billing: PlayBillingManager,
+    onDismiss: () -> Unit,
+    currentTier: String? = null,
+    /// This account's billing interval, "month" or "year", when it has one.
+    currentInterval: String? = null,
+) {
     val colors = LocalTsColors.current
     val context = LocalContext.current
     val billingState by billing.state.collectAsStateWithLifecycle()
     var monthly by rememberSaveable { mutableStateOf(false) }
-    val catalog = if (monthly) pitches.filter { it.monthlyId != null } else pitches
+    val catalog = if (monthly) pitches.filter { it.hasMonthly } else pitches
     // Full height. This is a list of plans with a paragraph each; opening it
     // half way over the sheet that launched it showed one and a half cards
     // and made comparing them a scroll inside a scroll inside a sheet.
@@ -169,9 +175,20 @@ fun PaywallSheet(billing: PlayBillingManager, onDismiss: () -> Unit, currentTier
                 color = colors.textSecondary,
             )
             catalog.forEach { pitch ->
-                val id = if (monthly) pitch.monthlyId else pitch.yearlyId
-                val product = billingState.products.find { it.details.productId == id }
-                val isCurrent = currentTier?.equals(pitch.tier, ignoreCase = true) == true
+                val interval = if (monthly) PlayBillingManager.INTERVAL_MONTH else PlayBillingManager.INTERVAL_YEAR
+                val product = billingState.products.find {
+                    it.details.productId == pitch.productId && it.interval == interval
+                }
+                val sameTier = currentTier?.equals(pitch.tier, ignoreCase = true) == true
+                val isCurrent = sameTier && currentInterval == interval
+                // The tier on the other interval, switchable only when Play
+                // holds the subscription to replace. A plan bought on the web
+                // or the App Store reads as current instead: offering the
+                // switch would stack a second subscription beside it.
+                val canSwitch = sameTier && currentInterval != null && !isCurrent &&
+                    billingState.hasPlaySubscription
+                val readsCurrent = isCurrent ||
+                    (sameTier && currentInterval != null && !isCurrent && !billingState.hasPlaySubscription)
                 TsCard {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
@@ -187,7 +204,7 @@ fun PaywallSheet(billing: PlayBillingManager, onDismiss: () -> Unit, currentTier
                                 color = colors.textSecondary,
                             )
                         }
-                        if (isCurrent) {
+                        if (readsCurrent) {
                             Text("Your current plan", style = TextStyle(fontSize = 13.sp), color = colors.accent)
                         }
                         Text(pitch.summary, color = colors.textSecondary)
@@ -202,14 +219,15 @@ fun PaywallSheet(billing: PlayBillingManager, onDismiss: () -> Unit, currentTier
                             Text(it, style = TextStyle(fontSize = 12.sp), color = colors.accent)
                         }
                         val buttonLabel = when {
-                            isCurrent -> "Your current plan"
+                            readsCurrent -> "Your current plan"
+                            canSwitch -> if (monthly) "Switch to monthly" else "Switch to yearly"
                             product != null -> "${pitch.title} · ${product.price}"
                             billingState.products.isEmpty() -> "Loading price…"
                             else -> "Price unavailable"
                         }
                         TsAccentButton(
                             label = buttonLabel,
-                            enabled = product != null && !isCurrent,
+                            enabled = product != null && !readsCurrent,
                             onClick = {
                                 val found = product ?: return@TsAccentButton
                                 (context as? Activity)?.let { billing.purchase(it, found) }

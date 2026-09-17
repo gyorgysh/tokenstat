@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -72,6 +73,17 @@ fun TaskResultDialog(
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // A sheet with a surface under it. Without one the title drew over
+        // the dimmed tasks behind and the rows floated as loose cards.
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = LocalTsColors.current.background,
+            tonalElevation = 0.dp,
+            shadowElevation = 12.dp,
+            // Hug the content: this dialog is a fixed few rows, not a list,
+            // so a tall sheet would be mostly empty surface.
+            modifier = Modifier.fillMaxWidth(0.94f),
+        ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -103,6 +115,7 @@ fun TaskResultDialog(
                 onOpenHistory = { onDismiss(); onOpenSection("History") },
             )
             TsSecondaryButton(label = "Close", small = true, onClick = onDismiss)
+        }
         }
     }
 }

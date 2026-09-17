@@ -122,10 +122,12 @@ first app.
 Create these auto-renewing subscriptions, same ids the Android client
 already queries:
 
-- `ai.tokenstat.supporter.yearly` — yearly base plan only
-- `ai.tokenstat.patron.yearly` — yearly base plan `annual`, plus a
-  monthly base plan `monthly` (draft until the paywall can pick it)
-- `ai.tokenstat.legend.yearly` — same shape as Patron
+- `ai.tokenstat.supporter.yearly`: yearly base plan only
+- `ai.tokenstat.patron.yearly`: yearly base plan `annual`, plus a
+  monthly base plan `monthly`. The paywall tells them apart by billing
+  period, not by id: legend's yearly plan is called `yearly`.
+- `ai.tokenstat.legend.yearly`: same shape as Patron, except the yearly
+  base plan id is `yearly` rather than `annual`
 
 Base plans should match the Apple / Paddle prices. Activate yearly on
 the internal track first, then production. Do not create separate

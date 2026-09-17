@@ -64,6 +64,28 @@ object HostContracts {
     fun supportsWorkflowEditing(protocol: Long?): Boolean =
         protocol == null || protocol >= WORKFLOW_EDITING_MIN_PROTOCOL
 
+    /// Version 6 added asking the host to read an agent's model list again,
+    /// mirroring `RemoteHostFeature.modelRefresh`. An older host still lists
+    /// the models it cached, so only the Refresh goes away.
+    const val MODEL_REFRESH_MIN_PROTOCOL = 6
+
+    fun supportsModelRefresh(protocol: Long?): Boolean =
+        protocol == null || protocol >= MODEL_REFRESH_MIN_PROTOCOL
+
+    /// Version 10 added `clientMessageId` on `chat.send` and `chat.receipt`,
+    /// and version 14 added the send revision, mirroring
+    /// `RemoteHostFeature.confirmedSend`. A host below 14 refuses an id
+    /// without the revision, so sending needs all of 14 while reading an
+    /// older receipt only needs 10.
+    const val RECEIPT_MIN_PROTOCOL = 10
+    const val CONFIRMED_SEND_MIN_PROTOCOL = 14
+
+    fun supportsReceipt(protocol: Long?): Boolean =
+        protocol == null || protocol >= RECEIPT_MIN_PROTOCOL
+
+    fun supportsConfirmedSend(protocol: Long?): Boolean =
+        protocol == null || protocol >= CONFIRMED_SEND_MIN_PROTOCOL
+
     /// Version 14 added the host self-update check and apply, mirroring
     /// `RemoteHostFeature.hostUpdate`.
     const val HOST_UPDATE_MIN_PROTOCOL = 14

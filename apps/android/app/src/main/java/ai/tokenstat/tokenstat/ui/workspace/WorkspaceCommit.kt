@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -680,6 +682,18 @@ private fun BranchDialog(
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // A sheet with a surface under it. Without one the title drew over
+        // the dimmed screen behind, the rows floated as loose cards, and the
+        // create row landed on top of the tab bar.
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = LocalTsColors.current.background,
+            tonalElevation = 0.dp,
+            shadowElevation = 12.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.86f),
+        ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -730,6 +744,7 @@ private fun BranchDialog(
                 TsAccentButton(label = "Create", small = true, enabled = newName.trim().isNotEmpty() && !working, onClick = { create(newName) })
             }
             TsSecondaryButton(label = "Close", small = true, onClick = onDismiss)
+        }
         }
     }
 }

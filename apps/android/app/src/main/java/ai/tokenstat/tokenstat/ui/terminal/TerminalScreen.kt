@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.terminal
 
+import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
 
 import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
@@ -19,7 +20,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,6 +42,10 @@ import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.TsColors
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardHide
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -87,6 +96,9 @@ fun TerminalScreen(
     // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
+    // Back is Done: it stops showing the session without stopping the
+    // process. Ending it is the Close button, which asks first.
+    BackHandler { onClose() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val dark = isSystemInDarkTheme()
@@ -97,6 +109,12 @@ fun TerminalScreen(
     }
     var sessionId by remember { mutableStateOf(existingSessionId) }
     var confirmClose by remember { mutableStateOf(false) }
+    // The bar's Ctrl key reads the bridge, which is what spends the flag.
+    var controlArmed by remember { mutableStateOf(false) }
+    bridge.onControlChanged = { controlArmed = it }
+    var keyboardUp by remember { mutableStateOf(false) }
+    bridge.onKeyboardChanged = { keyboardUp = it }
+    ReconcileKeyboard(keyboardUp) { keyboardUp = false; bridge.noteKeyboardHidden() }
     // A redraw tick for bridge-owned read state (transport error, dropped
     // output, exit). The loop sets the fields and nudges this.
     var tick by remember { mutableIntStateOf(0) }
@@ -148,7 +166,13 @@ fun TerminalScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // The keyboard takes room from the terminal rather than covering it.
+    //
+    // Nothing consumed the IME inset, so the soft keyboard sat on top of the
+    // bottom rows and the key bar, and the page was never told its size had
+    // changed. The emulator shrinks, the page re-fits, and the rows come back
+    // when the keyboard goes away.
+    Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
         TopAppBar(
             title = {
                 key(tick) {
@@ -213,14 +237,35 @@ fun TerminalScreen(
             modifier = Modifier.weight(1f).fillMaxSize(),
             factory = { ctx ->
                 WebView(ctx).apply {
+                    // Match the space Compose gives this view, explicitly.
+                    // `AndroidView` leaves a child on wrap-content, and a
+                    // WebView measured that way lays its page out against a
+                    // containing block of zero height: `html { height: 100% }`
+                    // computes to 0px, so the terminal can never fit itself to
+                    // the screen and never follows the keyboard.
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
+                    // Both, explicitly. A WebView inside Compose is not given
+                    // focus by the focus system, and without focus the page's
+                    // textarea cannot be what the keyboard types into.
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    // The size the page fits to arrives with layout, not with
+                    // the page load, so every layout asks it to measure again.
+                    addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or_, ob ->
+                        if (r - l != or_ - ol || b - t != ob - ot) bridge.fit()
+                    }
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
                     webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String?) {
                             bridge.webView = view
                             bridge.pushTheme(dark)
+                            bridge.fit()
                             if (bridge.sessionBound) return
                             bridge.sessionBound = true
                             val existing = sessionId
@@ -281,6 +326,9 @@ fun TerminalScreen(
             onSend = { bytes -> bridge.sendBytes(bytes) },
             onToggleKeyboard = { bridge.toggleKeyboard() },
             onScrolls = { bridge.setScrolls(it) },
+            control = controlArmed,
+            onControl = { bridge.armControl(it) },
+            keyboardUp = keyboardUp,
         )
     }
     if (confirmClose) {
@@ -355,6 +403,9 @@ fun SshTerminalScreen(
     // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
+    // Back is Done: it stops showing the session without stopping the
+    // process. Ending it is the Close button, which asks first.
+    BackHandler { onClose() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val dark = isSystemInDarkTheme()
@@ -365,6 +416,11 @@ fun SshTerminalScreen(
     }
     var tick by remember { mutableIntStateOf(0) }
     bridge.onProgress = { tick++ }
+    var controlArmed by remember { mutableStateOf(false) }
+    bridge.onControlChanged = { controlArmed = it }
+    var keyboardUp by remember { mutableStateOf(false) }
+    bridge.onKeyboardChanged = { keyboardUp = it }
+    ReconcileKeyboard(keyboardUp) { keyboardUp = false; bridge.noteKeyboardHidden() }
     var confirmEnd by remember { mutableStateOf(false) }
     var filling by remember { mutableStateOf<JsonObject?>(null) }
     // On-connect commands, once the shell is there to hear them. The channel
@@ -385,7 +441,13 @@ fun SshTerminalScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // The keyboard takes room from the terminal rather than covering it.
+    //
+    // Nothing consumed the IME inset, so the soft keyboard sat on top of the
+    // bottom rows and the key bar, and the page was never told its size had
+    // changed. The emulator shrinks, the page re-fits, and the rows come back
+    // when the keyboard goes away.
+    Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
         TopAppBar(
             title = {
                 key(tick) {
@@ -423,14 +485,35 @@ fun SshTerminalScreen(
             modifier = Modifier.weight(1f).fillMaxSize(),
             factory = { ctx ->
                 WebView(ctx).apply {
+                    // Match the space Compose gives this view, explicitly.
+                    // `AndroidView` leaves a child on wrap-content, and a
+                    // WebView measured that way lays its page out against a
+                    // containing block of zero height: `html { height: 100% }`
+                    // computes to 0px, so the terminal can never fit itself to
+                    // the screen and never follows the keyboard.
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
+                    // Both, explicitly. A WebView inside Compose is not given
+                    // focus by the focus system, and without focus the page's
+                    // textarea cannot be what the keyboard types into.
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    // The size the page fits to arrives with layout, not with
+                    // the page load, so every layout asks it to measure again.
+                    addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or_, ob ->
+                        if (r - l != or_ - ol || b - t != ob - ot) bridge.fit()
+                    }
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
                     webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String?) {
                             bridge.webView = view
                             bridge.pushTheme(dark)
+                            bridge.fit()
                             if (!bridge.sessionBound) {
                                 bridge.sessionBound = true
                                 bridge.startSshLoop(model, sessionId, scope)
@@ -459,6 +542,9 @@ fun SshTerminalScreen(
             onSend = { bytes -> bridge.sendBytes(bytes) },
             onToggleKeyboard = { bridge.toggleKeyboard() },
             onScrolls = { bridge.setScrolls(it) },
+            control = controlArmed,
+            onControl = { bridge.armControl(it) },
+            keyboardUp = keyboardUp,
             leading = {
                 if (snippets.isNotEmpty()) {
                     SnippetKey(snippets, onRun = ::runSnippet)
@@ -626,6 +712,17 @@ class TerminalBridge {
         }
     }
 
+    /// Ask the page to measure itself again.
+    ///
+    /// Called from the view's own layout, because that is the moment the page
+    /// finally has a height. A WebView inside Compose loads before it is
+    /// measured, and a terminal fitted against no height is one row tall.
+    fun fit() {
+        webView?.post {
+            webView?.evaluateJavascript("termFit();", null)
+        }
+    }
+
     fun setScrolls(on: Boolean) {
         webView?.post {
             webView?.evaluateJavascript("termSetScrolls(${if (on) "true" else "false"});", null)
@@ -644,23 +741,102 @@ class TerminalBridge {
         onProgress()
     }
 
+    /// The armed Ctrl.
+    ///
+    /// The key bar has no letter keys: the letters arrive through the
+    /// emulator's own input path, so a fold that lives in the bar applies to
+    /// everything except the keys it is for. Ctrl+C typed on the soft keyboard
+    /// went to the shell as a plain `c` and nothing could be interrupted. The
+    /// bridge holds the flag and folds the next byte from either source, the
+    /// way `ClientTerminalSession.send` does on Apple.
+    @Volatile var controlArmed = false
+        private set
+
+    /// Raised when the fold spends the flag, so the bar can unlight its key.
+    var onControlChanged: (Boolean) -> Unit = {}
+
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    fun armControl(on: Boolean) {
+        if (controlArmed == on) return
+        controlArmed = on
+        // The fold can happen on the JavaScript bridge's thread, and the bar
+        // that reads this is Compose state.
+        main.post { onControlChanged(on) }
+    }
+
     fun sendBytes(bytes: ByteArray) {
-        inbound.trySend(Base64.encodeToString(bytes, Base64.NO_WRAP))
+        enqueue(bytes)
+    }
+
+    private fun enqueue(bytes: ByteArray) {
+        var out = bytes
+        if (controlArmed) {
+            armControl(false)
+            // One byte only. A paste under an armed Ctrl is a paste, not a
+            // control code, and a cursor key is already an escape sequence.
+            if (out.size == 1) {
+                TerminalKeysLogic.controlCode(out[0].toInt() and 0xFF)?.let {
+                    out = byteArrayOf(it.toByte())
+                }
+            }
+        }
+        inbound.trySend(Base64.encodeToString(out, Base64.NO_WRAP))
     }
 
     fun toggleKeyboard() {
+        if (keyboardUp) hideKeyboard() else showKeyboard()
+    }
+
+    /// Whether the keyboard was last asked for. The WebView holds focus in
+    /// both states, so `hasFocus` cannot answer this. The key bar reads it to
+    /// say which way its key points.
+    @Volatile var keyboardUp = false
+        private set
+
+    var onKeyboardChanged: (Boolean) -> Unit = {}
+
+    /// Raise the keyboard onto the emulator's own textarea.
+    ///
+    /// The order matters and all three steps are needed. The WebView takes
+    /// focus in the view hierarchy, `termFocus()` focuses the hidden textarea
+    /// xterm types into, and only then does the IME have an editable to open
+    /// against. Asking for the keyboard first opened it with an input type of
+    /// zero: it appeared, and every keystroke went nowhere.
+    fun showKeyboard() {
         val view = webView ?: return
-        val imm = view.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
-            as android.view.inputmethod.InputMethodManager
         view.post {
-            if (view.hasFocus()) {
-                imm.hideSoftInputFromWindow(view.windowToken, 0)
-                view.clearFocus()
-            } else {
-                view.requestFocus()
-                imm.showSoftInput(view, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            view.requestFocus()
+            view.evaluateJavascript("termFocus();") {
+                val imm = view.context
+                    .getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                    as? android.view.inputmethod.InputMethodManager
+                imm?.showSoftInput(view, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                keyboardUp = true
+                onKeyboardChanged(true)
             }
         }
+    }
+
+    fun hideKeyboard() {
+        val view = webView ?: return
+        view.post {
+            val imm = view.context
+                .getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                as? android.view.inputmethod.InputMethodManager
+            imm?.hideSoftInputFromWindow(view.windowToken, 0)
+            view.evaluateJavascript("termBlur();", null)
+            keyboardUp = false
+            onKeyboardChanged(false)
+        }
+    }
+
+    /// The window says the keyboard is gone although nothing here hid it: a
+    /// system dismissal. Records it so the key bar points at Show again.
+    fun noteKeyboardHidden() {
+        if (!keyboardUp) return
+        keyboardUp = false
+        onKeyboardChanged(false)
     }
 
     fun startReadLoop(model: AppViewModel, peer: String, id: String, scope: CoroutineScope) {
@@ -759,7 +935,9 @@ class TerminalBridge {
     inner class JsApi {
         @JavascriptInterface
         fun onInput(base64: String) {
-            inbound.trySend(base64)
+            // Decoded rather than forwarded, so an armed Ctrl can fold the
+            // key that was actually typed.
+            enqueue(runCatching { Base64.decode(base64, Base64.DEFAULT) }.getOrNull() ?: return)
         }
 
         @JavascriptInterface
@@ -770,6 +948,13 @@ class TerminalBridge {
         @JavascriptInterface
         fun onCopy(text: String) {
             onCopy(text)
+        }
+
+        /// A tap on the emulator asks for the keyboard, the way a tap on any
+        /// other text surface does.
+        @JavascriptInterface
+        fun onWantsKeyboard() {
+            showKeyboard()
         }
     }
 
@@ -847,6 +1032,22 @@ class TerminalBridge {
     }
 }
 
+/// The bridge knows when it asked, the window knows what happened. A
+/// system dismissal leaves the bar's key pointing at Hide until the two
+/// are reconciled.
+@Composable
+private fun ReconcileKeyboard(keyboardUp: Boolean, onHidden: () -> Unit) {
+    val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+    LaunchedEffect(imeVisible) {
+        if (!imeVisible) {
+            // Past the show animation: without the wait a keyboard still
+            // rising would be read as dismissed.
+            delay(600)
+            if (keyboardUp) onHidden()
+        }
+    }
+}
+
 /// The keys a phone keyboard does not have. Shift+Tab is CSI Z, not a shifted tab byte.
 ///
 /// `leading` carries keys one session has that others do not: an SSH session
@@ -857,21 +1058,24 @@ fun TerminalKeys(
     onSend: (ByteArray) -> Unit,
     onToggleKeyboard: () -> Unit,
     onScrolls: (Boolean) -> Unit = {},
+    /// Whether Ctrl is armed. Owned by the session that receives typed keys,
+    /// because that is the path the letters arrive on. Twin of the `control`
+    /// binding in `ClientTerminalKeys`.
+    control: Boolean = false,
+    onControl: (Boolean) -> Unit = {},
+    /// Which way the keyboard key points. Mirrors `keyboardUp` in
+    /// `ClientTerminalKeys`, where one key carries both directions.
+    keyboardUp: Boolean = false,
     leading: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
     var shift by remember { mutableStateOf(false) }
-    var control by remember { mutableStateOf(false) }
     var scrolls by remember { mutableStateOf(false) }
     fun fire(bytes: ByteArray) {
-        var out = bytes
-        if (control && out.size == 1) {
-            val folded = TerminalKeysLogic.controlCode(out[0].toInt() and 0xFF)
-            if (folded != null) out = byteArrayOf(folded.toByte())
-        }
-        onSend(out)
+        // No fold here. Every byte goes the one way, and the session folds an
+        // armed Ctrl into whichever one arrives first.
+        onSend(bytes)
         shift = false
-        control = false
     }
     Row(
         Modifier
@@ -882,13 +1086,18 @@ fun TerminalKeys(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading?.invoke()
-        KeyCap("kb", colors) { onToggleKeyboard() }
+        IconKeyCap(
+            icon = if (keyboardUp) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
+            label = if (keyboardUp) "Hide keyboard" else "Show keyboard",
+            colors = colors,
+            onClick = onToggleKeyboard,
+        )
         KeyCap("scroll", colors, armed = scrolls) {
             scrolls = !scrolls
             onScrolls(scrolls)
         }
         KeyCap("esc", colors) { fire(byteArrayOf(0x1B)) }
-        KeyCap("ctrl", colors, armed = control) { control = !control }
+        KeyCap("ctrl", colors, armed = control) { onControl(!control) }
         KeyCap("shift", colors, armed = shift) { shift = !shift }
         KeyCap(if (shift) "⇧⇥" else "⇥", colors) {
             fire(if (shift) TerminalKeysLogic.backTab else byteArrayOf(0x09))
@@ -901,6 +1110,31 @@ fun TerminalKeys(
             KeyCap(glyph, colors) { fire(glyph.toByteArray(Charsets.UTF_8)) }
         }
     }
+}
+
+/// A keycap whose face is a glyph. The keyboard toggle is the only one: every
+/// other key on this bar sends a byte whose name is the thing to draw.
+@Composable
+private fun IconKeyCap(
+    icon: ImageVector,
+    label: String,
+    colors: TsColors,
+    onClick: () -> Unit,
+) {
+    // The same cap as every other key. A bare glyph in a row of keycaps reads
+    // as a label rather than as something to press.
+    Icon(
+        icon,
+        label,
+        tint = colors.textPrimary,
+        modifier = Modifier
+            .padding(end = 6.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(colors.panel)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .size(20.dp),
+    )
 }
 
 @Composable

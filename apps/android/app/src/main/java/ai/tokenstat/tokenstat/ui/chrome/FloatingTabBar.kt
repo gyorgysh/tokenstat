@@ -22,6 +22,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -86,9 +90,24 @@ fun FloatingTabBar(
     val barShape = RoundedCornerShape(percent = 50)
     // Inset further than the old bar: what made the iOS dock read as a
     // floating capsule was the margin around it, not the corner radius.
-    BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 14.dp)) {
+    // The margin is what makes this read as a floating capsule rather than a
+    // strip, and on a narrow phone it is also the only width left to give the
+    // tabs. A 320dp display had "Workspaces" clipped to "Workspac" with both
+    // ends cut, so below that the inset gives some of itself back.
+    val inset = if (LocalConfiguration.current.screenWidthDp < 400) 14.dp else 22.dp
+    BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = inset).padding(bottom = 14.dp)) {
         val fullWidth = maxWidth
         val pillWidth = 64.dp
+        // What one tab gets, which decides whether the longest label fits.
+        // Scaled by the system font setting, so somebody who asked for large
+        // text gets the smaller step rather than a clipped word.
+        val perTab = (fullWidth - 12.dp) / tabs.size.coerceAtLeast(1)
+        val fontScale = LocalDensity.current.fontScale
+        val labelSize = when {
+            perTab < 62.dp * fontScale -> 9.sp
+            perTab < 70.dp * fontScale -> 10.sp
+            else -> 11.sp
+        }
         val width = fullWidth - (fullWidth - pillWidth) * fraction
         // Frosted, not see-through. The blur stops list rows being legible
         // under the bar, but a blur alone still leaves the labels sitting on
@@ -133,6 +152,7 @@ fun FloatingTabBar(
                             spec = tab,
                             selected = index == selected,
                             enabled = fraction < 0.5f,
+                            labelSize = labelSize,
                             onClick = { onSelect(index) },
                         )
                     }
@@ -187,7 +207,13 @@ private fun MinimizedPill(
 }
 
 @Composable
-private fun RowScope.FloatingTab(spec: TabSpec, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun RowScope.FloatingTab(
+    spec: TabSpec,
+    selected: Boolean,
+    enabled: Boolean,
+    labelSize: TextUnit,
+    onClick: () -> Unit,
+) {
     val colors = LocalTsColors.current
     val reduceMotion = rememberReduceMotion()
     val pillAlpha by animateFloatAsState(
@@ -209,7 +235,9 @@ private fun RowScope.FloatingTab(spec: TabSpec, selected: Boolean, enabled: Bool
             .clip(RoundedCornerShape(percent = 50))
             .background(colors.accentSoft.copy(alpha = pillAlpha))
             .selectable(selected = selected, enabled = enabled, onClick = onClick, role = Role.Tab)
-            .padding(vertical = 7.dp),
+            // Horizontal too: without it the longest label runs to the very
+            // edge of its slot and reads as one word touching the next.
+            .padding(horizontal = 2.dp, vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -224,11 +252,14 @@ private fun RowScope.FloatingTab(spec: TabSpec, selected: Boolean, enabled: Bool
         Text(
             spec.label,
             style = TsType.caption2.copy(
-                fontSize = 11.sp,
+                fontSize = labelSize,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             ),
             color = if (selected) colors.accent else colors.textPrimary,
             maxLines = 1,
+            // Past the smallest step the word ends in an ellipsis rather than
+            // being cut through a letter.
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

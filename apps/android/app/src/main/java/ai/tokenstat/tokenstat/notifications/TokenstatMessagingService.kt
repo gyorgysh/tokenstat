@@ -34,6 +34,7 @@ class TokenstatMessagingService : FirebaseMessagingService() {
         // body or title would be free text riding somebody else's server, so
         // both are ignored on purpose: only reason plus machine are read.
         val delivery = PushPayload.parse(message.data) ?: return
+        if (VisibleChat.suppresses(delivery.reason, delivery.machine)) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Agent updates", NotificationManager.IMPORTANCE_DEFAULT),

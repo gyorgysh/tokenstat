@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.notifications.NotificationOpen
 import ai.tokenstat.tokenstat.ClientState
 import ai.tokenstat.tokenstat.billing.PlayBillingManager
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
@@ -248,6 +249,26 @@ fun TokenstatApp(model: AppViewModel) {
                     .getBoolean("hasOnboarded", false)
             }.getOrDefault(false),
         )
+    }
+    // A pending notification tap belongs to the account that was signed in
+    // when it arrived. Signing out drops it, the way the Apple root clears
+    // its tap on a scope change, so it cannot open somebody else's work. A
+    // sign-in drops an unnamed one for the same reason: a named tap only
+    // resolves when its machine is in the new account's directory, but an
+    // unnamed tap falls back to the connected host and could open the wrong
+    // account's chat.
+    var wasSignedIn by remember { mutableStateOf<Boolean?>(null) }
+    val tapScope = rememberCoroutineScope()
+    LaunchedEffect(state.signedIn) {
+        if (wasSignedIn == true && !state.signedIn) NotificationOpen.take()
+        if (wasSignedIn == false && state.signedIn) {
+            if (NotificationOpen.request.value?.machineID == null) NotificationOpen.take()
+            // The cold-start half of the foreground tunnel nudge. `onResume`
+            // fires before the account lands, so it cannot cover a fresh
+            // process, and this transition is where the sign-in completes.
+            tapScope.launch { model.nudgeTunnelOnForeground() }
+        }
+        wasSignedIn = state.signedIn
     }
     TsTheme {
         val colors = LocalTsColors.current
@@ -469,6 +490,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     val homeStores = remember { HomeStores(context) }
     val billing = remember { PlayBillingManager(context) }
     billing.appAccountToken = state.appAccountToken
+    billing.trialUsed = state.trialUsed
     billing.onActivated = { model.applyAccount(it) }
     DisposableEffect(billing) {
         billing.start()
@@ -512,6 +534,20 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     // sampling itself.
     val backdrop = rememberBackdrop()
     LaunchedEffect(selected) { tabBar.expand() }
+    // A notification tap heads for Workspaces, like the Apple root: every
+    // notification is about work on a machine, so the machine list is both
+    // where the tap was heading and the screen that resolves it. Without
+    // remote access there is nothing to resolve, so the tap is dropped and
+    // the app simply stays where it is.
+    val pushTap by NotificationOpen.request.collectAsStateWithLifecycle()
+    LaunchedEffect(pushTap, state.canRemote) {
+        if (pushTap == null) return@LaunchedEffect
+        if (!state.canRemote) {
+            NotificationOpen.take()
+        } else if (selected != Destination.Workspaces) {
+            selected = Destination.Workspaces
+        }
+    }
 
     val colors = LocalTsColors.current
     CompositionLocalProvider(LocalTabBarPresence provides tabBarPresence) {
@@ -2913,6 +2949,63 @@ private fun WorkspacesScreen(
         pendingChatId = chat.string("id")
         pendingOpenConversation = false
     }
+    // A tap on a push opens the conversation it names, the way the iOS
+    // workspaces view fulfills it: the tap already re-read the account on
+    // its way in, so this waits for the pieces (hosts, connection, recent
+    // chats) and opens the chat once they resolve. Peek first, consume only
+    // once the tap resolves. Anything unresolvable is dropped at patience,
+    // landing on this list, never a crash and never a second move.
+    val pushTap by NotificationOpen.request.collectAsStateWithLifecycle()
+    var tapDialled by remember(pushTap) { mutableStateOf<String?>(null) }
+    LaunchedEffect(pushTap, hosts, connectedPeer, connectingPeer, chats, folders) {
+        val tap = pushTap ?: return@LaunchedEffect
+        val target = NotificationOpen.pickHost(hosts, tap.machineID, connectedPeer)
+        if (target == null) {
+            // The named machine is not in the directory, or there are no
+            // hosts at all: the account refresh may still be landing. Keep
+            // the tap while it is fresh.
+            NotificationOpen.dropIfStale()
+            return@LaunchedEffect
+        }
+        val peer = target.string("publicIdentity")
+        if (peer.isNullOrEmpty()) {
+            NotificationOpen.dropIfStale()
+            return@LaunchedEffect
+        }
+        if (connectedPeer != peer) {
+            // A dial already in flight finishes on its own and reruns this.
+            // One dial per tap otherwise: a failure surfaces on the list
+            // with its retry, and tapping retry still completes the tap.
+            if (connectingPeer != null) return@LaunchedEffect
+            if (tapDialled == peer) {
+                NotificationOpen.dropIfStale()
+                return@LaunchedEffect
+            }
+            tapDialled = peer
+            // On the composition scope, not this effect's: the first thing
+            // the dial does is move `connectingPeer`, which is a key here,
+            // and an effect cannot survive cancelling itself halfway through
+            // its own work.
+            scope.launch { connect(target) }
+            return@LaunchedEffect
+        }
+        val chat = NotificationOpen.pickChat(chats.mapNotNull { it as? JsonObject }, tap.waiting)
+        val folderId = chat?.string("workspaceId")
+        if (chat == null || folderId.isNullOrEmpty() ||
+            folders.mapNotNull { it as? JsonObject }.none { it.string("id") == folderId }
+        ) {
+            NotificationOpen.dropIfStale()
+            return@LaunchedEffect
+        }
+        // Compare before consuming: `take` always clears, so a newer tap
+        // that arrived mid-resolve would otherwise be swallowed with this one.
+        // Still fresh, too: a tap that sat past patience resolving must not
+        // yank the user into its chat now that the data happens to be here.
+        if (NotificationOpen.request.value != tap) return@LaunchedEffect
+        if (NotificationOpen.dropIfStale()) return@LaunchedEffect
+        NotificationOpen.take()
+        openChat(chat)
+    }
     var wsRefreshing by remember { mutableStateOf(false) }
 
     @Composable
@@ -3643,6 +3736,19 @@ private fun AccountDialog(
             billing = billing,
             onDismiss = { paywall = false },
             currentTier = state.account?.string("tier"),
+            // The server names a monthly interval and leaves a yearly one
+            // unsaid, the way the account card reads it: paid and not
+            // monthly means yearly.
+            currentInterval = run {
+                val serverBilling = state.account?.get("billing") as? JsonObject
+                when {
+                    serverBilling?.string("interval") == PlayBillingManager.INTERVAL_MONTH ->
+                        PlayBillingManager.INTERVAL_MONTH
+                    state.account?.string("tier")?.lowercase() in listOf("supporter", "patron", "legend") ->
+                        PlayBillingManager.INTERVAL_YEAR
+                    else -> null
+                }
+            },
         )
     }
 }

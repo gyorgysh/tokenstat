@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
 
 import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
@@ -87,6 +88,9 @@ fun WorkspaceFileEditorPage(
     // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
+    // A pushed screen owns the system back. Without it the gesture falls
+    // through to the activity and closes the app instead of stepping back.
+    BackHandler { onClose() }
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
     var field by remember(path) { mutableStateOf(TextFieldValue("")) }
