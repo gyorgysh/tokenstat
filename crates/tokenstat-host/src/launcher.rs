@@ -1513,6 +1513,21 @@ mod tests {
         assert_eq!(missing, ["opencode2", "cursor_agent"], "{missing:?}");
     }
 
+    /// Muse's Windows installer, pinned by value. Meta publishes the `.ps1`
+    /// beside the Unix script, and the catalog must keep pointing at it
+    /// rather than degrading Muse to a tile with no Install button.
+    #[test]
+    fn muse_keeps_its_windows_installer() {
+        let muse = PROFILES
+            .iter()
+            .find(|p| p.id == "muse")
+            .expect("Muse must be in the catalog");
+        assert_eq!(
+            muse.install_command_windows,
+            Some("irm https://dev.meta.ai/install.ps1 | iex")
+        );
+    }
+
     #[test]
     fn the_next_opencode_build_is_its_own_profile() {
         let next = PROFILES
