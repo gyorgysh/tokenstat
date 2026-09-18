@@ -5,8 +5,11 @@ import ai.tokenstat.tokenstat.ui.browser.BrowserPolicy
 import ai.tokenstat.tokenstat.ui.screen.ScreenFrames
 import ai.tokenstat.tokenstat.ui.ssh.SnippetRun
 import ai.tokenstat.tokenstat.ui.terminal.TerminalKeysLogic
+import ai.tokenstat.tokenstat.ui.terminal.TerminalViewer
+import ai.tokenstat.tokenstat.ui.terminal.ptyViewerParams
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -225,5 +228,34 @@ class MachinePlaneTest {
     @Test
     fun runBytesTypeReturn() {
         assertTrue(SnippetRun.runBytes("uptime").contentEquals("uptime\r".toByteArray(Charsets.UTF_8)))
+    }
+
+    /// A pty call made on behalf of this front end names it. Without the
+    /// viewer the host resizes the session outright instead of clamping it to
+    /// the smallest viewer, which collapsed the Mac's terminal to the phone's
+    /// width and left it there.
+    @Test
+    fun ptyCallsNameTheViewer() {
+        val params = ptyViewerParams("session-1") {
+            put("rows", 38)
+            put("cols", 54)
+        }
+        assertEquals("session-1", params["id"]?.jsonPrimitive?.content)
+        assertEquals(TerminalViewer.id, params["viewer"]?.jsonPrimitive?.content)
+        assertTrue(TerminalViewer.id.isNotBlank())
+        assertEquals("38", params["rows"]?.jsonPrimitive?.content)
+        assertEquals("54", params["cols"]?.jsonPrimitive?.content)
+    }
+
+    /// The same id for every call this launch makes: the resize takes the
+    /// lease, the reads keep it alive, and the detach gives it back. Three
+    /// different ids would be three viewers, and the session would stay
+    /// clamped by the two that never let go.
+    @Test
+    fun theViewerIdIsStableWithinTheProcess() {
+        assertEquals(
+            ptyViewerParams("a")["viewer"]?.jsonPrimitive?.content,
+            ptyViewerParams("b")["viewer"]?.jsonPrimitive?.content,
+        )
     }
 }

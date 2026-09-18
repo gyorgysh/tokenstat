@@ -66,6 +66,7 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.AppViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
@@ -153,7 +154,7 @@ fun TerminalScreen(
             // session ends here with a way out, instead of the blank
             // terminal a dead attach used to draw.
             runCatching {
-                model.workspaceSection(peer, "pty.info", buildJsonObject { put("id", id) })
+                model.workspaceSection(peer, "pty.info", ptyViewerParams(id))
             }.onSuccess { element ->
                 bridge.readInfo(element as? JsonObject)
                 if (bridge.exitCode != null || !bridge.alive) {
@@ -327,9 +328,16 @@ fun TerminalScreen(
                 if (id != null && !bridge.killed) {
                     // Stop showing a session without stopping its process on
                     // the Mac (`pty.detach`). Close is what ends the process.
-                    scope.launch {
+                    //
+                    // On the view model's scope, not the composable's: this
+                    // runs as the screen leaves, and the remembered scope is
+                    // cancelled in the same breath, so the request was a coin
+                    // toss. Losing it means the phone keeps its claim on the
+                    // session's geometry until the host's lease expires, and
+                    // the Mac stays at the phone's width in the meantime.
+                    model.viewModelScope.launch {
                         runCatching {
-                            model.workspaceSection(peer, "pty.detach", buildJsonObject { put("id", id) })
+                            model.workspaceSection(peer, "pty.detach", ptyViewerParams(id))
                         }
                     }
                 }
@@ -557,8 +565,13 @@ fun SshTerminalScreen(
             onRelease = { view ->
                 bridge.alive = false
                 // Done only stops watching. Only an ended session closes.
+                //
+                // The view model's scope for the same reason the pty detach
+                // uses it: a teardown call launched on the composable's scope
+                // races the cancellation of that scope, and the one that loses
+                // leaves a session open on the server.
                 if (bridge.killed) {
-                    scope.launch {
+                    model.viewModelScope.launch {
                         runCatching {
                             model.core("ssh.session.close", buildJsonObject { put("id", sessionId) })
                         }
@@ -890,8 +903,8 @@ class TerminalBridge {
             var failures = 0
             while (alive) {
                 val chunk = runCatching {
-                    model.workspaceSection(peer, "pty.read", buildJsonObject {
-                        put("id", id); put("offset", offset); put("waitMs", 250)
+                    model.workspaceSection(peer, "pty.read", ptyViewerParams(id) {
+                        put("offset", offset); put("waitMs", 250)
                     })
                 }.getOrNull()
                 if (chunk == null) {
@@ -906,7 +919,7 @@ class TerminalBridge {
                     }
                     if (failures % 8 == 0) {
                         val info = runCatching {
-                            model.workspaceSection(peer, "pty.info", buildJsonObject { put("id", id) })
+                            model.workspaceSection(peer, "pty.info", ptyViewerParams(id))
                         }.getOrNull() as? JsonObject
                         if (info != null) {
                             readInfo(info)
@@ -959,10 +972,12 @@ class TerminalBridge {
                     val cols = parts.getOrNull(1)?.toIntOrNull() ?: continue
                     // Sending the ask rather than a command means the host
                     // picks the smaller geometry and the Mac is not left
-                    // narrow after the phone closes.
+                    // narrow after the phone closes. The viewer id is what
+                    // makes it an ask: without one the host resizes the
+                    // session outright. See `TerminalViewer`.
                     runCatching {
-                        model.workspaceSection(peer, "pty.resize", buildJsonObject {
-                            put("id", id); put("rows", rows); put("cols", cols)
+                        model.workspaceSection(peer, "pty.resize", ptyViewerParams(id) {
+                            put("rows", rows); put("cols", cols)
                         })
                     }
                 } else {
