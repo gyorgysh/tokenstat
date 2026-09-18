@@ -853,8 +853,10 @@ private fun AnnotatedString.Builder.parseInline(
                     append(text.drop(i))
                     return
                 }
+                // Parsed again inside, not appended raw: a link inside bold
+                // is a bold link, not the letters `[text](url)`.
                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                    append(text.substring(i + 2, end))
+                    parseInline(text.substring(i + 2, end), accent, secondary)
                 }
                 i = end + 2
             }
@@ -891,7 +893,7 @@ private fun AnnotatedString.Builder.parseInline(
                     i += 1
                 } else {
                     withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                        append(text.substring(i + 1, end))
+                        parseInline(text.substring(i + 1, end), accent, secondary)
                     }
                     i = end + 1
                 }

@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.R
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
+import ai.tokenstat.tokenstat.ui.theme.TsColors
 import ai.tokenstat.tokenstat.ui.theme.TsMotion
 import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.delay
@@ -283,8 +284,22 @@ fun avatarInitials(name: String?): String? {
 /// synchronously, so an already fetched face paints on the first frame instead
 /// of flashing the letter while a new fetch spins up.
 @Composable
-fun Avatar(name: String, size: Int = 28, avatarUrl: String? = null, signedIn: Boolean = true) {
+fun Avatar(
+    name: String,
+    size: Int = 28,
+    avatarUrl: String? = null,
+    signedIn: Boolean = true,
+    /// The bubble's colour. The app's accent for our own picture; a colour
+    /// drawn from the identity where several people appear in one list, so a
+    /// row is recognisable before the name is read. Port of `Avatar.tint`.
+    tint: Color? = null,
+    /// Beside its own name in text, a face is decoration and announcing it
+    /// again is noise. The account button, which is the face on its own,
+    /// leaves this false and keeps its label.
+    decorative: Boolean = false,
+) {
     val colors = LocalTsColors.current
+    val bubble = tint ?: colors.accent
     val context = LocalContext.current
     val raw = avatarUrl?.trim()?.takeIf { it.isNotEmpty() }
     var picture: Bitmap? by remember(raw) { mutableStateOf(raw?.let { AvatarCache.cached(it) }) }
@@ -299,7 +314,15 @@ fun Avatar(name: String, size: Int = 28, avatarUrl: String? = null, signedIn: Bo
     Box(
         Modifier
             .size(drawn)
-            .semantics { contentDescription = if (signedIn) "Account, $name" else "Sign in to tokenstat" },
+            .then(
+                if (decorative) {
+                    Modifier
+                } else {
+                    Modifier.semantics {
+                        contentDescription = if (signedIn) "Account, $name" else "Sign in to tokenstat"
+                    }
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -308,7 +331,7 @@ fun Avatar(name: String, size: Int = 28, avatarUrl: String? = null, signedIn: Bo
                 .clip(CircleShape)
                 .background(
                     androidx.compose.ui.graphics.Brush.linearGradient(
-                        listOf(colors.accent, colors.secondary),
+                        listOf(bubble, colors.secondary),
                     ),
                     alpha = if (signedIn) 1f else 0.14f,
                 ),
@@ -347,4 +370,22 @@ fun Avatar(name: String, size: Int = 28, avatarUrl: String? = null, signedIn: Bo
             )
         }
     }
+}
+
+/// A stable colour for a person, from the app's own ramp. Port of
+/// `Avatar.tint(for:)`.
+///
+/// Hashed over the bytes rather than with `hashCode`, which is not promised to
+/// be stable across runs: the same author would get a different colour on the
+/// next launch, and a mark that moves is not a mark. The ramp's first two
+/// steps are left out — they are the heatmap's quiet-day greys, and a letter
+/// in one of them is a letter nobody can read.
+fun avatarTint(identity: String, colors: TsColors): Color {
+    val palette = colors.heat.drop(2) + listOf(colors.warning, colors.danger)
+    if (palette.isEmpty()) return colors.accent
+    var hash = 5381UL
+    for (byte in identity.lowercase().toByteArray()) {
+        hash = hash * 33UL + byte.toUByte().toULong()
+    }
+    return palette[(hash % palette.size.toULong()).toInt()]
 }

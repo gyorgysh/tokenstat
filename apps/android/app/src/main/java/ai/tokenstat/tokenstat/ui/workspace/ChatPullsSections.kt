@@ -230,6 +230,16 @@ fun ChatSection(
     /// on disk at open are not, except the ones explicitly marked Send when
     /// connected: reopening the app is not the same as asking to send.
     var authorized by remember(workspace) { mutableStateOf<Set<String>>(emptySet()) }
+    /// The message the composer is delivering on its first attempt. Twin of
+    /// `ChatModel.deliveringFromComposer`: the strip draws `pending` rather
+    /// than `queued`, so a healthy send never opens it.
+    var deliveringFromComposer by remember(workspace) { mutableStateOf<String?>(null) }
+    /// What the pending strip draws: everything genuinely waiting, which is
+    /// to say everything except the send that is in flight right now. A
+    /// refused or unconfirmed send clears the filter on its way out, so it
+    /// appears the moment it really is pending. Twin of
+    /// `ChatModel.pendingQueue`.
+    val pendingQueue = ChatOutboxRules.pending(queued, deliveringFromComposer)
     // The document picker, which needs no storage permission: the user hands
     // us one file at a time and nothing else on the device is readable.
     val picker = rememberLauncherForActivityResult(
@@ -611,12 +621,20 @@ fun ChatSection(
             }
             files.add(QueuedAttachment(file.str("id").orEmpty(), file.str("name") ?: attachment.name))
         }
-        if (enqueue(id, clean, files, whenConnected = false) == null) return
+        val item = enqueue(id, clean, files, whenConnected = false) ?: return
         draft = ""
         staged = emptyList()
         attachError = null
         sendError = null
-        drainQueue()
+        // Hidden while this first attempt is in flight, the way the Apple
+        // strip hides it. A refusal clears this on the way out, so the
+        // message appears the moment it really is pending.
+        deliveringFromComposer = item.id
+        try {
+            drainQueue()
+        } finally {
+            deliveringFromComposer = null
+        }
     }
 
     /// Stop the open turn so this message goes next, or check a delivery
@@ -1122,10 +1140,12 @@ fun ChatSection(
                 TextButton(onClick = { setupError = null }) { Text("Dismiss") }
             }
             ChatQueueStrip(
-                items = queued,
+                items = pendingQueue,
                 // Paused when the next message is not one this session was
-                // asked to send: a reopened queue waits to be told.
-                paused = queued.firstOrNull()?.let { it.id !in authorized } == true,
+                // asked to send: a reopened queue waits to be told. Read
+                // from what the strip shows, so the in-flight send hiding
+                // above does not decide it.
+                paused = pendingQueue.firstOrNull()?.let { it.id !in authorized } == true,
                 offline = offline,
                 onChange = { item, text ->
                     val id = openId ?: return@ChatQueueStrip
@@ -1775,25 +1795,6 @@ internal fun chatSendParams(
     }
 }
 
-/// Pull bodies mix markdown with raw HTML (Dependabot release notes are
-/// mostly `<details>` and `<a>` tags). Links keep their URL in
-/// parentheses; every other tag goes, so the markdown renderer below sees
-/// prose instead of markup.
-internal fun stripPullHtml(body: String): String = body
-    .replace(Regex("""<a\s+href="([^"]*)">([^<]*)</a>""", RegexOption.IGNORE_CASE), "$2 ($1)")
-    .replace(Regex("""<!--.*?-->"""), "")
-    .replace(Regex("""<[^>]*>"""), "")
-    .replace("&amp;", "&")
-    .replace("&lt;", "<")
-    .replace("&gt;", ">")
-    .replace("&quot;", "\"")
-    .replace("&#39;", "'")
-    .lines()
-    .map { it.trimEnd() }
-    .joinToString("\n")
-    .replace(Regex("\n{3,}"), "\n\n")
-    .trim()
-
 private val pullScopes = listOf(
     "All" to "all",
     "Mine" to "mine",
@@ -1851,6 +1852,9 @@ fun PullsSection(
             hostLabel = hostLabel,
             number = opened,
             modifier = modifier,
+            // The row that was tapped already knows the title and the author,
+            // so the loading page can show them instead of a bare spinner.
+            summary = pulls.firstOrNull { it.long("number") == opened },
             onBack = { openNumber = null; scope.launch { load() } },
         )
         return
@@ -1959,522 +1963,6 @@ fun PullsSection(
                     }
                 }
             }
-        }
-    }
-}
-
-/// One pull request as a full management page, port of `PullDetailView`: the
-/// hero, the conversation with its timeline and composer, the files with the
-/// same diff rows as Changes, the checks, and the actions panel (review,
-/// ready, merge, close or reopen, local checkout). Every call site is one
-/// labelled button press, using the same `pulls.*` host methods iOS uses.
-@Composable
-private fun PullDetailPage(
-    model: AppViewModel,
-    peer: String,
-    workspace: String,
-    hostLabel: String,
-    number: Long,
-    modifier: Modifier = Modifier,
-    onBack: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    var detail by remember(number) { mutableStateOf<JsonObject?>(null) }
-    var timeline by remember(number) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var nextCursor by remember(number) { mutableStateOf<String?>(null) }
-    var diffs by remember(number) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var error by remember(number) { mutableStateOf<String?>(null) }
-    var actionError by remember(number) { mutableStateOf<String?>(null) }
-    var actionNotice by remember(number) { mutableStateOf<String?>(null) }
-    var loading by remember(number) { mutableStateOf(true) }
-    var actionBusy by remember(number) { mutableStateOf(false) }
-    var commentDraft by remember(number) { mutableStateOf("") }
-    var reviewMode by remember(number) { mutableStateOf<String?>(null) }
-    var reviewDraft by remember(number) { mutableStateOf("") }
-    var mergeMethod by remember(number) { mutableStateOf("merge") }
-    var checkoutBranch by remember(number) { mutableStateOf("") }
-    var confirmingClose by remember(number) { mutableStateOf(false) }
-    var confirmingMerge by remember(number) { mutableStateOf(false) }
-
-    suspend fun loadTimeline(cursor: String? = null, append: Boolean = false) {
-        runCatching {
-            model.workspaceSection(peer, "pulls.timeline", buildJsonObject {
-                put("workspaceId", workspace); put("number", number); put("refresh", false)
-                if (cursor != null) put("cursor", cursor)
-            })
-        }.onSuccess { element ->
-            val page = element as? JsonObject
-            val fresh = asObjects(page?.get("events")).ifEmpty { asObjects(element) }
-            timeline = if (append) timeline + fresh else fresh
-            nextCursor = page?.str("nextCursor")
-        }
-    }
-    suspend fun loadDiff() {
-        runCatching {
-            model.workspaceSection(peer, "pulls.diff", buildJsonObject {
-                put("workspaceId", workspace); put("number", number); put("refresh", false)
-            })
-        }.onSuccess { element ->
-            val obj = element as? JsonObject
-            diffs = asObjects(element).ifEmpty { asObjects(obj?.get("diffs")) }.ifEmpty { asObjects(obj?.get("files")) }
-        }
-    }
-    suspend fun load() {
-        loading = true
-        runCatching {
-            model.workspaceSection(peer, "pulls.view", buildJsonObject {
-                put("workspaceId", workspace); put("number", number); put("refresh", false)
-            }) as? JsonObject
-        }.onSuccess {
-            detail = (it?.get("pull") as? JsonObject) ?: it
-            error = null
-            loadTimeline()
-            loadDiff()
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
-        loading = false
-    }
-    LaunchedEffect(number) { load() }
-
-    suspend fun act(label: String, method: String, params: JsonObjectBuilderScope.() -> Unit) {
-        if (actionBusy) return
-        actionBusy = true
-        actionNotice = null
-        try {
-            runCatching {
-                model.workspaceSection(peer, method, buildJsonObject {
-                    put("workspaceId", workspace); put("number", number)
-                    JsonObjectBuilderScope(this).params()
-                })
-            }.onSuccess {
-                actionError = null
-                actionNotice = label
-                load()
-            }.onFailure {
-                actionError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
-            }
-        } finally {
-            actionBusy = false
-        }
-    }
-
-    val view = detail
-    Column(modifier.verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.m)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack, modifier = Modifier.weight(1f)) {
-                Text("← Pull requests", modifier = Modifier.fillMaxWidth())
-            }
-            TextButton(onClick = { scope.launch { load() } }) { Text("Refresh") }
-        }
-        Text("#$number", style = TsType.mono(13), color = LocalTsColors.current.textSecondary)
-        if (error != null) {
-            StickyErrorCard(
-                message = error!!,
-                onRetry = { scope.launch { load() } },
-                onDismiss = { error = null },
-            )
-        }
-        if (actionError != null) {
-            StickyErrorCard(
-                message = actionError!!,
-                onDismiss = { actionError = null },
-            )
-        }
-        actionNotice?.let { Banner(it, BannerSeverity.SUCCESS) }
-        if (loading && view == null) {
-            Text("Loading…", color = LocalTsColors.current.textSecondary)
-            return
-        }
-        if (view == null) return
-        PullHeroCard(view)
-        PullConversationCard(
-            timeline = timeline,
-            nextCursor = nextCursor,
-            commentDraft = commentDraft,
-            onCommentDraft = { commentDraft = it },
-            busy = actionBusy,
-            onMore = { scope.launch { loadTimeline(nextCursor, append = true) } },
-            onComment = {
-                val body = commentDraft.trim()
-                if (body.isEmpty()) return@PullConversationCard
-                commentDraft = ""
-                scope.launch { act("Comment posted.", "pulls.comment") { put("body", body) } }
-            },
-        )
-        PullFilesCard(diffs)
-        PullChecksCard(view)
-        PullActionsPanel(
-            view = view,
-            busy = actionBusy,
-            reviewMode = reviewMode,
-            reviewDraft = reviewDraft,
-            onReviewDraft = { reviewDraft = it },
-            onBeginReview = { reviewMode = it; reviewDraft = "" },
-            onCancelReview = { reviewMode = null; reviewDraft = "" },
-            onApprove = { scope.launch { act("Approved.", "pulls.review") { put("verdict", "approve"); put("body", "") } } },
-            onSendReview = { mode ->
-                val body = reviewDraft.trim()
-                if (body.isEmpty()) return@PullActionsPanel
-                reviewMode = null
-                reviewDraft = ""
-                scope.launch { act("Review sent.", "pulls.review") { put("verdict", mode); put("body", body) } }
-            },
-            onReady = { scope.launch { act("Marked ready for review.", "pulls.ready") {} } },
-            onClose = { confirmingClose = true },
-            onReopen = { scope.launch { act("Reopened.", "pulls.reopen") {} } },
-            mergeMethod = mergeMethod,
-            onMergeMethod = { mergeMethod = it },
-            onMerge = { confirmingMerge = true },
-            checkoutBranch = checkoutBranch,
-            onCheckoutBranch = { checkoutBranch = it },
-            onCheckout = {
-                val branch = checkoutBranch.trim()
-                if (branch.isEmpty()) return@PullActionsPanel
-                scope.launch { act("Checked out $branch.", "pulls.checkout") { put("branch", branch) } }
-            },
-        )
-    }
-    if (confirmingClose) {
-        AlertDialog(
-            onDismissRequest = { confirmingClose = false },
-            title = { Text("Close pull request #$number?") },
-            text = { Text("The branch stays. You can reopen it later.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmingClose = false
-                    scope.launch { act("Closed.", "pulls.close") {} }
-                }) { Text("Close pull request") }
-            },
-            dismissButton = { TextButton(onClick = { confirmingClose = false }) { Text("Cancel") } },
-        )
-    }
-    if (confirmingMerge) {
-        AlertDialog(
-            onDismissRequest = { confirmingMerge = false },
-            title = { Text("Merge pull request #$number?") },
-            text = { Text("Merge with ${ai.tokenstat.tokenstat.ui.logic.PullReview.mergeTitle(mergeMethod).lowercase()}.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmingMerge = false
-                    scope.launch { act("Merged.", "pulls.merge") { put("mergeMethod", mergeMethod) } }
-                }) { Text("Merge pull request") }
-            },
-            dismissButton = { TextButton(onClick = { confirmingMerge = false }) { Text("Cancel") } },
-        )
-    }
-}
-
-private class JsonObjectBuilderScope(val builder: kotlinx.serialization.json.JsonObjectBuilder) {
-    fun put(key: String, value: String) = builder.put(key, value)
-}
-
-@Composable
-private fun PullHeroCard(view: JsonObject) {
-    val colors = LocalTsColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(cardRadiusDp))
-            .background(colors.panel)
-            .padding(Space.m),
-        verticalArrangement = Arrangement.spacedBy(Space.s),
-    ) {
-        Text(
-            view.str("title") ?: "",
-            style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-            color = colors.textPrimary,
-        )
-        (view.str("body") ?: "").takeIf { it.isNotBlank() }?.let {
-            MarkdownText(stripPullHtml(it), TextStyle(fontSize = 14.sp), colors.textSecondary)
-        }
-        val author = (view["author"] as? JsonObject)?.str("login") ?: view.str("author").orEmpty()
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-            if (author.isNotBlank()) {
-                Text(author, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = colors.textPrimary)
-            }
-            view.str("createdAt")?.takeIf { it.isNotBlank() }?.let {
-                Text(it.take(10), style = TextStyle(fontSize = 12.sp), color = colors.textTertiary)
-            }
-            view.str("state")?.takeIf { it.isNotBlank() }?.let {
-                Text(it.replaceFirstChar(Char::uppercase), style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = colors.accent)
-            }
-            if (view.bol("draft")) {
-                Text("Draft", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-            }
-        }
-        Text(
-            "${view.str("headRef") ?: ""} → ${view.str("baseRef") ?: ""}",
-            style = TsType.mono(12),
-            color = colors.textSecondary,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            view.long("additions")?.let {
-                Text("+$it", style = TsType.numeric(12), color = colors.diffAdded)
-            }
-            view.long("deletions")?.let {
-                Text("−$it", style = TsType.numeric(12), color = colors.diffRemoved)
-            }
-            view.long("changedFiles")?.let {
-                Text("$it files", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-            }
-        }
-        view.str("reviewDecision")?.takeIf { it.isNotBlank() }?.let {
-            Text("Review: $it", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-        }
-        (view["labels"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
-            ?.takeIf { it.isNotEmpty() }?.let { labels ->
-                Text(labels.joinToString(" · "), style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-            }
-    }
-}
-
-@Composable
-private fun PullConversationCard(
-    timeline: List<JsonObject>,
-    nextCursor: String?,
-    commentDraft: String,
-    onCommentDraft: (String) -> Unit,
-    busy: Boolean,
-    onMore: () -> Unit,
-    onComment: () -> Unit,
-) {
-    val colors = LocalTsColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(cardRadiusDp))
-            .background(colors.panel)
-            .padding(Space.m),
-        verticalArrangement = Arrangement.spacedBy(Space.m),
-    ) {
-        Text("Conversation", style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
-        if (timeline.isEmpty()) {
-            Text("No comments yet.", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-        }
-        timeline.forEach { event ->
-            val actor = (event["actor"] as? JsonObject)?.str("login") ?: event.str("actor").orEmpty()
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        (event.str("kind") ?: "event").replaceFirstChar(Char::uppercase),
-                        style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                        color = colors.accent,
-                    )
-                    if (actor.isNotBlank()) {
-                        Text(actor, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = colors.textPrimary)
-                    }
-                    event.str("createdAt")?.takeIf { it.isNotBlank() }?.let {
-                        Text(it.take(10), style = TextStyle(fontSize = 11.sp), color = colors.textTertiary)
-                    }
-                }
-                (event.str("subject") ?: event.str("state"))?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = colors.textPrimary)
-                }
-                (event.str("body") ?: "").takeIf { it.isNotBlank() }?.let {
-                    MarkdownText(stripPullHtml(it), TextStyle(fontSize = 13.sp), colors.textSecondary)
-                }
-            }
-        }
-        if (nextCursor != null) {
-            TsSecondaryButton(label = "More", small = true, onClick = onMore)
-        }
-        Text("Join the conversation", style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
-        OutlinedTextField(
-            commentDraft,
-            onCommentDraft,
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Write a comment…") },
-            minLines = 3,
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Markdown is supported", style = TextStyle(fontSize = 11.sp), color = colors.textTertiary, modifier = Modifier.weight(1f))
-            TsAccentButton(label = "Comment", small = true, enabled = commentDraft.trim().isNotEmpty() && !busy, onClick = onComment)
-        }
-    }
-}
-
-@Composable
-private fun PullFilesCard(diffs: List<JsonObject>) {
-    val colors = LocalTsColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(cardRadiusDp))
-            .background(colors.panel)
-            .padding(Space.m),
-        verticalArrangement = Arrangement.spacedBy(Space.m),
-    ) {
-        Text("Files", style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
-        if (diffs.isEmpty()) {
-            Text("No file changes reported.", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-            return
-        }
-        diffs.forEach { diff ->
-            val path = diff.str("path") ?: ""
-            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text(
-                    path.substringAfterLast('/').ifBlank { path },
-                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                    color = colors.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (path.contains('/')) {
-                    Text(path, style = TextStyle(fontSize = 11.sp), color = colors.textSecondary, maxLines = 1)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    diff.long("additions")?.let {
-                        Text("+$it", style = TsType.numeric(12), color = colors.diffAdded)
-                    }
-                    diff.long("deletions")?.let {
-                        Text("−$it", style = TsType.numeric(12), color = colors.diffRemoved)
-                    }
-                    diff.str("changeType")?.takeIf { it.isNotBlank() }?.let {
-                        Text(it.replaceFirstChar(Char::uppercase), style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-                    }
-                }
-                if (asObjects(diff["hunks"]).isEmpty()) {
-                    Text("No line changes in this file.", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-                } else {
-                    HunkDiffView(diff)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PullChecksCard(view: JsonObject) {
-    val colors = LocalTsColors.current
-    val checks = asObjects(view["checks"])
-    val flat = view.str("checks")
-    if (checks.isEmpty() && flat.isNullOrBlank()) return
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(cardRadiusDp))
-            .background(colors.panel)
-            .padding(Space.m),
-        verticalArrangement = Arrangement.spacedBy(Space.s),
-    ) {
-        Text("Checks", style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
-        if (!flat.isNullOrBlank() && checks.isEmpty()) {
-            Text(flat, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-        }
-        checks.forEach { check ->
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    check.str("name") ?: "Check",
-                    style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
-                    color = colors.textPrimary,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                check.str("state")?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary, maxLines = 1)
-                }
-            }
-            check.str("workflow")?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = TextStyle(fontSize = 11.sp), color = colors.textTertiary, maxLines = 1)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PullActionsPanel(
-    view: JsonObject,
-    busy: Boolean,
-    reviewMode: String?,
-    reviewDraft: String,
-    onReviewDraft: (String) -> Unit,
-    onBeginReview: (String) -> Unit,
-    onCancelReview: () -> Unit,
-    onApprove: () -> Unit,
-    onSendReview: (String) -> Unit,
-    onReady: () -> Unit,
-    onClose: () -> Unit,
-    onReopen: () -> Unit,
-    mergeMethod: String,
-    onMergeMethod: (String) -> Unit,
-    onMerge: () -> Unit,
-    checkoutBranch: String,
-    onCheckoutBranch: (String) -> Unit,
-    onCheckout: () -> Unit,
-) {
-    val colors = LocalTsColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(cardRadiusDp))
-            .background(colors.panel)
-            .padding(Space.m),
-        verticalArrangement = Arrangement.spacedBy(Space.m),
-    ) {
-        Text("Actions", style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
-        if (view.str("state") == "open") {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text("Review", style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
-                TsSecondaryButton(label = "Approve", small = true, enabled = !busy, onClick = onApprove)
-                TsSecondaryButton(label = "Request changes", small = true, enabled = !busy, onClick = { onBeginReview("requestChanges") })
-                TsSecondaryButton(label = "Comment review", small = true, enabled = !busy, onClick = { onBeginReview("comment") })
-                val mode = reviewMode
-                if (mode != null) {
-                    OutlinedTextField(
-                        reviewDraft,
-                        onReviewDraft,
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text(ai.tokenstat.tokenstat.ui.logic.PullReview.reviewPlaceholder(mode)) },
-                        minLines = 3,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        TsSecondaryButton(label = "Cancel", small = true, onClick = onCancelReview)
-                        Spacer(Modifier.weight(1f))
-                        TsAccentButton(
-                            label = "Send review",
-                            small = true,
-                            enabled = reviewDraft.trim().isNotEmpty() && !busy,
-                            onClick = { onSendReview(mode) },
-                        )
-                    }
-                }
-            }
-            if (view.bol("draft")) {
-                TsAccentButton(label = "Ready for review", small = true, enabled = !busy, onClick = onReady)
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text("Merge method", style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    ai.tokenstat.tokenstat.ui.logic.PullReview.MERGE_METHODS.forEach { method ->
-                        if (method == mergeMethod) {
-                            TsAccentButton(label = ai.tokenstat.tokenstat.ui.logic.PullReview.mergeTitle(method), small = true, onClick = {})
-                        } else {
-                            TsSecondaryButton(label = ai.tokenstat.tokenstat.ui.logic.PullReview.mergeTitle(method), small = true, onClick = { onMergeMethod(method) })
-                        }
-                    }
-                }
-                TsAccentButton(label = "Merge pull request", small = true, enabled = !view.bol("draft") && !busy, onClick = onMerge)
-            }
-            TsSecondaryButton(label = "Close pull request", small = true, enabled = !busy, onClick = onClose)
-        } else if (view.str("state") == "closed") {
-            TsAccentButton(label = "Reopen pull request", small = true, enabled = !busy, onClick = onReopen)
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            Text("Local checkout", style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
-            OutlinedTextField(
-                checkoutBranch,
-                onCheckoutBranch,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Local branch name") },
-                singleLine = true,
-                textStyle = TsType.mono(12),
-            )
-            TsSecondaryButton(
-                label = "Check out locally",
-                small = true,
-                enabled = checkoutBranch.trim().isNotEmpty() && !busy,
-                onClick = onCheckout,
-            )
         }
     }
 }
