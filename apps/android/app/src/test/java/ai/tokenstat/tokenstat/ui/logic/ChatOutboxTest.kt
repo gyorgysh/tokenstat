@@ -117,6 +117,18 @@ class ChatOutboxTest {
         )
     }
 
+    /// The strip hides the composer's own in-flight send: on a healthy send
+    /// that record exists for one round trip, and drawing it made the strip
+    /// open and shut on every message. Twin of `ChatModel.pendingQueue`.
+    @Test
+    fun `the strip hides the send that is in flight right now`() {
+        val items = listOf(message("a"), message("b"))
+        assertEquals(items, ChatOutboxRules.pending(items, null))
+        assertEquals(listOf("b"), ChatOutboxRules.pending(items, "a").map { it.id })
+        assertEquals(emptyList<String>(), ChatOutboxRules.pending(listOf(message("a")), "a").map { it.id })
+        assertEquals(listOf("a", "b"), ChatOutboxRules.pending(items, "gone").map { it.id })
+    }
+
     @Test
     fun `two hosts with the same conversation id keep separate queues`() {
         val one = ChatOutboxRules.key("peerA", "ws", "chat1")

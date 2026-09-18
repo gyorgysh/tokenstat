@@ -152,6 +152,18 @@ object ChatOutboxRules {
         }
     }
 
+    /// What the pending strip draws: everything genuinely waiting, which is
+    /// to say everything except the send that is in flight right now. Port of
+    /// `ChatModel.pendingQueue`.
+    ///
+    /// The outbox is written before the host is asked, because an
+    /// acknowledgement that never arrives must not take the words with it.
+    /// That record is not news to the person who just pressed Send: on a
+    /// healthy send it exists for one round trip, and drawing it made the
+    /// pending strip open and shut on every message.
+    fun pending(items: List<QueuedMessage>, deliveringId: String?): List<QueuedMessage> =
+        if (deliveringId == null) items else items.filter { it.id != deliveringId }
+
     /// One key per conversation, and the host is part of it: two machines can
     /// hand out the same conversation id and their queues must not merge.
     fun key(peer: String, workspaceId: String, chatId: String): String =
