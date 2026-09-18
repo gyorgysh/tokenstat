@@ -10,7 +10,7 @@
 //! A Mac with the app open notifies itself: it can see the run end and post a
 //! local notification, with no account, no network and no server. This module
 //! is for the other case, a phone in a pocket with the app closed, which only
-//! Apple can wake.
+//! Apple or Google can wake.
 //!
 //! # What may be said
 //!
@@ -23,7 +23,7 @@
 //!
 //! # When nothing happens
 //!
-//! Not signed in, no phone registered, or the server has no APNs key: all
+//! Not signed in, no phone registered, or the server has no push key: all
 //! three are a quiet no-op rather than an error. Notifying is never the point
 //! of the work that triggered it, so a failure here must not be able to fail a
 //! run, and [`notify_in_background`] is what callers on a hot path use.
@@ -86,7 +86,7 @@ pub struct Sent {
     pub devices: u32,
     /// Whether the server can send at all.
     ///
-    /// False means it has no APNs key, which is a different thing from having
+    /// False means it has no push key, which is a different thing from having
     /// nowhere to send and needs different words in front of somebody. Without
     /// this, a "send a test" that quietly did nothing looked identical to one
     /// that worked and had no phone to arrive on.
@@ -127,19 +127,20 @@ pub fn notify(reason: Reason) -> Result<Sent, ProfileError> {
 
 /// Tell the account where to reach this device.
 ///
-/// Called on every launch by a client that has notifications on, because iOS
-/// reissues the token when it feels like it and the server keys devices by the
-/// token itself. `environment` is which Apple host the token belongs to:
+/// Called on every launch by a client that has notifications on, because the
+/// OS reissues the token when it feels like it and the server keys devices by
+/// the token itself. `environment` is which Apple host the token belongs to:
 /// a build signed for development gets a sandbox token, and sending it to the
-/// production host is answered with BadDeviceToken.
+/// production host is answered with BadDeviceToken. Android has one host, so
+/// it always registers as production.
 pub fn register_device(token: &str, platform: &str, environment: &str) -> Result<(), ProfileError> {
     // Both fields are an allowlist, the same way `Reason` is: they travel to
     // somebody else's servers, so free text from a caller must not be able
     // to ride along. The server rejects what it does not recognise; refusing
     // here first keeps a bad value a local error instead of a failed request.
-    if !matches!(platform, "ios" | "ipados") {
+    if !matches!(platform, "ios" | "ipados" | "android") {
         return Err(ProfileError::Message(format!(
-            "unknown push platform {platform:?}: expected \"ios\" or \"ipados\""
+            "unknown push platform {platform:?}: expected \"ios\", \"ipados\" or \"android\""
         )));
     }
     if !matches!(environment, "production" | "sandbox") {
@@ -279,7 +280,7 @@ mod tests {
     fn register_device_refuses_anything_off_the_allowlist() {
         // Rejected locally, before any credential is read or any request is
         // made: free text must not be able to ride to somebody else's server.
-        let err = register_device("tok", "android", "production").unwrap_err();
+        let err = register_device("tok", "windows", "production").unwrap_err();
         assert!(err.to_string().contains("platform"), "{err}");
         let err = register_device("tok", "ios", "development").unwrap_err();
         assert!(err.to_string().contains("environment"), "{err}");

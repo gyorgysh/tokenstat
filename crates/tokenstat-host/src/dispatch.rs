@@ -1731,7 +1731,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 tokenstat_sync::push::notify(tokenstat_sync::push::Reason::Test).envelope()?;
             Ok(json!({
                 "sent": sent.devices,
-                // Whether the server has an APNs key at all. A test that sent
+                // Whether the server has a push key at all. A test that sent
                 // to nobody and a server that cannot send are different
                 // answers and the settings row says different things.
                 "enabled": sent.enabled,
