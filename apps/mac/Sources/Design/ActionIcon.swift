@@ -29,6 +29,7 @@ enum ActionIcon {
     case plans
     case billing
     case appStore
+    case playStore
     case autoRenew
     case downgrade
     case cancelPlan
@@ -128,6 +129,7 @@ enum ActionIcon {
         case .plans: return "crown"
         case .billing: return "creditcard"
         case .appStore: return "arrow.up.forward.app"
+        case .playStore: return "play.rectangle"
         case .autoRenew: return "arrow.triangle.2.circlepath"
         case .downgrade: return "arrow.down"
         case .cancelPlan, .dismiss: return "xmark"
