@@ -2,6 +2,8 @@
 package ai.tokenstat.tokenstat.notifications
 
 import android.content.Context
+import android.content.SharedPreferences
+import androidx.annotation.VisibleForTesting
 import ai.tokenstat.tokenstat.core.CoreClient
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlin.coroutines.resume
@@ -58,10 +60,7 @@ object PushRegistrar {
     suspend fun disable() {
         val prefs = prefs() ?: return
         prefs.edit().putBoolean(KEY_ON, false).apply()
-        val token = prefs.getString(KEY_TOKEN, null) ?: return
-        runCatching { unregisterToken(token) }
-            .onSuccess { prefs.edit().remove(KEY_PENDING).apply() }
-            .onFailure { prefs.edit().putString(KEY_PENDING, token).apply() }
+        dropServerRow(prefs)
     }
 
     /** Re-register at launch, and after signing in. Cheap, and the only
@@ -88,8 +87,24 @@ object PushRegistrar {
         }
     }
 
+    /** Sign-out: drop this device's server row but keep the switch, so
+     *  signing back in re-registers through `refresh()`.
+     *
+     *  Differs from `disable()` on purpose. The Apple client keeps its
+     *  preference across sign-out too, and a switch that silently turns
+     *  itself off on sign-out is one nobody turns back on: the toggle
+     *  would read off for somebody who asked for on. */
     suspend fun unregister() {
-        disable()
+        prefs()?.let { dropServerRow(it) }
+    }
+
+    /** Remove the stored token from the account, remembering a removal that
+     *  never landed so `refresh()` retries it before registering again. */
+    private suspend fun dropServerRow(prefs: SharedPreferences) {
+        val token = prefs.getString(KEY_TOKEN, null) ?: return
+        runCatching { unregisterToken(token) }
+            .onSuccess { prefs.edit().remove(KEY_PENDING).apply() }
+            .onFailure { prefs.edit().putString(KEY_PENDING, token).apply() }
     }
 
     /** Ask the account to send one, so somebody can tell "on" from "on but
@@ -127,5 +142,8 @@ object PushRegistrar {
         }
     }
 
-    private fun prefs() = app?.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+    @VisibleForTesting
+    internal var prefsOverride: SharedPreferences? = null
+
+    private fun prefs() = prefsOverride ?: app?.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 }

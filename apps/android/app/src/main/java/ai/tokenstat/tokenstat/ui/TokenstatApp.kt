@@ -3832,8 +3832,13 @@ private fun AccountDialog(
                                     },
                                 )
                             }
+                            // Not the iPhone's sentence: there the server names the
+                            // machine in the banner, while here the banner is
+                            // composed on the device from the reason alone and
+                            // never carries a name. Promising "which machine"
+                            // would be promising what never arrives.
                             Text(
-                                "When an agent run or a chat on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work.",
+                                "When an agent run or a chat on one of your machines finishes, or stops to ask you something. The notification says what happened, and nothing about the work.",
                                 style = TextStyle(fontSize = 13.sp),
                                 color = colors.textSecondary,
                             )
