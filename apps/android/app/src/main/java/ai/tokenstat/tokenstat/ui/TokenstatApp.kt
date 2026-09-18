@@ -58,6 +58,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -74,7 +76,9 @@ import ai.tokenstat.tokenstat.billing.PlayBillingManager
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
+import ai.tokenstat.tokenstat.ui.components.EmptyKind
 import ai.tokenstat.tokenstat.ui.components.EmptyState
+import ai.tokenstat.tokenstat.ui.components.TsFitFigure
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.SectionTitle
 import ai.tokenstat.tokenstat.ui.components.SegmentedCapsulePicker
@@ -165,6 +169,7 @@ import ai.tokenstat.tokenstat.ui.chrome.tabSummary
 import ai.tokenstat.tokenstat.ui.legal.LicensesCard
 import ai.tokenstat.tokenstat.ui.legal.LicensesSheet
 import ai.tokenstat.tokenstat.ui.billing.PaywallSheet
+import ai.tokenstat.tokenstat.ui.billing.Plans
 import ai.tokenstat.tokenstat.ui.browser.PortBrowserScreen
 import ai.tokenstat.tokenstat.ui.screen.ScreenViewerScreen
 import ai.tokenstat.tokenstat.ui.ssh.SshConnectDialog
@@ -236,7 +241,11 @@ private enum class Destination(val id: String, val label: String, val icon: Imag
     Ssh("ssh", "SSH", Icons.Default.Terminal, "Saved servers and keys"),
 }
 
-private enum class Door { Onboarding, Loading, Login, SignedIn }
+/// Five doors after onboarding, not three: still checking, could not check
+/// (usually offline), an honest signed-out answer, and the app. Folding a
+/// failed check into "signed out" is the cold-start bug that flashed Sign in
+/// at a phone that still had a token.
+private enum class Door { Onboarding, Loading, AuthRetry, Login, SignedIn }
 
 @Composable
 fun TokenstatApp(model: AppViewModel) {
@@ -277,7 +286,13 @@ fun TokenstatApp(model: AppViewModel) {
                 val door = when {
                     state.signedIn -> Door.SignedIn
                     !hasOnboarded -> Door.Onboarding
+                    // Above the loading clause on purpose: a retry keeps its
+                    // screen and shows Checking, instead of swapping to the
+                    // spinner and back. The first check has no error yet, so it
+                    // still falls through to Loading.
+                    state.authNeedsRetry -> Door.AuthRetry
                     state.loading && state.account == null -> Door.Loading
+                    state.authPending -> Door.Loading
                     else -> Door.Login
                 }
                 AnimatedContent(
@@ -298,6 +313,12 @@ fun TokenstatApp(model: AppViewModel) {
                             hasOnboarded = true
                         }
                         Door.Loading -> LoadingScreen()
+                        Door.AuthRetry -> AuthRetryScreen(
+                            message = state.authError,
+                            isLoading = state.loading,
+                            offline = state.connection.offline,
+                            onRetry = { model.retryConnection() },
+                        )
                         Door.Login -> LoginScreen(model, state.error) {
                             runCatching {
                                 context.getSharedPreferences("client", android.content.Context.MODE_PRIVATE)
@@ -326,6 +347,70 @@ private fun LoadingScreen() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         LogoMark(size = 44, animated = !reduceMotion, loops = true)
+    }
+}
+
+/// The account could not be checked, which is not the same thing as being
+/// signed out. Port of `ClientAuthRetryView`.
+///
+/// `account.status` asks the account service, so no internet means no answer,
+/// and a phone holding a valid token must not be shown the Sign in door for
+/// it. The mark, the app's own words for the failure, and one button.
+@Composable
+private fun AuthRetryScreen(
+    message: String?,
+    isLoading: Boolean,
+    offline: Boolean,
+    onRetry: () -> Unit,
+) {
+    val colors = LocalTsColors.current
+    val friendly = remember(message) { friendlyError(message) }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .systemBarsPadding()
+            .padding(horizontal = Space.l),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.weight(1f))
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            LogoMark(size = 46, animated = false)
+            Text(
+                // Offline rewrites this whatever the call happened to say. A
+                // device with no internet produces a different sentence per
+                // subsystem, and all of them have one cause and one answer.
+                if (offline) "You are offline" else friendly.title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                if (offline) {
+                    "This device cannot reach the internet. You are still signed in, and " +
+                        "everything comes back on its own."
+                } else {
+                    friendly.message
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 320.dp),
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        TsAccentButton(
+            label = if (isLoading) "Checking…" else "Try again",
+            icon = ActionIcon.Refresh.vector,
+            enabled = !isLoading,
+            onClick = onRetry,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(Space.xl))
     }
 }
 
@@ -701,14 +786,17 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                             },
                         )
                     } else {
-                        RemotePaywall { accountOpen = true }
+                        RemoteGateScreen(
+                            signedIn = state.signedIn,
+                            onPlans = { Plans.open() },
+                        )
                     }
                     Destination.Insights -> InsightsScreen(model, state, onHome = { selected = Destination.Home }, tabBarScroll = tabBarScroll)
                     Destination.Devices -> DevicesScreen(
                         model,
                         state,
                         tabBarScroll = tabBarScroll,
-                        onPlans = { accountOpen = true },
+                        onPlans = { Plans.open() },
                         onOpenWork = { id ->
                             pendingWorkHostId = id
                             selected = Destination.Workspaces
@@ -720,7 +808,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     )
                     // Saved servers, for somebody who lives in them. No back
                     // button: the bar behind it is the way out.
-                    Destination.Ssh -> AndroidSSHScreen(model, state, onPlans = { accountOpen = true }, tabBarScroll = tabBarScroll)
+                    Destination.Ssh -> AndroidSSHScreen(model, state, onPlans = { Plans.open() }, tabBarScroll = tabBarScroll)
                 }
                 }
             }
@@ -769,6 +857,32 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         )
     }
     if (accountOpen) AccountDialog(state, model, billing, customization, onDismiss = { accountOpen = false })
+    // The one paywall for every gate outside the account sheet. Hosted here
+    // so a lock anywhere in the app reaches the plans in one tap instead of
+    // opening Account and asking somebody to find the card. See `Plans`.
+    val planRequests by Plans.openRequests.collectAsStateWithLifecycle()
+    var planRequestSeen by rememberSaveable { mutableStateOf(planRequests) }
+    // Greater, not different: the counter resets to zero when the process
+    // dies while the seen mark restores, and `!=` would open the sheet on
+    // its own on the next launch.
+    val planSheetOpen = planRequests > planRequestSeen
+    if (planSheetOpen && !accountOpen) {
+        PaywallSheet(
+            billing = billing,
+            onDismiss = { planRequestSeen = planRequests },
+            currentTier = state.account?.string("tier"),
+            currentInterval = run {
+                val serverBilling = state.account?.get("billing") as? JsonObject
+                when {
+                    serverBilling?.string("interval") == PlayBillingManager.INTERVAL_MONTH ->
+                        PlayBillingManager.INTERVAL_MONTH
+                    state.account?.string("tier")?.lowercase() in listOf("supporter", "patron", "legend") ->
+                        PlayBillingManager.INTERVAL_YEAR
+                    else -> null
+                }
+            },
+        )
+    }
     if (wizardOpen) {
         SetupWizard(
             model = model,
@@ -789,22 +903,47 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     }
 }
 
+/// Remote work, on an account whose plan does not include it. Port of the
+/// `needsAccount` empty state in `ClientWorkspacesView`.
+///
+/// The same card every other empty screen uses, so "the answer is no, and
+/// upgrading is the fix" is told in the app's own language rather than by a
+/// centred paragraph with a button under it. Signed out is a different
+/// answer and gets a different sentence: quoting a plan at somebody who has
+/// not signed in tells them to buy their way out of a sign-in screen.
 @Composable
-private fun RemotePaywall(onPlans: () -> Unit) {
-    val colors = LocalTsColors.current
+private fun RemoteGateScreen(signedIn: Boolean, onPlans: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().padding(32.dp),
+        Modifier
+            .fillMaxSize()
+            .padding(Space.l),
         verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Remote is on Patron", style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "This device already shares the account and sees the usage from every device on it. Opening folders and terminals on the computer is a paid feature.",
-            color = colors.textSecondary,
-        )
-        Spacer(Modifier.height(20.dp))
-        TsAccentButton(label = "See plans", onClick = onPlans)
+        if (signedIn) {
+            EmptyState(
+                kind = EmptyKind.NeedsAccount,
+                title = "Remote is on Patron",
+                message = "This device already shares the account and sees the usage from " +
+                    "every device on it. Opening folders and terminals on the computer is " +
+                    "a paid feature.",
+                art = { EmptyArt(EmptyArtKind.RemoteGate) },
+                action = {
+                    TsAccentButton(
+                        label = "See plans",
+                        icon = ActionIcon.Plans.vector,
+                        onClick = onPlans,
+                    )
+                },
+            )
+        } else {
+            EmptyState(
+                kind = EmptyKind.NeedsAccount,
+                title = "Sign in to reach your computers",
+                message = "Remote work runs over your account. Sign in on this device and " +
+                    "the computers on it show up here.",
+                art = { EmptyArt(EmptyArtKind.RemoteGate) },
+            )
+        }
     }
 }
 
@@ -1187,10 +1326,28 @@ fun Arrive(reduceMotion: Boolean, staggerIndex: Int = 0, content: @Composable ()
 
 /// The Free-tier history-lock note under the heatmap
 /// (`HistoryLockBanner.swift`).
+///
+/// Not a wall. The year is already on screen. This says why the older squares
+/// are muted and offers the sheet that unlocks them.
+///
+/// **One paragraph, not two labels in a row.** The lead-in and the
+/// explanation are one sentence that wraps, the way the Apple banner
+/// concatenates its two runs. Side by side in a `Row` they cannot wrap into
+/// each other, so on a narrow phone the second one was squeezed to a column
+/// of single words or clipped off the edge entirely.
 @Composable
-private fun HistoryLockBanner() {
+private fun HistoryLockBanner(days: Int = 30) {
     val colors = LocalTsColors.current
-    val context = LocalContext.current
+    val note = remember(days, colors.textPrimary, colors.textSecondary) {
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = colors.textPrimary, fontWeight = FontWeight.SemiBold)) {
+                append("Older history is locked. ")
+            }
+            withStyle(SpanStyle(color = colors.textSecondary)) {
+                append("Free shows the last $days days in full. Older days keep the year shape only.")
+            }
+        }
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -1200,26 +1357,18 @@ private fun HistoryLockBanner() {
             .padding(horizontal = Space.m, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Older history is locked. ", style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
-            Text(
-                "Free shows the last 30 days in full. Older days keep the year shape only.",
-                style = TextStyle(fontSize = 12.sp),
-                color = colors.textSecondary,
-            )
-        }
+        Text(note, style = TextStyle(fontSize = 12.sp))
+        // The in-app sheet, not the pricing page. A plan on this platform is
+        // a Play subscription, and a link out of the app is a route nobody
+        // can buy from. See `Plans`.
         Text(
-            "Upgrade to see the year",
+            "See plans",
             style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
             color = colors.accent,
             modifier = Modifier.clickable(
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
-            ) {
-                runCatching {
-                    CustomTabsIntent.Builder().build().launchUrl(context, "https://tokenstat.ai/pricing".toUri())
-                }
-            },
+            ) { Plans.open() },
         )
     }
 }
@@ -1347,7 +1496,9 @@ private fun InsightsScreen(
                 item {
                     val offline = state.connection.offline
                     EmptyState(
-                        icon = if (needsSignIn) Icons.Default.Person else Icons.Default.Warning,
+                        // Refused and unreachable are different answers and
+                        // must not read alike.
+                        kind = if (needsSignIn) EmptyKind.NeedsAccount else EmptyKind.Unreachable,
                         title = if (offline) "You are offline" else "Could not load your usage",
                         message = if (offline) {
                             "This updates by itself when the connection is back."
@@ -1454,6 +1605,7 @@ private fun InsightSummary(rows: List<JsonObject>, cutName: String, stale: Boole
                 style = TsType.numeric(34, FontWeight.SemiBold),
                 color = tsAccent(),
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 "at list rates, across every device",
@@ -1552,6 +1704,7 @@ private fun InsightRow(row: JsonObject, cut: Int, peak: Long) {
                     style = TsType.subheadline,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 val tokens = row["counters"]?.jsonObject?.long("total") ?: 0L
                 val events = row.long("events") ?: 0L
@@ -1800,6 +1953,7 @@ private fun DevicesScreen(
                                     fontWeight = FontWeight.Medium,
                                     color = colors.textPrimary,
                                     maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
                                     DeviceCopy.caption(value.string("label"), value.string("id"), status),
@@ -3297,6 +3451,7 @@ private fun WorkspaceList(
                                 style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                                 color = colors.textPrimary,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             Text("This device", style = TsType.caption, color = colors.textSecondary)
                         }
@@ -4001,11 +4156,12 @@ private fun TotalTile(label: String, value: String, mark: String, modifier: Modi
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(label, style = TsType.subheadline, color = colors.textSecondary)
-            Text(
+            // Shrinks to fit rather than clipping. "$1,110.16" cut to "$1,11"
+            // on a narrow phone is not a smaller number, it is a wrong one.
+            TsFitFigure(
                 value,
                 style = TsType.numeric(22, FontWeight.SemiBold),
                 color = colors.accent,
-                maxLines = 1,
             )
         }
         FeatureMark(name = mark, size = 26)
@@ -4033,27 +4189,26 @@ private fun LimitCard(reading: JsonObject) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 HarnessMark(id = source, size = 24.dp)
+                // Both sides weighted, and both allowed to wrap. Only the
+                // name column had a weight, so on a narrow phone the
+                // freshness took its full natural width first and left the
+                // provider a few letters, clipped mid-glyph: "OpenCod".
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(
                         harnessName(source.ifEmpty { "Provider" }),
                         style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                         color = colors.textPrimary,
-                        maxLines = 1,
                     )
                     reading.string("plan")?.let {
-                        Text(
-                            it,
-                            style = TsType.caption,
-                            color = colors.textSecondary,
-                            maxLines = 1,
-                        )
+                        Text(it, style = TsType.caption, color = colors.textSecondary)
                     }
                 }
                 Text(
                     observed,
                     style = TsType.caption,
                     color = if (stale) colors.warning else colors.textSecondary,
-                    maxLines = 1,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
             }
             if (windows.isEmpty()) {
@@ -4113,6 +4268,7 @@ private fun LimitGauge(value: JsonObject) {
                 style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                 color = gauge,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         val fraction = (percent / 100.0).coerceIn(0.0, 1.0).toFloat()
@@ -4144,61 +4300,25 @@ private fun LimitGauge(value: JsonObject) {
     }
 }
 
+/// The cross-device SSH vault, on a plan that does not include it. The same
+/// card every other empty screen uses, so a plan gate is told in one voice
+/// across the app. Port of `vaultUpgrade` in `SSHLibraryView`.
 @Composable
 private fun VaultUpgradeCard(onPlans: () -> Unit) {
-    TsCard {
-        Column(
-            Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            EmptyArt(EmptyArtKind.Vault)
-            Text("Sync SSH between your devices", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                "An encrypted vault keeps hosts and keys on every device signed in to this account. Supporter and above.",
-                color = LocalTsColors.current.textSecondary,
+    EmptyState(
+        kind = EmptyKind.NeedsAccount,
+        title = "Sync SSH between your devices",
+        message = "An encrypted vault keeps hosts and keys on every device signed in to " +
+            "this account. Supporter and above.",
+        art = { EmptyArt(EmptyArtKind.Vault) },
+        action = {
+            TsAccentButton(
+                label = "See plans",
+                icon = ActionIcon.Plans.vector,
+                onClick = onPlans,
             )
-            TsAccentButton(label = "See plans", onClick = onPlans)
-        }
-    }
-}
-
-@Composable
-private fun VaultEmptyArt() {
-    val accent = tsAccent()
-    Canvas(Modifier.size(128.dp, 84.dp)) {
-        val stroke = Stroke(width = 3.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        drawRoundRect(
-            color = accent.copy(alpha = 0.55f),
-            topLeft = Offset(size.width * 0.16f, size.height * 0.16f),
-            size = Size(size.width * 0.18f, size.height * 0.58f),
-            cornerRadius = CornerRadius(10f, 10f),
-            style = stroke,
-        )
-        drawRoundRect(
-            color = accent.copy(alpha = 0.55f),
-            topLeft = Offset(size.width * 0.62f, size.height * 0.32f),
-            size = Size(size.width * 0.26f, size.height * 0.36f),
-            cornerRadius = CornerRadius(8f, 8f),
-            style = stroke,
-        )
-        drawArc(
-            color = accent,
-            startAngle = 200f,
-            sweepAngle = 140f,
-            useCenter = false,
-            topLeft = Offset(size.width * 0.445f, size.height * 0.26f),
-            size = Size(size.width * 0.11f, size.height * 0.24f),
-            style = stroke,
-        )
-        drawRoundRect(
-            color = accent,
-            topLeft = Offset(size.width * 0.435f, size.height * 0.46f),
-            size = Size(size.width * 0.13f, size.height * 0.22f),
-            cornerRadius = CornerRadius(6f, 6f),
-            style = stroke,
-        )
-    }
+        },
+    )
 }
 
 @Composable private fun EmptyCard(title: String, message: String) {

@@ -130,6 +130,7 @@ fun HubSectionRow(
             color = colors.textPrimary,
             modifier = Modifier.weight(1f),
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         if (count != null && count > 0) {
             Text(
@@ -137,6 +138,7 @@ fun HubSectionRow(
                 style = TsType.numeric(15),
                 color = colors.textSecondary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Icon(

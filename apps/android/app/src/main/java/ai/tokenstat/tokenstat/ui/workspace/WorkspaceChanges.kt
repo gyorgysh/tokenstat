@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.AppViewModel
@@ -322,6 +323,7 @@ private fun ChangedFileRow(file: JsonObject, modifier: Modifier = Modifier, onOp
                 style = TextStyle(fontSize = 14.sp),
                 color = LocalTsColors.current.textPrimary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (directory.isNotEmpty()) {
                 Text(
@@ -329,6 +331,7 @@ private fun ChangedFileRow(file: JsonObject, modifier: Modifier = Modifier, onOp
                     style = TextStyle(fontSize = 11.sp),
                     color = LocalTsColors.current.textSecondary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (kind.isNotBlank()) {
@@ -455,6 +458,7 @@ fun HunkDiffView(diff: JsonObject, maxLines: Int = 2000) {
                     style = TsType.mono(11),
                     color = colors.textTertiary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(colors.panel)

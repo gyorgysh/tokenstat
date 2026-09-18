@@ -654,6 +654,26 @@ struct GoogleActivateParams {
     purchase_token: String,
 }
 
+/// The store a subscription was bought from, in one spelling.
+///
+/// The account service writes `"google"` into `subscriptions.provider`, and
+/// every client was written against `"google_play"`, which it never sends. So
+/// a real Play subscriber was told "This plan is not a Google Play purchase.
+/// Manage it on the web" on the one screen that offers to manage it, and the
+/// route to change or cancel the plan disappeared with it.
+///
+/// Translating here is what the DTO layer is for: the server's vocabulary
+/// stops at this boundary and every front end sees the contract that
+/// `PLAY_RELEASE.md` already documents. Idempotent, so a server that starts
+/// sending the long form needs no second change.
+fn normalize_billing_provider(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "google" | "google_play" | "googleplay" | "play" => "google_play".to_string(),
+        "app_store" | "appstore" | "ios" => "apple".to_string(),
+        other => other.to_string(),
+    }
+}
+
 fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
     let b = raw.get("billing")?;
     if b.is_null() {
@@ -664,7 +684,7 @@ fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
             .get("provider")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
-            .map(str::to_string),
+            .map(normalize_billing_provider),
         status: b
             .get("status")
             .and_then(|v| v.as_str())
@@ -5517,6 +5537,40 @@ mod tests {
         assert!(parsed.force);
         let quiet: CalendarParams = serde_json::from_str(r#"{"scope":"account"}"#).unwrap();
         assert!(!quiet.force);
+    }
+
+    #[test]
+    fn a_play_subscription_reaches_the_clients_as_one_word() {
+        // The account service writes "google". Every client compares against
+        // "google_play". Without this, a live Play subscriber is told their
+        // plan is not a Play purchase on the screen that offers to manage it.
+        assert_eq!(normalize_billing_provider("google"), "google_play");
+        assert_eq!(normalize_billing_provider("GOOGLE"), "google_play");
+        assert_eq!(normalize_billing_provider(" play "), "google_play");
+        // Idempotent, so a server that switches to the long form needs no
+        // second change here.
+        assert_eq!(normalize_billing_provider("google_play"), "google_play");
+        assert_eq!(normalize_billing_provider("app_store"), "apple");
+        assert_eq!(normalize_billing_provider("apple"), "apple");
+        // Anything unfamiliar passes through rather than being guessed at.
+        assert_eq!(normalize_billing_provider("paddle"), "paddle");
+        assert_eq!(normalize_billing_provider("stripe"), "stripe");
+    }
+
+    #[test]
+    fn the_billing_block_is_normalized_on_its_way_out() {
+        let raw = serde_json::json!({
+            "billing": {
+                "provider": "google",
+                "status": "active",
+                "entitled": true,
+                "has_live_sub": true,
+            }
+        });
+        let dto = billing_from_raw(&raw).expect("billing present");
+        assert_eq!(dto.provider.as_deref(), Some("google_play"));
+        assert!(dto.entitled);
+        assert!(dto.has_live_sub);
     }
 
     #[test]

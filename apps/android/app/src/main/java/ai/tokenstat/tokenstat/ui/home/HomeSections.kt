@@ -60,9 +60,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.BrandCheckDisc
+import ai.tokenstat.tokenstat.ui.components.EmptyKind
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.SectionTitle
@@ -490,12 +492,14 @@ fun MachinesSection(
                             style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                             color = colors.textPrimary,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             machineState(machine.online),
                             style = TsType.caption,
                             color = colors.textSecondary,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     Icon(Icons.Default.ChevronRight, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
@@ -580,27 +584,43 @@ fun PinnedSection(
 @Composable
 fun HomeStatusBlock(error: String?, offline: Boolean, onRetry: () -> Unit) {
     val colors = LocalTsColors.current
+    // Could not look, which is not the same as nothing to show. Offline
+    // gets its own words and no button: every screen here is account plane,
+    // so with no network there is nothing to fetch and a Try again that
+    // cannot work is worse than no button at all.
     if (offline) {
         EmptyState(
-            icon = ActionIcon.Help.vector,
+            kind = EmptyKind.Unreachable,
             title = "You are offline",
             message = "This updates by itself when the connection is back.",
             art = { EmptyArt(EmptyArtKind.Waiting) },
         )
     } else if (error != null) {
         EmptyState(
-            icon = ActionIcon.Help.vector,
+            kind = EmptyKind.Unreachable,
             title = "Could not load your activity",
             message = friendlyError(error).message,
-            action = { TsAccentButton(label = "Try again", onClick = onRetry) },
+            action = {
+                TsAccentButton(
+                    label = "Try again",
+                    icon = ActionIcon.Refresh.vector,
+                    onClick = onRetry,
+                )
+            },
             art = { EmptyArt(EmptyArtKind.Waiting) },
         )
     } else {
         EmptyState(
-            icon = ActionIcon.Help.vector,
+            kind = EmptyKind.Unreachable,
             title = "Activity is unavailable",
             message = "Waiting for your activity to load.",
-            action = { TsAccentButton(label = "Try again", onClick = onRetry) },
+            action = {
+                TsAccentButton(
+                    label = "Try again",
+                    icon = ActionIcon.Refresh.vector,
+                    onClick = onRetry,
+                )
+            },
             art = { EmptyArt(EmptyArtKind.Waiting) },
         )
     }
@@ -1119,6 +1139,7 @@ fun HomeLayoutPreview(sections: List<HomeSection>) {
                         style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Medium),
                         color = colors.textSecondary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

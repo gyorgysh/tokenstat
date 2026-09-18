@@ -36,12 +36,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.CommitTagPills
+import ai.tokenstat.tokenstat.ui.components.EmptyKind
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.RelativeTimeText
 import ai.tokenstat.tokenstat.ui.components.TsType
@@ -139,6 +141,7 @@ fun HistorySection(
                 Icons.Default.History,
                 "Folder missing",
                 "This folder is no longer on $place.",
+                kind = EmptyKind.Unreachable,
                 art = { EmptyArt(EmptyArtKind.History) },
             )
         } else if (loaded && !isRepo && error == null) {
@@ -334,6 +337,7 @@ private fun CommitDetailPage(
                                 style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                                 color = LocalTsColors.current.textPrimary,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             if (path.contains('/')) {
                                 Text(path, style = TextStyle(fontSize = 11.sp), color = LocalTsColors.current.textSecondary, maxLines = 1)

@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Info
@@ -37,6 +39,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.R
@@ -229,6 +232,7 @@ fun Stat(
                 style = TsType.numeric(size, FontWeight.Medium),
                 color = if (tint == Color.Unspecified) colors.textPrimary else tint,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (note != null) {
                 Spacer(Modifier.width(Space.xs))
@@ -285,6 +289,7 @@ fun ScopeChip(label: String, modifier: Modifier = Modifier) {
             style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
             color = colors.accent,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -339,40 +344,139 @@ fun Banner(text: String, severity: BannerSeverity = BannerSeverity.WARNING, modi
     }
 }
 
+/// A figure that shrinks rather than losing its last digits.
+///
+/// The Apple client writes this as `minimumScaleFactor(0.6)` on every money
+/// figure and percentage, and for the same reason: "$1,110.16" clipped to
+/// "$1,11" is not a smaller number, it is a wrong one. A phone at 320dp with
+/// the system font turned up is exactly where that happens, so the fit is
+/// part of the component rather than something each screen remembers.
+@Composable
+fun TsFitFigure(
+    text: String,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    /// How far down it may shrink before it gives up. Half the size, rather
+    /// than the Apple client's 0.6: the system font scale multiplies on top
+    /// of this on Android, and at 320dp with the font turned up a 0.6 floor
+    /// still lost the last digit of a four-figure total.
+    minScale: Float = 0.5f,
+) {
+    BasicText(
+        text,
+        modifier = modifier,
+        style = style.copy(color = color),
+        maxLines = 1,
+        // The floor can still be too big on the narrowest phone with the
+        // largest font. An ellipsis says so; a clipped glyph pretends the
+        // number ended there.
+        overflow = TextOverflow.Ellipsis,
+        autoSize = TextAutoSize.StepBased(
+            minFontSize = style.fontSize * minScale,
+            maxFontSize = style.fontSize,
+            stepSize = 1.sp,
+        ),
+    )
+}
+
+/// What a screen shows when it has no content, and why the three cases are
+/// three cases. Port of `ClientEmptyKind`.
+///
+/// **Empty, unreachable and refused are not the same thing**, and rendering
+/// them the same is the mistake `limits.rs` already argues against for quota
+/// readings: "no data" and "we could not look" must never read alike. A quiet
+/// day is an answer. A host that is down is a problem. An account that does
+/// not include this is a decision somebody can act on, and it is the only one
+/// of the three that gets a button by default.
+enum class EmptyKind {
+    /// The answer arrived and it was nothing.
+    NothingYet,
+
+    /// We could not get an answer.
+    Unreachable,
+
+    /// The answer is no, and signing in or upgrading is the fix.
+    NeedsAccount,
+    ;
+
+    /// The mark this kind leads with when a screen passes no art of its own.
+    val mark: String
+        get() = when (this) {
+            NothingYet -> "mark_activity"
+            Unreachable -> "mark_sync"
+            NeedsAccount -> "mark_account"
+        }
+}
+
 /// What a screen shows before it has anything to show. One component for the
 /// whole app: an empty Automations screen and an empty Insights screen are the
-/// same situation and should not look like two different products.
+/// same situation and should not look like two different products. Port of
+/// `ClientEmptyState`.
 ///
 /// The headline names what is missing, the line under it says what the thing
-/// is *for*, and the button is the one action that ends the empty state.
+/// is *for*, and the button is the one action that ends the empty state. All
+/// of it on a card, like the Apple one, so an empty screen reads as a piece
+/// of the app rather than as text that fell into the middle of a page.
 @Composable
 fun EmptyState(
-    icon: ImageVector,
+    /// The glyph to lead with when the screen passes no art. Kept as the
+    /// first parameter because most screens pass one positionally. Null falls
+    /// back to the kind's mark, which is what a plan gate or an unreachable
+    /// screen wants: those three cases have their own vocabulary.
+    icon: ImageVector? = null,
     title: String,
     message: String,
     modifier: Modifier = Modifier,
+    /// Which of the three situations this is. Nothing yet by default: it is
+    /// what most screens mean, and it is the only one of the three that is
+    /// not news.
+    kind: EmptyKind = EmptyKind.NothingYet,
     art: (@Composable () -> Unit)? = null,
     action: (@Composable () -> Unit)? = null,
+    /// A second way out, under the first. Rare on purpose: a screen offering
+    /// two answers to "there is nothing here" usually has one too many.
+    secondaryAction: (@Composable () -> Unit)? = null,
+    /// Off for a caller that is already drawing its own card around this.
+    card: Boolean = true,
 ) {
     val colors = LocalTsColors.current
     Column(
-        modifier.fillMaxWidth(),
+        modifier
+            .fillMaxWidth()
+            .then(if (card) Modifier.tsPanel() else Modifier)
+            .padding(horizontal = Space.m, vertical = Space.l),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
-        art?.invoke() ?: Icon(icon, null, tint = colors.accent.copy(alpha = 0.7f), modifier = Modifier.heightIn(min = 28.dp))
+        when {
+            art != null -> art()
+            icon != null -> Icon(
+                icon,
+                null,
+                tint = colors.accent.copy(alpha = 0.7f),
+                modifier = Modifier.heightIn(min = 28.dp),
+            )
+            else -> FeatureMark(
+                name = kind.mark,
+                tint = if (kind == EmptyKind.Unreachable) colors.textSecondary else colors.accent,
+                size = 30,
+            )
+        }
         Text(
             title,
             style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
+            textAlign = TextAlign.Center,
         )
         Text(
             message,
             style = TextStyle(fontSize = 14.sp),
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(0.85f),
+            modifier = Modifier.fillMaxWidth(0.9f),
         )
         action?.let { Box(Modifier.padding(top = Space.xs)) { it() } }
+        secondaryAction?.let { Box(Modifier.padding(top = Space.xs)) { it() } }
     }
 }

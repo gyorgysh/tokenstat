@@ -4,9 +4,16 @@ package ai.tokenstat.tokenstat
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import ai.tokenstat.tokenstat.core.ConnectivityMonitor
 import ai.tokenstat.tokenstat.core.CoreClient
 import ai.tokenstat.tokenstat.core.CoreFailure
+import ai.tokenstat.tokenstat.core.CoreObserver
+import ai.tokenstat.tokenstat.core.NetworkGate
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
+import ai.tokenstat.tokenstat.ui.logic.ConnectionTracker
+import ai.tokenstat.tokenstat.ui.logic.ConnectionUiState
+import ai.tokenstat.tokenstat.ui.logic.NetworkClassifier
+import ai.tokenstat.tokenstat.ui.logic.NetworkPlane
 import ai.tokenstat.tokenstat.ui.logic.tagSignInUrl
 import ai.tokenstat.tokenstat.ui.ssh.SshConnectionState
 import kotlinx.coroutines.CancellationException
@@ -16,6 +23,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.longOrNull
@@ -24,19 +32,15 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-data class ConnectionUi(
-    val ok: Boolean = true,
-    val down: Boolean = false,
-    val offline: Boolean = false,
-    val service: Boolean = false,
-    val title: String = "",
-    val detail: String = "",
-)
+/// One honest answer about the network, written by `ConnectionTracker`. The
+/// name the chrome reads; the shape lives with the logic that fills it.
+typealias ConnectionUi = ConnectionUiState
 
 data class ClientState(
     val loading: Boolean = true,
@@ -46,8 +50,27 @@ data class ClientState(
     val limitsError: String? = null,
     val error: String? = null,
     val connection: ConnectionUi = ConnectionUi(),
+    /// True only after a definitive account answer: signed in, or honestly
+    /// signed out (`account.status` came back saying `signedIn: false`).
+    ///
+    /// A network failure does **not** set this. Collapsing "could not check"
+    /// into "signed out" is the cold-start bug the Apple client already paid
+    /// for: `account.status` asks the account service, so a phone with a
+    /// valid token and no internet flashed the Sign in door and never
+    /// recovered without a retry.
+    val authChecked: Boolean = false,
+    /// Why the last check failed, when it was not a clean signed-out answer.
+    /// Null while loading and after a check that answered.
+    val authError: String? = null,
 ) {
     val signedIn: Boolean get() = account?.get("signedIn")?.jsonPrimitive?.content == "true"
+
+    /// The first check is still in flight. Splash territory.
+    val authPending: Boolean get() = !authChecked && authError == null
+
+    /// The first check failed, usually because this device is offline. Show
+    /// a retry surface, not the Sign in door.
+    val authNeedsRetry: Boolean get() = !authChecked && authError != null
     val canRemote: Boolean
         get() {
             val flag = account?.get("canRemote")
@@ -116,7 +139,80 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /// not dial again on return. See `WorkspacesConnectionState`.
     val workspacesConnection = ai.tokenstat.tokenstat.ui.workspace.WorkspacesConnectionState()
 
-    init { refresh() }
+    /// What the app believes about the network, folded from the platform's
+    /// route and from every call that leaves this process. One tracker, so
+    /// two screens cannot say different things about one failure.
+    private val tracker = ConnectionTracker()
+    private val connectivity = ConnectivityMonitor(app, viewModelScope)
+
+    init {
+        // Every call that leaves this device reports here, and offline ones
+        // are refused before they spend their patience budget. Installed
+        // once, where the tracker lives, so no screen has to remember to.
+        CoreObserver.report = { method, peer, error -> noteCall(method, peer, error) }
+        CoreObserver.precheck = { method ->
+            if (NetworkGate.isOffline && NetworkPlane.of(method) != null) {
+                CoreFailure("offline", "This device is offline.")
+            } else {
+                null
+            }
+        }
+        connectivity.start()
+        // Synchronously, before the first call goes out: a launch with no
+        // internet must refuse an account call now rather than spend its
+        // patience budget finding out.
+        tracker.setPath(connectivity.status.value)
+        publishConnection()
+        viewModelScope.launch {
+            connectivity.status.collect { path ->
+                tracker.setPath(path)
+                publishConnection()
+            }
+        }
+        viewModelScope.launch {
+            // The network came back, or moved to another route. A cold start
+            // with no internet leaves an account nobody could read, and the
+            // tunnel session this phone holds should redial now rather than
+            // after its backoff.
+            connectivity.restored.collect {
+                tracker.reset()
+                publishConnection()
+                refresh()
+                nudgeTunnel(reconnect = true)
+            }
+        }
+        refresh()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        connectivity.stop()
+        CoreObserver.report = null
+        CoreObserver.precheck = null
+    }
+
+    /// Fold one call's outcome into the tracker and publish what changed.
+    /// Calls that say nothing about the network move nothing.
+    private fun noteCall(method: String, peer: String?, error: Throwable?) {
+        val plane = NetworkPlane.of(method) ?: return
+        val kind = error?.let {
+            NetworkClassifier.kind((it as? CoreFailure)?.code.orEmpty(), it.message.orEmpty())
+        }
+        tracker.note(plane, peer, kind, System.currentTimeMillis())
+        publishConnection()
+    }
+
+    /// Called from whatever thread a call finished on, so the write is a
+    /// compare-and-set rather than a read-modify-write: an IO thread
+    /// reporting a failure must not lose a main-thread write of the account
+    /// it raced with.
+    private fun publishConnection() {
+        NetworkGate.isOffline = tracker.offline
+        val next = tracker.ui()
+        mutableState.update { current ->
+            if (current.connection == next) current else current.copy(connection = next)
+        }
+    }
 
     fun refresh() = viewModelScope.launch {
         mutableState.value = mutableState.value.copy(loading = true, error = null)
@@ -125,7 +221,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val accountObject = account.jsonObject
                 mutableState.value = mutableState.value.copy(
                     account = accountObject,
-                    connection = ConnectionUi(),
+                    authChecked = true,
+                    authError = null,
+                )
+                // Cheap on every load, and it is what lets the chip say
+                // "Studio" rather than "Computer" when an account has four
+                // machines. Only machines their owner named: an invented
+                // name in a warning is a puzzle, not news.
+                notePeerNames(
+                    ((accountObject["machines"] as? JsonArray).orEmpty())
+                        .mapNotNull { it as? JsonObject }
+                        .mapNotNull { machine ->
+                            val key = (machine["publicIdentity"] as? JsonPrimitive)?.contentOrNull
+                            val label = (machine["label"] as? JsonPrimitive)?.contentOrNull
+                            if (key.isNullOrBlank() || label.isNullOrBlank()) null else key to label
+                        }
+                        .toMap(),
                 )
                 if (accountObject["signedIn"]?.jsonPrimitive?.content == "true") {
                     PushRegistrar.refresh()
@@ -133,17 +244,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             .onFailure { err ->
+                // Not an answer about the account, so `authChecked` is left
+                // where it was. A check that already succeeded once keeps the
+                // app open; a first check that never landed gets the retry
+                // door instead of Sign in.
                 mutableState.value = mutableState.value.copy(
                     error = err.message,
-                    connection = classify(err),
+                    authError = err.message ?: "The account could not be reached.",
                 )
             }
         mutableState.value = mutableState.value.copy(loading = false)
     }
 
+    /// The person pressed Try now. Re-read the route, forget the counters
+    /// that described a network which may no longer exist, and ask again.
     fun retryConnection() {
-        mutableState.value = mutableState.value.copy(connection = ConnectionUi())
+        connectivity.checkNow()
+        tracker.reset()
+        publishConnection()
         refresh()
+    }
+
+    /// Names for the machines this account knows about, so the chip can say
+    /// "Studio" rather than "Computer".
+    fun notePeerNames(names: Map<String, String>) {
+        tracker.setPeerNames(names)
+        publishConnection()
     }
 
     private suspend fun loadDashboard() {
@@ -382,37 +508,4 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun core(method: String, params: JsonObject = buildJsonObject {}): JsonElement =
         CoreClient.call(method, params)
-}
-
-private fun classify(err: Throwable): ConnectionUi {
-    val code = (err as? CoreFailure)?.code.orEmpty()
-    val message = err.message.orEmpty().lowercase()
-    val offline = code == "offline" ||
-        message.contains("unable to resolve") ||
-        message.contains("network") ||
-        message.contains("enotconn")
-    if (offline) {
-        return ConnectionUi(
-            ok = false,
-            down = true,
-            offline = true,
-            title = "Offline",
-            detail = "This device cannot reach the internet. Retrying from Try now.",
-        )
-    }
-    if (code == "host_timeout" || code == "host_unreachable" || code.contains("peer")) {
-        return ConnectionUi(
-            ok = false,
-            down = false,
-            title = "Computer unreachable",
-            detail = "The internet is fine and the computer stopped answering. It is asleep, or tokenstat is not running there.",
-        )
-    }
-    return ConnectionUi(
-        ok = false,
-        down = true,
-        service = true,
-        title = "No connection",
-        detail = "Signed in, but tokenstat is not answering. Your numbers are the last ones this device read.",
-    )
 }

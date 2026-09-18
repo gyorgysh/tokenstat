@@ -289,6 +289,7 @@ private fun SpendCard(usage: DeviceUsage?, accountTotalMicros: Long) {
                     style = TsType.numeric(26, FontWeight.SemiBold),
                     color = colors.accent,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     if (usage != null) {
@@ -846,6 +847,7 @@ private fun HostStatsCells(stats: JsonObject?, failed: Boolean, route: String?) 
                         style = TsType.numeric(16),
                         color = colors.textPrimary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             } else {
@@ -869,6 +871,7 @@ private fun HostStatsCells(stats: JsonObject?, failed: Boolean, route: String?) 
                         style = TsType.numeric(ramSize),
                         color = colors.textPrimary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         onTextLayout = { if (it.hasVisualOverflow && ramSize > 11) ramSize -= 1 },
                     )
                 }

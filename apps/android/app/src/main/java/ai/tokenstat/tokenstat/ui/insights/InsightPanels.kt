@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 
 /// One panel per figure, not one card holding every figure. Port of
@@ -69,6 +70,7 @@ private fun RowScope.panel(item: InsightFactPanel) {
                 style = TsType.numeric(22, FontWeight.SemiBold),
                 color = colors.accent,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 softWrap = false,
                 autoSize = TextAutoSize.StepBased(
                     minFontSize = 11.sp,
@@ -81,6 +83,7 @@ private fun RowScope.panel(item: InsightFactPanel) {
                 style = TsType.caption,
                 color = colors.textSecondary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 softWrap = false,
                 autoSize = TextAutoSize.StepBased(
                     minFontSize = 8.sp,

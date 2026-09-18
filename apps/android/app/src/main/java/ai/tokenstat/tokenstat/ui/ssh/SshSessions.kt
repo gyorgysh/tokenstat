@@ -34,6 +34,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
+import androidx.compose.ui.text.style.TextOverflow
 
 /// One shell the host is holding, as `ssh.session.list` reports it.
 ///
@@ -236,7 +237,12 @@ fun SshOpenSessionsSection(
                     )
                     Spacer(Modifier.width(Space.s))
                     Column(Modifier.weight(1f)) {
-                        Text(session.label, maxLines = 1, color = colors.textPrimary)
+                        Text(
+                            session.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = colors.textPrimary,
+                        )
                         Text(
                             if (session.alive && !session.locallyEnded) "Running" else "Ended",
                             style = MaterialTheme.typography.bodySmall,

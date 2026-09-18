@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.Banner
@@ -203,6 +204,7 @@ private fun Breadcrumb(root: String, path: String, onJump: (String) -> Unit) {
                 Text(
                     segment,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     color = if (index == segments.lastIndex) LocalTsColors.current.textPrimary else LocalTsColors.current.accent,
                 )
             }

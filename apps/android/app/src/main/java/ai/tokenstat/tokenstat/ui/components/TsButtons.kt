@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
@@ -235,6 +236,7 @@ fun <T> SegmentedCapsulePicker(
                     style = TextStyle(fontSize = 13.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal),
                     color = if (active) colors.accent else colors.controlGlyph,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ClientState
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
@@ -265,6 +266,7 @@ private fun SearchFolderRow(folder: SearchFolder, onClick: () -> Unit) {
                 style = TsType.caption,
                 color = colors.textSecondary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)

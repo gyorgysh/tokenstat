@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
@@ -121,7 +122,14 @@ fun SshHostRow(
             Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(label, fontWeight = FontWeight.SemiBold, color = colors.textPrimary, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                    Text(
+                        label,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                     if (favorite) {
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.Default.Star, "Favourite", tint = colors.warning, modifier = Modifier.size(12.dp))
@@ -133,6 +141,7 @@ fun SshHostRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.textSecondary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
                             .padding(top = 2.dp)
                             .clip(RoundedCornerShape(8.dp))

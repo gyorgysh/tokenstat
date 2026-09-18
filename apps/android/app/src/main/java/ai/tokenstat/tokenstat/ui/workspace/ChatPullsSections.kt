@@ -1299,6 +1299,7 @@ private fun ChatStatPanels(chats: List<JsonObject>) {
                             style = TsType.numeric(20, FontWeight.Medium),
                             color = colors.accent,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
                         Box(
@@ -1364,6 +1365,7 @@ private fun ChatRow(chat: JsonObject) {
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.accent,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (atMs != null) {
                 RelativeTimeText(atMs, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, compact = true)
@@ -2314,6 +2316,7 @@ private fun PullFilesCard(diffs: List<JsonObject>) {
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                     color = colors.textPrimary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 if (path.contains('/')) {
                     Text(path, style = TextStyle(fontSize = 11.sp), color = colors.textSecondary, maxLines = 1)
@@ -2365,6 +2368,7 @@ private fun PullChecksCard(view: JsonObject) {
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 check.str("state")?.takeIf { it.isNotBlank() }?.let {
                     Text(it, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary, maxLines = 1)
@@ -2798,6 +2802,7 @@ private fun ChatSegmented(
                         else -> colors.textTertiary
                     },
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

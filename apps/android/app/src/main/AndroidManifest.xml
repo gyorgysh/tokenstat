@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The offline state. Android already runs its own captive-portal check
+         and publishes the verdict as a network capability, so the app reads
+         that answer instead of probing an endpoint of its own. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:name=".TokenstatApplication"

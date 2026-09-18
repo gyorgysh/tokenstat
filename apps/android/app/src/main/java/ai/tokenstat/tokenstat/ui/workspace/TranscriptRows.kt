@@ -337,6 +337,7 @@ private fun TranscriptToolRow(state: ChatToolState) {
                 style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
                 color = tint,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (state.target.isNotEmpty()) {
                 Text(
@@ -596,6 +597,7 @@ private fun AttachmentRow(
                 style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                 color = colors.textPrimary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             val detail = listOfNotNull(
                 item.mediaType,

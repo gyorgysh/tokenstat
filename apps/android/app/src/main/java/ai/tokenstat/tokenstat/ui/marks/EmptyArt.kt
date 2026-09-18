@@ -212,17 +212,53 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawLine(colors.secondary, Offset(size.width * 0.65f, size.height * 0.45f), Offset(size.width * 0.84f, size.height * 0.45f), strokeWidth = 3.4f, cap = StrokeCap.Round)
                 drawRoundRect(accent, Offset(size.width * 0.74f, size.height * 0.56f), Size(size.width * 0.13f, size.height * 0.10f), CornerRadius(6f, 6f))
             }
+            // Two devices with a padlock between them, the way `VaultScene`
+            // draws it. The lock needs its shackle: a bare rectangle between
+            // a phone and a laptop reads as a box being passed around, which
+            // is the opposite of what an encrypted vault is. The ghost lines
+            // inside each frame are what make them read as devices holding
+            // something rather than as empty outlines.
             EmptyArtKind.Vault -> {
-                drawRoundRect(border, Offset(size.width * 0.16f, size.height * 0.22f), Size(size.width * 0.22f, size.height * 0.56f), CornerRadius(10f, 10f), style = stroke)
-                drawRoundRect(border, Offset(size.width * 0.48f, size.height * 0.28f), Size(size.width * 0.36f, size.height * 0.44f), CornerRadius(8f, 8f), style = stroke)
-                val lock = Path().apply {
-                    moveTo(size.width * 0.44f, size.height * 0.52f)
-                    lineTo(size.width * 0.56f, size.height * 0.52f)
-                    lineTo(size.width * 0.56f, size.height * 0.66f)
-                    lineTo(size.width * 0.44f, size.height * 0.66f)
-                    close()
+                fun device(left: Float, top: Float, w: Float, h: Float) {
+                    drawRoundRect(
+                        border,
+                        Offset(size.width * left, size.height * top),
+                        Size(size.width * w, size.height * h),
+                        CornerRadius(8f, 8f),
+                        style = stroke,
+                    )
+                    val midX = size.width * (left + w / 2f)
+                    val lineWidth = size.width * w
+                    listOf(0.5f to colors.secondary, 0.32f to border).forEachIndexed { i, (span, ink) ->
+                        val y = size.height * (top + h / 2f) + (i - 0.5f) * size.height * 0.08f
+                        drawLine(
+                            ink,
+                            Offset(midX - lineWidth * span / 2f, y),
+                            Offset(midX + lineWidth * span / 2f, y),
+                            strokeWidth = 2.4f,
+                            cap = StrokeCap.Round,
+                        )
+                    }
                 }
-                drawPath(lock, accent, style = stroke)
+                device(0.133f, 0.310f, 0.203f, 0.524f)
+                device(0.586f, 0.452f, 0.359f, 0.333f)
+                // A half circle whose ends land exactly on the body's top
+                // edge, drawn first so the box covers its round caps. Any
+                // shorter sweep leaves the shackle floating above the lock
+                // with daylight under it.
+                drawArc(
+                    accent,
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(size.width * 0.430f, size.height * 0.411f),
+                    size = Size(size.width * 0.094f, size.height * 0.143f),
+                    style = stroke,
+                )
+                val body = Offset(size.width * 0.422f, size.height * 0.482f)
+                val bodySize = Size(size.width * 0.156f, size.height * 0.179f)
+                drawRoundRect(colors.accentSoft, body, bodySize, CornerRadius(5f, 5f))
+                drawRoundRect(accent, body, bodySize, CornerRadius(5f, 5f), style = stroke)
             }
             // A display with a scan line: the picture that is missing until
             // the plan includes the remote screen.

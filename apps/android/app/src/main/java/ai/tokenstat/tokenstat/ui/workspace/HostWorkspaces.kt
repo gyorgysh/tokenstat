@@ -302,6 +302,7 @@ fun HostStatsStrip(model: AppViewModel, peer: String, online: Boolean = true) {
                     style = TsType.numeric(12),
                     color = colors.textSecondary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             stats?.get("cpu")?.jsonPrimitive?.doubleOrNull?.let { cpu ->
@@ -364,6 +365,7 @@ fun HostCard(
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 if (online == false) {
                     Text("Offline", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
@@ -517,6 +519,7 @@ fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
                     style = TsType.caption.copy(fontWeight = FontWeight.Medium),
                     color = colors.textSecondary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Icon(
                     if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -621,6 +624,7 @@ private fun SecurityKeyRow(
                 style = TsType.mono(12),
                 color = colors.textTertiary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (copied == key) {
                 Text("copied", style = TsType.caption, color = colors.accent)
@@ -665,6 +669,7 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit) {
                 style = TsType.caption,
                 color = colors.textSecondary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             folderSubtitle(folder)?.let { subtitle ->
                 Row(
@@ -738,6 +743,7 @@ fun WorkspaceSessionRow(session: JsonObject, onOpen: () -> Unit) {
                 style = TsType.caption,
                 color = colors.textSecondary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -898,6 +904,7 @@ fun FolderChooserDialog(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = LocalTsColors.current.textSecondary,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
@@ -1059,6 +1066,7 @@ fun WorkspacesLayoutPreview(sections: List<WorkSection>) {
                         style = androidx.compose.ui.text.TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Medium),
                         color = colors.textSecondary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

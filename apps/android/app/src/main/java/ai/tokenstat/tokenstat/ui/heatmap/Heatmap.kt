@@ -229,6 +229,7 @@ fun YearHeatmap(
                         style = TextStyle(fontSize = 11.sp, fontFamily = TsType.interfaceFamily),
                         color = colors.textTertiary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 } else {
                     val value = current.day["value"]?.jsonPrimitive?.longOrNull ?: 0L
@@ -242,12 +243,14 @@ fun YearHeatmap(
                         ),
                         color = colors.textPrimary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         if (value == 0L) "nothing recorded" else "${money(value)} at list rates",
                         style = TextStyle(fontSize = 12.sp, fontFamily = TsType.interfaceFamily),
                         color = colors.textSecondary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

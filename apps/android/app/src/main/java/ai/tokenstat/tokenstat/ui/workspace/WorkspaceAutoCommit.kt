@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.Banner
@@ -343,6 +344,7 @@ private fun BackendPicker(
             style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
             color = LocalTsColors.current.textPrimary,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(cardRadiusDp))
@@ -357,6 +359,7 @@ private fun BackendPicker(
                     style = TextStyle(fontSize = 14.sp),
                     color = if (id == selected) LocalTsColors.current.accent else LocalTsColors.current.textPrimary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onSelect(id); expanded = false }

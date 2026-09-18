@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
@@ -174,6 +175,7 @@ fun CloneRepositoryScreen(
                                 color = if (parent == null) colors.textSecondary else colors.textPrimary,
                                 modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
                         }
@@ -409,6 +411,7 @@ fun FolderPickerScreen(
                             style = TsType.mono(13),
                             color = colors.textPrimary,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                         )
                     }

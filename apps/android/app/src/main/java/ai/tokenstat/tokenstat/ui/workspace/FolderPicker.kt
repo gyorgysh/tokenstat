@@ -58,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -172,6 +173,7 @@ fun FolderPickerScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textPrimary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -231,6 +233,7 @@ fun FolderPickerScreen(
                             entry.str("name") ?: "",
                             color = if (isDir) colors.textPrimary else colors.textSecondary,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         if (entry.bol("isRegistered") == true) {
                             Text("already registered", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)

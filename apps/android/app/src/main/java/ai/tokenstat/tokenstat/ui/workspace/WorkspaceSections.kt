@@ -83,6 +83,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.AppViewModel
@@ -469,6 +470,7 @@ private fun SessionsSection(
                         style = TextStyle(fontSize = 11.sp),
                         color = LocalTsColors.current.textTertiary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 TextButton(onClick = { pendingClose = session }) { Text("Close") }
@@ -607,6 +609,7 @@ private fun DestinationTile(
                 style = TsType.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
                 color = colors.textPrimary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (count > 0) {
@@ -673,6 +676,7 @@ private fun LaunchTile(
                 style = TsType.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
                 color = if (dimmed) colors.textSecondary else colors.textPrimary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -712,12 +716,14 @@ private fun ExtraLaunchRow(
                 style = TextStyle(fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
                 color = colors.textPrimary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 if (!profile.installed) "Not installed" else "Hidden",
                 style = TextStyle(fontSize = 11.sp),
                 color = colors.textTertiary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (!profile.installed && profile.installCommand != null) {
@@ -1082,6 +1088,7 @@ private fun StepCapsule(label: String) {
             style = TextStyle(fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
             color = LocalTsColors.current.accent,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -1300,6 +1307,7 @@ private fun MoreLaunchTile(showing: Boolean, onTap: () -> Unit, modifier: Modifi
             style = TsType.caption.copy(fontWeight = FontWeight.Medium),
             color = colors.textSecondary,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

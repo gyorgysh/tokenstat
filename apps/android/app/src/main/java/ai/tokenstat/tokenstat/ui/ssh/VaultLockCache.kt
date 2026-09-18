@@ -37,6 +37,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import androidx.compose.ui.text.style.TextOverflow
 
 /// The last-known vault lock state, shown immediately instead of jumping.
 ///
@@ -148,6 +149,7 @@ fun VaultLockRow(
                 style = TsType.body,
                 color = if (unconfirmedRecovery) colors.warning else colors.textPrimary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             when {
@@ -162,6 +164,7 @@ fun VaultLockRow(
                     style = TsType.caption,
                     color = colors.textSecondary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (checking && shown != null) {

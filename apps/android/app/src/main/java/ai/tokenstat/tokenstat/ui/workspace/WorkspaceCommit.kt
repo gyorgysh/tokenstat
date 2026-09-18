@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -601,6 +602,7 @@ fun BranchRow(
             style = TextStyle(fontSize = 12.sp),
             color = LocalTsColors.current.accent,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
             stats.orEmpty(),
@@ -608,6 +610,7 @@ fun BranchRow(
             color = LocalTsColors.current.accent.copy(alpha = 0.75f),
             modifier = Modifier.weight(1f),
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text("Switch", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.accent)
     }
@@ -820,6 +823,7 @@ fun ReviewAllPage(
                                 color = LocalTsColors.current.textPrimary,
                                 modifier = Modifier.weight(1f),
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             (file.str("kind") ?: "").takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium), color = LocalTsColors.current.accent)

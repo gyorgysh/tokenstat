@@ -457,6 +457,7 @@ private fun TsPickerSectionTab(title: String, selected: Boolean, onSelect: () ->
             ),
             color = if (selected) colors.accent else colors.textSecondary,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

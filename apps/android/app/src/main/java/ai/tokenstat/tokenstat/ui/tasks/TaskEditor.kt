@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import ai.tokenstat.tokenstat.AppViewModel
@@ -991,6 +992,7 @@ fun TaskRunScreen(
                     color = LocalTsColors.current.textPrimary,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 TextButton(onClick = onBack) { Text("Done") }
             }

@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
@@ -177,6 +178,7 @@ fun CommitTagPills(tags: List<String>, modifier: Modifier = Modifier) {
                     style = TsType.mono(10, FontWeight.Medium),
                     color = colors.accent,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
