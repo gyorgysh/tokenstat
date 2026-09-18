@@ -249,6 +249,13 @@ fun TerminalScreen(
                     )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
+                    // The page is sized to this view and cannot overflow it,
+                    // so there is nothing to scroll to and no bar to show.
+                    // A scrollable page pans to follow the focused textarea
+                    // at the cursor, which is what jumped the picture.
+                    isVerticalScrollBarEnabled = false
+                    isHorizontalScrollBarEnabled = false
+                    overScrollMode = android.view.View.OVER_SCROLL_NEVER
                     // Both, explicitly. A WebView inside Compose is not given
                     // focus by the focus system, and without focus the page's
                     // textarea cannot be what the keyboard types into.
@@ -256,8 +263,16 @@ fun TerminalScreen(
                     isFocusableInTouchMode = true
                     // The size the page fits to arrives with layout, not with
                     // the page load, so every layout asks it to measure again.
-                    addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or_, ob ->
-                        if (r - l != or_ - ol || b - t != ob - ot) bridge.fit()
+                    // The measured view size travels with the ask: with the
+                    // keyboard open the window pans instead of resizing, so
+                    // the page's own viewport stays tall behind a short view.
+                    addOnLayoutChangeListener { view, l, t, r, b, ol, ot, or_, ob ->
+                        if (r - l == or_ - ol && b - t == ob - ot) return@addOnLayoutChangeListener
+                        val density = view.resources.displayMetrics.density
+                        bridge.fitSize(
+                            TerminalKeysLogic.cssPx(r - l, density),
+                            TerminalKeysLogic.cssPx(b - t, density),
+                        )
                     }
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
                     webChromeClient = TermChromeClient
@@ -497,6 +512,13 @@ fun SshTerminalScreen(
                     )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
+                    // The page is sized to this view and cannot overflow it,
+                    // so there is nothing to scroll to and no bar to show.
+                    // A scrollable page pans to follow the focused textarea
+                    // at the cursor, which is what jumped the picture.
+                    isVerticalScrollBarEnabled = false
+                    isHorizontalScrollBarEnabled = false
+                    overScrollMode = android.view.View.OVER_SCROLL_NEVER
                     // Both, explicitly. A WebView inside Compose is not given
                     // focus by the focus system, and without focus the page's
                     // textarea cannot be what the keyboard types into.
@@ -504,8 +526,16 @@ fun SshTerminalScreen(
                     isFocusableInTouchMode = true
                     // The size the page fits to arrives with layout, not with
                     // the page load, so every layout asks it to measure again.
-                    addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or_, ob ->
-                        if (r - l != or_ - ol || b - t != ob - ot) bridge.fit()
+                    // The measured view size travels with the ask: with the
+                    // keyboard open the window pans instead of resizing, so
+                    // the page's own viewport stays tall behind a short view.
+                    addOnLayoutChangeListener { view, l, t, r, b, ol, ot, or_, ob ->
+                        if (r - l == or_ - ol && b - t == ob - ot) return@addOnLayoutChangeListener
+                        val density = view.resources.displayMetrics.density
+                        bridge.fitSize(
+                            TerminalKeysLogic.cssPx(r - l, density),
+                            TerminalKeysLogic.cssPx(b - t, density),
+                        )
                     }
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
                     webChromeClient = TermChromeClient
@@ -720,6 +750,20 @@ class TerminalBridge {
     fun fit() {
         webView?.post {
             webView?.evaluateJavascript("termFit();", null)
+        }
+    }
+
+    /// Fit to the measured view size, in CSS pixels. The page sizes its
+    /// terminal box to this rather than to its own viewport, which stays
+    /// tall behind a short view while the keyboard is open. See
+    /// `termViewport` in term.html.
+    fun fitSize(wCss: Int, hCss: Int) {
+        if (wCss < 1 || hCss < 1) {
+            fit()
+            return
+        }
+        webView?.post {
+            webView?.evaluateJavascript("termViewport($wCss,$hCss);", null)
         }
     }
 

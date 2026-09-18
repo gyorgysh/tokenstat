@@ -51,6 +51,20 @@ class MachinePlaneTest {
         assertEquals("tokenstat", TerminalKeysLogic.basename("/Users/someone/work/tokenstat/"))
     }
 
+    /// The xterm page sizes its terminal box to the measured view, in CSS
+    /// pixels, so a keyboard that pans instead of resizing cannot leave a
+    /// tall page behind a short view. Floored; zero means unmeasured and
+    /// the page keeps its last good box.
+    @Test
+    fun cssPxDividesByDensityAndRefusesNothing() {
+        assertEquals(412, TerminalKeysLogic.cssPx(1030, 2.5f))
+        assertEquals(412, TerminalKeysLogic.cssPx(1031, 2.5f))
+        assertEquals(1, TerminalKeysLogic.cssPx(1, 3.0f))
+        assertEquals(0, TerminalKeysLogic.cssPx(0, 2.0f))
+        assertEquals(0, TerminalKeysLogic.cssPx(-8, 2.0f))
+        assertEquals(0, TerminalKeysLogic.cssPx(500, 0f))
+    }
+
     // ScreenFrames, from ScreenEncodedFrame and ScreenViewerModel inputs.
 
     private fun envelope(payload: ByteArray, keyframe: Boolean = true): ByteArray {

@@ -37,4 +37,12 @@ object TerminalKeysLogic {
     /// persistence boundary; this stays on the header line only.
     fun basename(path: String): String =
         path.trimEnd('/').substringAfterLast('/').ifBlank { path }
+
+    /// CSS pixels for a measured view size, which is what the xterm page
+    /// sizes its terminal box to. One CSS pixel is one dp at the page's
+    /// default text zoom, so this is the view pixels over the density,
+    /// floored. Zero means unmeasured: the page keeps its last good box
+    /// rather than fitting against nothing.
+    fun cssPx(viewPx: Int, density: Float): Int =
+        if (viewPx <= 0 || density <= 0f) 0 else (viewPx / density).toInt().coerceAtLeast(1)
 }

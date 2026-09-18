@@ -9,7 +9,7 @@
     font-family: "JetBrains Mono";
     src: url("fonts/JetBrainsMono-Variable.ttf");
   }
-  html, body { margin: 0; padding: 0; height: 100%; background: #0A0A0B; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0A0A0B; }
   #term { width: 100%; height: 100%; }
 </style>
 </head>
@@ -146,6 +146,30 @@
       term.attachCustomWheelEventHandler(function () { return true; });
       scrollsHandler = null;
     }
+  }
+
+  // The size Kotlin measured for the view, in CSS pixels.
+  //
+  // The view and the viewport disagree while the keyboard is open: the
+  // window pans instead of resizing, so the layout viewport stays tall
+  // while Compose shrinks the view. Fitting against that tall viewport
+  // rendered a terminal the window could only pan around, and the WebView
+  // pans a scrollable page to follow the focused textarea at the cursor:
+  // the picture jumped on every cursor move. Sizing the terminal box to
+  // the measured view keeps page and window the same size, so there is
+  // nothing to pan. A degenerate size keeps the last good box.
+  var sizedW = 0;
+  var sizedH = 0;
+  function termViewport(w, h) {
+    if (!w || !h || w < 1 || h < 1) return termFit();
+    var el = document.getElementById("term");
+    if (w !== sizedW || h !== sizedH) {
+      sizedW = w;
+      sizedH = h;
+      el.style.width = w + "px";
+      el.style.height = h + "px";
+    }
+    return termFit();
   }
 
   // Fit to the space there actually is, and refuse a size that says there is
