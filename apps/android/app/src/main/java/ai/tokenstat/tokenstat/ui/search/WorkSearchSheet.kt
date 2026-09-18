@@ -159,6 +159,7 @@ fun WorkSearchSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = colors.background,
     ) {
         Column(
             // Fills the sheet, not just its width: `skipPartiallyExpanded`

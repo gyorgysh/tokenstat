@@ -177,6 +177,12 @@ fun rememberTsColors(): TsColors = if (isSystemInDarkTheme()) DarkColors else Li
 /// light paper cannot sit under a forced `darkColorScheme`.
 fun TsColors.toColorScheme(): ColorScheme {
     val onAccent = Color.White
+    // Every floating surface reads the container roles: dialogs use High,
+    // menus use Container. Leaving them at Material's defaults painted all
+    // thirty-odd dialogs and every menu neutral grey in dark mode, while
+    // light mode hid it. Highest stays default on purpose: it feeds the
+    // switch and progress tracks, which read fine grey on a card and would
+    // blend into one in panel.
     return if (isDark) {
         darkColorScheme(
             primary = accent,
@@ -189,6 +195,10 @@ fun TsColors.toColorScheme(): ColorScheme {
             onSurface = textPrimary,
             surfaceVariant = sidebar,
             onSurfaceVariant = textSecondary,
+            surfaceContainerLowest = background,
+            surfaceContainerLow = panel,
+            surfaceContainer = panel,
+            surfaceContainerHigh = panel,
             outline = border,
             error = danger,
             onError = onAccent,
@@ -207,6 +217,10 @@ fun TsColors.toColorScheme(): ColorScheme {
             onSurface = textPrimary,
             surfaceVariant = sidebar,
             onSurfaceVariant = textSecondary,
+            surfaceContainerLowest = background,
+            surfaceContainerLow = panel,
+            surfaceContainer = panel,
+            surfaceContainerHigh = panel,
             outline = border,
             error = danger,
             onError = onAccent,

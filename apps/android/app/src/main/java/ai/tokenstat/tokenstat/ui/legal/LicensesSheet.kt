@@ -84,7 +84,7 @@ fun LicensesSheet(onDismiss: () -> Unit) {
         }
         loadFailed = text == null
     }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.background) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),

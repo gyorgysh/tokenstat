@@ -3699,6 +3699,7 @@ private fun AccountDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = colors.background,
     ) {
         Column(
             Modifier

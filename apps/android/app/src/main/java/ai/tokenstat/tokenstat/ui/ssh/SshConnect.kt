@@ -217,7 +217,10 @@ fun SshConnectDialog(
                 },
             )
         },
-        dismissButton = { TsSecondaryButton(label = "Cancel", small = true, onClick = onDismiss) },
+        // Full size, like Connect beside it. A small Cancel next to a
+        // full-size primary reads broken, and it misses the 48dp touch
+        // minimum the capsule comment promises for actions.
+        dismissButton = { TsSecondaryButton(label = "Cancel", onClick = onDismiss) },
     )
 }
 

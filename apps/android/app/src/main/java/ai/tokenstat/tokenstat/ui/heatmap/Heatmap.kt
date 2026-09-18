@@ -552,7 +552,7 @@ fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
             .getOrNull() as? JsonObject
         isLoading = false
     }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.background) {
         Column(
             Modifier
                 .fillMaxWidth()
