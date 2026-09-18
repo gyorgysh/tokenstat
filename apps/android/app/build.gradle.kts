@@ -18,7 +18,7 @@ android {
         applicationId = "ai.tokenstat.tokenstat"
         minSdk = 28
         targetSdk = 36
-        versionCode = 113
+        versionCode = 114
         versionName = "1.0.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
