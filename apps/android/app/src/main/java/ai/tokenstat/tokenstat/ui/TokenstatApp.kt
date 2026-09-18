@@ -194,6 +194,7 @@ import ai.tokenstat.tokenstat.ui.marks.TierMark
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
 import ai.tokenstat.tokenstat.ui.components.TierBadge
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
+import ai.tokenstat.tokenstat.ui.components.TsProminentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.auth.Onboarding
 import ai.tokenstat.tokenstat.ui.marks.Avatar
@@ -425,105 +426,138 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
     fun openPage(url: String) {
         CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
     }
-    // Edge-to-edge draws behind the status bar; safeDrawing keeps the card
-    // clear of the clock. The column caps at a phone-like width so a tablet
-    // reads as a centred card, not a stretched row.
-    Box(
-        Modifier.fillMaxSize().background(colors.background)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
+    // The shape of `ClientLoginView`: the mark and the name centred in the
+    // room above the actions, the actions themselves against the bottom
+    // edge. Full width on a tablet, the way the iPad draws it, rather than a
+    // narrow card in the middle of a wide screen.
+    //
+    // Edge-to-edge draws behind the status bar, so safeDrawing keeps the top
+    // clear of the clock and the bottom clear of the gesture bar.
     Column(
-        Modifier.widthIn(max = 480.dp).fillMaxWidth()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.Center,
+        Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Spacer(Modifier.weight(1f))
+        // Mark, name, sentence. No "Sign in" heading: the button at the
+        // bottom of the same screen says it, and saying it twice made the
+        // product's own name look like a subtitle to the word above it.
         // The mark rising once and landing: an intro page, not a spinner.
-        LogoMark(size = 44, animated = !reduceMotion, loops = false)
-        Spacer(Modifier.height(Space.s))
-        Wordmark(size = 22, showsMark = false)
-        Spacer(Modifier.height(12.dp))
-        Text("Your AI coding activity, wherever your machines are.", color = colors.textSecondary)
-        Spacer(Modifier.height(28.dp))
-        if (pending != null) {
-            // The approval is happening in the browser tab. Shown for the
-            // same reason iOS shows it: the tab can be dismissed while the
-            // sign-in is alive underneath, and without this the screen would
-            // look exactly as it did before the tap.
-            CircularProgressIndicator(color = colors.accent)
-            Spacer(Modifier.height(Space.s))
-            Text("Waiting for approval", style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(Space.xs))
-            Text(
-                notice ?: "Approve this device on tokenstat.ai. This screen updates by itself.",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.textSecondary,
-            )
-            Spacer(Modifier.height(Space.s))
-            Text(
-                pending!!.code,
-                style = TextStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 2.sp,
-                ),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colors.accentSoft)
-                    .padding(vertical = Space.s, horizontal = Space.m),
-            )
-            Spacer(Modifier.height(Space.s))
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsSecondaryButton(
-                    label = "Open the page",
-                    icon = ActionIcon.External.vector,
-                    small = true,
-                    onClick = { model.presentSignInPage(::openPage) },
+        LogoMark(size = 52, animated = !reduceMotion, loops = false)
+        Spacer(Modifier.height(Space.m))
+        Wordmark(size = 28, showsMark = false)
+        Spacer(Modifier.height(Space.m))
+        Text(
+            "Your coding agents, projects, and AI usage. Together, wherever you are.",
+            style = TsType.body,
+            color = colors.textSecondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 320.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Space.l)
+                .padding(bottom = Space.xl),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            if (pending != null) {
+                // The approval is happening in the browser tab. Shown for the
+                // same reason iOS shows it: the tab can be dismissed while the
+                // sign-in is alive underneath, and without this the screen would
+                // look exactly as it did before the tap.
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
+                    CircularProgressIndicator(color = colors.accent)
+                    Text(
+                        "Waiting for approval",
+                        style = TsType.title3.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.textPrimary,
+                    )
+                    Text(
+                        notice ?: "Approve this device on tokenstat.ai. This screen updates by itself.",
+                        style = TsType.subheadline,
+                        color = colors.textSecondary,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        pending!!.code,
+                        style = TsType.mono(20, FontWeight.SemiBold).copy(letterSpacing = 2.sp),
+                        color = colors.textPrimary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.accentSoft)
+                            .padding(vertical = Space.s, horizontal = Space.m),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        TsSecondaryButton(
+                            label = "Open the page",
+                            icon = ActionIcon.External.vector,
+                            small = true,
+                            onClick = { model.presentSignInPage(::openPage) },
+                        )
+                        TsSecondaryButton(
+                            label = "Cancel",
+                            icon = ActionIcon.Dismiss.vector,
+                            small = true,
+                            onClick = { model.cancelSignIn() },
+                        )
+                    }
+                }
+            } else {
+                // Prominent, and the only prominent button on the screen:
+                // this is the door, and everything under it is a footnote to
+                // it. Same weight the iPhone gives it.
+                TsProminentButton(
+                    label = "Sign in",
+                    icon = ActionIcon.SignIn.vector,
+                    onClick = { model.signIn(::openPage) },
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                TsSecondaryButton(
-                    label = "Cancel",
-                    icon = ActionIcon.Dismiss.vector,
-                    small = true,
-                    onClick = { model.cancelSignIn() },
+                // There is no separate "create account" button, and that is
+                // not an omission: an account is made the first time somebody
+                // signs in with a provider they already have. This line says
+                // what happens instead of offering a fake choice.
+                Text(
+                    "No password to make. Signing in with GitHub, Google, X or Apple creates your account the first time.",
+                    style = TsType.caption,
+                    color = colors.textSecondary,
+                    textAlign = TextAlign.Center,
                 )
             }
-        } else {
-            TsAccentButton(
-                label = "Sign in",
-                icon = ActionIcon.SignIn.vector,
-                onClick = { model.signIn(::openPage) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.xs))
-            Text(
-                "No password to make. Signing in with GitHub, Google, X or Apple creates your account the first time.",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.textSecondary,
-            )
+            val shown = signInError ?: error
+            if (shown != null) {
+                Text(
+                    shown,
+                    style = TsType.caption,
+                    color = colors.danger,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            // A way back to the intro, for anyone who skipped it and then
+            // wondered what this is. A plain line of text like the iPhone's,
+            // not a bordered box: a box here reads as a second offer beside
+            // the one button this screen is for.
+            TextButton(onClick = onReboard, modifier = Modifier.padding(top = Space.xs)) {
+                Icon(
+                    ActionIcon.Help.vector,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("What is tokenstat?", style = TsType.subheadline, color = colors.accent)
+            }
+            // Signing in creates the account, so the two documents that govern
+            // it belong on this screen and not only in Settings.
+            LegalLine(onOpen = { openPage("$it?mobile=1") })
         }
-        val shown = signInError ?: error
-        if (shown != null) {
-            Spacer(Modifier.height(20.dp))
-            Text(shown, color = colors.danger)
-        }
-        Spacer(Modifier.height(Space.s))
-        TsSecondaryButton(
-            label = "What is tokenstat?",
-            icon = ActionIcon.Help.vector,
-            onClick = onReboard,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(Space.s))
-        // Signing in creates the account, so the two documents that govern
-        // it belong on this screen and not only in Settings.
-        LegalLine(
-            onOpen = { openPage("$it?mobile=1") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
     }
 }
 
@@ -532,7 +566,9 @@ private fun LegalLine(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
     val terms = "Terms"
     val privacy = "Privacy policy"
-    val text = "By signing in you accept the $terms and the $privacy."
+    // Word for word with the iPhone's line, which reads it as one sentence
+    // with two links in it rather than a sentence about two documents.
+    val text = "By signing in you accept the $terms and $privacy"
     val annotated = remember {
         buildAnnotatedString {
             append(text)
@@ -552,8 +588,8 @@ private fun LegalLine(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     }
     ClickableText(
         annotated,
-        style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary),
-        modifier = modifier,
+        style = TsType.caption.copy(color = colors.textTertiary, textAlign = TextAlign.Center),
+        modifier = modifier.padding(top = Space.xs),
         onClick = { offset ->
             annotated.getStringAnnotations("url", offset, offset).firstOrNull()?.let { onOpen(it.item) }
         },

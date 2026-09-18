@@ -71,8 +71,9 @@ fun TsAccentButton(
 }
 
 /// The prominent action: solid accent fill with white content, the port of
-/// SwiftUI `.borderedProminent` tinted with the accent. Used sparingly —
-/// on iOS it appears exactly once, on the host Connect button.
+/// SwiftUI `.borderedProminent` tinted with the accent. Used sparingly, where
+/// the Apple clients use it: the host Connect button, and the sign-in door,
+/// which is the only thing on its screen.
 @Composable
 fun TsProminentButton(
     label: String,
