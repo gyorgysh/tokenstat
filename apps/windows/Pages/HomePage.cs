@@ -578,28 +578,62 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
     /// <summary>
     /// The work worth going back to: recent conversations the host reports,
     /// newest first. A shortcut, so it only renders when there is somewhere
-    /// to go back to.
+    /// to go back to. Each row opens its conversation in the folder's chat,
+    /// like the Mac.
     /// </summary>
     private static UIElement ContinueCard(JsonArray recent)
     {
-        var list = new StackPanel { Spacing = Theme.SpaceM };
+        var list = new StackPanel { Spacing = Theme.SpaceS };
         foreach (var item in recent)
         {
             var title = Format.Text(item, "title", "Conversation");
-            var row = new StackPanel { Spacing = 3 };
-            row.Children.Add(new TextBlock
+            var texts = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+            texts.Children.Add(new TextBlock
             {
                 Text = title,
                 FontWeight = Microsoft.UI.Text.FontWeights.Medium,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             });
-            row.Children.Add(new TextBlock
+            texts.Children.Add(new TextBlock
             {
                 Text = ContinueSubtitle(item),
                 Opacity = 0.7,
                 FontSize = 12,
             });
-            list.Children.Add(row);
+            var workspaceId = Format.Text(item, "workspaceId");
+            var id = Format.Text(item, "id");
+            if (string.IsNullOrEmpty(workspaceId) || string.IsNullOrEmpty(id))
+            {
+                list.Children.Add(texts);
+                continue;
+            }
+            var mark = ActionIcon.History.Icon();
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            var chevron = ActionIcon.Next.Icon();
+            chevron.VerticalAlignment = VerticalAlignment.Center;
+            var content = new Grid { ColumnSpacing = Theme.SpaceM };
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            content.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star),
+            });
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            content.Children.Add(mark);
+            Grid.SetColumn(texts, 1);
+            content.Children.Add(texts);
+            Grid.SetColumn(chevron, 2);
+            content.Children.Add(chevron);
+            var open = new Button
+            {
+                Content = content,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(Theme.SpaceS),
+            };
+            open.Click += (_, _) => AppServices.OpenConversation?.Invoke(workspaceId, id);
+            list.Children.Add(open);
         }
         return Chrome.Card("Continue", list, "The conversations you last opened");
     }
@@ -1455,6 +1489,15 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
         {
             _inspectorRoot.Children.Add(child);
         }
+        // The footer action, like the Mac: the pinned day opened as a full
+        // report in Insights.
+        var open = ActionIconGlyph.PrimaryButton(
+            "Open in Insights",
+            ActionIcon.Next,
+            (_, _) => AppServices.OpenInsightsDay?.Invoke(date));
+        open.HorizontalAlignment = HorizontalAlignment.Stretch;
+        open.HorizontalContentAlignment = HorizontalAlignment.Center;
+        _inspectorRoot.Children.Add(open);
     }
 
     private List<UIElement> DayBody(JsonNode detail, DayOverview? extra, string date)

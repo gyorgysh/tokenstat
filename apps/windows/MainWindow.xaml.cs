@@ -170,6 +170,41 @@ public sealed partial class MainWindow : Window
                 });
             });
         };
+        AppServices.OpenConversation = (workspaceId, chatId) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                // Through the sidebar row, so the pane and the content agree.
+                // The chat id travels for the reveal; the folder's chat opens
+                // either way.
+                var tag = "ws:" + workspaceId + ":Chat";
+                if (FindNavItem(tag) is NavigationViewItem row)
+                {
+                    _nav.SelectedItem = row;
+                }
+                else
+                {
+                    SetContent(new ChatPage(workspaceId));
+                }
+            });
+        };
+        AppServices.OpenInsightsDay = (date) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                // Through the sidebar row, like the search opener. The day
+                // travels for the focus; Insights opens either way.
+                const string tag = "global:Insights";
+                if (FindNavItem(tag) is NavigationViewItem row)
+                {
+                    _nav.SelectedItem = row;
+                }
+                else
+                {
+                    Show(tag);
+                }
+            });
+        };
 
         if (_nav.MenuItems[0] is NavigationViewItem first)
         {

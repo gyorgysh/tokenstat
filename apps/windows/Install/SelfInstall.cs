@@ -20,6 +20,13 @@ internal static class SelfInstall
 {
     public const string UninstallKeyName = "ai.tokenstat.tokenstat";
 
+    /// <summary>
+    /// The per-user scheduled task that runs hostd. A task, never a Windows
+    /// Service: it runs as you, reads your logs, and has no business running
+    /// as SYSTEM or existing before you log in.
+    /// </summary>
+    public const string HostTaskName = "ai.tokenstat.hostd";
+
     public static string InstallDirectory =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -84,6 +91,13 @@ internal static class SelfInstall
 
         if (IsRunningFromInstall || IsDevBuild)
         {
+            if (IsRunningFromInstall)
+            {
+                // An update swaps the folder under a script, outside this
+                // process. Refresh the Add/Remove Programs entry on the way
+                // in, so it names the version that is actually on disk.
+                RefreshUninstallKey();
+            }
             return false;
         }
 
@@ -165,6 +179,114 @@ internal static class SelfInstall
                 process.Dispose();
             }
         }
+    }
+
+    /// <summary>
+    /// Bring the host helper's scheduled task in line with the always-on
+    /// switch, the way the Mac app rewrites the launch agent after
+    /// `host.setPolicy`. Call after the policy call returns: the script reads
+    /// the `alwaysOn` value hostd just wrote. Never a Windows Service.
+    /// </summary>
+    public static void ApplyAlwaysOn(bool alwaysOn)
+    {
+        if (alwaysOn)
+        {
+            var hostd = Path.Combine(InstallDirectory, "tokenstat-hostd.exe");
+            if (!File.Exists(hostd))
+            {
+                hostd = Path.Combine(AppContext.BaseDirectory, "tokenstat-hostd.exe");
+            }
+            if (File.Exists(hostd))
+            {
+                RegisterHostTask(hostd);
+            }
+            return;
+        }
+        UnregisterHostTask();
+        // hostd re-registers the task itself on `host.setPolicy`, in a
+        // powershell it does not wait for, so its registration can land after
+        // this delete. Sweep again once it has had time to arrive. A task
+        // with no logon trigger would do nothing, but disabled means gone.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5));
+                UnregisterHostTask();
+            }
+            catch
+            {
+                // Best effort.
+            }
+        });
+    }
+
+    /// <summary>
+    /// Register the per-user task that runs hostd, with a logon trigger, by
+    /// invoking the bundled script. That script is the one definition of the
+    /// task shape (settings, principal, when the trigger applies); this only
+    /// falls back to schtasks when the script is not on disk.
+    /// </summary>
+    public static void RegisterHostTask(string hostdExe)
+    {
+        var script = BundledHostScript();
+        if (script is not null)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Bin \"{hostdExe}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                })?.WaitForExit(15000);
+                return;
+            }
+            catch
+            {
+                // Fall through to schtasks.
+            }
+        }
+        RunSchTasks($"/Create /TN \"{HostTaskName}\" /TR \"\\\"{hostdExe}\\\"\" /SC ONLOGON /RL LIMITED /F");
+        RunSchTasks($"/Run /TN \"{HostTaskName}\"");
+    }
+
+    /// <summary>
+    /// Remove the per-user hostd task. schtasks directly rather than the
+    /// script, so it works when the install directory is already gone.
+    /// </summary>
+    public static void UnregisterHostTask()
+    {
+        RunSchTasks($"/Delete /TN \"{HostTaskName}\" /F");
+    }
+
+    /// <summary>
+    /// Rewrite the Add/Remove Programs entry for the version on disk. Cheap
+    /// when nothing changed: the size walk only runs when the version moved.
+    /// </summary>
+    public static void RefreshUninstallKey()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Uninstall\" + UninstallKeyName,
+                writable: true);
+            if (key is null)
+            {
+                WriteUninstallKey();
+                return;
+            }
+            if (string.Equals(key.GetValue("DisplayVersion") as string, AppInfo.Version, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+        catch
+        {
+            return;
+        }
+        WriteUninstallKey();
     }
 
     private static void ScheduleDelete(string dest)
@@ -363,20 +485,13 @@ internal static class SelfInstall
     private static void TryRegisterHostTask()
     {
         var hostd = Path.Combine(InstallDirectory, "tokenstat-hostd.exe");
-        var script = Path.Combine(InstallDirectory, "install-host-task.ps1");
-        if (!File.Exists(hostd) || !File.Exists(script))
+        if (!File.Exists(hostd))
         {
             return;
         }
         try
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Bin \"{hostd}\"",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            })?.WaitForExit(15000);
+            RegisterHostTask(hostd);
         }
         catch
         {
@@ -387,23 +502,63 @@ internal static class SelfInstall
     private static void TryUnregisterHostTask()
     {
         var script = Path.Combine(InstallDirectory, "install-host-task.ps1");
-        if (!File.Exists(script))
+        if (File.Exists(script))
         {
-            return;
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Uninstall",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                })?.WaitForExit(10000);
+            }
+            catch
+            {
+                // Fall through to schtasks.
+            }
         }
+        try
+        {
+            UnregisterHostTask();
+        }
+        catch
+        {
+            // Ignore.
+        }
+    }
+
+    private static string? BundledHostScript()
+    {
+        var nextToApp = Path.Combine(AppContext.BaseDirectory, "install-host-task.ps1");
+        if (File.Exists(nextToApp))
+        {
+            return nextToApp;
+        }
+        var installed = Path.Combine(InstallDirectory, "install-host-task.ps1");
+        return File.Exists(installed) ? installed : null;
+    }
+
+    /// <summary>
+    /// One schtasks call, best effort. A missing task, a locked scheduler, or
+    /// no schtasks on PATH all mean the helper simply starts with the app.
+    /// </summary>
+    private static void RunSchTasks(string arguments)
+    {
         try
         {
             Process.Start(new ProcessStartInfo
             {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Uninstall",
+                FileName = "schtasks.exe",
+                Arguments = arguments,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             })?.WaitForExit(10000);
         }
         catch
         {
-            // Ignore.
+            // Best effort.
         }
     }
 }

@@ -767,9 +767,7 @@ internal sealed class AccountPage : Page
             toggle.IsEnabled = false;
             try
             {
-                await AppServices.Host.CallAsync(
-                    "host.setPolicy",
-                    new JsonObject { ["alwaysOn"] = toggle.IsOn });
+                await AppServices.ApplyHostPolicyAsync(toggle.IsOn);
             }
             catch (Exception ex)
             {

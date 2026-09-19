@@ -5,6 +5,7 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
+using System.Text.Json.Nodes;
 using Tokenstat.Host;
 using Tokenstat.Install;
 using Tokenstat.Navigation;
@@ -45,4 +46,31 @@ internal static class AppServices
     /// Set from MainWindow so results return to the folder they live in.
     /// </summary>
     public static Action<string, WorkspaceSection>? OpenWorkspace { get; set; }
+
+    /// <summary>
+    /// Open a conversation from Home's Continue list. Workspace id, then the
+    /// conversation id. Set from MainWindow, like the Mac opening the recent
+    /// in its folder's chat.
+    /// </summary>
+    public static Action<string, string>? OpenConversation { get; set; }
+
+    /// <summary>
+    /// Open Insights for one calendar day (yyyy-MM-dd) from Home's inspector.
+    /// Set from MainWindow, like the Mac focusing the pinned day.
+    /// </summary>
+    public static Action<string>? OpenInsightsDay { get; set; }
+
+    /// <summary>
+    /// Store the always-on policy, then bring the host helper's scheduled
+    /// task in line with it: registered with a logon trigger when on, removed
+    /// when off. One call so the toggle cannot store the policy and forget
+    /// the task. Never a Windows Service.
+    /// </summary>
+    public static async Task ApplyHostPolicyAsync(bool alwaysOn)
+    {
+        await Host.CallAsync(
+            "host.setPolicy",
+            new JsonObject { ["alwaysOn"] = alwaysOn });
+        await Task.Run(() => SelfInstall.ApplyAlwaysOn(alwaysOn));
+    }
 }
