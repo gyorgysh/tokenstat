@@ -6,6 +6,8 @@ using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Pages;
 using Windows.Media.Core;
 
+namespace NativeUiTests;
+
 internal static class Program
 {
     internal static int Result = 1;
@@ -23,8 +25,10 @@ internal static class Program
         {
             Log("Starting native Windows UI tests");
             WinRT.ComWrappersSupport.InitializeComWrappers();
+            Log("Starting XAML application");
             Application.Start(_ =>
             {
+                Log("XAML dispatcher initialized");
                 SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
                 new SmokeApp();
             });
@@ -34,13 +38,13 @@ internal static class Program
         return Result;
     }
 }
-internal sealed class SmokeApp : Application
+public sealed partial class SmokeApp : Application
 {
     private Window? _window;
     public SmokeApp()
     {
-        Resources.MergedDictionaries.Add(new XamlControlsResources());
-        UnhandledException += (_, e) => { Program.Log(e.Exception.ToString()); e.Handled = true; Exit(); };
+        InitializeComponent();
+        UnhandledException += (_, e) => { Program.Result = 1; Program.Log(e.Exception.ToString()); e.Handled = true; Exit(); };
     }
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
@@ -71,15 +75,21 @@ internal sealed class SmokeApp : Application
                 if (frames.Length < 3 || frames.Any(frame => frame is null)) throw new Exception("Native encoder fixture missing");
                 streamer = new H264Streamer((uint)frames[0].Width, (uint)frames[0].Height);
                 var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                string? playbackFailure = null;
                 using var player = new Windows.Media.Playback.MediaPlayer();
                 video.SetMediaPlayer(player);
                 player.MediaOpened += (_, _) => opened.TrySetResult();
-                player.MediaFailed += (_, error) => opened.TrySetException(new Exception(error.ErrorMessage));
+                player.MediaFailed += (_, error) =>
+                {
+                    playbackFailure = error.ErrorMessage;
+                    opened.TrySetException(new Exception(playbackFailure));
+                };
                 video.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
                 foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10));
                 player.Play();
                 await opened.Task.WaitAsync(TimeSpan.FromSeconds(15));
                 await Task.Delay(500);
+                if (playbackFailure is not null) throw new Exception(playbackFailure);
                 if (player.PlaybackSession.NaturalVideoWidth != 320 || player.PlaybackSession.NaturalVideoHeight != 180)
                     throw new Exception("Native Windows decoder did not accept the host encoder's stream");
                 Program.Log("PASS: native host H.264 opens in the production Windows player pipeline");

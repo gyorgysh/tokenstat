@@ -229,6 +229,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}
+          cache-on-failure: true
 
       - name: Build
         run: cargo build --workspace --all-features --locked
@@ -256,6 +257,11 @@ jobs:
           dotnet run --project scripts/tests/windows-ui/WindowsUiTests.csproj -c Release
           $result = $LASTEXITCODE
           Get-Content "$env:TOKENSTAT_SCREEN_FIXTURE/ui-tests.log" -ErrorAction Continue
+          if ($result -ne 0) {
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-3) } -ErrorAction Continue |
+              Where-Object { $_.Message -match 'WindowsUiTests|Microsoft.UI.Xaml' } |
+              Select-Object TimeCreated, ProviderName, Message | Format-List
+          }
           exit $result
 
       - name: Windows client and daemon lifetime regressions
