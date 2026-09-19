@@ -723,10 +723,9 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// Rebuild the one top bar for what is on screen, like the Mac contextual
-    /// toolbar: the device scope picker only on Home, then the page's own
-    /// scope chip, then the page's actions before the shared search icon, and
-    /// the inspector toggle last, nearest the edge it opens. Insights is
-    /// local only, like the desktop Mac, so it gets no picker. Account never
+    /// toolbar: the device scope picker on Home and Insights, then the page's
+    /// scope chip and actions before the shared search icon, and the inspector
+    /// toggle last, nearest the edge it opens. Account never
     /// shows an inspector, so it gets no toggle either.
     /// </summary>
     private void RebuildToolbar()

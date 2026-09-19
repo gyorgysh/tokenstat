@@ -345,13 +345,13 @@ internal static class WorkspaceHistory
 /// linked computer can identify the same author here without changing Git config.
 internal static class HistoryAvatars
 {
-    private static readonly Dictionary<string, (DateTime At, Task<HashSet<string>> Task)> Cache = new();
+    private static readonly Dictionary<string, (DateTime At, Task<Dictionary<string, string>> Task)> Cache = new();
     internal static async Task<HashSet<string>> OwnEmailsAsync(JsonNode? account, JsonArray commits)
     {
         var own = commits.Where(c => Format.Flag(c, "mine"))
             .Select(c => Format.Text(c, "email")).Where(e => e.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (account is null || string.IsNullOrEmpty(Format.Text(account, "avatar"))) return own;
-        var accountId = Format.Text(account, "accountId", Format.Text(account, "handle"));
+        var accountId = Format.Text(account, "host") + ":" + Format.Text(account, "accountId", Format.Text(account, "handle"));
         var peers = (Format.Items(account, "machines") ?? new JsonArray())
             .Select(m => Format.Text(m, "publicIdentity")).Where(p => p.Length > 0).ToHashSet();
         var ids = commits.Select(c => Format.Text(c, "id")).ToHashSet();
@@ -362,26 +362,28 @@ internal static class HistoryAvatars
             var key = accountId + ":" + folder.Id + ":" + Format.Text(commits.FirstOrDefault(), "id");
             if (!Cache.TryGetValue(key, out var cached) || DateTime.UtcNow - cached.At > TimeSpan.FromMinutes(5))
             {
-                async Task<HashSet<string>> Fetch()
+                async Task<Dictionary<string, string>> Fetch()
                 {
-                    var emails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var emails = new Dictionary<string, string>(StringComparer.Ordinal);
                     try
                     {
                         var log = await Tokenstat.Navigation.RemoteWorkspaces.CallOnPeerAsync(folder.PeerKey,
                             "workspace.log", new JsonObject { ["id"] = folder.InnerId, ["limit"] = 100 }, TimeSpan.FromSeconds(3));
                         foreach (var c in Format.Items(log, "commits", "history", "log") ?? new JsonArray())
-                            if (Format.Flag(c, "mine") && ids.Contains(Format.Text(c, "id")) && Format.Text(c, "email") is { Length: > 0 } email)
-                                emails.Add(email);
+                            if (Format.Flag(c, "mine") && Format.Text(c, "id").Length > 0 && Format.Text(c, "email") is { Length: > 0 } email)
+                                emails[Format.Text(c, "id")] = email;
                     }
                     catch { /* Offline computers do not delay or erase local history. */ }
                     return emails;
                 }
                 cached = (DateTime.UtcNow, Fetch());
                 Cache[key] = cached;
+                foreach (var old in Cache.OrderByDescending(pair => pair.Value.At).Skip(64).Select(pair => pair.Key).ToArray()) Cache.Remove(old);
             }
             return await cached.Task;
         });
-        foreach (var emails in await Task.WhenAll(loads)) own.UnionWith(emails);
+        foreach (var emails in await Task.WhenAll(loads))
+            own.UnionWith(emails.Where(pair => ids.Contains(pair.Key)).Select(pair => pair.Value));
         return own;
     }
 }

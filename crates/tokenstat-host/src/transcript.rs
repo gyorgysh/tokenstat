@@ -2787,7 +2787,7 @@ fn nonempty(s: Option<&str>) -> Option<String> {
     s.filter(|s| !s.trim().is_empty()).map(str::to_string)
 }
 
-/// Strip CSI and similar cursor sequences the pty can interleave.
+/// Strip terminal control sequences without leaking titles or hyperlink metadata.
 pub fn strip_ansi(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = String::with_capacity(text.len());
@@ -2798,9 +2798,28 @@ pub fn strip_ansi(text: &str) -> String {
             while i < bytes.len() {
                 let b = bytes[i];
                 i += 1;
-                if b.is_ascii_alphabetic() {
+                if (0x40..=0x7e).contains(&b) {
                     break;
                 }
+            }
+            continue;
+        }
+        if bytes[i] == 0x1b
+            && i + 1 < bytes.len()
+            && matches!(bytes[i + 1], b']' | b'P' | b'X' | b'^' | b'_')
+        {
+            let osc = bytes[i + 1] == b']';
+            i += 2;
+            while i < bytes.len() {
+                if osc && bytes[i] == 0x07 {
+                    i += 1;
+                    break;
+                }
+                if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'\\') {
+                    i += 2;
+                    break;
+                }
+                i += 1;
             }
             continue;
         }
@@ -2819,6 +2838,22 @@ mod tests {
     fn feed(backend: &str, raw: &str) -> String {
         let mut p = Parser::new(backend);
         p.push(raw.as_bytes())
+    }
+
+    #[test]
+    fn terminal_titles_and_hyperlinks_do_not_leak_into_chat() {
+        assert_eq!(
+            strip_ansi(
+                "\x1b[?25h\x1b]0;C:\\Windows\\powershell.exe\x07Error: Invalid JSON provided to --settings"
+            ),
+            "Error: Invalid JSON provided to --settings"
+        );
+        assert_eq!(
+            strip_ansi("\x1b]8;;https://example.invalid\x1b\\visible 😀\x1b]8;;\x1b\\"),
+            "visible 😀"
+        );
+        assert_eq!(strip_ansi("before\x1b]0;incomplete title"), "before");
+        assert_eq!(strip_ansi("\x1b[200~hello\x1b[201~"), "hello");
     }
 
     #[test]

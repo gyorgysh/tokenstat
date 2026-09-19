@@ -617,7 +617,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = frame,
         };
-        button.Click += (_, _) =>
+        void SelectRow()
         {
             _creating = false;
             _selectedId = id;
@@ -629,13 +629,14 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
             _runError = null;
             _historyShown = WorkbenchOps.RunPreviewCount;
             RenderDetail();
-        };
+        }
+        button.Click += (_, _) => SelectRow();
         var menu = ContextMenus.Menu(button);
-        ContextMenus.AddButton(menu, button, "Edit");
+        ContextMenus.Add(menu, "Edit", SelectRow);
         ContextMenus.AddButtons(menu, actions);
         ContextMenus.Add(menu, "Delete…", () =>
         {
-            ContextMenus.Invoke(button);
+            SelectRow();
             _confirmDelete = true;
             RenderDetail();
         });

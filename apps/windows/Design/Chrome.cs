@@ -16,7 +16,7 @@ namespace Tokenstat.Design;
 
 internal static class Chrome
 {
-    public static Border Card(string title, UIElement body, string? subtitle = null, FrameworkElement? accessory = null)
+    public static Border Card(string title, UIElement body, string? subtitle = null, FrameworkElement? accessory = null, FrameworkElement? mark = null)
     {
         var header = new StackPanel { Spacing = 2 };
         header.Children.Add(new TextBlock
@@ -36,10 +36,22 @@ internal static class Chrome
             });
         }
 
+        UIElement heading = header;
+        if (mark is not null)
+        {
+            var marked = new Grid { ColumnSpacing = Theme.SpaceS };
+            marked.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            marked.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            marked.Children.Add(mark);
+            Grid.SetColumn(header, 1);
+            marked.Children.Add(header);
+            heading = marked;
+        }
         var stack = new StackPanel { Spacing = Theme.SpaceM };
         if (accessory is null)
         {
-            stack.Children.Add(header);
+            stack.Children.Add(heading);
         }
         else
         {
@@ -51,7 +63,7 @@ internal static class Chrome
                 Width = new GridLength(1, GridUnitType.Star),
             });
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            head.Children.Add(header);
+            head.Children.Add(heading);
             accessory.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(accessory, 1);
             head.Children.Add(accessory);
@@ -68,6 +80,14 @@ internal static class Chrome
             Padding = new Thickness(Theme.CardPadding),
             Child = stack,
         };
+    }
+
+    public static Border CardMark(ActionIcon action)
+    {
+        var icon = action.Icon();
+        icon.Foreground = Theme.AccentBrush;
+        return new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(7),
+            Background = Theme.AccentSoftBrush, Child = new Viewbox { Width = 16, Height = 16, Child = icon } };
     }
 
     public static StackPanel Stat(string label, string value, string? note = null, bool accent = false)

@@ -27,14 +27,18 @@ internal static class ContextMenus
         return item;
     }
 
-    public static MenuFlyoutItem AddAsync(MenuFlyout menu, string title, Func<Task> action, Func<bool>? enabled = null) =>
-        Add(menu, title, async () =>
+    public static MenuFlyoutItem AddAsync(MenuFlyout menu, string title, Func<Task> action, Func<bool>? enabled = null)
+    {
+        XamlRoot? ownerRoot = null;
+        menu.Opening += (_, _) => ownerRoot = menu.Target?.XamlRoot;
+        return Add(menu, title, async () =>
         {
+            var root = ownerRoot ?? menu.Target?.XamlRoot;
             try { await action(); }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine(ex);
-                if (menu.Target?.XamlRoot is not { } root) return;
+                if (root is null) return;
                 try
                 {
                     await new ContentDialog { XamlRoot = root, Title = "Action could not finish", Content = ex.Message, CloseButtonText = "Close" }.ShowAsync();
@@ -42,6 +46,7 @@ internal static class ContextMenus
                 catch { /* The owning window may have closed while the action was running. */ }
             }
         }, enabled);
+    }
 
     public static void Copy(MenuFlyout menu, string title, Func<string> text) =>
         Add(menu, title, () => { var data = new DataPackage(); data.SetText(text()); Clipboard.SetContent(data); });

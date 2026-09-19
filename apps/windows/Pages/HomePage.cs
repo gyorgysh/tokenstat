@@ -739,7 +739,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             open.Click += (_, _) => AppServices.OpenConversation?.Invoke(workspaceId, id);
             list.Children.Add(open);
         }
-        return Chrome.Card("Continue", list, "The conversations you last opened");
+        return Chrome.Card("Continue", list, "The conversations you last opened", mark: Chrome.CardMark(ActionIcon.History));
     }
 
     private static string ContinueSubtitle(JsonNode? item)
@@ -910,7 +910,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             _selectedDate,
             onSelect: day => SelectDay(day),
             onHover: day => HoverDay(day));
-        return Chrome.Card("Activity", _heatmap, subtitle);
+        return Chrome.Card("Activity", _heatmap, subtitle, mark: Chrome.CardMark(ActionIcon.Layout));
     }
 
     /// <summary>
@@ -1079,7 +1079,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
                 TextWrapping = TextWrapping.Wrap,
             });
         }
-        return Chrome.Card(HarnessName(source), body, ProviderSubtitle(provider), AgentMark.View(source, 32));
+        return Chrome.Card(HarnessName(source), body, ProviderSubtitle(provider), mark: AgentMark.View(source, 32));
     }
 
     /// <summary>
@@ -1259,7 +1259,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         return Chrome.Card(
             "Plan usage",
             list,
-            "Subscription-covered usage recorded in the archive");
+            "Subscription-covered usage recorded in the archive", mark: Chrome.CardMark(ActionIcon.Plans));
     }
 
     private static UIElement MachinesCard(JsonNode? account)
@@ -1324,7 +1324,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
                 TextWrapping = TextWrapping.Wrap,
             });
         }
-        return Chrome.Card("Machines", list, subtitle);
+        return Chrome.Card("Machines", list, subtitle, mark: Chrome.CardMark(ActionIcon.Device));
     }
 
     /// <summary>
@@ -1882,7 +1882,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
                 });
             }
         }
-        return Chrome.Card(title, body, subtitle);
+        return Chrome.Card(title, body, subtitle, mark: Chrome.CardMark(title == "Harnesses" ? ActionIcon.Run : ActionIcon.Token));
     }
 
     private static List<DayGroupRow> ModelRows(JsonNode detail, DayOverview? extra)

@@ -15,6 +15,7 @@ struct InsightsView: View {
     /// Leave a day-focused view and return to Home, which is where it came
     /// from. Nil when Insights was opened directly, so there is no back arrow
     /// for a journey nobody took.
+    var accountIdentity: String = ""
     var onBackToHome: (() -> Void)?
 
     private var tabs: [(tab: InsightsModel.Tab, label: String, symbol: String)] {
@@ -76,7 +77,7 @@ struct InsightsView: View {
                 }
             )
             if scope == .allMachines {
-                AccountInsightsContent()
+                AccountInsightsContent().id(accountIdentity)
             } else {
                 TabStrip(tabs: tabs, selection: $model.tab)
                 content
@@ -687,10 +688,11 @@ private struct AccountInsightsContent: View {
     var body: some View {
         VStack(spacing: Theme.Space.m) {
             HStack {
-                Picker("Breakdown", selection: $model.cut) {
-                    ForEach(ClientInsightsModel.Cut.allCases) { cut in Text(cut.label).tag(cut) }
-                }.pickerStyle(.segmented).frame(maxWidth: 360)
-                TextField("Filter", text: $search).textFieldStyle(.roundedBorder)
+                SegmentedCapsulePicker(
+                    options: ClientInsightsModel.Cut.allCases.map { (value: $0, label: $0.label, symbol: "") },
+                    selection: $model.cut
+                ).frame(maxWidth: 360)
+                SearchField(text: $search, prompt: "Filter")
                 ToolbarIconButton(systemImage: "arrow.clockwise", help: "Refresh account usage", isBusy: model.isLoading) {
                     Task { await model.refresh() }
                 }

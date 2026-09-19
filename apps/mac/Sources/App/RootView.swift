@@ -2594,7 +2594,7 @@ struct RootView: View {
             EmptyView()
             #endif
         case .global(.insights):
-            InsightsView(model: model) {
+            InsightsView(model: model, accountIdentity: (account.account?.host ?? "") + ":" + (account.account?.accountId ?? account.account?.handle ?? "signed-out")) {
                 // The back arrow exists only for a day that came from Home, so
                 // the round trip has to end there too: clear the day filter
                 // and put Home back in front.

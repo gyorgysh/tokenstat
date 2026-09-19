@@ -42,10 +42,27 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     private DeviceScope _scope = DeviceScopeNames.Restore();
     private readonly Dictionary<string, JsonNode?> _accountReports = new();
     private string _accountCut = "model";
+    private string? _accountIdentity;
+    private int _scopeGeneration;
+    private void AccountChanged()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _scopeGeneration++;
+            _accountReports.Clear();
+            _accountIdentity = null;
+            if (_scope != DeviceScope.AllDevices || !IsLoaded) return;
+            _hasContent = false;
+            while (_root.Children.Count > 1) _root.Children.RemoveAt(1);
+            _status.Text = "Loading…";
+            _ = LoadAsync();
+        });
+    }
     public void ApplyScope(DeviceScope scope)
     {
         if (_scope == scope) return;
         _scope = scope;
+        _scopeGeneration++;
         _hasContent = false;
         RebuildTabs();
         RaiseToolbarChanged();
@@ -129,11 +146,20 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         RefreshInspector();
         Loaded += async (_, _) =>
         {
-            if (!_hasContent && !_loading)
+            AppServices.AccountChanged -= AccountChanged;
+            AppServices.AccountChanged += AccountChanged;
+            if (_scope == DeviceScope.AllDevices)
+            {
+                _scopeGeneration++;
+                _accountReports.Clear();
+                _hasContent = false;
+            }
+            if (!_hasContent)
             {
                 await LoadAsync();
             }
         };
+        Unloaded += (_, _) => { AppServices.AccountChanged -= AccountChanged; _scopeGeneration++; };
     }
 
     /// <summary>
@@ -204,6 +230,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             return new List<UIElement> { Buttons.ToolbarIcon(ActionIcon.Refresh, "Refresh account usage", async (_, _) =>
             {
+                _scopeGeneration++;
                 _accountReports.Clear();
                 await LoadAsync();
             }) };
@@ -352,6 +379,9 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
 
     private async Task LoadOnceAsync()
     {
+        var generation = _scopeGeneration;
+        var scope = _scope;
+        var accountCut = _accountCut;
         while (_root.Children.Count > 1)
         {
             _root.Children.RemoveAt(1);
@@ -365,13 +395,36 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             _error = null;
             try
             {
+                var status = await AppServices.Host.CallAsync("account.status");
+                if (generation != _scopeGeneration) return;
+                var account = status["account"] ?? status;
+                var identity = Format.Text(account, "host") + ":" + Format.Text(account, "accountId", Format.Text(account, "handle"));
+                if (_accountIdentity != identity)
+                {
+                    _accountReports.Clear();
+                    _accountIdentity = identity;
+                }
+                if (!Format.Flag(account, "signedIn"))
+                {
+                    _accountReports.Clear();
+                    throw new InvalidOperationException("Sign in to see synced usage across your devices.");
+                }
                 if (!_accountReports.ContainsKey(cut))
-                    _accountReports[cut] = await AppServices.Host.CallAsync("account.report",
-                        new JsonObject { ["group"] = cut, ["weeks"] = 53 });
+                {
+                    var report = await AppServices.Host.CallAsync("account.report", new JsonObject { ["group"] = cut, ["weeks"] = 53 });
+                    if (generation != _scopeGeneration) return;
+                    _accountReports[cut] = report;
+                }
             }
-            catch (Exception ex) { _error = ex.Message; }
+            catch (Exception ex)
+            {
+                if (generation != _scopeGeneration) return;
+                _accountReports.Clear();
+                _error = ex.Message;
+            }
         }
         else await LoadLocalAsync();
+        if (generation != _scopeGeneration || scope != _scope || (scope == DeviceScope.AllDevices && accountCut != _accountCut)) return;
 
         while (_root.Children.Count > 1)
         {
