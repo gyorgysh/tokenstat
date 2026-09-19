@@ -9,6 +9,10 @@ use crate::ui;
 
 pub(super) fn draw(f: &mut Frame<'_>, app: &mut App) {
     let area = f.area();
+    f.render_widget(
+        Block::default().style(Style::default().fg(MUTED).bg(background())),
+        area,
+    );
     // Thin chrome: tabs, flexible data, one input line, one status line.
     // Suggestions overlay the bottom of the data pane so they do not steal
     // permanent vertical space.
@@ -77,11 +81,11 @@ pub(super) fn draw_tabs(f: &mut Frame<'_>, area: Rect, app: &App) {
                 .bg(accent())
                 .add_modifier(Modifier::BOLD),
         )
-        .divider(Span::styled(divider, Style::default().fg(MUTED)));
+        .divider(Span::styled(divider, Style::default().fg(border())));
     f.render_widget(tabs, area);
 }
 
-pub(super) fn draw_body(f: &mut Frame<'_>, area: Rect, app: &App) {
+pub(super) fn draw_body(f: &mut Frame<'_>, area: Rect, app: &mut App) {
     let filter_note = if filter_active(&app.filter) {
         format!(" · filter {}", describe_filter(&app.filter))
     } else {
@@ -128,16 +132,20 @@ pub(super) fn draw_body(f: &mut Frame<'_>, area: Rect, app: &App) {
         .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
         .border_type(border_type())
         .border_style(Style::default().fg(border()))
-        .title(Span::styled(
-            title,
-            Style::default()
-                .fg(secondary())
-                .add_modifier(Modifier::BOLD),
-        ));
+        .title(Span::styled(title, Style::default().fg(MUTED)));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let lines = if app.empty && app.tab != Tab::Doctor {
+    let table = |rows: &[tokenstat_core::Bucket], label: &str, group: GroupBy| {
+        table_lines(
+            rows,
+            label,
+            group == GroupBy::Model,
+            &app.prices,
+            app.values.iter().find(|(g, _)| *g == group).map(|(_, v)| v),
+        )
+    };
+    let mut lines = if app.empty && app.tab != Tab::Doctor {
         if filter_active(&app.filter) {
             filtered_empty_lines()
         } else {
@@ -146,37 +154,46 @@ pub(super) fn draw_body(f: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         match app.tab {
             Tab::Summary => summary_lines(app, inner.width),
-            Tab::Daily => table_lines(
+            Tab::Daily => table(
                 &chrono_ordered(&app.days, app.chrono_newest_first),
                 "Date",
-                false,
-                &app.prices,
+                GroupBy::Day,
             ),
-            Tab::Weekly => table_lines(
+            Tab::Weekly => table(
                 &chrono_ordered(&app.weeks, app.chrono_newest_first),
                 "Week",
-                false,
-                &app.prices,
+                GroupBy::Week,
             ),
-            Tab::Monthly => table_lines(
+            Tab::Monthly => table(
                 &chrono_ordered(&app.months, app.chrono_newest_first),
                 "Month",
-                false,
-                &app.prices,
+                GroupBy::Month,
             ),
-            Tab::Models => table_lines(&app.models, "Model", true, &app.prices),
-            Tab::Projects => table_lines(&app.projects, "Project", false, &app.prices),
-            Tab::Sessions => table_lines(&app.sessions, "Session", false, &app.prices),
+            Tab::Models => table(&app.models, "Model", GroupBy::Model),
+            Tab::Projects => table(&app.projects, "Project", GroupBy::Project),
+            Tab::Sessions => table(&app.sessions, "Session", GroupBy::Session),
             Tab::Blocks => block_lines(app),
             Tab::Doctor => doctor_lines(app),
         }
     };
 
+    if app.tab == Tab::Daily {
+        lines.insert(0, Line::from(""));
+        lines.insert(0, today_line(app));
+    }
+
     // Leave room at the bottom of the pane when the palette is open so rows
     // are not permanently covered without a way to scroll past them.
     let reserve = suggestion_height(app, inner.height);
     let view_height = inner.height.saturating_sub(reserve);
-    let scroll = app.scroll.min(lines.len().saturating_sub(1) as u16);
+    app.page_rows = view_height.max(1);
+    app.scroll = app.scroll.min(
+        lines
+            .len()
+            .saturating_sub(usize::from(app.page_rows))
+            .min(u16::MAX as usize) as u16,
+    );
+    let scroll = app.scroll;
     let para = Paragraph::new(lines)
         .scroll((scroll, 0))
         .style(Style::default());
@@ -228,6 +245,10 @@ pub(super) fn draw_suggestions_overlay(f: &mut Frame<'_>, body: Rect, app: &App)
         height,
     };
     f.render_widget(Clear, area);
+    f.render_widget(
+        Block::default().style(Style::default().fg(MUTED).bg(background())),
+        area,
+    );
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     // Top rule, then command rows. Selected row is bright; others are muted.
@@ -281,6 +302,10 @@ pub(super) fn draw_suggestions_overlay(f: &mut Frame<'_>, body: Rect, app: &App)
 
 pub(super) fn draw_input(f: &mut Frame<'_>, area: Rect, app: &App) {
     f.render_widget(Clear, area);
+    f.render_widget(
+        Block::default().style(Style::default().fg(MUTED).bg(background())),
+        area,
+    );
     let prompt = "❯ ";
     let display = Line::from(vec![
         Span::styled(
@@ -407,6 +432,10 @@ pub(super) fn draw_wizard(f: &mut Frame<'_>, area: Rect, app: &App) {
     let width = area.width.saturating_sub(4).min(72).max(40.min(area.width));
     let popup = centered_rect(width, height, area);
     f.render_widget(Clear, popup);
+    f.render_widget(
+        Block::default().style(Style::default().fg(MUTED).bg(background())),
+        popup,
+    );
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -489,6 +518,10 @@ pub(super) fn draw_detail(f: &mut Frame<'_>, area: Rect, app: &App) {
         .max(6);
     let popup = centered_rect(width, height, area);
     f.render_widget(Clear, popup);
+    f.render_widget(
+        Block::default().style(Style::default().fg(MUTED).bg(background())),
+        popup,
+    );
 
     let block = Block::default()
         .borders(Borders::ALL)

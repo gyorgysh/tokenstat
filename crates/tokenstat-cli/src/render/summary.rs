@@ -74,7 +74,7 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     println!("{values}");
     let sep = ui::separator();
     println!(
-        "  {DIM}cache read {}  {sep}  cache write {}  {sep}  {} counting cache{DIM:#}",
+        "  {DIM}cache read {}  {sep}  cache write {}  {sep}  {} total tokens, including cache{DIM:#}",
         ui::tokens(c.cache_read.unwrap_or(0)),
         ui::tokens(cache_write),
         ui::tokens(c.total()),
@@ -87,13 +87,20 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         println!("  {DIM}{first} to {last}{peak_txt}{DIM:#}");
     }
 
-    // One load for the heatmap, the table, and the notes below it. The catalog
+    // One load for the table and the notes below it. The catalog
     // is a megabyte of JSON, so parsing it twice per report is not free.
     let prices = PriceTable::load_with_catalog();
 
+    let day_values = values_by_key(&store.report_by_model(GroupBy::Day, q)?, &prices);
+    println!();
+    println!(
+        "  {}",
+        today_summary(&days, &day_values, &today(tz).to_string())
+    );
+
     if !days.is_empty() {
         println!();
-        let pairs = daily_cost(store, q, &prices)?;
+        let pairs = daily_tokens(&days);
         let unknown = store
             .days_active_without_usage("claude_code")
             .unwrap_or_default();
@@ -286,8 +293,7 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
     if days.is_empty() {
         return empty_range(json);
     }
-    let prices = PriceTable::load_with_catalog();
-    let pairs = daily_cost(store, q, &prices)?;
+    let pairs = daily_tokens(&days);
     let weeks = if json { 53 } else { heat_weeks(53) };
     let unknown = store
         .days_active_without_usage("claude_code")
@@ -297,12 +303,16 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
     };
 
     if json {
+        let prices = PriceTable::load_with_catalog();
+        let costs = values_by_key(&store.report_by_model(GroupBy::Day, q)?, &prices);
+        let cost_for = |date: &str| costs.get(date).map_or(0, |v| v.micros.max(0) as u64);
         let cells: Vec<String> = cal
             .days()
             .map(|c| {
                 format!(
-                    r#"{{"date":{},"cost_micros":{},"level":{}}}"#,
+                    r#"{{"date":{},"cost_micros":{},"tokens":{},"level":{}}}"#,
                     json_string(&c.date.to_string()),
+                    cost_for(&c.date.to_string()),
                     c.value,
                     c.level
                 )
@@ -311,9 +321,12 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
         // Money in microdollars, so the profile page can render exact figures
         // without a float ever touching the wire.
         println!(
-            r#"{{"days":[{}],"weeks":{},"cost_micros":{},"active_days":{},"streak_current":{},"streak_best":{},"busiest_day":{}}}"#,
+            r#"{{"days":[{}],"weeks":{},"cost_micros":{},"tokens":{},"shade_by":"tokens","active_days":{},"streak_current":{},"streak_best":{},"busiest_day":{}}}"#,
             cells.join(","),
             cal.weeks,
+            cal.days()
+                .map(|c| cost_for(&c.date.to_string()))
+                .sum::<u64>(),
             cal.total,
             cal.active_days,
             cal.streak_current,
@@ -327,29 +340,28 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
     println!();
     println!("  {DIM}ACTIVITY{DIM:#}");
     println!(
-        "  {BOLD}{a}{}{a:#} over {a}{}{a:#} active days{BOLD:#}",
-        micros_usd(cal.total),
+        "  {BOLD}{a}{}{a:#} tokens over {a}{}{a:#} active days{BOLD:#}",
+        ui::tokens(cal.total),
         cal.active_days,
     );
     let mut sub = format!(
-        "Averaging {} on a day worked.",
-        micros_usd(cal.total / cal.active_days.max(1) as u64)
+        "Averaging {} tokens on a day worked.",
+        ui::tokens(cal.total / cal.active_days.max(1) as u64)
     );
     if let Some(b) = cal.busiest {
         sub.push_str(&format!(
             " Busiest was {} at {}.",
             b.date,
-            micros_usd(b.value)
+            ui::tokens(b.value)
         ));
     }
     if cal.streak_current > 1 {
         sub.push_str(&format!(" On a {} day streak.", cal.streak_current));
     }
     println!("  {DIM}{sub}{DIM:#}");
-    // Say what the ramp measures, and say that it is not a bill. Plan usage is
-    // valued at list rates here exactly as everywhere else.
+    // State the metric used by the heatmap.
     println!(
-        "  {DIM}{} to {} {} list-rate value per day, not money charged{DIM:#}",
+        "  {DIM}{} to {} {} total tokens per day, including cache{DIM:#}",
         cal.first,
         cal.last,
         ui::separator()
@@ -359,7 +371,7 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
     if cal.unmeasured_days() > 0 {
         println!(
             "  {DIM}{} of those days were worked with no usage on record, drawn {}. \
-The value above is a floor.{DIM:#}",
+The token total above is a floor.{DIM:#}",
             cal.unmeasured_days(),
             ui::heat_unknown_cell(),
         );
@@ -405,10 +417,10 @@ pub fn wrapped(
         .iter()
         .filter_map(|m| EquivalentValue::price(&prices, &model_label(&m.key), &m.counters))
         .sum();
-    // Busiest by spend, so this line and the heatmap below it agree on which
+    // Busiest by token volume, so this line and the heatmap below it agree on which
     // day was the big one.
-    let day_cost = daily_cost(store, &q, &prices)?;
-    let busiest_day = day_cost.iter().max_by_key(|(_, micros)| *micros);
+    let day_tokens = daily_tokens(&days);
+    let busiest_day = day_tokens.iter().max_by_key(|(_, tokens)| *tokens);
     let top_project = projects.first();
     let in_out = totals.counters.input_fresh.unwrap_or(0) + totals.counters.output.unwrap_or(0);
 
@@ -454,11 +466,11 @@ pub fn wrapped(
     if let Some(p) = top_project {
         println!("  {DIM}top project{DIM:#}  {}", p.key);
     }
-    if let Some((date, micros)) = busiest_day {
+    if let Some((date, tokens)) = busiest_day {
         println!(
             "  {DIM}busiest day{DIM:#}  {}  ({})",
             date,
-            micros_usd(*micros)
+            ui::tokens(*tokens)
         );
     }
     if let Some(h) = peak {
@@ -475,7 +487,7 @@ pub fn wrapped(
         let unknown = store
             .days_active_without_usage("claude_code")
             .unwrap_or_default();
-        if let Some(cal) = ui::heat_calendar(&day_cost, heat_weeks(weeks), anchor, &unknown) {
+        if let Some(cal) = ui::heat_calendar(&day_tokens, heat_weeks(weeks), anchor, &unknown) {
             heat_block(&cal, true);
         }
     }

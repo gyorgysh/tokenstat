@@ -140,18 +140,11 @@ fn to_basic(r: u8, g: u8, b: u8) -> AnsiColor {
     best.0
 }
 
-/// Electric accent for black terminals (`#B264EB`).
-///
-/// Sampled from the galaxy purple reference (mid `#9F68C7`), then pushed
-/// brighter so chrome, bars, and the active tab read cleanly on black. The
-/// website should use black/white surfaces with `#9F68C7` as the brand mid and
-/// `#B264EB` where something needs to pop.
-pub const ACCENT_RGB: (u8, u8, u8) = (0xB2, 0x64, 0xEB);
-
-/// Secondary accent (`#67E8F9`). Cool cyan beside electric purple, the usual
-/// nebula pairing on black. Used for the activity heat grid so it does not
-/// fight the purple chrome with a leftover green.
-pub const SECONDARY_RGB: (u8, u8, u8) = (0x67, 0xE8, 0xF9);
+/// Website dark theme: electric violet, fuchsia, and quiet violet surfaces.
+pub const ACCENT_RGB: (u8, u8, u8) = (0x8B, 0x5C, 0xF6);
+pub const SECONDARY_RGB: (u8, u8, u8) = (0xE8, 0x79, 0xF9);
+pub const BACKGROUND_RGB: (u8, u8, u8) = (0x10, 0x0E, 0x1A);
+pub const BORDER_RGB: (u8, u8, u8) = (0x2E, 0x28, 0x44);
 
 pub fn accent() -> Style {
     let (r, g, b) = ACCENT_RGB;
@@ -164,16 +157,16 @@ pub fn secondary() -> Style {
     style_rgb(r, g, b)
 }
 
-/// Brand ramp from deep violet through electric purple to cyan.
+/// Brand ramp from deep violet through electric violet to fuchsia.
 ///
-/// `t` is 0..=1. Low values stay quiet on black, high values peak in cyan so
+/// `t` is 0..=1. Low values stay quiet on black, high values peak in fuchsia so
 /// charts read as a fade that gets stronger rather than one flat purple.
 pub fn intensity_rgb(t: f64) -> (u8, u8, u8) {
     const STOPS: [(f64, (u8, u8, u8)); 4] = [
-        (0.0, (0x3D, 0x2A, 0x55)),
-        (0.35, (0x9F, 0x68, 0xC7)),
-        (0.70, (0xB2, 0x64, 0xEB)),
-        (1.0, (0x67, 0xE8, 0xF9)),
+        (0.0, (0x3B, 0x2A, 0x6B)),
+        (0.35, (0x5F, 0x3F, 0xB8)),
+        (0.70, ACCENT_RGB),
+        (1.0, SECONDARY_RGB),
     ];
     let t = t.clamp(0.0, 1.0);
     for w in STOPS.windows(2) {
@@ -203,9 +196,9 @@ fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f64) -> (u8, u8, u8) {
 /// Heat-grid cell colors on the same ramp, spaced so levels read apart.
 pub fn heat_rgb(level: u8) -> (u8, u8, u8) {
     match level {
-        0 => (0x2A, 0x20, 0x38),
-        1 => (0x5A, 0x3D, 0x82),
-        2 => (0x9F, 0x68, 0xC7),
+        0 => (0x19, 0x16, 0x27),
+        1 => (0x3B, 0x2A, 0x6B),
+        2 => (0x5F, 0x3F, 0xB8),
         3 => ACCENT_RGB,
         _ => SECONDARY_RGB,
     }
@@ -453,8 +446,7 @@ pub const HEAT_COL: usize = 2;
 // about a terminal: the column arithmetic and the two label strings.
 pub use tokenstat_core::activity::HeatCalendar;
 
-/// Build an activity grid, marking the days that were worked and cannot be
-/// priced.
+/// Build an activity grid, marking the days that were worked without measured tokens.
 ///
 /// Wraps the core builder rather than re-exporting it so that every screen in
 /// this binary has to pass the list. Marking used to be something a caller
@@ -467,8 +459,45 @@ pub fn heat_calendar(
     unmeasured: &[String],
 ) -> Option<HeatCalendar> {
     let mut cal = tokenstat_core::activity::calendar(days, weeks, anchor)?;
+    // Match tokenstat.ai: interpolated quartiles over visible positive days,
+    // with relative thresholds when fewer than four days have measurements.
+    let mut values: Vec<u64> = cal.days().map(|c| c.value).filter(|v| *v > 0).collect();
+    values.sort_unstable();
+    for cell in cal.rows.iter_mut().flatten().flatten() {
+        cell.level = website_heat_level(cell.value, &values);
+    }
     cal.mark_unmeasured(unmeasured);
     Some(cal)
+}
+
+/// `values` contains the sorted positive values in the visible calendar.
+fn website_heat_level(value: u64, values: &[u64]) -> u8 {
+    if value == 0 {
+        return 0;
+    }
+    let v = value as f64;
+    if values.len() < 4 {
+        let ratio = v / values.last().copied().unwrap_or(1).max(1) as f64;
+        return if ratio > 0.6 {
+            4
+        } else if ratio > 0.32 {
+            3
+        } else if ratio > 0.12 {
+            2
+        } else {
+            1
+        };
+    }
+    for (i, q) in [0.25, 0.5, 0.75].iter().enumerate() {
+        let k = (values.len() - 1) as f64 * q;
+        let f = k.floor() as usize;
+        let fraction = k - f as f64;
+        let threshold = values[f] as f64 * (1.0 - fraction) + values[f + 1] as f64 * fraction;
+        if v <= threshold {
+            return i as u8 + 1;
+        }
+    }
+    4
 }
 
 /// Drawing a calendar into a fixed-width grid.
@@ -632,13 +661,51 @@ mod tests {
     }
 
     #[test]
-    fn intensity_ramps_from_violet_to_cyan() {
-        assert_eq!(intensity_rgb(0.0), (0x3D, 0x2A, 0x55));
+    fn intensity_ramps_from_violet_to_fuchsia() {
+        assert_eq!(intensity_rgb(0.0), (0x3B, 0x2A, 0x6B));
         assert_eq!(intensity_rgb(1.0), SECONDARY_RGB);
         let mid = intensity_rgb(0.5);
         // Mid should sit between brand purple and electric, not at either end.
         assert_ne!(mid, intensity_rgb(0.0));
         assert_ne!(mid, intensity_rgb(1.0));
+    }
+
+    #[test]
+    fn website_quartiles_interpolate_and_keep_equal_values_together() {
+        let values = [10, 20, 30, 40, 50, 60];
+        // Interpolated breaks are 22.5, 35, 47.5 (not nearest ranks).
+        assert_eq!(
+            [22, 23, 35, 36, 47, 48].map(|v| website_heat_level(v, &values)),
+            [1, 2, 2, 3, 3, 4]
+        );
+        assert_eq!(website_heat_level(0, &values), 0);
+        assert_eq!(website_heat_level(10, &[10, 10, 10, 10]), 1);
+    }
+
+    #[test]
+    fn sparse_activity_uses_website_relative_thresholds() {
+        assert_eq!(
+            [0, 12, 13, 32, 33, 60, 61, 100].map(|v| website_heat_level(v, &[100])),
+            [0, 1, 2, 2, 3, 3, 4, 4]
+        );
+    }
+
+    #[test]
+    fn heat_scale_ignores_days_outside_visible_window() {
+        let days = vec![
+            ("2026-01-01".into(), 1_000_000),
+            ("2026-07-27".into(), 10),
+            ("2026-07-28".into(), 100),
+            ("2026-07-30".into(), 1_000_000),
+        ];
+        let cal = heat_calendar(&days, 1, anchor(), &["2026-07-29".into()]).unwrap();
+        let levels: Vec<_> = cal.days().map(|c| c.level).collect();
+        assert_eq!(levels, [1, 4, 0]);
+        assert_eq!(cal.total, 110);
+        assert_eq!(cal.busiest.unwrap().value, 100);
+        assert_eq!(cal.active_days, 3);
+        assert_eq!(cal.streak_current, 3);
+        assert_eq!(cal.unmeasured_days(), 1);
     }
 
     /// Wednesday 2026-07-29, the anchor most of these cases hang off.

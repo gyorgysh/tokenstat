@@ -42,6 +42,7 @@ use ratatui::widgets::BorderType;
 use tokenstat_core::{Bucket, PriceTable, Query, Reconciliation, Totals, UsageBlock};
 
 use crate::ui::{self, ACCENT_RGB, SECONDARY_RGB};
+use tokenstat_core::GroupBy;
 
 // macOS Terminal's DarkGray is almost black on its default dark-blue profile.
 // Normal gray keeps secondary labels readable without competing with data.
@@ -49,7 +50,7 @@ const MUTED: Color = Color::Gray;
 const SELECTED: Color = Color::White;
 
 /// Deep violet used for panel borders: present, but never competing with data.
-const BORDER_RGB: (u8, u8, u8) = (0x3D, 0x2A, 0x55);
+const BORDER_RGB: (u8, u8, u8) = ui::BORDER_RGB;
 
 /// A brand colour as a ratatui colour, degraded to what the terminal supports.
 ///
@@ -92,6 +93,14 @@ fn accent() -> Color {
 
 fn secondary() -> Color {
     brand(SECONDARY_RGB)
+}
+
+fn background() -> Color {
+    if ui::caps().palette256 {
+        brand(ui::BACKGROUND_RGB)
+    } else {
+        Color::Black
+    }
 }
 
 fn border() -> Color {
@@ -238,6 +247,7 @@ struct App {
     /// Index into the current filtered suggestion list.
     suggest_idx: usize,
     scroll: u16,
+    page_rows: u16,
     status: String,
     should_quit: bool,
     empty: bool,
@@ -248,9 +258,11 @@ struct App {
     days_unmeasured: Vec<String>,
     models: Vec<Bucket>,
     days: Vec<Bucket>,
-    /// `(YYYY-MM-DD, microdollars)` for the heatmap. The grid ramps on spend,
-    /// so it needs the day x model split that `days` has already flattened.
-    day_cost: Vec<(String, u64)>,
+    /// `(YYYY-MM-DD, total tokens)` for the heatmap. The grid ramps on volume,
+    /// including cache reads and writes, independent of model pricing.
+    day_tokens: Vec<(String, u64)>,
+    values: Vec<(GroupBy, crate::render::ValueMap)>,
+    loaded_tabs: Vec<Tab>,
     weeks: Vec<Bucket>,
     months: Vec<Bucket>,
     projects: Vec<Bucket>,
@@ -353,6 +365,7 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
             // (Blocks and Doctor render minute-granular ages).
             let now_minute = epoch_minutes();
             if app.dirty || now_minute != last_minute {
+                app.ensure_tab_loaded()?;
                 terminal.draw(|f| draw(f, &mut app))?;
                 last_minute = now_minute;
                 app.dirty = false;
@@ -442,26 +455,6 @@ extern "C" fn handle_stop_signal(signal: libc::c_int) {
     }
 }
 
-fn rollup_months(days: &[Bucket]) -> Vec<Bucket> {
-    let mut months: Vec<Bucket> = Vec::new();
-    for d in days {
-        let key = d.key.get(..7).unwrap_or(&d.key).to_string();
-        match months.last_mut() {
-            Some(m) if m.key == key => {
-                m.counters.accumulate(&d.counters);
-                m.events += d.events;
-            }
-            _ => months.push(Bucket {
-                key,
-                counters: d.counters,
-                events: d.events,
-                sessions: 0,
-            }),
-        }
-    }
-    months
-}
-
 fn split_cmd(raw: &str) -> (&str, Vec<&str>) {
     let trimmed = raw.trim().trim_start_matches('/');
     let mut parts = trimmed.split_whitespace();
@@ -543,6 +536,90 @@ fn epoch_minutes() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lazy_reports_refresh_after_filters_and_paging_stays_inside_content() {
+        use ratatui::backend::TestBackend;
+        use tokenstat_core::{
+            BillingMode, Confidence, Counters, EventId, Extras, SourceId, Timestamp, UsageEvent,
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-cli-reports-{}-{}",
+            std::process::id(),
+            jiff::Timestamp::now().as_nanosecond()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("usage.db");
+        let tz = TimeZone::UTC;
+        let mut store = tokenstat_core::Store::open(&path).unwrap();
+        let events: Vec<_> = ["2026-09-18T12:00:00Z", "2026-09-19T12:00:00Z"]
+            .into_iter()
+            .map(|date| UsageEvent {
+                id: EventId::derive(&[date]),
+                source: SourceId::ClaudeCode,
+                ts: Timestamp::from_ms(date.parse::<jiff::Timestamp>().unwrap().as_millisecond()),
+                model: "claude-sonnet-4-5".into(),
+                session: "same-session".into(),
+                project: "example".into(),
+                counters: Counters {
+                    input_fresh: Some(1000),
+                    output: Some(100),
+                    cache_read: Some(0),
+                    cache_write_5m: Some(0),
+                    cache_write_1h: Some(0),
+                },
+                extras: Extras::default(),
+                billing: BillingMode::Plan,
+                confidence: Confidence::Exact,
+            })
+            .collect();
+        store.insert_events(&events, &tz).unwrap();
+        let mut app = App::load(&path, &tz).unwrap();
+        assert!(app.months.is_empty());
+        assert!(app.projects.is_empty());
+        assert_eq!(app.values.len(), 1);
+        app.tab = Tab::Monthly;
+        app.ensure_tab_loaded().unwrap();
+        assert_eq!(app.months[0].events, 2);
+        assert_eq!(app.months[0].sessions, 1);
+        let cached = app.values.len();
+        app.ensure_tab_loaded().unwrap();
+        assert_eq!(app.values.len(), cached);
+        app.filter.until = Some("2026-09-18".into());
+        app.reload(&store).unwrap();
+        assert!(app.months.is_empty());
+        app.ensure_tab_loaded().unwrap();
+        assert_eq!(app.months[0].events, 1);
+        app.tab = Tab::Daily;
+        let mut terminal = Terminal::new(TestBackend::new(140, 18)).unwrap();
+        app.scroll = u16::MAX;
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert_eq!(app.scroll, 0, "a short report must not scroll off screen");
+        app.days = (0..60)
+            .map(|i| Bucket {
+                key: format!("2026-{i:02}"),
+                counters: Counters::default(),
+                events: 1,
+                sessions: 1,
+            })
+            .collect();
+        app.scroll = u16::MAX;
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let end = app.scroll;
+        assert!(end > 0 && end < 70);
+        handle_event(
+            &mut app,
+            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::PageUp,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+        )
+        .unwrap();
+        assert_eq!(app.scroll, end.saturating_sub(app.page_rows - 1));
+        drop(app);
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn only_date_like_keys_get_a_trend_line() {

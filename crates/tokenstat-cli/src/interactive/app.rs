@@ -17,6 +17,7 @@ impl App {
             cursor: 0,
             suggest_idx: 0,
             scroll: 0,
+            page_rows: 20,
             status: "type / for commands · ↑↓ history · /filter · m expands models · s sorts · ← → tabs · q quits"
                 .into(),
             should_quit: false,
@@ -25,7 +26,9 @@ impl App {
             days_unmeasured: Vec::new(),
             models: Vec::new(),
             days: Vec::new(),
-            day_cost: Vec::new(),
+            day_tokens: Vec::new(),
+            values: Vec::new(),
+            loaded_tabs: Vec::new(),
             weeks: Vec::new(),
             months: Vec::new(),
             projects: Vec::new(),
@@ -69,18 +72,22 @@ impl App {
             .days_active_without_usage("claude_code")
             .unwrap_or_default();
         self.empty = self.totals.events == 0;
-        self.reconciliation = tokenstat_core::reconcile(store)?;
+        // Invalidate lazy reports on every scan/filter change. Only Summary's
+        // data is eager; opening the CLI must not query every other tab.
+        self.loaded_tabs.clear();
+        self.values.clear();
+        self.weeks.clear();
+        self.months.clear();
+        self.projects.clear();
+        self.sessions.clear();
+        self.blocks.clear();
+        self.confidence.clear();
+        self.reconciliation = None;
         if self.empty {
             self.models.clear();
             self.days.clear();
-            self.day_cost.clear();
-            self.weeks.clear();
-            self.months.clear();
-            self.projects.clear();
-            self.sessions.clear();
-            self.blocks.clear();
+            self.day_tokens.clear();
             self.peak_hour = None;
-            self.confidence.clear();
             self.last_scan = store.meta("last_scan_ms")?;
             if filter_active(&self.filter) {
                 self.status = "Nothing in this filter. Type /filter clear.".into();
@@ -89,23 +96,58 @@ impl App {
             }
             return Ok(());
         }
+        self.values.push((
+            GroupBy::Day,
+            crate::render::values_by_key(&store.report_by_model(GroupBy::Day, &q)?, &self.prices),
+        ));
         self.models = store.report(GroupBy::Model, &q)?;
         self.days = store.report(GroupBy::Day, &q)?;
-        self.day_cost = tokenstat_core::activity::cost_by_day(
-            &store.report_by_model(GroupBy::Day, &q)?,
-            &self.prices,
-        );
-        self.weeks = store.report(GroupBy::Week, &q)?;
-        self.months = rollup_months(&self.days);
-        self.projects = store.report(GroupBy::Project, &q)?;
-        let mut sessions = store.report(GroupBy::Session, &q)?;
-        sessions.truncate(40);
-        self.sessions = sessions;
-        let now_ms = jiff::Timestamp::now().as_millisecond();
-        self.blocks = store.blocks(&q, now_ms)?;
+        self.day_tokens = crate::render::daily_tokens(&self.days);
         self.peak_hour = store.peak_hour()?;
-        self.confidence = store.confidence_breakdown()?;
         self.last_scan = store.meta("last_scan_ms")?;
+        Ok(())
+    }
+
+    /// Cache reports on first visit, and reuse them until scan/filter reload.
+    pub(super) fn ensure_tab_loaded(&mut self) -> Result<()> {
+        if matches!(self.tab, Tab::Summary | Tab::Daily | Tab::Models)
+            || self.loaded_tabs.contains(&self.tab)
+        {
+            return Ok(());
+        }
+        let store = Store::open(&self.db_path)?;
+        let group = match self.tab {
+            Tab::Weekly => Some(GroupBy::Week),
+            Tab::Monthly => Some(GroupBy::Month),
+            Tab::Projects => Some(GroupBy::Project),
+            Tab::Sessions => Some(GroupBy::Session),
+            _ => None,
+        };
+        if let Some(group) = group {
+            let values = crate::render::values_by_key(
+                &store.report_by_model(group, &self.filter)?,
+                &self.prices,
+            );
+            let mut query = self.filter.clone();
+            if group == GroupBy::Session {
+                query.limit = Some(40);
+            }
+            let rows = store.report(group, &query)?;
+            match self.tab {
+                Tab::Weekly => self.weeks = rows,
+                Tab::Monthly => self.months = rows,
+                Tab::Projects => self.projects = rows,
+                Tab::Sessions => self.sessions = rows,
+                _ => unreachable!(),
+            }
+            self.values.push((group, values));
+        } else if self.tab == Tab::Blocks {
+            self.blocks = store.blocks(&self.filter, jiff::Timestamp::now().as_millisecond())?;
+        } else if self.tab == Tab::Doctor {
+            self.reconciliation = tokenstat_core::reconcile(&store)?;
+            self.confidence = store.confidence_breakdown()?;
+        }
+        self.loaded_tabs.push(self.tab);
         Ok(())
     }
 

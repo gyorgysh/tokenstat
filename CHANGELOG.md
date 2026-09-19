@@ -13,6 +13,23 @@ at the end.
 
 ## [Unreleased]
 
+### Changed
+
+- The CLI uses the website's violet and pink palette. Activity heatmaps now
+  shade total tokens including cache, using the website's quartile scale.
+- The interactive CLI opens faster by loading other reports on first visit
+  and reusing model prices. Tab/Shift+Tab switch reports, Page Up/Down move
+  by a screen, and Home/End jump to the beginning/end of a report.
+- Summary and Daily show today's usage and estimated API value. Daily,
+  Weekly, Monthly, Projects, and Sessions show per-model list-rate value
+  totals, including in JSON. Partial values carry `+`, estimates carry `~`.
+
+### Fixed
+
+- Monthly session counts respect the selected date range and filters.
+- Scrolling stops at the last full page instead of leaving a nearly blank
+  report below the last row.
+
 ## [1.0.6] - 2026-09-15
 
 ### Fixed

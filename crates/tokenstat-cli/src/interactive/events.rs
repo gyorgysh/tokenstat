@@ -70,7 +70,7 @@ pub(super) fn handle_event(app: &mut App, ev: Event) -> Result<()> {
                         app.should_quit = true;
                         return Ok(());
                     }
-                    KeyCode::Right if !suggesting => {
+                    KeyCode::Right | KeyCode::Tab if !suggesting => {
                         app.tab = app.tab.next();
                         app.scroll = 0;
                         return Ok(());
@@ -85,12 +85,24 @@ pub(super) fn handle_event(app: &mut App, ev: Event) -> Result<()> {
                         app.scroll = 0;
                         return Ok(());
                     }
+                    KeyCode::Home => {
+                        app.scroll = 0;
+                        return Ok(());
+                    }
+                    KeyCode::End => {
+                        app.scroll = u16::MAX;
+                        return Ok(());
+                    }
                     KeyCode::PageUp => {
-                        app.scroll = app.scroll.saturating_sub(5);
+                        app.scroll = app
+                            .scroll
+                            .saturating_sub(app.page_rows.saturating_sub(1).max(1));
                         return Ok(());
                     }
                     KeyCode::PageDown => {
-                        app.scroll = app.scroll.saturating_add(5);
+                        app.scroll = app
+                            .scroll
+                            .saturating_add(app.page_rows.saturating_sub(1).max(1));
                         return Ok(());
                     }
                     KeyCode::Up => {

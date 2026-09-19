@@ -8,6 +8,21 @@ use super::*;
 use crate::render::sanitize_label;
 use crate::ui::{self, HeatRender};
 
+pub(super) fn today_line(app: &App) -> Line<'static> {
+    let date = tokenstat_core::activity::today(&app.tz).to_string();
+    let empty = crate::render::ValueMap::new();
+    let values = app
+        .values
+        .iter()
+        .find(|(g, _)| *g == GroupBy::Day)
+        .map(|(_, v)| v)
+        .unwrap_or(&empty);
+    Line::from(Span::styled(
+        crate::render::today_summary(&app.days, values, &date),
+        Style::default().fg(accent()),
+    ))
+}
+
 pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let c = &app.totals.counters;
     let in_out = c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0);
@@ -15,40 +30,27 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     lines.push(Line::from(vec![
-        Span::styled(
-            format!("{:<16}", "Sessions"),
-            Style::default().fg(accent()).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("{:<16}", "Requests"),
-            Style::default().fg(accent()).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(format!("{:<16}", "Sessions"), Style::default().fg(MUTED)),
+        Span::styled(format!("{:<16}", "Requests"), Style::default().fg(MUTED)),
         Span::styled(
             format!("{:<16}", "Input + output"),
-            Style::default().fg(accent()).add_modifier(Modifier::BOLD),
+            Style::default().fg(MUTED),
         ),
-        Span::styled(
-            format!("{:<16}", "Active days"),
-            Style::default().fg(accent()).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(format!("{:<16}", "Active days"), Style::default().fg(MUTED)),
     ]));
     lines.push(Line::from(vec![
         Span::styled(
             format!("{:<16}", ui::exact(app.totals.sessions)),
-            Style::default()
-                .fg(intensity_color(0.7))
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent()).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("{:<16}", ui::exact(app.totals.events)),
-            Style::default()
-                .fg(intensity_color(0.8))
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent()).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("{:<16}", ui::tokens(in_out)),
             Style::default()
-                .fg(intensity_color(0.95))
+                .fg(secondary())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -56,19 +58,17 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 "{:<16}",
                 ui::exact(app.totals.days + app.days_unmeasured.len() as u64)
             ),
-            Style::default()
-                .fg(intensity_color(0.6))
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent()).add_modifier(Modifier::BOLD),
         ),
     ]));
     lines.push(Line::from(Span::styled(
         format!(
-            "cache read {}  ·  cache write {}  ·  {} counting cache",
+            "cache read {}  ·  cache write {}  ·  {} total tokens, including cache",
             ui::tokens(c.cache_read.unwrap_or(0)),
             ui::tokens(cache_write),
             ui::tokens(c.total()),
         ),
-        Style::default().fg(secondary()),
+        Style::default().fg(MUTED),
     )));
 
     if let (Some(first), Some(last)) = (&app.totals.first_date, &app.totals.last_date) {
@@ -78,15 +78,17 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             .unwrap_or_default();
         lines.push(Line::from(Span::styled(
             format!("{first} to {last}{peak}"),
-            Style::default().fg(secondary()),
+            Style::default().fg(MUTED),
         )));
     }
 
+    lines.push(Line::from(""));
+    lines.push(today_line(app));
+
     if !app.days.is_empty() {
         lines.push(Line::from(""));
-        let pairs = &app.day_cost;
-        // Purple→cyan heat: idle cells stay muted, hot days peak in cyan so
-        // the grid sits with the electric purple chrome instead of fighting it.
+        let pairs = &app.day_tokens;
+        // Website token-volume heatmap: violet through fuchsia.
         let weeks = usize::from(width)
             .saturating_sub(4 + ui::HEAT_GUTTER)
             .div_ceil(ui::HEAT_COL)
@@ -95,7 +97,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         if let Some(cal) = ui::heat_calendar(pairs, weeks, today, &app.days_unmeasured) {
             lines.push(Line::from(Span::styled(
                 cal.header(),
-                Style::default().fg(secondary()),
+                Style::default().fg(MUTED),
             )));
             for (r, row) in cal.rows.iter().enumerate() {
                 let mut spans = vec![Span::styled(
@@ -105,7 +107,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 for cell in row {
                     match cell {
                         None => spans.push(Span::raw("  ")),
-                        // A day that was worked and cannot be priced gets its
+                        // A day that was worked without measured tokens gets its
                         // own hollow mark, never level 0: a day off must not
                         // look the same as a day whose transcripts are gone.
                         Some(c) if c.unmeasured => {
@@ -133,11 +135,11 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                         "{}busiest {} ({})  ·  streak {} days, best {}",
                         " ".repeat(ui::HEAT_GUTTER),
                         b.date,
-                        ui::usd(b.value as f64 / 1_000_000.0),
+                        ui::tokens(b.value),
                         cal.streak_current,
                         cal.streak_best,
                     ),
-                    Style::default().fg(secondary()),
+                    Style::default().fg(MUTED),
                 )));
             }
         }
@@ -169,7 +171,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 "total",
                 "price",
             ),
-            Style::default().fg(accent()).add_modifier(Modifier::BOLD),
+            Style::default().fg(MUTED),
         )));
 
         let hidden = app.models.len().saturating_sub(SUMMARY_MODEL_PREVIEW);
@@ -199,7 +201,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             };
             let shown = sanitize_label(&lookup);
             lines.push(Line::from(vec![
-                Span::styled(ui::pad_right(&shown, w), Style::default().fg(accent())),
+                Span::raw(ui::pad_right(&shown, w)),
                 Span::raw(format!(
                     "  {:>8}  {:>8}  {:>8}  {:>9}  {:>8}  ",
                     opt_cell(c.input_fresh),
@@ -210,7 +212,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 )),
                 Span::styled(
                     format!("{:.1}%", share * 100.0),
-                    Style::default().fg(secondary()),
+                    Style::default().fg(accent()),
                 ),
             ]));
         }
@@ -324,6 +326,7 @@ pub(super) fn table_lines(
     label: &str,
     price_as_model: bool,
     prices: &PriceTable,
+    values: Option<&crate::render::ValueMap>,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if rows.is_empty() {
@@ -398,7 +401,12 @@ pub(super) fn table_lines(
                 })
                 .unwrap_or_else(|| "-".to_string())
         } else {
-            "-".to_string()
+            let v = values
+                .and_then(|v| v.get(&r.key))
+                .copied()
+                .unwrap_or_default();
+            any_estimate |= v.estimated;
+            v.cell()
         };
         let key_style = if price_as_model {
             Style::default().fg(accent())
@@ -419,9 +427,9 @@ pub(super) fn table_lines(
         row.extend(faded_bar_spans(frac, 12));
         lines.push(Line::from(row));
     }
-    if price_as_model {
+    {
         lines.push(Line::from(Span::styled(
-            "value = list-rate equivalent, not billed dollars",
+            "value = API list-rate equivalent, not billed · + partial · ~ estimated",
             Style::default().fg(MUTED),
         )));
         if any_estimate {
@@ -430,7 +438,8 @@ pub(super) fn table_lines(
                 Style::default().fg(MUTED),
             )));
         }
-    } else if let Some((spark, first, last)) = trend_spark(rows) {
+    }
+    if !price_as_model && let Some((spark, first, last)) = trend_spark(rows) {
         // The tab can be sorted newest first, so the sparkline sorts its own
         // copy: a trend that reads right to left is worse than none.
         lines.push(Line::from(vec![
@@ -475,7 +484,7 @@ pub(super) fn looks_like_a_period(key: &str) -> bool {
 
 /// A horizontal bar that fades along its length and scales with `fraction`.
 ///
-/// Quiet rows stay deep violet. Strong rows run purple into cyan at the tip,
+/// Quiet rows stay deep violet. Strong rows run violet into fuchsia at the tip,
 /// so rank is visible without reading the number.
 pub(super) fn faded_bar_spans(fraction: f64, width: usize) -> Vec<Span<'static>> {
     let filled = ui::bar(fraction, width);
@@ -501,11 +510,6 @@ pub(super) fn faded_bar_spans(fraction: f64, width: usize) -> Vec<Span<'static>>
         spans.push(Span::styled(" ".repeat(pad), Style::default().fg(MUTED)));
     }
     spans
-}
-
-pub(super) fn intensity_color(t: f64) -> Color {
-    let (r, g, b) = ui::intensity_rgb(t.clamp(0.0, 1.0));
-    brand((r, g, b))
 }
 
 /// Offline sync line for the status bar: host, plan interval, next allowed time.
@@ -720,7 +724,7 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
         )));
         return lines;
     }
-    let pairs = &app.day_cost;
+    let pairs = &app.day_tokens;
     let weeks = usize::from(width)
         .saturating_sub(2 + ui::HEAT_GUTTER)
         .div_ceil(ui::HEAT_COL)
@@ -733,8 +737,8 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
     lines.push(Line::from(vec![
         Span::styled(
             format!(
-                "{} over {} active days",
-                ui::usd(cal.total as f64 / 1_000_000.0),
+                "{} tokens, including cache, over {} active days",
+                ui::tokens(cal.total),
                 ui::exact(cal.active_days as u64)
             ),
             Style::default().fg(SELECTED).add_modifier(Modifier::BOLD),
@@ -748,9 +752,7 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
         format!(
             "busiest {} ({})  ·  streak {} days, best {}",
             cal.busiest.map(|b| b.date.to_string()).unwrap_or_default(),
-            cal.busiest
-                .map(|b| ui::usd(b.value as f64 / 1_000_000.0))
-                .unwrap_or_default(),
+            cal.busiest.map(|b| ui::tokens(b.value)).unwrap_or_default(),
             cal.streak_current,
             cal.streak_best,
         ),
@@ -846,10 +848,9 @@ pub(super) fn wrapped_detail_lines(
         .sum();
     let top_model = models.first().map(|m| display_usage_model_id(&m.key));
     let top_project = projects.first().map(|p| p.key.clone());
-    // Busiest by spend, so this row agrees with the heatmap under it.
-    let day_cost =
-        tokenstat_core::activity::cost_by_day(&store.report_by_model(GroupBy::Day, &q)?, prices);
-    let busiest = day_cost.iter().max_by_key(|(_, micros)| *micros);
+    // Busiest by token volume, so this row agrees with the heatmap under it.
+    let day_tokens = crate::render::daily_tokens(&days);
+    let busiest = day_tokens.iter().max_by_key(|(_, tokens)| *tokens);
 
     let rows = [
         ("requests", ui::exact(totals.events)),
@@ -875,9 +876,7 @@ pub(super) fn wrapped_detail_lines(
         (
             "busiest day",
             busiest
-                .map(|(date, micros)| {
-                    format!("{}  ({})", date, ui::usd(*micros as f64 / 1_000_000.0))
-                })
+                .map(|(date, tokens)| format!("{}  ({})", date, ui::tokens(*tokens)))
                 .unwrap_or_else(|| "-".into()),
         ),
         (
@@ -909,7 +908,7 @@ pub(super) fn wrapped_detail_lines(
         let unmeasured = store
             .days_active_without_usage("claude_code")
             .unwrap_or_default();
-        if let Some(cal) = ui::heat_calendar(&day_cost, weeks.min(fit), anchor, &unmeasured) {
+        if let Some(cal) = ui::heat_calendar(&day_tokens, weeks.min(fit), anchor, &unmeasured) {
             lines.push(Line::from(Span::styled(
                 cal.header(),
                 Style::default().fg(MUTED),
@@ -922,7 +921,7 @@ pub(super) fn wrapped_detail_lines(
                 for cell in row {
                     match cell {
                         None => spans.push(Span::raw("  ")),
-                        // A day that was worked and cannot be priced gets its
+                        // A day that was worked without measured tokens gets its
                         // own hollow mark, never level 0: a day off must not
                         // look the same as a day whose transcripts are gone.
                         Some(c) if c.unmeasured => {

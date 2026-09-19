@@ -215,16 +215,7 @@ impl PriceTable {
 
     /// Value of these counters at list rates, in micros of a dollar.
     fn value_micros(&self, model: &str, c: &Counters) -> Option<i64> {
-        let r = self.rates_for(model)?;
-        let per = |tokens: Option<u64>, rate: f64| -> f64 {
-            tokens.unwrap_or(0) as f64 * rate / 1_000_000.0
-        };
-        let dollars = per(c.input_fresh, r.input)
-            + per(c.output, r.output)
-            + per(c.cache_read, r.cache_read)
-            + per(c.cache_write_5m, r.cache_write_5m)
-            + per(c.cache_write_1h, r.cache_write_1h);
-        Some((dollars * 1_000_000.0).round() as i64)
+        Some(EquivalentValue::from_rates(self.rates_for(model)?, c).micros())
     }
 }
 
@@ -423,6 +414,19 @@ impl EquivalentValue {
     /// What this usage would have cost if it had been billed per token.
     pub fn price(table: &PriceTable, model: &str, counters: &Counters) -> Option<EquivalentValue> {
         table.value_micros(model, counters).map(EquivalentValue)
+    }
+
+    /// Value counters using already-resolved rates, for batched reports.
+    pub fn from_rates(r: Rates, c: &Counters) -> EquivalentValue {
+        let per = |tokens: Option<u64>, rate: f64| -> f64 {
+            tokens.unwrap_or(0) as f64 * rate / 1_000_000.0
+        };
+        let dollars = per(c.input_fresh, r.input)
+            + per(c.output, r.output)
+            + per(c.cache_read, r.cache_read)
+            + per(c.cache_write_5m, r.cache_write_5m)
+            + per(c.cache_write_1h, r.cache_write_1h);
+        EquivalentValue((dollars * 1_000_000.0).round() as i64)
     }
 
     /// Rebuild a value from micros already summed elsewhere.

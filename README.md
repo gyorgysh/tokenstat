@@ -257,7 +257,7 @@ one-shot report.
 | --- | --- |
 | `tokenstat` | Full-screen interactive client (TTY) |
 | `tokenstat summary` | Headline numbers, activity grid, model breakdown |
-| `tokenstat heatmap` | Activity heatmap (JSON contract for the website profile) |
+| `tokenstat heatmap` | Token activity heatmap, including cache (JSON also retains list-rate cost) |
 | `tokenstat wrapped` | Year-in-review from the local archive |
 | `tokenstat daily` / `weekly` / `monthly` | Usage per day, ISO week, or month |
 | `tokenstat models` / `projects` / `sessions` | Breakdowns |
@@ -276,6 +276,12 @@ one-shot report.
 | `tokenstat schedule` | Automatic scanning, syncing, and updates |
 | `tokenstat update` | Check or apply a newer release build |
 | `tokenstat login` / `sync` | Link this machine and upload sealed aggregates |
+
+In the interactive client, use Tab/Shift+Tab or ←/→ to switch reports,
+PgUp/PgDn to move by a screen, and Home/End to jump to the start/end when the
+command field is empty. Reports load on first visit and are cached until a
+scan or filter change. Summary and Daily include today's usage; value columns
+show API list-rate equivalents (`+` marks a partial amount, `~` an estimate).
 
 Filters: `--since`, `--until`, `--last N`, `--model`, `--project`. Every command
 accepts `--json`.

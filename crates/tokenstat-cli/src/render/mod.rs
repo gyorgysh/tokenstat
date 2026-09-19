@@ -31,31 +31,16 @@ pub use summary::{heatmap, overview, wrapped};
 pub use tables::{blocks, export, grouped, monthly, sessions};
 pub use updates::{maybe_notify_update, self_update, self_update_scheduled, update_auto};
 
-use std::io::Write;
-
 use anyhow::Result;
-use tokenstat_core::{
-    Bucket, Counters, EquivalentValue, GroupBy, PriceTable, Query, Store, display_usage_model_id,
-};
+use tokenstat_core::{Bucket, Counters, EquivalentValue, PriceTable, display_usage_model_id};
 
 use crate::ui;
 
-/// `(YYYY-MM-DD, microdollars)` pairs for the activity heatmap.
-///
-/// The grid ramps on spend, so the busiest day is the most expensive one, not
-/// the one that happened to move the most cache tokens.
-pub(super) fn daily_cost(
-    store: &Store,
-    q: &Query,
-    prices: &PriceTable,
-) -> Result<Vec<(String, u64)>> {
-    let split = store.report_by_model(GroupBy::Day, q)?;
-    Ok(tokenstat_core::activity::cost_by_day(&split, prices))
-}
-
-/// Microdollars as money, for heatmap headlines.
-pub(super) fn micros_usd(micros: u64) -> String {
-    ui::usd(micros as f64 / 1_000_000.0)
+/// Calendar volume includes fresh input, output, cache reads and writes.
+pub(super) fn daily_tokens(days: &[Bucket]) -> Vec<(String, u64)> {
+    days.iter()
+        .map(|d| (d.key.clone(), d.counters.total()))
+        .collect()
 }
 
 /// Render `Some(n)` compactly, `None` as a dash.
@@ -91,17 +76,81 @@ pub(super) fn model_label(model: &str) -> String {
     display_usage_model_id(model)
 }
 
-/// Price only when `key` looks like a model id. Day/project buckets would
-/// otherwise look up a date or path as a model and almost always show `-`.
-pub(super) fn price_cell_for_group(
+/// Sum model-priced slices, preserving missing prices and estimate markers.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct RowValue {
+    pub micros: i64,
+    pub priced: bool,
+    pub partial: bool,
+    pub estimated: bool,
+}
+
+pub(super) type ValueMap = std::collections::BTreeMap<String, RowValue>;
+
+pub(super) fn values_by_key(
+    split: &[tokenstat_core::SplitBucket],
     prices: &PriceTable,
-    group: GroupBy,
-    key: &str,
-    c: &Counters,
-) -> String {
-    match group {
-        GroupBy::Model => price_cell(prices, key, c),
-        _ => "-".to_string(),
+) -> ValueMap {
+    let mut values = ValueMap::new();
+    let mut rates = std::collections::HashMap::new();
+    for row in split {
+        let value = values.entry(row.key.clone()).or_default();
+        let (rates, estimated) = rates.entry(row.split.as_str()).or_insert_with(|| {
+            let model = model_label(&row.split);
+            (prices.rates_for(&model), prices.is_estimate(&model))
+        });
+        if let Some(rates) = rates {
+            let amount = EquivalentValue::from_rates(*rates, &row.counters);
+            value.micros = value.micros.saturating_add(amount.micros());
+            value.priced = true;
+            value.estimated |= *estimated;
+            value.partial |= row.counters.has_unknown();
+        } else {
+            value.partial = true;
+        }
+    }
+    values
+}
+
+impl RowValue {
+    pub fn cell(self) -> String {
+        if !self.priced {
+            return "-".into();
+        }
+        format!(
+            "{}{}{}",
+            if self.estimated { "~" } else { "" },
+            ui::usd(self.micros as f64 / 1_000_000.0),
+            if self.partial { "+" } else { "" }
+        )
+    }
+}
+
+pub(super) fn bucket_value_json(row: &Bucket, values: &ValueMap) -> String {
+    let v = values.get(&row.key).copied().unwrap_or_default();
+    let amount = if v.priced {
+        format!("{:.6}", v.micros as f64 / 1_000_000.0)
+    } else {
+        "null".into()
+    };
+    let mut json = bucket_json(row);
+    json.pop();
+    format!(
+        r#"{},"value_usd":{},"value_partial":{},"value_estimated":{}}}"#,
+        json, amount, v.partial, v.estimated
+    )
+}
+
+pub(super) fn today_summary(days: &[Bucket], values: &ValueMap, date: &str) -> String {
+    match days.iter().find(|d| d.key == date) {
+        Some(day) => format!(
+            "Today {date} · {} requests · {} in+out · {} tokens incl. cache · {} API value",
+            ui::exact(day.events),
+            ui::tokens(day.counters.input_fresh.unwrap_or(0) + day.counters.output.unwrap_or(0)),
+            total_cell(&day.counters),
+            values.get(date).copied().unwrap_or_default().cell()
+        ),
+        None => format!("Today {date} · no recorded usage in this range"),
     }
 }
 
@@ -157,19 +206,6 @@ pub(super) fn bucket_json(r: &Bucket) -> String {
         r.events,
         r.sessions,
     )
-}
-
-pub(super) fn print_json_buckets(rows: &[Bucket]) -> Result<()> {
-    let mut out = std::io::stdout().lock();
-    write!(out, "[")?;
-    for (i, r) in rows.iter().enumerate() {
-        if i > 0 {
-            write!(out, ",")?;
-        }
-        write!(out, "{}", bucket_json(r))?;
-    }
-    writeln!(out, "]")?;
-    Ok(())
 }
 
 /// Bucket array with the list-rate equivalent attached, for model rows.
@@ -236,6 +272,65 @@ pub(super) fn num(v: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grouped_value_prices_each_model_and_preserves_missing_prices() {
+        let prices = PriceTable::parse(r#"{"effective_from":"2026-09-19","models":[
+            {"match":"model-a","input":2,"output":10,"cache_read":0.5,"cache_write_5m":3,"cache_write_1h":4},
+            {"match":"model-b","input":5,"output":20,"cache_read":1,"cache_write_5m":6,"cache_write_1h":8}
+        ]}"#).unwrap();
+        let counters = Counters {
+            input_fresh: Some(1_000_000),
+            output: Some(100_000),
+            cache_read: Some(2_000_000),
+            cache_write_5m: Some(0),
+            cache_write_1h: Some(0),
+        };
+        let row = |key: &str, model: &str| tokenstat_core::SplitBucket {
+            key: key.into(),
+            split: model.into(),
+            counters,
+            events: 1,
+            sessions: 1,
+        };
+        let values = values_by_key(
+            &[
+                row("mixed", "model-a"),
+                row("mixed", "model-b"),
+                row("partial", "model-a"),
+                row("partial", "unknown"),
+                row("unknown", "unknown"),
+            ],
+            &prices,
+        );
+        assert_eq!(values["mixed"].micros, 13_000_000);
+        assert_eq!(values["mixed"].cell(), "$13");
+        assert_eq!(values["partial"].cell(), "$4.0+");
+        assert_eq!(values["unknown"].cell(), "-");
+        let bucket = Bucket {
+            key: "unknown".into(),
+            counters,
+            events: 1,
+            sessions: 1,
+        };
+        let json: serde_json::Value =
+            serde_json::from_str(&bucket_value_json(&bucket, &values)).unwrap();
+        assert!(json["value_usd"].is_null());
+        assert_eq!(json["value_partial"], true);
+    }
+
+    #[test]
+    fn today_uses_the_requested_calendar_date_not_the_latest_row() {
+        let days = vec![Bucket {
+            key: "2026-09-18".into(),
+            counters: Counters::default(),
+            events: 42,
+            sessions: 2,
+        }];
+        let values = ValueMap::new();
+        assert!(today_summary(&days, &values, "2026-09-19").contains("no recorded usage"));
+        assert!(today_summary(&days, &values, "2026-09-18").contains("42 requests"));
+    }
 
     #[test]
     fn unknown_renders_as_dash_not_zero() {

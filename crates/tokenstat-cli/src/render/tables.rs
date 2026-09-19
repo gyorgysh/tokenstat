@@ -51,21 +51,40 @@ pub fn grouped(store: &Store, group: GroupBy, q: &Query, label: &str, json: bool
     if rows.is_empty() {
         return empty_range(json);
     }
+    let prices = PriceTable::load_with_catalog();
+    let mut values = if group == GroupBy::Model {
+        ValueMap::new()
+    } else {
+        values_by_key(&store.report_by_model(group, q)?, &prices)
+    };
     if json {
         if group == GroupBy::Model {
-            let prices = PriceTable::load_with_catalog();
             return print_json_model_buckets(&rows, &prices);
         }
-        return print_json_buckets(&rows);
+        println!(
+            "[{}]",
+            rows.iter()
+                .map(|r| bucket_value_json(r, &values))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        return Ok(());
     }
     // JSON keeps the stored ids. The table is a breakdown, so estimate and
     // rollup share one recovered row rather than looking like two tools.
     let rows = if group == GroupBy::Source {
+        if let Some(estimate) = values.remove("claude_code_estimate") {
+            let rollup = values.entry("claude_code_rollup".into()).or_default();
+            rollup.micros = rollup.micros.saturating_add(estimate.micros);
+            rollup.priced |= estimate.priced;
+            rollup.partial |= estimate.partial;
+            rollup.estimated |= estimate.estimated;
+        }
         fold_recovered_sources(rows)
     } else {
         rows
     };
-    print_table(&rows, label, group);
+    print_table(&rows, label, group, &prices, &values);
     note_unmeasured_days(store, q);
     Ok(())
 }
@@ -135,7 +154,13 @@ fn trend_line(rows: &[Bucket], group: GroupBy) -> Option<(String, String, String
     ))
 }
 
-fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
+fn print_table(
+    rows: &[Bucket],
+    label: &str,
+    group: GroupBy,
+    prices: &PriceTable,
+    values: &ValueMap,
+) {
     // Caller already handles the empty case so the table always has a body.
     // The footer counts what the rows are: days, months, or plain rows.
     let noun = match group {
@@ -157,7 +182,6 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
         .unwrap_or(1)
         .max(1);
     let grand: u64 = rows.iter().map(|r| r.counters.total()).sum();
-    let prices = PriceTable::load_with_catalog();
 
     println!();
     println!(
@@ -182,7 +206,14 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
             ui::pad_left(&cell(c.output), 8),
             ui::pad_left(&cache_cell(c), 8),
             ui::pad_left(&total_cell(c), 9),
-            ui::pad_left(&price_cell_for_group(&prices, group, &r.key, c), 8),
+            ui::pad_left(
+                &if group == GroupBy::Model {
+                    price_cell(prices, &r.key, c)
+                } else {
+                    values.get(&r.key).copied().unwrap_or_default().cell()
+                },
+                8
+            ),
             ui::bar(frac, 12),
         );
     }
@@ -206,12 +237,17 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
             ui::pad_right("", key_w),
         );
     }
-    if group == GroupBy::Model {
-        println!("  {DIM}value = list-rate equivalent, not billed dollars{DIM:#}");
-        if rows
-            .iter()
-            .any(|r| prices.is_estimate(&model_label(&r.key)))
-        {
+    {
+        println!(
+            "  {DIM}value = API list-rate equivalent, not billed · + partial · ~ estimated{DIM:#}"
+        );
+        if rows.iter().any(|r| {
+            if group == GroupBy::Model {
+                prices.is_estimate(&model_label(&r.key))
+            } else {
+                values.get(&r.key).is_some_and(|v| v.estimated)
+            }
+        }) {
             println!(
                 "  {DIM}~ values are estimates (Cursor Auto at Composer 2.5 list rates as a floor).{DIM:#}"
             );
@@ -221,55 +257,24 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
 }
 
 pub fn monthly(store: &Store, q: &Query, json: bool) -> Result<()> {
-    // Months are days rolled up by prefix, so there is no separate query.
-    let days = store.report(GroupBy::Day, q)?;
-    let mut months: Vec<Bucket> = Vec::new();
-    for d in days {
-        let key = d.key.get(..7).unwrap_or(&d.key).to_string();
-        match months.last_mut() {
-            Some(m) if m.key == key => {
-                m.counters.accumulate(&d.counters);
-                m.events += d.events;
-                m.sessions += d.sessions;
-            }
-            _ => months.push(Bucket {
-                key,
-                counters: d.counters,
-                events: d.events,
-                sessions: d.sessions,
-            }),
-        }
-    }
+    let months = store.report(GroupBy::Month, q)?;
     if months.is_empty() {
         return empty_range(json);
     }
-    // Day buckets count distinct sessions per day, so the sum above counts a
-    // session once per midnight it spans. Replace it with the distinct count
-    // for the month, the same figure a week bucket carries, keeping the
-    // caller's model/project filters.
-    for m in &mut months {
-        let mut parts = m.key.split('-');
-        let year = parts.next().and_then(|y| y.parse::<i16>().ok());
-        let month = parts.next().and_then(|v| v.parse::<i8>().ok());
-        if let (Some(y), Some(mo)) = (year, month)
-            && (1..=12).contains(&mo)
-        {
-            let month_q = Query {
-                since: Some(format!("{y:04}-{mo:02}-01")),
-                until: Some(jiff::civil::date(y, mo, 1).last_of_month().to_string()),
-                model: q.model.clone(),
-                project: q.project.clone(),
-                ..Query::default()
-            };
-            if let Ok(totals) = store.totals(&month_q) {
-                m.sessions = totals.sessions;
-            }
-        }
-    }
+    let prices = PriceTable::load_with_catalog();
+    let values = values_by_key(&store.report_by_model(GroupBy::Month, q)?, &prices);
     if json {
-        return print_json_buckets(&months);
+        println!(
+            "[{}]",
+            months
+                .iter()
+                .map(|r| bucket_value_json(r, &values))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        return Ok(());
     }
-    print_table(&months, "Month", GroupBy::Month);
+    print_table(&months, "Month", GroupBy::Month, &prices, &values);
     note_unmeasured_days(store, q);
     Ok(())
 }
@@ -279,10 +284,16 @@ pub fn sessions(store: &Store, q: &Query, top: usize, json: bool) -> Result<()> 
     if rows.is_empty() {
         return empty_range(json);
     }
+    let prices = PriceTable::load_with_catalog();
+    let values = values_by_key(&store.report_by_model(GroupBy::Session, q)?, &prices);
     if json {
         // The array is capped at `top`, so say so: without the total a
         // consumer cannot tell two sessions from two hundred.
-        let shown: Vec<String> = rows.iter().take(top).map(bucket_json).collect();
+        let shown: Vec<String> = rows
+            .iter()
+            .take(top)
+            .map(|r| bucket_value_json(r, &values))
+            .collect();
         println!(
             r#"{{"total":{},"top":{top},"rows":[{}]}}"#,
             rows.len(),
@@ -295,7 +306,7 @@ pub fn sessions(store: &Store, q: &Query, top: usize, json: bool) -> Result<()> 
     if rows.is_empty() {
         return empty_range(json);
     }
-    print_table(&rows, "Session", GroupBy::Session);
+    print_table(&rows, "Session", GroupBy::Session, &prices, &values);
     Ok(())
 }
 /// Five-hour usage blocks (gap-based, Claude-style rate-limit windows).
