@@ -37,6 +37,8 @@
                  fallback in code for the same reason. -->
             <Style TargetType="Page">
                 <Setter Property="Background" Value="Transparent" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>
