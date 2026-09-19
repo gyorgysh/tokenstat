@@ -66,6 +66,16 @@ internal static class Theme
     public static Color ControlGlyph => Hex(IsDark ? 0xA8A5B5u : 0x6B6876u);
     /// <summary>The same glyph while the pointer is over it.</summary>
     public static Color ControlGlyphHover => Hex(IsDark ? 0xE9E7F0u : 0x2A2831u);
+    /// <summary>
+    /// Caption button pressed fill. Hover reuses ControlSeat, a press wants a
+    /// deeper neutral at about twice the hover weight, in both themes.
+    /// Translucent like the hover: it lands on the content tone the buttons sit
+    /// over, and the OS caption painter only honors these colors where that
+    /// composition works.
+    /// </summary>
+    public static Color CaptionPressed => IsDark
+        ? Color.FromArgb(46, 255, 255, 255)
+        : Color.FromArgb(31, 0, 0, 0);
     public static Color Success => Accent;
     public static Color Warning => Color.FromArgb(255, 0xE0, 0xA9, 0x3B);
     public static Color Danger => Color.FromArgb(255, 0xD6, 0x45, 0x3F);

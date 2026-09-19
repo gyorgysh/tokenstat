@@ -29,6 +29,15 @@
             <FontFamily x:Key="InterfaceFontFamily">ms-appx:///Assets/Fonts/Manrope-Variable.ttf#Manrope</FontFamily>
             <FontFamily x:Key="MonoFontFamily">ms-appx:///Assets/Fonts/JetBrainsMono-Variable.ttf#JetBrains Mono</FontFamily>
             <FontFamily x:Key="ContentControlThemeFontFamily">ms-appx:///Assets/Fonts/Manrope-Variable.ttf#Manrope</FontFamily>
+            <!-- Every page is transparent over the content host, which carries
+                 the Background tone. Without this a page paints the system page
+                 brush and the content area shows that instead of the theme.
+                 Pages that own their surface (terminal, screen) set Background
+                 locally, which wins over this style, and MainWindow repeats the
+                 fallback in code for the same reason. -->
+            <Style TargetType="Page">
+                <Setter Property="Background" Value="Transparent" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

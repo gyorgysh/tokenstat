@@ -7,7 +7,6 @@
 
 using System.Text.Json.Nodes;
 using Microsoft.UI;
-using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -24,6 +23,18 @@ public sealed partial class MainWindow : Window
 {
     private readonly NavigationView _nav = new();
     private readonly Frame _frame = new();
+    /// <summary>
+    /// The content area behind the frame. Opaque Background tone, so the
+    /// NavigationView content grid never shows its default grey through.
+    /// </summary>
+    private readonly Border _contentHost = new();
+    // One brush instance per flat surface, shared by every element showing
+    // that tone. A theme change mutates the color in place, which reaches the
+    // NavigationView template too: a StaticResource lookup would keep a
+    // replaced brush, but it cannot keep a mutated one.
+    private readonly SolidColorBrush _chromeBackground = new(Theme.Background);
+    private readonly SolidColorBrush _chromeSidebar = new(Theme.Sidebar);
+    private readonly SolidColorBrush _chromeBorder = new(Theme.Border);
     private readonly NavigationViewItem _workspacesHeader = new()
     {
         Content = "FOLDERS",
@@ -36,16 +47,25 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         Title = "tokenstat";
-        TryMica();
+        TryExtendIntoTitleBar();
         TrySize();
         TryIcon();
-        RootGrid.Background = Theme.BackgroundBrush;
+
+        // Flat theme surfaces, no Mica: the Mac app is flat colors everywhere,
+        // and a translucent backdrop would tint every tone it sits behind.
+        RootGrid.Background = _chromeBackground;
+        TitlePaneSide.Background = _chromeSidebar;
+        TitleContentSide.Background = _chromeBackground;
+        _contentHost.Background = _chromeBackground;
+        _contentHost.Child = _frame;
 
         _nav.IsSettingsVisible = false;
         _nav.OpenPaneLength = 240;
         _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Left;
         _nav.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
-        _nav.Background = Theme.SidebarBrush;
+        _nav.Background = _chromeSidebar;
+        _nav.Resources["NavigationViewContentBackground"] = _chromeBackground;
+        _nav.Resources["NavigationViewContentGridBorderBrush"] = _chromeBorder;
 
         foreach (var section in Sections.Standalone)
         {
@@ -63,9 +83,17 @@ public sealed partial class MainWindow : Window
         _nav.FooterMenuItems.Add(Item(GlobalSection.Account));
         _nav.FooterMenuItems.Add(Item(GlobalSection.About));
 
-        _nav.Content = _frame;
+        _nav.Content = _contentHost;
         _nav.SelectionChanged += NavOnSelectionChanged;
+        Grid.SetRow(_nav, 1);
         RootGrid.Children.Add(_nav);
+        ApplyChromeColors();
+        RootGrid.ActualThemeChanged += (_, _) => ApplyChromeColors();
+        // Keep the titlebar split on the pane edge when the pane collapses to
+        // its compact width. The display mode itself is fixed at Left.
+        _nav.RegisterPropertyChangedCallback(
+            NavigationView.IsPaneOpenProperty,
+            (_, _) => SyncTitleBarSplit());
 
         AppServices.OpenTerminal = (workspaceId, sessionId) =>
         {
@@ -273,6 +301,13 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void SetContent(Page page)
     {
+        // Pages sit transparent over the content host, which carries the
+        // Background tone. Only when the page did not choose its own surface:
+        // the terminal and the screen own a black one, and a local value wins.
+        if (page.ReadLocalValue(Control.BackgroundProperty) == DependencyProperty.UnsetValue)
+        {
+            page.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        }
         _frame.Content = page;
         Motion.PlayArrival(page);
     }
@@ -378,15 +413,86 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void TryMica()
+    /// <summary>
+    /// Extend the content into the caption area and hand the titlebar element
+    /// to the OS as the drag region. Code only, never XAML: setting
+    /// ExtendsContentIntoTitleBar in XAML is an error. Failure keeps the
+    /// system bar, the window still works with a 32px strip above the nav.
+    /// </summary>
+    private void TryExtendIntoTitleBar()
     {
         try
         {
-            SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+            ExtendsContentIntoTitleBar = true;
+            SetTitleBar(AppTitleBar);
         }
         catch
         {
-            // Windows 10 keeps the solid background.
+            // System caption stays. Surfaces still paint from the tokens.
+        }
+    }
+
+    /// <summary>
+    /// Repaint every flat surface from the theme tokens. Runs once at launch
+    /// and again whenever the system theme changes, so the window frame never
+    /// shows a stale tone. Pages rebuild on navigation and pick the new theme
+    /// up there.
+    /// </summary>
+    private void ApplyChromeColors()
+    {
+        _chromeBackground.Color = Theme.Background;
+        _chromeSidebar.Color = Theme.Sidebar;
+        _chromeBorder.Color = Theme.Border;
+        SyncTitleBarSplit();
+        TryTitleBarColors();
+    }
+
+    /// <summary>
+    /// Keep the titlebar split on the pane edge: full length while the pane is
+    /// open, compact length once it collapses to icons.
+    /// </summary>
+    private void SyncTitleBarSplit()
+    {
+        TitlePaneColumn.Width = new GridLength(_nav.IsPaneOpen ? _nav.OpenPaneLength : _nav.CompactPaneLength);
+    }
+
+    /// <summary>
+    /// Paint the OS caption buttons from the theme. The buttons sit over the
+    /// content half of the titlebar, so their resting tone is Background;
+    /// hover is the control seat, pressed a deeper neutral, inactive the idle
+    /// grey. All twelve colors are set together, as the OS guidance asks, so a
+    /// user accent on title bars cannot leak an unintended combination in.
+    /// Where the OS ignores custom colors, the system caption stays correct.
+    /// </summary>
+    private void TryTitleBarColors()
+    {
+        try
+        {
+            var hwnd = WindowNative.GetWindowHandle(this);
+            var id = Win32Interop.GetWindowIdFromWindow(hwnd);
+            var bar = AppWindow.GetFromWindowId(id).TitleBar;
+            if (!AppWindowTitleBar.IsCustomizationSupported())
+            {
+                return;
+            }
+            bar.ExtendsContentIntoTitleBar = true;
+            bar.IconShowOptions = IconShowOptions.HideIconAndSystemMenu;
+            bar.BackgroundColor = Theme.Background;
+            bar.ForegroundColor = Theme.DefaultText;
+            bar.InactiveBackgroundColor = Theme.Background;
+            bar.InactiveForegroundColor = Theme.StateIdle;
+            bar.ButtonBackgroundColor = Theme.Background;
+            bar.ButtonForegroundColor = Theme.DefaultText;
+            bar.ButtonHoverBackgroundColor = Theme.ControlSeat;
+            bar.ButtonHoverForegroundColor = Theme.DefaultText;
+            bar.ButtonPressedBackgroundColor = Theme.CaptionPressed;
+            bar.ButtonPressedForegroundColor = Theme.DefaultText;
+            bar.ButtonInactiveBackgroundColor = Theme.Background;
+            bar.ButtonInactiveForegroundColor = Theme.StateIdle;
+        }
+        catch
+        {
+            // System caption stays. Content still paints from the tokens.
         }
     }
 }

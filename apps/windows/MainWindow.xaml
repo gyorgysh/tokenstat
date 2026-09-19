@@ -4,5 +4,33 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="tokenstat">
-    <Grid x:Name="RootGrid" />
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="32" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <!-- The custom caption. Split like the window below it, sidebar tone
+             over the pane and content tone over the content, so no seam shows
+             where the bar meets either half. The OS caption buttons sit over
+             the content half. Code makes this the drag region with SetTitleBar,
+             paints both halves from the theme, and keeps the split on the pane
+             edge when the pane collapses. Never put interactive content here:
+             the default drag region covers it as long as there is none. -->
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Height="32">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="TitlePaneColumn" Width="240" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border x:Name="TitlePaneSide" Grid.Column="0" />
+            <Border x:Name="TitleContentSide" Grid.Column="1" />
+            <TextBlock
+                Grid.Column="0"
+                Grid.ColumnSpan="2"
+                Margin="16,0,0,0"
+                VerticalAlignment="Center"
+                FontSize="12"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                Text="tokenstat" />
+        </Grid>
+    </Grid>
 </Window>
