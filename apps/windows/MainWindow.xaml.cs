@@ -366,7 +366,7 @@ public sealed partial class MainWindow : Window
                 }
             }
             _ = RefreshSidebarLiveAsync(slow: true);
-            if (_frame.Content == _hostSplash
+            if (ReferenceEquals(_frame.Content, _hostSplash)
                 && _nav.SelectedItem is NavigationViewItem selected
                 && selected.Tag is string tag)
             {
@@ -387,7 +387,7 @@ public sealed partial class MainWindow : Window
     {
         // Dismissed once the helper answered: a late retry must not drag the
         // splash back over the first page.
-        if (_hostSplash is not null && _frame.Content != _hostSplash)
+        if (_hostSplash is not null && !ReferenceEquals(_frame.Content, _hostSplash))
         {
             return;
         }

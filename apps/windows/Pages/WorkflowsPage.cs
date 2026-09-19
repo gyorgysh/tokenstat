@@ -1483,6 +1483,10 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
         var edges = GraphEdges();
         foreach (var edge in edges)
         {
+            if (edge is null)
+            {
+                continue;
+            }
             if (Format.Text(edge, "from") == from && Format.Text(edge, "to") == to)
             {
                 edge["when"] = when;
