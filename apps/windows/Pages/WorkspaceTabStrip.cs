@@ -14,6 +14,10 @@ internal sealed class WorkspaceTabStrip
     private readonly Dictionary<string, TabViewItem> _surfaces = new();
     public WorkspaceTabStrip()
     {
+        // WinUI's DefaultTabViewStyle sets VerticalAlignment=Top. Content
+        // alignment alone cannot make the tab control fill its parent's slot.
+        View.HorizontalAlignment = HorizontalAlignment.Stretch;
+        View.VerticalAlignment = VerticalAlignment.Stretch;
         View.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         View.VerticalContentAlignment = VerticalAlignment.Stretch;
         View.Loaded += (_, _) => StretchContentPresenter();
