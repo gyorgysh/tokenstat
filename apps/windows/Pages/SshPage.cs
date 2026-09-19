@@ -13,6 +13,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Windows.System;
 using Windows.UI;
 
@@ -48,14 +49,19 @@ internal sealed class SshPage : Page
     private string? _sessionHostId;
     private long _offset;
     private CancellationTokenSource? _poll;
+    private SSHSection _section;
+    private readonly Border _stripHost = new();
+    private readonly Border _bodyHost = new();
 
-    public SshPage()
+    public SshPage(SSHSection section = SSHSection.Hosts)
     {
+        _section = section;
         _listView = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
             Content = _listRoot,
         };
+        _bodyHost.Child = _listView;
 
         _scroll.Content = _view;
         _sessionGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -88,19 +94,54 @@ internal sealed class SshPage : Page
         _sessionGrid.Children.Add(_input);
         _input.KeyDown += InputOnKeyDown;
 
-        Content = _listView;
+        RefreshStrip();
+        var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(_stripHost, 0);
+        Grid.SetRow(_bodyHost, 1);
+        root.Children.Add(_stripHost);
+        root.Children.Add(_bodyHost);
+        Content = root;
         Loaded += async (_, _) => await LoadAsync();
         Unloaded += (_, _) => _ = CloseSessionAsync();
     }
 
+    /// <summary>
+    /// The four library sections as tabs. The strip stays up while a session
+    /// runs below it, so leaving a shell for the library is one tap rather
+    /// than a close. The session keeps running on the host either way.
+    /// </summary>
+    private void RefreshStrip()
+    {
+        var tabs = new List<(string Value, string Label, ActionIcon? Glyph)>();
+        foreach (var section in Sections.SshRows)
+        {
+            tabs.Add((section.ToString(), section.Label(), null));
+        }
+        _stripHost.Child = TabStrip.View(
+            tabs,
+            _section.ToString(),
+            async value =>
+            {
+                if (Enum.TryParse<SSHSection>(value, out var next) && next != _section)
+                {
+                    _section = next;
+                    RefreshStrip();
+                    ShowList();
+                    await LoadAsync();
+                }
+            });
+    }
+
     private void ShowList()
     {
-        Content = _listView;
+        _bodyHost.Child = _listView;
     }
 
     private void ShowSession()
     {
-        Content = _sessionGrid;
+        _bodyHost.Child = _sessionGrid;
     }
 
     private async Task LoadAsync()
@@ -108,13 +149,35 @@ internal sealed class SshPage : Page
         _listRoot.Children.Clear();
         _listRoot.Children.Add(new TextBlock
         {
-            Text = "SSH",
+            Text = _section.Label(),
             FontSize = 18,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         _listRoot.Children.Add(ActionIconGlyph.Button(
             "Refresh", ActionIcon.Refresh, async (_, _) => await LoadAsync()));
 
+        switch (_section)
+        {
+            case SSHSection.Keys:
+                await LoadKeysTabAsync();
+                break;
+            case SSHSection.Snippets:
+                await LoadSnippetsAsync();
+                break;
+            case SSHSection.KnownHosts:
+                await LoadKnownHostsAsync();
+                break;
+            default:
+                await LoadHostsAsync();
+                await LoadSessionsAsync();
+                await LoadFoldersAsync();
+                await LoadConfigAsync();
+                break;
+        }
+    }
+
+    private async Task LoadKeysTabAsync()
+    {
         JsonArray? keys = null;
         try
         {
@@ -125,7 +188,15 @@ internal sealed class SshPage : Page
             _listRoot.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
         }
         AddVaultCard(keys);
+        await LoadKeysAsync(keys);
+    }
 
+    /// <summary>
+    /// Saved hosts with their connect, edit and delete actions, plus the add
+    /// form entry. The Hosts tab, and the screen the sidebar group opens.
+    /// </summary>
+    private async Task LoadHostsAsync()
+    {
         JsonNode listed;
         try
         {
@@ -203,17 +274,10 @@ internal sealed class SshPage : Page
         }
         _listRoot.Children.Add(ActionIconGlyph.Button(
             "Add host", ActionIcon.Create, async (_, _) => await EditHostAsync(null)));
-
-        await LoadKeysAsync(keys);
-        await LoadSessionsAsync();
-        await LoadSnippetsAsync();
-        await LoadFoldersAsync();
-        await LoadKnownHostsAsync();
-        await LoadConfigAsync();
     }
 
     /// <summary>
-    /// The credential vault, as one card above the host list. Like the Apple
+    /// The credential vault, as one card above the key list. Like the Apple
     /// vault screen it leads with what the store holds and gates use on
     /// presence: a key whose secret is not on this PC connects with a
     /// password or a pasted key, never with a displayed one.

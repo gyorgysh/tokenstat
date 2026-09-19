@@ -29,6 +29,7 @@ internal enum WorkspaceSection
     Sessions,
     Chat,
     Changes,
+    History,
     Pulls,
     Todo,
     Notes,
@@ -38,13 +39,32 @@ internal enum WorkspaceSection
     Browser,
 }
 
+/// <summary>
+/// The sections of the SSH library. Fixed set, fixed order, the same shape a
+/// workspace has. Labels match the Mac sidebar exactly.
+/// </summary>
+internal enum SSHSection
+{
+    Hosts,
+    Keys,
+    Snippets,
+    KnownHosts,
+}
+
 internal static class Sections
 {
+    // Home, Insights and Devices stand alone at the top, like the Mac. SSH
+    // is an expandable group below the Everywhere rows instead, and Search
+    // lives in the footer next to Account until it gets a toolbar home. The
+    // Ssh and Search enum cases stay so their routes keep resolving.
     public static readonly GlobalSection[] Standalone =
-        [GlobalSection.Home, GlobalSection.Insights, GlobalSection.Machines, GlobalSection.Ssh, GlobalSection.Search];
+        [GlobalSection.Home, GlobalSection.Insights, GlobalSection.Machines];
 
     public static readonly GlobalSection[] Everywhere =
         [GlobalSection.Todo, GlobalSection.Notes, GlobalSection.Workflows, GlobalSection.Automations];
+
+    public static readonly SSHSection[] SshRows =
+        [SSHSection.Hosts, SSHSection.Keys, SSHSection.Snippets, SSHSection.KnownHosts];
 
     public static string Label(this GlobalSection section) => section switch
     {
@@ -83,6 +103,7 @@ internal static class Sections
         WorkspaceSection.Sessions => "Sessions",
         WorkspaceSection.Chat => "Chat",
         WorkspaceSection.Changes => "Changes",
+        WorkspaceSection.History => "History",
         WorkspaceSection.Pulls => "Pull requests",
         WorkspaceSection.Todo => "Tasks",
         WorkspaceSection.Notes => "Notes",
@@ -90,6 +111,15 @@ internal static class Sections
         WorkspaceSection.Automations => "Automations",
         WorkspaceSection.Files => "Files",
         WorkspaceSection.Browser => "Browser",
+        _ => section.ToString(),
+    };
+
+    public static string Label(this SSHSection section) => section switch
+    {
+        SSHSection.Hosts => "Hosts",
+        SSHSection.Keys => "Keys",
+        SSHSection.Snippets => "Snippets",
+        SSHSection.KnownHosts => "Trusted servers",
         _ => section.ToString(),
     };
 }

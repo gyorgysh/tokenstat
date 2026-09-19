@@ -37,7 +37,7 @@ public sealed partial class MainWindow : Window
     private readonly SolidColorBrush _chromeBorder = new(Theme.Border);
     private readonly NavigationViewItem _workspacesHeader = new()
     {
-        Content = "FOLDERS",
+        Content = "WORKSPACES",
         SelectsOnInvoked = false,
         IsEnabled = false,
     };
@@ -72,14 +72,25 @@ public sealed partial class MainWindow : Window
             _nav.MenuItems.Add(Item(section));
         }
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
-        _nav.MenuItems.Add(new NavigationViewItemHeader { Content = "EVERYWHERE" });
+        _nav.MenuItems.Add(new NavigationViewItemHeader { Content = "GLOBAL" });
         foreach (var section in Sections.Everywhere)
         {
             _nav.MenuItems.Add(Item(section));
         }
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
+        _nav.MenuItems.Add(SshGroup());
+        _nav.MenuItems.Add(new NavigationViewItemSeparator());
         _nav.MenuItems.Add(_workspacesHeader);
+        _nav.MenuItems.Add(new NavigationViewItem
+        {
+            Content = "All folders",
+            Tag = "workspaces:all",
+            Icon = new SymbolIcon { Symbol = Symbol.Folder },
+        });
 
+        // Search has no row in the main list, like the Mac, where it is a
+        // toolbar icon. It sits in the footer until this window grows one.
+        _nav.FooterMenuItems.Add(Item(GlobalSection.Search));
         _nav.FooterMenuItems.Add(Item(GlobalSection.Account));
         _nav.FooterMenuItems.Add(Item(GlobalSection.About));
 
@@ -156,6 +167,30 @@ public sealed partial class MainWindow : Window
             Tag = "global:" + section,
             Icon = new SymbolIcon { Symbol = section.Symbol() },
         };
+    }
+
+    /// <summary>
+    /// The SSH library as an expandable group, one row per section like the
+    /// Mac sidebar. The parent carries the Hosts tag so invoking it lands on
+    /// the Hosts screen rather than nowhere.
+    /// </summary>
+    private static NavigationViewItem SshGroup()
+    {
+        var parent = new NavigationViewItem
+        {
+            Content = GlobalSection.Ssh.Label(),
+            Tag = "ssh:" + SSHSection.Hosts,
+            Icon = new SymbolIcon { Symbol = GlobalSection.Ssh.Symbol() },
+        };
+        foreach (var section in Sections.SshRows)
+        {
+            parent.MenuItems.Add(new NavigationViewItem
+            {
+                Content = section.Label(),
+                Tag = "ssh:" + section,
+            });
+        }
+        return parent;
     }
 
     private async Task LoadWorkspacesAsync()
@@ -347,6 +382,19 @@ public sealed partial class MainWindow : Window
             }
             return;
         }
+        if (tag.StartsWith("ssh:", StringComparison.Ordinal))
+        {
+            if (Enum.TryParse<SSHSection>(tag["ssh:".Length..], out var section))
+            {
+                SetContent(new SshPage(section));
+            }
+            return;
+        }
+        if (tag == "workspaces:all")
+        {
+            SetContent(WorkspacesOverviewPage());
+            return;
+        }
         if (tag.StartsWith("ws:", StringComparison.Ordinal))
         {
             var rest = tag["ws:".Length..];
@@ -363,11 +411,182 @@ public sealed partial class MainWindow : Window
                     WorkspaceSection.Automations => new AutomationsPage(id),
                     WorkspaceSection.Pulls => new PullsPage(id),
                     WorkspaceSection.Chat => new ChatPage(id),
+                    WorkspaceSection.History => WorkspaceHistoryPage(id),
                     _ => new WorkspacePage(id, section),
                 };
                 SetContent(page);
             }
         }
+    }
+
+    /// <summary>
+    /// Every registered folder as cards, the first row under Workspaces. Each
+    /// card opens that folder, selecting its sidebar row so the pane and the
+    /// sidebar agree.
+    /// </summary>
+    private Page WorkspacesOverviewPage()
+    {
+        var root = new StackPanel { Spacing = Theme.SpaceL };
+        var page = new Page
+        {
+            Content = new ScrollViewer
+            {
+                Padding = new Thickness(Theme.SpaceL),
+                Content = root,
+            },
+        };
+        page.Loaded += async (_, _) =>
+        {
+            root.Children.Clear();
+            root.Children.Add(new TextBlock
+            {
+                Text = "All folders",
+                FontSize = 18,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            JsonNode listed;
+            try
+            {
+                listed = await AppServices.Host.CallAsync("workspace.list");
+            }
+            catch (Exception ex)
+            {
+                root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+                return;
+            }
+            var array = listed as JsonArray
+                ?? listed["folders"] as JsonArray
+                ?? listed["workspaces"] as JsonArray;
+            if (array is null || array.Count == 0)
+            {
+                root.Children.Add(EmptyState.View(
+                    "No folders yet",
+                    "Add a project folder and it will appear here.",
+                    EmptyArtKind.WorkspaceAccess));
+                return;
+            }
+            var list = new StackPanel { Spacing = Theme.SpaceS };
+            foreach (var folder in array)
+            {
+                var id = Format.Text(folder, "id");
+                if (string.IsNullOrEmpty(id))
+                {
+                    continue;
+                }
+                var captured = "ws:" + id + ":Files";
+                var open = new Button
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Left,
+                    Content = new StackPanel
+                    {
+                        Spacing = 2,
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = Format.Text(folder, "name", Format.Text(folder, "path", id)),
+                                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                                TextWrapping = TextWrapping.Wrap,
+                            },
+                            new TextBlock
+                            {
+                                Text = Format.Text(folder, "path", id),
+                                Opacity = 0.7,
+                                TextWrapping = TextWrapping.Wrap,
+                            },
+                        },
+                    },
+                };
+                open.Click += (_, _) =>
+                {
+                    if (FindNavItem(captured) is NavigationViewItem row)
+                    {
+                        _nav.SelectedItem = row;
+                    }
+                    else
+                    {
+                        Show(captured);
+                    }
+                };
+                list.Children.Add(open);
+            }
+            root.Children.Add(Chrome.Card("Folders", list));
+        };
+        return page;
+    }
+
+    /// <summary>
+    /// One folder's commit history, through the shared history card. The diff
+    /// opener matches the Changes screen, so a file reads the same from both.
+    /// </summary>
+    private static Page WorkspaceHistoryPage(string id)
+    {
+        var root = new StackPanel { Spacing = Theme.SpaceL };
+        var page = new Page
+        {
+            Content = new ScrollViewer
+            {
+                Padding = new Thickness(Theme.SpaceL),
+                Content = root,
+            },
+        };
+        page.Loaded += async (_, _) =>
+        {
+            root.Children.Clear();
+            root.Children.Add(new TextBlock
+            {
+                Text = WorkspaceSection.History.Label(),
+                FontSize = 18,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            var card = await WorkspaceHistory.LoadCardAsync(
+                page,
+                id,
+                async filePath =>
+                {
+                    JsonNode? diff;
+                    try
+                    {
+                        diff = await AppServices.Host.CallAsync(
+                            "workspace.diff",
+                            new JsonObject { ["id"] = id, ["path"] = filePath });
+                    }
+                    catch (Exception ex)
+                    {
+                        root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+                        return;
+                    }
+                    await WorkspaceDiff.ShowFileDiffAsync(page, "Diff · " + filePath, diff);
+                });
+            if (card is not null)
+            {
+                root.Children.Add(card);
+            }
+        };
+        return page;
+    }
+
+    private NavigationViewItem? FindNavItem(string tag)
+    {
+        foreach (var item in _nav.MenuItems)
+        {
+            if (item is NavigationViewItem row)
+            {
+                if ((row.Tag as string) == tag)
+                {
+                    return row;
+                }
+                foreach (var child in row.MenuItems)
+                {
+                    if (child is NavigationViewItem sub && (sub.Tag as string) == tag)
+                    {
+                        return sub;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private void RefreshUpdateBadge()
