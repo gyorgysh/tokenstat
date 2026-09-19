@@ -19,7 +19,7 @@ using Windows.UI;
 
 namespace Tokenstat.Pages;
 
-internal sealed class SshPage : Page
+internal sealed class SshPage : Page, IToolbarItems
 {
     private readonly StackPanel _listRoot = new() { Spacing = Theme.SpaceL };
     private readonly ScrollViewer _listView;
@@ -50,11 +50,6 @@ internal sealed class SshPage : Page
     private long _offset;
     private CancellationTokenSource? _poll;
     private SSHSection _section;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly Border _stripHost = new();
     private readonly Border _bodyHost = new();
 
@@ -63,7 +58,7 @@ internal sealed class SshPage : Page
         _section = section;
         _listView = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceM),
             Content = _listRoot,
         };
         _bodyHost.Child = _listView;
@@ -100,15 +95,11 @@ internal sealed class SshPage : Page
         _input.KeyDown += InputOnKeyDown;
 
         RefreshStrip();
-        RebuildChrome();
         var root = new Grid();
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        Grid.SetRow(_barSlot, 0);
-        Grid.SetRow(_stripHost, 1);
-        Grid.SetRow(_bodyHost, 2);
-        root.Children.Add(_barSlot);
+        Grid.SetRow(_stripHost, 0);
+        Grid.SetRow(_bodyHost, 1);
         root.Children.Add(_stripHost);
         root.Children.Add(_bodyHost);
         Content = root;
@@ -116,20 +107,28 @@ internal sealed class SshPage : Page
         Unloaded += (_, _) => _ = CloseSessionAsync();
     }
 
+    public event Action? ToolbarChanged;
+
+    /// <summary>Global screen: no folder to name.</summary>
+    public UIElement? ToolbarScope => null;
+
     /// <summary>
-    /// The screen's own actions in the DetailBar, above the tab strip: the
-    /// library re-read, which stays reachable while a session runs below.
+    /// The library re-read, which stays reachable while a session runs below.
     /// A reload rebuilds the hidden list and leaves the session alone.
     /// </summary>
-    private void RebuildChrome()
+    public IList<UIElement> ToolbarActions()
     {
-        _barSlot.Content = DetailBar.View(trailing: new List<UIElement>
+        return new List<UIElement>
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
                 "Reload the library",
-                async (_, _) => await LoadAsync()),
-        });
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await LoadAsync();
+                }),
+        };
     }
 
     /// <summary>
@@ -178,6 +177,8 @@ internal sealed class SshPage : Page
             FontSize = 18,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
+        var skeleton = Motion.SkeletonCard();
+        _listRoot.Children.Add(skeleton);
 
         switch (_section)
         {
@@ -197,6 +198,7 @@ internal sealed class SshPage : Page
                 await LoadConfigAsync();
                 break;
         }
+        _listRoot.Children.Remove(skeleton);
     }
 
     private async Task LoadKeysTabAsync()

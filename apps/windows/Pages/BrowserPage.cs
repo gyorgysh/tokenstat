@@ -23,17 +23,12 @@ namespace Tokenstat.Pages;
 /// confirm before a remote site loads inside the app, and an empty state
 /// until an address is entered.
 /// </summary>
-internal sealed class BrowserPage : Page, IInspectorContent
+internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly TabView _tabs = new()
     {
         IsAddTabButtonVisible = true,
         TabWidthMode = TabViewWidthMode.SizeToContent,
-    };
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
     };
     private readonly StackPanel _inspector = new()
     {
@@ -41,7 +36,7 @@ internal sealed class BrowserPage : Page, IInspectorContent
         Padding = new Thickness(Theme.SpaceM),
     };
 
-    public BrowserPage(string url, string host, int port, bool unlisten)
+    public BrowserPage(string url, string host, int port, bool unlisten, string? peer = null)
     {
         _tabs.AddTabButtonClick += (_, _) => AddTab("", "127.0.0.1", 0, false);
         _tabs.TabCloseRequested += async (_, args) =>
@@ -52,23 +47,13 @@ internal sealed class BrowserPage : Page, IInspectorContent
             }
         };
         _tabs.SelectionChanged += (_, _) => RenderInspector();
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(_tabs, 1);
-        layout.Children.Add(_tabs);
-        Content = layout;
-        RebuildChrome();
+        Content = _tabs;
         RenderInspector();
         Loaded += (_, _) =>
         {
             if (_tabs.TabItems.Count == 0)
             {
-                AddTab(url, host, port, unlisten);
+                AddTab(url, host, port, unlisten, peer);
             }
         };
         // One close for every tab when the page itself goes away. Per-tab
@@ -93,21 +78,26 @@ internal sealed class BrowserPage : Page, IInspectorContent
     /// </summary>
     public UIElement? Inspector => _inspector;
 
-    private void RebuildChrome()
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The tab strip names its own pages; the scope says this is the browser.
+    /// </summary>
+    public UIElement? ToolbarScope => Chrome.ScopeChip("Browser", Symbol.Globe);
+
+    public IList<UIElement> ToolbarActions()
     {
-        _barSlot.Content = DetailBar.View(
-            scope: Chrome.ScopeChip("Browser", Symbol.Globe),
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload the current page",
-                    (_, _) => CurrentTab()?.Reload()),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Create,
-                    "Open a new tab",
-                    (_, _) => AddTab("", "127.0.0.1", 0, false)),
-            });
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload the current page",
+                (_, _) => CurrentTab()?.Reload()),
+            Buttons.ToolbarIcon(
+                ActionIcon.Create,
+                "Open a new tab",
+                (_, _) => AddTab("", "127.0.0.1", 0, false)),
+        };
     }
 
     private void RenderInspector()
@@ -148,9 +138,9 @@ internal sealed class BrowserPage : Page, IInspectorContent
     private BrowserTab? CurrentTab() =>
         (_tabs.SelectedItem as TabViewItem)?.Tag as BrowserTab;
 
-    private void AddTab(string url, string host, int port, bool unlisten)
+    private void AddTab(string url, string host, int port, bool unlisten, string? peer = null)
     {
-        var tab = new BrowserTab(this, url, host, port, unlisten, CloseRequested);
+        var tab = new BrowserTab(this, url, host, port, unlisten, peer, CloseRequested);
         var item = new TabViewItem
         {
             Header = tab.Title,
@@ -228,6 +218,7 @@ internal sealed class BrowserPage : Page, IInspectorContent
         private string _loadedUrl;
         private string _host;
         private int _port;
+        private readonly string _peer;
         private readonly bool _unlisten;
         private bool _closed;
         private bool _started;
@@ -271,12 +262,13 @@ internal sealed class BrowserPage : Page, IInspectorContent
             }
         }
 
-        public BrowserTab(Page owner, string url, string host, int port, bool unlisten, Action<BrowserTab> close)
+        public BrowserTab(Page owner, string url, string host, int port, bool unlisten, string? peer, Action<BrowserTab> close)
         {
             _owner = owner;
             _loadedUrl = url ?? "";
             _host = host ?? "127.0.0.1";
             _port = port;
+            _peer = peer ?? "";
             _unlisten = unlisten;
             _address.Text = _loadedUrl;
 
@@ -580,13 +572,19 @@ internal sealed class BrowserPage : Page, IInspectorContent
             {
                 try
                 {
-                    await AppServices.Host.CallAsync(
-                        "proxy.unlisten",
-                        new JsonObject
-                        {
-                            ["host"] = _host,
-                            ["port"] = _port,
-                        });
+                    // The host keys bridges by peer, host and port, so the
+                    // peer travels back or the bridge leaks. Local tabs never
+                    // unlisten: their ports were opened directly.
+                    var parameters = new JsonObject
+                    {
+                        ["host"] = _host,
+                        ["port"] = _port,
+                    };
+                    if (!string.IsNullOrEmpty(_peer))
+                    {
+                        parameters["peer"] = _peer;
+                    }
+                    await AppServices.Host.CallAsync("proxy.unlisten", parameters);
                 }
                 catch
                 {

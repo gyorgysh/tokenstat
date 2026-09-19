@@ -28,7 +28,7 @@ namespace Tokenstat.Pages;
 /// full-screen programs work. The session outlives the page, so navigating
 /// away and back reattaches to the same shell.
 /// </summary>
-internal sealed class TerminalPage : Page, IInspectorContent
+internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
 {
     internal const int BufferCap = 200_000;
 
@@ -36,11 +36,6 @@ internal sealed class TerminalPage : Page, IInspectorContent
     private const double CellHeight = 17.0;
 
     private readonly string _workspaceId;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _inspector = new()
     {
         Spacing = Theme.SpaceM,
@@ -164,17 +159,7 @@ internal sealed class TerminalPage : Page, IInspectorContent
         grid.Children.Add(_status);
         grid.Children.Add(termHost);
         grid.Children.Add(_input);
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(grid, 1);
-        layout.Children.Add(grid);
-        Content = layout;
-        RebuildChrome();
+        Content = grid;
         RenderInspector();
 
         _resizeTimer = DispatcherQueue.CreateTimer();
@@ -199,11 +184,27 @@ internal sealed class TerminalPage : Page, IInspectorContent
         Loaded += async (_, _) =>
         {
             _folderName = await FolderNameAsync();
-            RebuildChrome();
+            RaiseToolbarChanged();
             await StartAsync();
         };
         Unloaded += (_, _) => Stop();
     }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The folder this shell runs in.
+    /// </summary>
+    public UIElement? ToolbarScope =>
+        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? "Terminal" : _folderName);
+
+    /// <summary>
+    /// Kill, close, and respawn. The same buttons the page holds, so session
+    /// state keeps driving their enabled marks from one place.
+    /// </summary>
+    public IList<UIElement> ToolbarActions() => new List<UIElement> { _kill, _close, _respawn };
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
     /// <summary>
     /// The inspector column content: what this shell is and how it is doing.
@@ -211,15 +212,6 @@ internal sealed class TerminalPage : Page, IInspectorContent
     /// asking again.
     /// </summary>
     public UIElement? Inspector => _inspector;
-
-    private void RebuildChrome()
-    {
-        var scope = Chrome.ScopeChip(
-            string.IsNullOrEmpty(_folderName) ? "Terminal" : _folderName);
-        _barSlot.Content = DetailBar.View(
-            scope: scope,
-            trailing: new List<UIElement> { _kill, _close, _respawn });
-    }
 
     private void RenderInspector()
     {

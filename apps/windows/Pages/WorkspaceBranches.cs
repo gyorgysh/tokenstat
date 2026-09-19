@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
@@ -36,7 +37,8 @@ internal static class WorkspaceBranches
         string? error = null;
         try
         {
-            var branches = await AppServices.Host.CallAsync(
+            var branches = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.branches",
                 new JsonObject { ["id"] = workspaceId });
             var items = branches as JsonArray ?? new JsonArray();
@@ -293,7 +295,8 @@ internal static class WorkspaceBranches
     {
         try
         {
-            var outcome = await AppServices.Host.CallAsync(
+            var outcome = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.checkout",
                 new JsonObject
                 {
@@ -317,7 +320,8 @@ internal static class WorkspaceBranches
     {
         try
         {
-            var outcome = await AppServices.Host.CallAsync(
+            var outcome = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.createBranch",
                 new JsonObject
                 {

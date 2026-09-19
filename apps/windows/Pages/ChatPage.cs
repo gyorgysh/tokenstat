@@ -13,6 +13,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
 using Tokenstat.Design.Persona;
+using Tokenstat.Navigation;
 using Windows.Storage.Pickers;
 using Windows.System;
 using Windows.UI.Core;
@@ -26,16 +27,12 @@ namespace Tokenstat.Pages;
 /// bypass sit as pills beside it. Enter sends, Shift+Enter inserts a
 /// newline, Escape stops a running turn. Approvals sit in the transcript.
 /// </summary>
-internal sealed class ChatPage : Page, IInspectorContent
+internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
 {
     private const int AttachmentCap = 12 * 1024 * 1024;
 
     private readonly string _workspaceId;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
+    public event Action? ToolbarChanged;
     private readonly StackPanel _inspector = new()
     {
         Spacing = Theme.SpaceM,
@@ -112,13 +109,16 @@ internal sealed class ChatPage : Page, IInspectorContent
             if (string.IsNullOrEmpty(next) || next == Format.Text(_openChat, "title")) return;
             await UpdateAsync(new JsonObject { ["title"] = next });
         };
+        // The Mac reading lane: 1040 wide, leading, with the transcript
+        // gutters. A centred lane puts the reader's eye somewhere different
+        // at every window size and leaves two gutters saying nothing.
         _scroll = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl, Theme.SpaceXl),
+            Padding = new Thickness(Theme.SpaceL, Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl),
             Content = new Grid
             {
-                MaxWidth = 880,
-                HorizontalAlignment = HorizontalAlignment.Center,
+                MaxWidth = 1040,
+                HorizontalAlignment = HorizontalAlignment.Left,
                 Children = { _root },
             },
         };
@@ -128,21 +128,45 @@ internal sealed class ChatPage : Page, IInspectorContent
             // Pinned while at the end; a scroll up hands control to the reader.
             _followEnd = _scroll.ScrollableHeight - _scroll.VerticalOffset < 48;
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(_scroll, 1);
-        layout.Children.Add(_scroll);
-        Content = layout;
-        RebuildChrome();
+        Content = _scroll;
         RenderInspector();
         Loaded += async (_, _) => await ShowListAsync();
         Unloaded += (_, _) => _poll?.Cancel();
     }
+
+    /// <summary>
+    /// The folder this chat belongs to, like the Mac conversation scope.
+    /// </summary>
+    public UIElement? ToolbarScope =>
+        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? "Chat" : _folderName);
+
+    public IList<UIElement> ToolbarActions()
+    {
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload chats",
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    if (_openId is null)
+                    {
+                        await ShowListAsync();
+                    }
+                    else
+                    {
+                        await OpenAsync(_openId);
+                    }
+                }),
+            Buttons.ToolbarIcon(
+                ActionIcon.Create,
+                "Start a chat",
+                async (_, _) => await CreateAsync()),
+        };
+    }
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
     /// <summary>
     /// The inspector column content: the open conversation's setup and spend,
@@ -150,35 +174,6 @@ internal sealed class ChatPage : Page, IInspectorContent
     /// so the column stays live without the shell asking again.
     /// </summary>
     public UIElement? Inspector => _inspector;
-
-    private void RebuildChrome()
-    {
-        var scope = Chrome.ScopeChip(
-            string.IsNullOrEmpty(_folderName) ? "Chat" : _folderName);
-        _barSlot.Content = DetailBar.View(
-            scope: scope,
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload chats",
-                    async (_, _) =>
-                    {
-                        if (_openId is null)
-                        {
-                            await ShowListAsync();
-                        }
-                        else
-                        {
-                            await OpenAsync(_openId);
-                        }
-                    }),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Create,
-                    "Start a chat",
-                    async (_, _) => await CreateAsync()),
-            });
-    }
 
     private void RenderInspector()
     {
@@ -268,8 +263,34 @@ internal sealed class ChatPage : Page, IInspectorContent
             : tokens;
     }
 
+    /// <summary>
+    /// One chat method against this folder, local or remote. A remote folder
+    /// travels as remote.call with the peer's own folder id, the way the
+    /// desktop Mac routes every chat read and write. Params are copied, never
+    /// mutated, so a retry cannot forward an already rewritten id.
+    /// </summary>
+    private Task<JsonNode> CallChatAsync(string method, JsonNode? parameters = null)
+    {
+        if (!RemoteWorkspaces.TrySplit(_workspaceId, out var peer, out var inner))
+        {
+            return AppServices.Host.CallAsync(method, parameters);
+        }
+        var forwarded = parameters is null
+            ? new JsonObject()
+            : (JsonObject)JsonNode.Parse(parameters.ToJsonString())!;
+        if (Format.Text(forwarded, "workspaceId") == _workspaceId)
+        {
+            forwarded["workspaceId"] = inner;
+        }
+        return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
+    }
+
     private async Task<string> FolderNameAsync()
     {
+        if (RemoteWorkspaces.CachedFolder(_workspaceId) is RemoteFolder cached)
+        {
+            return cached.DisplayName;
+        }
         try
         {
             var listed = await AppServices.Host.CallAsync("workspace.list");
@@ -304,13 +325,16 @@ internal sealed class ChatPage : Page, IInspectorContent
         _followEnd = true;
         _root.Children.Clear();
         _root.Children.Add(ListHeader());
+        var skeleton = Motion.SkeletonCard();
+        _root.Children.Add(skeleton);
         _folderName = await FolderNameAsync();
-        RebuildChrome();
+        RaiseToolbarChanged();
         RenderInspector();
         try
         {
             await RefreshCatalogAsync();
             RenderInspector();
+            _root.Children.Remove(skeleton);
             _listReady = true;
             if (!string.IsNullOrEmpty(_pendingReveal))
             {
@@ -347,6 +371,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         }
         catch (Exception ex)
         {
+            _root.Children.Remove(skeleton);
             _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
         }
     }
@@ -459,7 +484,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         {
             await RefreshCatalogAsync();
             var chosen = DefaultBackend();
-            var created = await AppServices.Host.CallAsync("chat.create", new JsonObject
+            var created = await CallChatAsync("chat.create", new JsonObject
             {
                 ["workspaceId"] = _workspaceId,
                 ["backend"] = Format.Text(chosen, "id", "claude"),
@@ -524,14 +549,14 @@ internal sealed class ChatPage : Page, IInspectorContent
                 await ShowListAsync();
                 return;
             }
-            var chunk = await AppServices.Host.CallAsync("chat.events", new JsonObject
+            var chunk = await CallChatAsync("chat.events", new JsonObject
             {
                 ["id"] = id,
                 ["offset"] = 0,
             });
             _events = AsArray(chunk, "events");
             _offset = (ulong)Format.Long(chunk, "nextOffset");
-            _approvals = AsArray(await AppServices.Host.CallAsync(
+            _approvals = AsArray(await CallChatAsync(
                 "chat.approvals", new JsonObject { ["id"] = id }));
             _started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
             _running = Format.Flag(_openChat, "running");
@@ -724,7 +749,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         JsonNode answer;
         try
         {
-            answer = await AppServices.Host.CallAsync(
+            answer = await CallChatAsync(
                 "chat.instructions", new JsonObject { ["id"] = chatId });
         }
         catch
@@ -1705,7 +1730,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         }
         try
         {
-            var attached = await AppServices.Host.CallAsync("chat.attach", new JsonObject
+            var attached = await CallChatAsync("chat.attach", new JsonObject
             {
                 ["id"] = _openId,
                 ["name"] = file.Name,
@@ -1747,7 +1772,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         _sending = true;
         try
         {
-            var updated = await AppServices.Host.CallAsync("chat.send", new JsonObject
+            var updated = await CallChatAsync("chat.send", new JsonObject
             {
                 ["id"] = _openId,
                 ["text"] = text,
@@ -1776,7 +1801,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         if (_openId is null) return;
         try
         {
-            await AppServices.Host.CallAsync("chat.stop", new JsonObject { ["id"] = _openId });
+            await CallChatAsync("chat.stop", new JsonObject { ["id"] = _openId });
             StartPoll();
         }
         catch (Exception ex)
@@ -1789,12 +1814,12 @@ internal sealed class ChatPage : Page, IInspectorContent
     {
         try
         {
-            await AppServices.Host.CallAsync("chat.resolveApproval", new JsonObject
+            await CallChatAsync("chat.resolveApproval", new JsonObject
             {
                 ["id"] = id,
                 ["choice"] = choice,
             });
-            _approvals = AsArray(await AppServices.Host.CallAsync(
+            _approvals = AsArray(await CallChatAsync(
                 "chat.approvals", new JsonObject { ["id"] = _openId }));
             RebuildTranscript();
         }
@@ -1818,7 +1843,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
         try
         {
-            await AppServices.Host.CallAsync("chat.remove", new JsonObject { ["id"] = _openId });
+            await CallChatAsync("chat.remove", new JsonObject { ["id"] = _openId });
             await ShowListAsync();
         }
         catch (Exception ex)
@@ -1834,7 +1859,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         try
         {
             _suppress = true;
-            _openChat = await AppServices.Host.CallAsync("chat.update", patch);
+            _openChat = await CallChatAsync("chat.update", patch);
         }
         catch (Exception ex)
         {
@@ -1864,7 +1889,7 @@ internal sealed class ChatPage : Page, IInspectorContent
             {
                 await Task.Delay(400, token);
                 var wasBusy = Busy();
-                var chunk = await AppServices.Host.CallAsync("chat.events", new JsonObject
+                var chunk = await CallChatAsync("chat.events", new JsonObject
                 {
                     ["id"] = chatId,
                     ["offset"] = _offset,
@@ -1882,7 +1907,7 @@ internal sealed class ChatPage : Page, IInspectorContent
                     _offset = nextOffset;
                     _approvals = approvals;
                 }
-                var approvals = AsArray(await AppServices.Host.CallAsync(
+                var approvals = AsArray(await CallChatAsync(
                     "chat.approvals", new JsonObject { ["id"] = chatId }));
                 if (token.IsCancellationRequested || _openId != chatId) return;
                 await RefreshCatalogAsync();
@@ -1964,7 +1989,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         // banner it like every other host call from this page.
         try
         {
-            var backends = await AppServices.Host.CallAsync(
+            var backends = await CallChatAsync(
                 "chat.backends",
                 new JsonObject { ["refresh"] = true });
             _backends = AsArray(backends);
@@ -1978,9 +2003,9 @@ internal sealed class ChatPage : Page, IInspectorContent
 
     private async Task RefreshCatalogAsync()
     {
-        var chats = AppServices.Host.CallAsync("chat.list", new JsonObject { ["workspaceId"] = _workspaceId });
-        var backends = AppServices.Host.CallAsync("chat.backends");
-        var personas = AppServices.Host.CallAsync(
+        var chats = CallChatAsync("chat.list", new JsonObject { ["workspaceId"] = _workspaceId });
+        var backends = CallChatAsync("chat.backends");
+        var personas = CallChatAsync(
             "chat.personas",
             new JsonObject { ["workspaceId"] = _workspaceId });
         await Task.WhenAll(chats, backends, personas);

@@ -29,15 +29,10 @@ namespace Tokenstat.Pages;
 /// choice ride screen.viewer.input with the same event shapes the Apple
 /// capture side applies. Audio has no pipeline in this cut and is skipped.
 /// </summary>
-internal sealed class ScreenPage : Page, IInspectorContent
+internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string _peer;
     private readonly string _name;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _inspector = new()
     {
         Spacing = Theme.SpaceM,
@@ -202,21 +197,29 @@ internal sealed class ScreenPage : Page, IInspectorContent
         grid.Children.Add(_status);
         grid.Children.Add(_stage);
         grid.Children.Add(keyBar);
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(grid, 1);
-        layout.Children.Add(grid);
-        Content = layout;
-        RebuildChrome();
+        Content = grid;
         RenderInspector();
 
         Loaded += async (_, _) => await StartAsync();
         Unloaded += (_, _) => _ = CloseAsync();
+    }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The machine on the other end of the viewer.
+    /// </summary>
+    public UIElement? ToolbarScope => Chrome.ScopeChip(_name, Symbol.View);
+
+    public IList<UIElement> ToolbarActions()
+    {
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Done,
+                "Close the viewer",
+                async (_, _) => await CloseAsync()),
+        };
     }
 
     /// <summary>
@@ -225,19 +228,6 @@ internal sealed class ScreenPage : Page, IInspectorContent
     /// asking again.
     /// </summary>
     public UIElement? Inspector => _inspector;
-
-    private void RebuildChrome()
-    {
-        _barSlot.Content = DetailBar.View(
-            scope: Chrome.ScopeChip(_name, Symbol.View),
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Done,
-                    "Close the viewer",
-                    async (_, _) => await CloseAsync()),
-            });
-    }
 
     private void RenderInspector()
     {

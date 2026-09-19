@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
@@ -17,14 +18,9 @@ namespace Tokenstat.Pages;
 /// host boundary; this page only asks because it loaded or a labelled control
 /// was pressed.
 /// </summary>
-internal sealed class PullsPage : Page, IInspectorContent
+internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string _workspaceId;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _inspector = new()
     {
         Spacing = Theme.SpaceM,
@@ -51,31 +47,50 @@ internal sealed class PullsPage : Page, IInspectorContent
         _state.SelectedIndex = 0;
         _scope.SelectionChanged += async (_, _) => await LoadListAsync();
         _state.SelectionChanged += async (_, _) => await LoadListAsync();
-        var scroller = new ScrollViewer
+        // A scanned list takes the window, like the Mac ReadingRoom: no lane,
+        // leading, with the wide gutters. The lane that keeps prose readable
+        // is the lane that pushes rows into each other.
+        Content = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl, Theme.SpaceXl),
-            Content = new Grid
-            {
-                MaxWidth = 920,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Children = { _root },
-            },
+            Padding = new Thickness(Theme.SpaceXl),
+            Content = _root,
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(scroller, 1);
-        layout.Children.Add(scroller);
-        Content = layout;
-        RebuildChrome();
         RenderInspector();
         Loaded += async (_, _) => await LoadAsync();
         Unloaded += (_, _) => _loginPoll?.Cancel();
     }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The folder these pull requests belong to.
+    /// </summary>
+    public UIElement? ToolbarScope =>
+        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? "Pull requests" : _folderName);
+
+    public IList<UIElement> ToolbarActions()
+    {
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload pull requests",
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    if (_openNumber.HasValue)
+                    {
+                        await ShowDetailAsync(_openNumber.Value, true);
+                    }
+                    else
+                    {
+                        await LoadAsync(true);
+                    }
+                }),
+        };
+    }
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
     /// <summary>
     /// The inspector column content: the repository and connection, and the
@@ -83,31 +98,6 @@ internal sealed class PullsPage : Page, IInspectorContent
     /// it, so the column stays live without the shell asking again.
     /// </summary>
     public UIElement? Inspector => _inspector;
-
-    private void RebuildChrome()
-    {
-        var scope = Chrome.ScopeChip(
-            string.IsNullOrEmpty(_folderName) ? "Pull requests" : _folderName);
-        _barSlot.Content = DetailBar.View(
-            scope: scope,
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload pull requests",
-                    async (_, _) =>
-                    {
-                        if (_openNumber.HasValue)
-                        {
-                            await ShowDetailAsync(_openNumber.Value, true);
-                        }
-                        else
-                        {
-                            await LoadAsync(true);
-                        }
-                    }),
-            });
-    }
 
     private void RenderInspector()
     {
@@ -161,8 +151,36 @@ internal sealed class PullsPage : Page, IInspectorContent
         });
     }
 
+    /// <summary>
+    /// One workspace-scoped pulls method against this folder, local or
+    /// remote. A remote folder travels as remote.call with the peer's own
+    /// folder id, the way the desktop Mac routes every pulls read and write.
+    /// Params are copied, never mutated, so a retry cannot forward an already
+    /// rewritten id. The sign-in flow has no folder and always stays local,
+    /// matching the Mac.
+    /// </summary>
+    private Task<JsonNode> CallPullsAsync(string method, JsonNode? parameters = null)
+    {
+        if (!RemoteWorkspaces.TrySplit(_workspaceId, out var peer, out var inner))
+        {
+            return AppServices.Host.CallAsync(method, parameters);
+        }
+        var forwarded = parameters is null
+            ? new JsonObject()
+            : (JsonObject)JsonNode.Parse(parameters.ToJsonString())!;
+        if (Format.Text(forwarded, "workspaceId") == _workspaceId)
+        {
+            forwarded["workspaceId"] = inner;
+        }
+        return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
+    }
+
     private async Task<string> FolderNameAsync()
     {
+        if (RemoteWorkspaces.CachedFolder(_workspaceId) is RemoteFolder cached)
+        {
+            return cached.DisplayName;
+        }
         try
         {
             var listed = await AppServices.Host.CallAsync("workspace.list");
@@ -189,15 +207,19 @@ internal sealed class PullsPage : Page, IInspectorContent
         _root.Children.Clear();
         _openNumber = null;
         _detail = null;
-        _root.Children.Add(Header("Review the work around this branch", refresh));
+        _root.Children.Add(Header("Review the work around this branch"));
+        var skeleton = Motion.SkeletonCard();
+        _root.Children.Add(skeleton);
         _folderName = await FolderNameAsync();
-        RebuildChrome();
+        RaiseToolbarChanged();
         RenderInspector();
+        UIElement? rows = null;
         try
         {
-            var availability = await AppServices.Host.CallAsync(
+            var availability = await CallPullsAsync(
                 "pulls.availability",
                 new JsonObject { ["workspaceId"] = _workspaceId });
+            _root.Children.Remove(skeleton);
             var state = Format.Text(availability, "state");
             switch (state)
             {
@@ -207,10 +229,14 @@ internal sealed class PullsPage : Page, IInspectorContent
                     _source = Format.Text(availability, "source");
                     RenderInspector();
                     _root.Children[0] = Header(
-                        Format.Text(availability, "repo", "Pull requests"), refresh);
+                        Format.Text(availability, "repo", "Pull requests"));
                     _root.Children.Add(ConnectionLine(availability));
                     _root.Children.Add(FilterBar());
+                    rows = Motion.SkeletonCard();
+                    _root.Children.Add(rows);
                     await AppendListAsync(refresh);
+                    _root.Children.Remove(rows);
+                    rows = null;
                     break;
                 case "signedOut":
                     _root.Children.Add(ConnectionCard());
@@ -241,16 +267,20 @@ internal sealed class PullsPage : Page, IInspectorContent
         }
         catch (Exception ex)
         {
+            _root.Children.Remove(skeleton);
+            if (rows is not null)
+            {
+                _root.Children.Remove(rows);
+            }
             _root.Children.Add(Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
         }
     }
 
-    private UIElement Header(string subtitle, bool busy)
+    private UIElement Header(string subtitle)
     {
         var row = new Grid();
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var mark = new Border
         {
             Width = 42,
@@ -274,10 +304,6 @@ internal sealed class PullsPage : Page, IInspectorContent
         titles.Children.Add(new TextBlock { Text = subtitle, Opacity = 0.66, TextWrapping = TextWrapping.Wrap });
         Grid.SetColumn(titles, 1);
         row.Children.Add(titles);
-        var refresh = ActionIconGlyph.Button("Refresh", ActionIcon.Refresh, async (_, _) => await LoadAsync(true));
-        refresh.IsEnabled = !busy;
-        Grid.SetColumn(refresh, 2);
-        row.Children.Add(refresh);
         return row;
     }
 
@@ -356,7 +382,7 @@ internal sealed class PullsPage : Page, IInspectorContent
     {
         var scopes = new[] { "all", "mine", "assigned", "reviewRequested" };
         var states = new[] { "open", "merged", "closed", "draft" };
-        var listed = await AppServices.Host.CallAsync("pulls.list", new JsonObject
+        var listed = await CallPullsAsync("pulls.list", new JsonObject
         {
             ["workspaceId"] = _workspaceId,
             ["scope"] = scopes[Math.Max(0, _scope.SelectedIndex)],
@@ -542,11 +568,11 @@ internal sealed class PullsPage : Page, IInspectorContent
         _root.Children.Add(chrome);
         try
         {
-            var detailTask = AppServices.Host.CallAsync("pulls.view", new JsonObject
+            var detailTask = CallPullsAsync("pulls.view", new JsonObject
             {
                 ["workspaceId"] = _workspaceId, ["number"] = number, ["refresh"] = refresh,
             });
-            var timelineTask = AppServices.Host.CallAsync("pulls.timeline", new JsonObject
+            var timelineTask = CallPullsAsync("pulls.timeline", new JsonObject
             {
                 ["workspaceId"] = _workspaceId, ["number"] = number, ["refresh"] = refresh,
             });
@@ -723,7 +749,7 @@ internal sealed class PullsPage : Page, IInspectorContent
     {
         try
         {
-            var response = await AppServices.Host.CallAsync("pulls.diff", new JsonObject
+            var response = await CallPullsAsync("pulls.diff", new JsonObject
             {
                 ["workspaceId"] = _workspaceId, ["number"] = number,
             });
@@ -830,7 +856,7 @@ internal sealed class PullsPage : Page, IInspectorContent
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
         try
         {
-            var outcome = await AppServices.Host.CallAsync("pulls.checkout", new JsonObject
+            var outcome = await CallPullsAsync("pulls.checkout", new JsonObject
             {
                 ["workspaceId"] = _workspaceId, ["number"] = number, ["branch"] = branch.Text.Trim(),
             });
@@ -878,7 +904,7 @@ internal sealed class PullsPage : Page, IInspectorContent
     {
         extra["workspaceId"] = _workspaceId;
         extra["number"] = number;
-        await AppServices.Host.CallAsync(method, extra);
+        await CallPullsAsync(method, extra);
     }
 
     private static Windows.UI.Color StateTint(string state, bool draft) => draft

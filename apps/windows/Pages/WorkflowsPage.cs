@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Tokenstat.Notifications;
 
 namespace Tokenstat.Pages;
@@ -20,14 +21,9 @@ namespace Tokenstat.Pages;
 /// saves on protocol 22 and later, complete run history, and unknown-field
 /// preservation on every round trip.
 /// </summary>
-internal sealed class WorkflowsPage : Page, IInspectorContent
+internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _scopeWorkspaceId;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _listHost = new() { Spacing = Theme.SpaceL };
@@ -75,32 +71,39 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
             _query = text ?? "";
             RenderList();
         });
-        _searchBox.MaxWidth = 340;
-        _searchBox.HorizontalAlignment = HorizontalAlignment.Left;
+        // Full width, like the Mac search box: a capped field stops halfway
+        // across its column and leaves dead background beside itself.
+        _searchBox.HorizontalAlignment = HorizontalAlignment.Stretch;
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_searchBox);
         _root.Children.Add(_listHost);
         // A wireframe until the first load lands. RenderList clears the host,
         // so real content replaces it, like Home's skeleton.
         _listHost.Children.Add(Motion.SkeletonCard());
-        var scroller = new ScrollViewer
+        Content = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceM),
             Content = _root,
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(scroller, 1);
-        layout.Children.Add(scroller);
-        Content = layout;
-        RebuildChrome();
         RenderDetail();
         Loaded += async (_, _) => await LoadAsync();
+    }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The folder this screen belongs to, or null on the global list.
+    /// </summary>
+    public UIElement? ToolbarScope
+    {
+        get
+        {
+            if (_scopeWorkspaceId is null)
+            {
+                return null;
+            }
+            return Chrome.ScopeChip(FolderLabel(_scopeWorkspaceId));
+        }
     }
 
     /// <summary>
@@ -110,27 +113,26 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
     /// </summary>
     public UIElement? Inspector => _detailHost;
 
-    private void RebuildChrome()
+    public IList<UIElement> ToolbarActions()
     {
-        UIElement? scope = null;
-        if (_scopeWorkspaceId is not null)
+        return new List<UIElement>
         {
-            scope = Chrome.ScopeChip(FolderLabel(_scopeWorkspaceId));
-        }
-        _barSlot.Content = DetailBar.View(
-            scope: scope,
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload workflows",
-                    async (_, _) => await LoadAsync()),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Create,
-                    "Start a blank draft",
-                    (_, _) => StartCreating()),
-            });
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload workflows",
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await LoadAsync();
+                }),
+            Buttons.ToolbarIcon(
+                ActionIcon.Create,
+                "Start a blank draft",
+                (_, _) => StartCreating()),
+        };
     }
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
     private void StartCreating()
     {
@@ -159,22 +161,94 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
         return stack;
     }
 
+    /// <summary>
+    /// One workbench method against this screen's folder, local or remote. A
+    /// remote folder travels as remote.call with the peer's own folder id.
+    /// Params are copied, never mutated, so a retry cannot forward an already
+    /// rewritten id. The global list has no folder and always stays local.
+    /// </summary>
+    private Task<JsonNode> CallWorkbenchAsync(
+        string method, JsonNode? parameters = null, TimeSpan? patience = null)
+    {
+        if (_scopeWorkspaceId is null
+            || !RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out var peer, out var inner))
+        {
+            return AppServices.Host.CallAsync(method, parameters, patience);
+        }
+        var forwarded = parameters is null
+            ? new JsonObject()
+            : (JsonObject)JsonNode.Parse(parameters.ToJsonString())!;
+        if (Format.Text(forwarded, "workspaceId") == _scopeWorkspaceId)
+        {
+            forwarded["workspaceId"] = inner;
+        }
+        if (patience is null)
+        {
+            return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
+        }
+        // The one call that needs patience (workflow.design) keeps it across
+        // the hop: the same remote.call envelope CallOnPeerAsync sends.
+        return AppServices.Host.CallAsync(
+            "remote.call",
+            new JsonObject
+            {
+                ["peer"] = peer,
+                ["method"] = method,
+                ["params"] = forwarded,
+            },
+            patience);
+    }
+
+    /// <summary>
+    /// The protocol of the host that owns these graphs: the peer's sessionless
+    /// protocol for a remote folder, the local one otherwise. Null means
+    /// unknown, and unknown means assume the feature is there.
+    /// </summary>
+    private async Task<long?> ProtocolAsync()
+    {
+        if (_scopeWorkspaceId is not null
+            && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out var peer, out _))
+        {
+            return await RemoteFeatureGate.PeerProtocolAsync(peer);
+        }
+        return await WorkbenchOps.ProtocolAsync();
+    }
+
     private async Task LoadAsync()
     {
         _working = true;
         try
         {
-            _protocol = await WorkbenchOps.ProtocolAsync();
-            var listTask = AppServices.Host.CallAsync("workflow.list", new JsonObject());
-            var runsTask = AppServices.Host.CallAsync("workflow.runs", new JsonObject());
+            _protocol = await ProtocolAsync();
+            var listTask = CallWorkbenchAsync("workflow.list", new JsonObject());
+            var runsTask = CallWorkbenchAsync("workflow.runs", new JsonObject());
             var foldersTask = AppServices.Host.CallAsync("workspace.list", new JsonObject());
-            var backendsTask = AppServices.Host.CallAsync("automation.backends", new JsonObject());
-            var queueTask = AppServices.Host.CallAsync("automation.queue", new JsonObject());
+            var backendsTask = CallWorkbenchAsync("automation.backends", new JsonObject());
+            var queueTask = CallWorkbenchAsync("automation.queue", new JsonObject());
             await Task.WhenAll(listTask, runsTask, foldersTask, backendsTask, queueTask);
             _graphs = Format.Items(listTask.Result, "graphs") ?? new JsonArray();
             _runs = Format.Items(runsTask.Result) ?? new JsonArray();
             RunNotifications.Shared.SettleWorkflows(_runs);
             _folders = ReadFolders(foldersTask.Result);
+            if (_scopeWorkspaceId is not null
+                && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner))
+            {
+                // Graphs from the peer carry its own folder id. Namespace them
+                // to this page's folder id so the scope filter below keeps
+                // matching, and list the folder itself so its name resolves.
+                foreach (var graph in _graphs)
+                {
+                    if (graph is JsonObject obj && Format.Text(obj, "workspaceId") == inner)
+                    {
+                        obj["workspaceId"] = _scopeWorkspaceId;
+                    }
+                }
+                if (RemoteWorkspaces.CachedFolder(_scopeWorkspaceId) is RemoteFolder cached
+                    && _folders.All(f => f.Id != _scopeWorkspaceId))
+                {
+                    _folders.Add((_scopeWorkspaceId, cached.DisplayName));
+                }
+            }
             _backends = ReadBackends(backendsTask.Result);
             var queue = queueTask.Result;
             try
@@ -191,7 +265,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
             {
                 RefreshGraphFromHost();
             }
-            RebuildChrome();
+            RaiseToolbarChanged();
             RenderList();
             RenderDetail();
         }
@@ -836,7 +910,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
             conflictRow.Children.Add(ActionIconGlyph.PrimaryButton(
                 "Save anyway", ActionIcon.Save, async (_, _) => await SaveAsync(force: true)));
             conflictRow.Children.Add(ActionIconGlyph.Button(
-                "Take saved", ActionIcon.Restore, async (_, _) =>
+                "Take saved", ActionIcon.Restore, (_, _) =>
                 {
                     _conflictId = null;
                     _detailDirty = false;
@@ -1539,7 +1613,15 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
     /// </summary>
     private JsonObject SavePayload()
     {
-        return (JsonObject)(_graph?.DeepClone() ?? new JsonObject());
+        var payload = (JsonObject)(_graph?.DeepClone() ?? new JsonObject());
+        // The detail edits the namespaced id; the peer stores its own.
+        if (_scopeWorkspaceId is not null
+            && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner)
+            && Format.Text(payload, "workspaceId") == _scopeWorkspaceId)
+        {
+            payload["workspaceId"] = inner;
+        }
+        return payload;
     }
 
     private async Task SaveAsync(bool force)
@@ -1557,7 +1639,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
             {
                 var payload = SavePayload();
                 payload["id"] = "";
-                var created = await AppServices.Host.CallAsync(
+                var created = await CallWorkbenchAsync(
                     "workflow.create", new JsonObject { ["workflow"] = payload });
                 _creating = false;
                 _selectedId = Format.Text(created, "id");
@@ -1581,7 +1663,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
                     payload["revision"] = revision.Value;
                     try
                     {
-                        await AppServices.Host.CallAsync("workflow.edit", new JsonObject
+                        await CallWorkbenchAsync("workflow.edit", new JsonObject
                         {
                             ["workflow"] = payload,
                             ["expectedRevision"] = revision.Value,
@@ -1597,7 +1679,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
                 }
                 else
                 {
-                    await AppServices.Host.CallAsync(
+                    await CallWorkbenchAsync(
                         "workflow.update", new JsonObject { ["workflow"] = payload });
                 }
                 _detailDirty = false;
@@ -1621,7 +1703,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
     {
         try
         {
-            var fresh = await AppServices.Host.CallAsync("workflow.get", new JsonObject { ["id"] = id });
+            var fresh = await CallWorkbenchAsync("workflow.get", new JsonObject { ["id"] = id });
             return WorkbenchOps.Revision(fresh);
         }
         catch
@@ -1639,7 +1721,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
         _working = true;
         try
         {
-            await AppServices.Host.CallAsync(
+            await CallWorkbenchAsync(
                 "workflow.remove", new JsonObject { ["id"] = _selectedId });
             Notice("Workflow deleted.");
             _creating = false;
@@ -1691,7 +1773,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
                 parameters["backend"] = backend;
             }
             // Design drains a backend for up to three minutes, so allow four.
-            var designed = await AppServices.Host.CallAsync(
+            var designed = await CallWorkbenchAsync(
                 "workflow.design", parameters, TimeSpan.FromMinutes(4));
             if (designed is JsonObject graph && graph.Count > 0)
             {
@@ -1772,7 +1854,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
             {
                 parameters["workspaceId"] = folder;
             }
-            await AppServices.Host.CallAsync("workflow.run", parameters);
+            await CallWorkbenchAsync("workflow.run", parameters);
             Notice("The run started.");
         }
         catch (Exception ex)
@@ -1818,7 +1900,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
                     break;
                 }
             }
-            await AppServices.Host.CallAsync("workflow.run", parameters);
+            await CallWorkbenchAsync("workflow.run", parameters);
             Notice("The run started.");
         }
         catch (Exception ex)
@@ -1837,7 +1919,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
     {
         try
         {
-            await AppServices.Host.CallAsync("workflow.kill", new JsonObject { ["id"] = runId });
+            await CallWorkbenchAsync("workflow.kill", new JsonObject { ["id"] = runId });
             Notice("Stopped.");
         }
         catch (Exception ex)
@@ -1852,7 +1934,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
     {
         try
         {
-            await AppServices.Host.CallAsync("workflow.continue", new JsonObject { ["id"] = runId });
+            await CallWorkbenchAsync("workflow.continue", new JsonObject { ["id"] = runId });
             Notice("The run continued.");
         }
         catch (Exception ex)
@@ -1981,7 +2063,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
     {
         try
         {
-            var answer = await AppServices.Host.CallAsync(
+            var answer = await CallWorkbenchAsync(
                 "workflow.transcript",
                 new JsonObject { ["id"] = runId, ["nodeId"] = nodeId, ["offset"] = offset });
             var text = Format.Text(answer, "text");

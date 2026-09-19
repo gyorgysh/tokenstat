@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Tokenstat.Notifications;
 
 namespace Tokenstat.Pages;
@@ -19,14 +20,9 @@ namespace Tokenstat.Pages;
 /// host-level queue settings, live-first run history, and revision-checked
 /// saves with receipts on protocol 21 and later.
 /// </summary>
-internal sealed class AutomationsPage : Page, IInspectorContent
+internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _scopeWorkspaceId;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _listHost = new() { Spacing = Theme.SpaceL };
@@ -111,32 +107,39 @@ internal sealed class AutomationsPage : Page, IInspectorContent
             _query = text ?? "";
             RenderList();
         });
-        _searchBox.MaxWidth = 340;
-        _searchBox.HorizontalAlignment = HorizontalAlignment.Left;
+        // Full width, like the Mac search box: a capped field stops halfway
+        // across its column and leaves dead background beside itself.
+        _searchBox.HorizontalAlignment = HorizontalAlignment.Stretch;
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_searchBox);
         _root.Children.Add(_listHost);
         // A wireframe until the first load lands. RenderList clears the host,
         // so real content replaces it, like Home's skeleton.
         _listHost.Children.Add(Motion.SkeletonCard());
-        var scroller = new ScrollViewer
+        Content = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceM),
             Content = _root,
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(scroller, 1);
-        layout.Children.Add(scroller);
-        Content = layout;
-        RebuildChrome();
         RenderDetail();
         Loaded += async (_, _) => await LoadAsync();
+    }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The folder this screen belongs to, or null on the global list.
+    /// </summary>
+    public UIElement? ToolbarScope
+    {
+        get
+        {
+            if (_scopeWorkspaceId is null)
+            {
+                return null;
+            }
+            return Chrome.ScopeChip(FolderLabel(_scopeWorkspaceId));
+        }
     }
 
     /// <summary>
@@ -146,27 +149,26 @@ internal sealed class AutomationsPage : Page, IInspectorContent
     /// </summary>
     public UIElement? Inspector => _detailHost;
 
-    private void RebuildChrome()
+    public IList<UIElement> ToolbarActions()
     {
-        UIElement? scope = null;
-        if (_scopeWorkspaceId is not null)
+        return new List<UIElement>
         {
-            scope = Chrome.ScopeChip(FolderLabel(_scopeWorkspaceId));
-        }
-        _barSlot.Content = DetailBar.View(
-            scope: scope,
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload automations",
-                    async (_, _) => await LoadAsync()),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Create,
-                    "Schedule a job",
-                    (_, _) => StartCreating()),
-            });
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload automations",
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await LoadAsync();
+                }),
+            Buttons.ToolbarIcon(
+                ActionIcon.Create,
+                "Schedule a job",
+                (_, _) => StartCreating()),
+        };
     }
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
     private void StartCreating()
     {
@@ -194,22 +196,79 @@ internal sealed class AutomationsPage : Page, IInspectorContent
         return stack;
     }
 
+    /// <summary>
+    /// One workbench method against this screen's folder, local or remote. A
+    /// remote folder travels as remote.call with the peer's own folder id.
+    /// Params are copied, never mutated, so a retry cannot forward an already
+    /// rewritten id. The global list has no folder and always stays local.
+    /// </summary>
+    private Task<JsonNode> CallWorkbenchAsync(string method, JsonNode? parameters = null)
+    {
+        if (_scopeWorkspaceId is null
+            || !RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out var peer, out var inner))
+        {
+            return AppServices.Host.CallAsync(method, parameters);
+        }
+        var forwarded = parameters is null
+            ? new JsonObject()
+            : (JsonObject)JsonNode.Parse(parameters.ToJsonString())!;
+        if (Format.Text(forwarded, "workspaceId") == _scopeWorkspaceId)
+        {
+            forwarded["workspaceId"] = inner;
+        }
+        return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
+    }
+
+    /// <summary>
+    /// The protocol of the host that owns these jobs: the peer's sessionless
+    /// protocol for a remote folder, the local one otherwise. Null means
+    /// unknown, and unknown means assume the feature is there.
+    /// </summary>
+    private async Task<long?> ProtocolAsync()
+    {
+        if (_scopeWorkspaceId is not null
+            && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out var peer, out _))
+        {
+            return await RemoteFeatureGate.PeerProtocolAsync(peer);
+        }
+        return await WorkbenchOps.ProtocolAsync();
+    }
+
     private async Task LoadAsync()
     {
         _working = true;
         try
         {
-            _protocol = await WorkbenchOps.ProtocolAsync();
-            var listTask = AppServices.Host.CallAsync("automation.list", new JsonObject());
-            var runsTask = AppServices.Host.CallAsync("automation.runs", new JsonObject());
+            _protocol = await ProtocolAsync();
+            var listTask = CallWorkbenchAsync("automation.list", new JsonObject());
+            var runsTask = CallWorkbenchAsync("automation.runs", new JsonObject());
             var foldersTask = AppServices.Host.CallAsync("workspace.list", new JsonObject());
-            var backendsTask = AppServices.Host.CallAsync("automation.backends", new JsonObject());
-            var queueTask = AppServices.Host.CallAsync("automation.queue", new JsonObject());
+            var backendsTask = CallWorkbenchAsync("automation.backends", new JsonObject());
+            var queueTask = CallWorkbenchAsync("automation.queue", new JsonObject());
             await Task.WhenAll(listTask, runsTask, foldersTask, backendsTask, queueTask);
             _jobs = Format.Items(listTask.Result) ?? new JsonArray();
             _runs = Format.Items(runsTask.Result) ?? new JsonArray();
             RunNotifications.Shared.SettleAutomations(_runs);
             _folders = ReadFolders(foldersTask.Result);
+            if (_scopeWorkspaceId is not null
+                && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner))
+            {
+                // Jobs from the peer carry its own folder id. Namespace them
+                // to this page's folder id so the scope filter below keeps
+                // matching, and list the folder itself so its name resolves.
+                foreach (var job in _jobs)
+                {
+                    if (job is JsonObject obj && Format.Text(obj, "workspaceId") == inner)
+                    {
+                        obj["workspaceId"] = _scopeWorkspaceId;
+                    }
+                }
+                if (RemoteWorkspaces.CachedFolder(_scopeWorkspaceId) is RemoteFolder cached
+                    && _folders.All(f => f.Id != _scopeWorkspaceId))
+                {
+                    _folders.Add((_scopeWorkspaceId, cached.DisplayName));
+                }
+            }
             _backends = ReadBackends(backendsTask.Result);
             _rawJobs = new Dictionary<string, JsonObject>();
             foreach (var job in _jobs)
@@ -224,7 +283,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
             try { _queueBudget = queue["defaultBudgetSeconds"]?.GetValue<ulong>() ?? _queueBudget; } catch { /* keep */ }
             try { _queueConcurrent = queue["maxConcurrent"]?.GetValue<uint>() ?? _queueConcurrent; } catch { /* keep */ }
             _queueTimezone = Format.Text(queue, "timezone");
-            RebuildChrome();
+            RaiseToolbarChanged();
             RenderList();
             RenderDetail();
         }
@@ -431,7 +490,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
             }
             try
             {
-                await AppServices.Host.CallAsync("automation.setQueue", new JsonObject
+                await CallWorkbenchAsync("automation.setQueue", new JsonObject
                 {
                     ["defaultBudgetSeconds"] = seconds,
                     ["maxConcurrent"] = atOnce,
@@ -1085,6 +1144,13 @@ internal sealed class AutomationsPage : Page, IInspectorContent
             ["budgetSeconds"] = budgetSeconds,
             ["enabled"] = draft.Enabled,
         };
+        // The editor holds the namespaced id; the peer stores its own.
+        if (_scopeWorkspaceId is not null
+            && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner)
+            && Format.Text(edited, "workspaceId") == _scopeWorkspaceId)
+        {
+            edited["workspaceId"] = inner;
+        }
         // Unknown host fields round-trip untouched.
         _rawJobs.TryGetValue(id, out var raw);
         return WorkbenchOps.PreserveUnknown(raw, edited);
@@ -1114,7 +1180,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
                 _pendingCreateOp = WorkbenchOps.NewOperationId("automation-create");
                 try
                 {
-                    await AppServices.Host.CallAsync("automation.createOnce", new JsonObject
+                    await CallWorkbenchAsync("automation.createOnce", new JsonObject
                     {
                         ["job"] = payload,
                         ["operationId"] = _pendingCreateOp,
@@ -1131,7 +1197,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
             }
             else
             {
-                await AppServices.Host.CallAsync("automation.create", new JsonObject { ["job"] = payload });
+                await CallWorkbenchAsync("automation.create", new JsonObject { ["job"] = payload });
                 Notice("Automation added.");
                 ResetEditor();
             }
@@ -1156,7 +1222,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
         }
         try
         {
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await CallWorkbenchAsync(
                 "automation.creationReceipt", new JsonObject { ["operationId"] = _pendingCreateOp });
             if (receipt is JsonObject obj && obj.Count > 0 && receipt["job"] is not null)
             {
@@ -1206,7 +1272,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
                 payload["revision"] = revision.Value;
                 try
                 {
-                    await AppServices.Host.CallAsync("automation.edit", new JsonObject
+                    await CallWorkbenchAsync("automation.edit", new JsonObject
                     {
                         ["job"] = payload,
                         ["expectedRevision"] = revision.Value,
@@ -1227,7 +1293,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
             }
             else
             {
-                await AppServices.Host.CallAsync("automation.update", new JsonObject { ["job"] = payload });
+                await CallWorkbenchAsync("automation.update", new JsonObject { ["job"] = payload });
             }
             _detailDirty = false;
             _conflictId = null;
@@ -1280,7 +1346,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
         _working = true;
         try
         {
-            await AppServices.Host.CallAsync(
+            await CallWorkbenchAsync(
                 "automation.remove", new JsonObject { ["id"] = _selectedId });
             Notice("Automation deleted.");
             ResetEditor();
@@ -1302,7 +1368,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
         SnapshotDraft();
         try
         {
-            await AppServices.Host.CallAsync(
+            await CallWorkbenchAsync(
                 enabled ? "automation.enable" : "automation.disable",
                 new JsonObject { ["id"] = id });
         }
@@ -1333,7 +1399,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
                 _runError = null;
                 try
                 {
-                    await AppServices.Host.CallAsync("automation.runOnce", new JsonObject
+                    await CallWorkbenchAsync("automation.runOnce", new JsonObject
                     {
                         ["id"] = id,
                         ["operationId"] = _pendingRunOp,
@@ -1351,7 +1417,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
             }
             else
             {
-                await AppServices.Host.CallAsync("automation.run", new JsonObject { ["id"] = id });
+                await CallWorkbenchAsync("automation.run", new JsonObject { ["id"] = id });
                 Notice("The run started.");
             }
         }
@@ -1375,7 +1441,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
         }
         try
         {
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await CallWorkbenchAsync(
                 "automation.runReceipt", new JsonObject { ["operationId"] = _pendingRunOp });
             if (receipt?["run"] is not null)
             {
@@ -1408,7 +1474,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
         {
             // Same operation id as the first attempt: the host answers from
             // the receipt when it already accepted the run.
-            await AppServices.Host.CallAsync("automation.runOnce", new JsonObject
+            await CallWorkbenchAsync("automation.runOnce", new JsonObject
             {
                 ["id"] = _pendingRunJob,
                 ["operationId"] = _pendingRunOp,
@@ -1431,7 +1497,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
         SnapshotDraft();
         try
         {
-            await AppServices.Host.CallAsync("automation.kill", new JsonObject { ["id"] = runId });
+            await CallWorkbenchAsync("automation.kill", new JsonObject { ["id"] = runId });
             Notice("Stopped.");
         }
         catch (Exception ex)
@@ -1533,7 +1599,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent
         SnapshotDraft();
         try
         {
-            var answer = await AppServices.Host.CallAsync(
+            var answer = await CallWorkbenchAsync(
                 "automation.transcript",
                 new JsonObject { ["id"] = runId, ["offset"] = offset });
             var text = Format.Text(answer, "text");

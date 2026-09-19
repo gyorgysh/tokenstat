@@ -21,13 +21,8 @@ namespace Tokenstat.Pages;
 /// recent queries for an empty field. Opening a hit returns to the folder
 /// it lives in: a conversation opens in Chat, anything else in Sessions.
 /// </summary>
-internal sealed class WorkSearchPage : Page, IInspectorContent
+internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
 {
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _inspector = new()
     {
         Spacing = Theme.SpaceM,
@@ -120,27 +115,40 @@ internal sealed class WorkSearchPage : Page, IInspectorContent
         body.Children.Add(_results);
         _scroll = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl, Theme.SpaceXl),
-            Content = new Grid
-            {
-                MaxWidth = 760,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Children = { body },
-            },
+            Padding = new Thickness(Theme.SpaceM),
+            Content = body,
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(_scroll, 1);
-        layout.Children.Add(_scroll);
-        Content = layout;
-        RebuildChrome();
+        Content = _scroll;
         RenderInspector();
         Loaded += (_, _) => ShowRecent();
+    }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>Global screen: no folder to name.</summary>
+    public UIElement? ToolbarScope => null;
+
+    public IList<UIElement> ToolbarActions()
+    {
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Run the search again",
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await SearchAsync(false);
+                }),
+            Buttons.ToolbarIcon(
+                ActionIcon.Search,
+                "Focus the search field",
+                (_, _) => _query.Focus(FocusState.Programmatic)),
+            Buttons.ToolbarIcon(
+                ActionIcon.Dismiss,
+                "Clear the search field",
+                (_, _) => _query.Text = ""),
+        };
     }
 
     /// <summary>
@@ -149,26 +157,6 @@ internal sealed class WorkSearchPage : Page, IInspectorContent
     /// asking again.
     /// </summary>
     public UIElement? Inspector => _inspector;
-
-    private void RebuildChrome()
-    {
-        _barSlot.Content = DetailBar.View(
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Run the search again",
-                    async (_, _) => await SearchAsync(false)),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Search,
-                    "Focus the search field",
-                    (_, _) => _query.Focus(FocusState.Programmatic)),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Dismiss,
-                    "Clear the search field",
-                    (_, _) => _query.Text = ""),
-            });
-    }
 
     private void RenderInspector()
     {
@@ -250,6 +238,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent
             _hitCount = 0;
             _unreadable = 0;
             _results.Children.Clear();
+            _results.Children.Add(Motion.SkeletonCard());
         }
         _busy.Visibility = Visibility.Visible;
         try

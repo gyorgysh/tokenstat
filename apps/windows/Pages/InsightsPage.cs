@@ -10,7 +10,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Tokenstat.Design;
@@ -19,20 +18,14 @@ using Tokenstat.Host;
 namespace Tokenstat.Pages;
 
 /// <summary>
-/// Where the tokens went. Mirrors the Mac Insights: a period picker and the
-/// screen's own actions in the DetailBar, a tab strip for the breakdowns, an
-/// overview with metric tiles and a daily chart, and the inspector beside it
-/// with the period figures, the selected row, and the archive. On All devices
-/// the screen answers from the account instead, with the three cuts the
-/// account holds (models, tools, days), like the Mac client.
+/// Where the tokens went. Mirrors the desktop Mac Insights: a period picker
+/// and the screen's own actions in the toolbar, a tab strip for the
+/// breakdowns, an overview with metric tiles and a daily chart, and the
+/// inspector beside it with the period figures, the selected row, and the
+/// archive. Local only, like the Mac: there is no account scope here.
 /// </summary>
-internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
+internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
 {
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly ContentControl _tabSlot = new()
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -44,20 +37,17 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         Spacing = Theme.SpaceM,
         Padding = new Thickness(Theme.SpaceM),
     };
-    private readonly StackPanel _signSlot = new() { Spacing = Theme.SpaceL };
     private readonly TextBlock _status = new() { Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
 
-    private string _scope = "account";
     private string _period = "all";
     /// <summary>
     /// A single day, pinned from Home's heatmap. Overrides the period rather
     /// than being another period, like the Mac focused day: it is not a
     /// length of time chosen from a control, and clearing it goes back to
-    /// whatever the period was. Only the local scope reads it.
+    /// whatever the period was.
     /// </summary>
     private string? _focusDay;
     private string _tab = "overview";
-    private string _cut = "model";
     private string? _selectedKey;
     private int _visible = FirstPage;
     private bool _chartShowsValue;
@@ -65,11 +55,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
     private double _contentWidth;
 
     private JsonNode? _snapshot;
-    private readonly Dictionary<string, JsonNode?> _accountCache = new();
-    private bool _signedIn;
     private string? _error;
-    private string? _accountError;
-    private string? _accountErrorCode;
 
     private bool _loading;
     private bool _hasContent;
@@ -92,14 +78,6 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             ("sessions", "Sessions", null),
         };
 
-    private static readonly List<(string Value, string Label, ActionIcon? Glyph)> AccountTabs =
-        new List<(string, string, ActionIcon?)>
-        {
-            ("model", "Models", null),
-            ("source", "Tools", null),
-            ("day", "Days", null),
-        };
-
     private static readonly List<(string Value, string Label, ActionIcon? Glyph)> Periods =
         new List<(string, string, ActionIcon?)>
         {
@@ -120,25 +98,22 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         }
         var scroller = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceM),
             Content = _root,
         };
         scroller.SizeChanged += OnContentSizeChanged;
         var layout = new Grid();
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition
         {
             Height = new GridLength(1, GridUnitType.Star),
         });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(_tabSlot, 1);
         layout.Children.Add(_tabSlot);
-        Grid.SetRow(scroller, 2);
+        Grid.SetRow(scroller, 1);
         layout.Children.Add(scroller);
         Content = layout;
         _root.Children.Add(_status);
-        RebuildChrome();
+        RebuildTabs();
         RefreshInspector();
         Loaded += async (_, _) =>
         {
@@ -158,9 +133,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
 
     /// <summary>
     /// Pin one day from Home's heatmap, like the Mac focused day. Safe
-    /// before first load: the day is set first and the load reads it. The
-    /// shell moves the scope to local alongside, because the account cuts
-    /// cannot show one day.
+    /// before first load: the day is set first and the load reads it.
     /// </summary>
     public Task FocusDayAsync(string day)
     {
@@ -186,29 +159,6 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         return LoadAsync();
     }
 
-    /// <summary>
-    /// The toolbar scope picker pushes here, on navigation and on every
-    /// change. The page never reads the toolbar directly. A pinned day
-    /// survives a scope trip: the account side ignores it and the local
-    /// side shows it again on return.
-    /// </summary>
-    public void ApplyScope(DeviceScope scope)
-    {
-        var wire = scope.Wire();
-        if (wire == _scope)
-        {
-            if (!_hasContent && !_loading)
-            {
-                _ = LoadAsync();
-            }
-            return;
-        }
-        _scope = wire;
-        _selectedKey = null;
-        _visible = FirstPage;
-        _ = LoadAsync();
-    }
-
     private void OnContentSizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (!_hasContent || _loading || e.NewSize.Width <= 0)
@@ -227,25 +177,17 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         Render();
     }
 
-    private void RebuildChrome()
+    public event Action? ToolbarChanged;
+
+    /// <summary>Global screen: no folder to name.</summary>
+    public UIElement? ToolbarScope => null;
+
+    /// <summary>
+    /// The screen's own actions: the period picker with scan and fetch, like
+    /// the desktop Mac bar.
+    /// </summary>
+    public IList<UIElement> ToolbarActions()
     {
-        if (_scope == "account")
-        {
-            var refresh = Buttons.ToolbarIcon(
-                ActionIcon.Refresh,
-                "Re-read the account breakdowns",
-                async (_, _) => await LoadAsync(force: true));
-            refresh.IsEnabled = !_loading;
-            _barSlot.Content = DetailBar.View(trailing: new List<UIElement> { refresh });
-            _tabSlot.Content = TabStrip.View(AccountTabs, _cut, value =>
-            {
-                _cut = value;
-                _selectedKey = null;
-                _visible = FirstPage;
-                return LoadAsync();
-            });
-            return;
-        }
         var picker = SegmentedCapsule.View(Periods, _period, value =>
         {
             _period = value;
@@ -267,8 +209,13 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             "Fetch usage from remote vendors such as Cursor",
             async (_, _) => await FetchAsync());
         fetch.IsEnabled = !_fetching && !_loading;
-        _barSlot.Content = DetailBar.View(
-            trailing: new List<UIElement> { picker, scan, fetch });
+        return new List<UIElement> { picker, scan, fetch };
+    }
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
+
+    private void RebuildTabs()
+    {
         _tabSlot.Content = TabStrip.View(LocalTabs, _tab, value =>
         {
             _tab = value;
@@ -287,7 +234,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             return;
         }
         _scanning = true;
-        RebuildChrome();
+        RaiseToolbarChanged();
         _status.Text = "Scanning local logs…";
         LogoRefresh.Began();
         try
@@ -302,11 +249,11 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         {
             _status.Text = FriendlyError.Display(ex.Message);
             _scanning = false;
-            RebuildChrome();
+            RaiseToolbarChanged();
             return;
         }
         _scanning = false;
-        await LoadAsync(force: true);
+        await LoadAsync();
     }
 
     private async Task FetchAsync()
@@ -316,7 +263,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             return;
         }
         _fetching = true;
-        RebuildChrome();
+        RaiseToolbarChanged();
         _status.Text = "Fetching remote usage…";
         LogoRefresh.Began();
         try
@@ -343,14 +290,14 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         {
             _status.Text = FriendlyError.Display(ex.Message);
             _fetching = false;
-            RebuildChrome();
+            RaiseToolbarChanged();
             return;
         }
         _fetching = false;
-        await LoadAsync(force: true);
+        await LoadAsync();
     }
 
-    private async Task LoadAsync(bool force = false)
+    private async Task LoadAsync()
     {
         if (_loading)
         {
@@ -358,25 +305,24 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             return;
         }
         _loading = true;
-        RebuildChrome();
+        RaiseToolbarChanged();
         try
         {
             do
             {
                 _reloadRequested = false;
-                await LoadOnceAsync(force);
-                force = false;
+                await LoadOnceAsync();
             }
             while (_reloadRequested);
         }
         finally
         {
             _loading = false;
-            RebuildChrome();
+            RaiseToolbarChanged();
         }
     }
 
-    private async Task LoadOnceAsync(bool force)
+    private async Task LoadOnceAsync()
     {
         while (_root.Children.Count > 1)
         {
@@ -385,14 +331,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         _status.Text = "Loading…";
         _root.Children.Add(Motion.SkeletonCard());
 
-        if (_scope == "account")
-        {
-            await LoadAccountAsync(force);
-        }
-        else
-        {
-            await LoadLocalAsync();
-        }
+        await LoadLocalAsync();
 
         while (_root.Children.Count > 1)
         {
@@ -514,50 +453,6 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         return snapshot;
     }
 
-    private async Task LoadAccountAsync(bool force)
-    {
-        _accountError = null;
-        _accountErrorCode = null;
-        try
-        {
-            var account = await AppServices.Host.CallAsync("account.status");
-            _signedIn = account?["signedIn"]?.GetValue<bool>() ?? false;
-        }
-        catch
-        {
-            _signedIn = false;
-        }
-        if (force)
-        {
-            _accountCache.Remove(_cut);
-        }
-        if (!_accountCache.TryGetValue(_cut, out var cached) || cached is null)
-        {
-            try
-            {
-                cached = await AppServices.Host.CallAsync(
-                    "account.report",
-                    new JsonObject { ["group"] = _cut, ["weeks"] = 53 });
-                _accountCache[_cut] = cached;
-            }
-            catch (HostException ex)
-            {
-                _accountErrorCode = ex.Code;
-                _accountError = FriendlyError.Display(ex.Message);
-                _accountCache[_cut] = null;
-            }
-            catch (Exception ex)
-            {
-                _accountError = FriendlyError.Display(ex.Message);
-                _accountCache[_cut] = null;
-            }
-        }
-        if (_status.Text == "Loading…")
-        {
-            _status.Text = "";
-        }
-    }
-
     /// <summary>
     /// The period as an archive query. The archive stores local dates as plain
     /// text, so the filter is built the same way rather than as an instant. A
@@ -609,14 +504,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         {
             _root.Children.RemoveAt(1);
         }
-        if (_scope == "account")
-        {
-            RenderAccount();
-        }
-        else
-        {
-            RenderLocal();
-        }
+        RenderLocal();
     }
 
     private JsonArray TabRows(string tab)
@@ -1099,8 +987,9 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             foot.Children.Add(new TextBlock
             {
-                Text = Format.Long(row, "sessions").ToString("N0", CultureInfo.InvariantCulture)
-                    + " sessions",
+                Text = SessionsCount(row) is string sessions
+                    ? sessions + " sessions"
+                    : "–",
                 FontSize = Fonts.Caption,
                 Opacity = 0.7,
             });
@@ -1131,24 +1020,18 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
                 new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             stack.Children.Add(hit);
         }
-        var card = Chrome.Card(title, stack, "Ranked by tokens · share of this breakdown");
-        if (card.Child is StackPanel body)
-        {
-            var more = ActionIconGlyph.Button(
-                "View all (" + rows.Count + ")", ActionIcon.More,
-                (_, _) =>
-                {
-                    _tab = tab;
-                    _selectedKey = null;
-                    _visible = FirstPage;
-                    RebuildChrome();
-                    Render();
-                    RefreshInspector();
-                });
-            more.HorizontalAlignment = HorizontalAlignment.Left;
-            body.Children.Add(more);
-        }
-        return card;
+        var more = ActionIconGlyph.Button(
+            "View all (" + rows.Count + ")", ActionIcon.More,
+            (_, _) =>
+            {
+                _tab = tab;
+                _selectedKey = null;
+                _visible = FirstPage;
+                RebuildTabs();
+                Render();
+                RefreshInspector();
+            });
+        return Chrome.Card(title, stack, "Ranked by tokens · share of this breakdown", more);
     }
 
     private void SelectAndOpen(string tab, string key)
@@ -1156,7 +1039,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         _tab = tab;
         _selectedKey = key;
         _visible = FirstPage;
-        RebuildChrome();
+        RebuildTabs();
         Render();
         RefreshInspector();
     }
@@ -1243,7 +1126,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             line.Children.Add(name);
             var sessionCount = Fonts.Tabular(new TextBlock
             {
-                Text = Format.Long(row, "sessions").ToString("N0", CultureInfo.InvariantCulture),
+                Text = SessionsCount(row) ?? "–",
                 FontSize = Fonts.Callout,
                 Opacity = 0.7,
                 TextAlignment = TextAlignment.Right,
@@ -1380,120 +1263,9 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         };
     }
 
-    private void RenderAccount()
-    {
-        _root.Children.Add(_signSlot);
-        if (_accountError is not null)
-        {
-            if (_accountErrorCode == "auth")
-            {
-                _root.Children.Add(SignInPrompt());
-            }
-            else
-            {
-                _root.Children.Add(Chrome.Banner(_accountError, Theme.Danger, Symbol.Important));
-            }
-            return;
-        }
-        _accountCache.TryGetValue(_cut, out var report);
-        var rows = Format.Items(report, "rows") ?? new JsonArray();
-        if (rows.Count == 0)
-        {
-            _root.Children.Add(EmptyState.View(
-                "Nothing recorded yet",
-                "Add a computer to this account and what it counts shows up here.",
-                EmptyArtKind.FirstBars));
-            return;
-        }
-        long tokens = 0;
-        foreach (var row in rows)
-        {
-            tokens += Format.Long(row?["counters"], "total");
-        }
-        var summary = new StackPanel { Spacing = Theme.SpaceS };
-        summary.Children.Add(Chrome.Stat("Total tokens", Format.Tokens(tokens)));
-        summary.Children.Add(Chrome.Stat(
-            "List-rate value", MoneyTotal(rows), "not billed"));
-        bool stale = Format.Flag(report, "stale");
-        long fetchedAt = Format.Long(report, "fetchedAtMs");
-        summary.Children.Add(new TextBlock
-        {
-            Text = stale
-                ? "Showing remembered figures, last read " + Ago(fetchedAt) + "."
-                : "Read " + Ago(fetchedAt) + ".",
-            FontSize = Fonts.Caption,
-            Opacity = 0.7,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        _root.Children.Add(Chrome.Card(
-            "All devices",
-            summary,
-            "Every machine on the account · list-rate equivalent, not a charge"));
-        if (_cut == "day")
-        {
-            var days = new List<JsonNode?>();
-            foreach (var row in rows)
-            {
-                days.Add(row);
-            }
-            days.Sort((a, b) => string.Compare(
-                Format.Text(a, "key"), Format.Text(b, "key"), StringComparison.Ordinal));
-            var sorted = new JsonArray();
-            foreach (var day in days)
-            {
-                sorted.Add(day?.DeepClone());
-            }
-            _root.Children.Add(Chrome.Card(
-                "Daily activity",
-                DailyChart(sorted, showsValue: false, showsToggle: false),
-                "Tokens per day · cache included"));
-        }
-        bool isHarness = _cut == "source";
-        string title = _cut switch
-        {
-            "model" => "Models",
-            "source" => "Tools",
-            _ => "Days",
-        };
-        _root.Children.Add(BreakdownTable(
-            title, rows, showsValue: true, monospaced: !isHarness, isHarness: isHarness));
-    }
-
-    /// <summary>
-    /// The account read fell back because a sign-in is missing or stale. Offer
-    /// the fix where the failure is rather than quoting a command at somebody
-    /// already in the app.
-    /// </summary>
-    private UIElement SignInPrompt()
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        row.Children.Add(new TextBlock
-        {
-            Text = "All devices needs your tokenstat.ai account.",
-            VerticalAlignment = VerticalAlignment.Center,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        row.Children.Add(ActionIconGlyph.Button(
-            _signedIn ? "Reconnect" : "Sign in",
-            ActionIcon.SignIn,
-            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync())));
-        return new Border
-        {
-            Background = Theme.AccentSoftBrush,
-            CornerRadius = new CornerRadius(Theme.CardRadius),
-            Padding = new Thickness(Theme.SpaceM),
-            Child = row,
-        };
-    }
-
     private void RefreshInspector()
     {
         _inspectorRoot.Children.Clear();
-        if (_scope == "account")
-        {
-            _inspectorRoot.Children.Add(AccountInspector());
-            return;
-        }
         _inspectorRoot.Children.Add(PeriodCard());
         _inspectorRoot.Children.Add(SelectionCard());
         _inspectorRoot.Children.Add(ArchiveCard());
@@ -1518,7 +1290,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             "Tokens", Format.Tokens(Format.Long(totals?["counters"], "total")),
             "Sessions", Format.Long(totals, "sessions").ToString("N0", CultureInfo.InvariantCulture)));
         body.Children.Add(StatPair(
-            "Events", Format.Long(totals, "events").ToString("N0", CultureInfo.InvariantCulture),
+            "Events", Format.Tokens(Format.Long(totals, "events")),
             "Active days", Format.Long(totals, "days").ToString("N0", CultureInfo.InvariantCulture)));
         var block = _snapshot?["activeBlock"];
         if (block is JsonObject)
@@ -1605,8 +1377,8 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             });
         }
         body.Children.Add(StatPair(
-            "Sessions", Format.Long(selected, "sessions").ToString("N0", CultureInfo.InvariantCulture),
-            "Events", Format.Long(selected, "events").ToString("N0", CultureInfo.InvariantCulture)));
+            "Sessions", SessionsCount(selected) ?? "–",
+            "Events", Format.Tokens(Format.Long(selected, "events"))));
         if (_tab == "projects")
         {
             var harnesses = HarnessesInProject(key);
@@ -1695,31 +1467,6 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         return Chrome.Card("Archive", body);
     }
 
-    private UIElement AccountInspector()
-    {
-        var body = new StackPanel { Spacing = Theme.SpaceM };
-        _accountCache.TryGetValue(_cut, out var report);
-        var rows = Format.Items(report, "rows") ?? new JsonArray();
-        long tokens = 0;
-        foreach (var row in rows)
-        {
-            tokens += Format.Long(row?["counters"], "total");
-        }
-        body.Children.Add(Chrome.Stat(
-            "Value at list rates", MoneyTotal(rows), "not billed"));
-        body.Children.Add(StatPair(
-            "Tokens", Format.Tokens(tokens),
-            "Rows", rows.Count.ToString("N0", CultureInfo.InvariantCulture)));
-        body.Children.Add(new TextBlock
-        {
-            Text = "Counted across every machine on the account. Projects stay on their own machine, so this view has no project cut.",
-            FontSize = Fonts.Caption,
-            Opacity = 0.55,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        return Chrome.Card("Account", body);
-    }
-
     private static UIElement StatPair(string label1, string value1, string label2, string value2)
     {
         var row = new Grid { ColumnSpacing = Theme.SpaceM };
@@ -1803,6 +1550,21 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             }
         }
         return outRows;
+    }
+
+    /// <summary>
+    /// A row's session count, or null when the payload carries none. The table
+    /// shows a missing mark there instead of a zero that would claim an empty
+    /// result rather than no data.
+    /// </summary>
+    private static string? SessionsCount(JsonNode? row)
+    {
+        var raw = row?["sessions"];
+        if (raw is null || raw.GetValueKind() is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+        return Format.Long(row, "sessions").ToString("N0", CultureInfo.InvariantCulture);
     }
 
     private static long? OptLong(JsonNode? node, string name)
@@ -1934,30 +1696,4 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         return id;
     }
 
-    private static string Ago(long fetchedAtMs)
-    {
-        if (fetchedAtMs <= 0)
-        {
-            return "just now";
-        }
-        var age = DateTimeOffset.UtcNow
-            - DateTimeOffset.FromUnixTimeMilliseconds(fetchedAtMs);
-        if (age < TimeSpan.Zero)
-        {
-            return "just now";
-        }
-        if (age < TimeSpan.FromMinutes(1))
-        {
-            return "just now";
-        }
-        if (age < TimeSpan.FromHours(1))
-        {
-            return (int)age.TotalMinutes + "m ago";
-        }
-        if (age < TimeSpan.FromDays(1))
-        {
-            return (int)age.TotalHours + "h ago";
-        }
-        return (int)age.TotalDays + "d ago";
-    }
 }

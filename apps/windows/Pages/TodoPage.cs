@@ -21,14 +21,9 @@ namespace Tokenstat.Pages;
 /// workbench: the same columns, filters, run placement, receipts, and the
 /// rule that a lost answer is checked before anything runs twice.
 /// </summary>
-internal sealed class TodoPage : Page, IInspectorContent
+internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _scopeWorkspaceId;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _boardHost = new() { Spacing = Theme.SpaceL };
@@ -39,12 +34,14 @@ internal sealed class TodoPage : Page, IInspectorContent
     };
     private readonly TextBox _quickTitle = new() { PlaceholderText = "New task" };
     private readonly Button _quickAdd;
-    private readonly ComboBox _folderFilter = new() { MinWidth = 160 };
+    private readonly ComboBox _folderFilter = new()
+    {
+        MinWidth = 160,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
     private readonly ComboBox _agentFilter = new() { MinWidth = 140 };
     private readonly ComboBox _attentionFilter = new() { MinWidth = 150 };
     private readonly TextBox _search = new() { PlaceholderText = "Search tasks", MinWidth = 180 };
-    private readonly Button _archiveToggle;
-    private readonly Button _sortToggle;
 
     private JsonArray _cards = new();
     private JsonArray _runs = new();
@@ -102,16 +99,6 @@ internal sealed class TodoPage : Page, IInspectorContent
     {
         _scopeWorkspaceId = workspaceId;
         _quickAdd = ActionIconGlyph.Button("Add", ActionIcon.Create, async (_, _) => await CreateAsync());
-        _archiveToggle = ActionIconGlyph.Button("Archive", ActionIcon.Archive, (_, _) =>
-        {
-            _showArchive = !_showArchive;
-            RenderBoard();
-        });
-        _sortToggle = ActionIconGlyph.Button("Newest first", ActionIcon.Filter, (_, _) =>
-        {
-            _newestFirst = !_newestFirst;
-            RenderBoard();
-        });
 
         _attentionFilter.ItemsSource = new[] { "All tasks", "Running", "Needs attention", "High priority" };
         _attentionFilter.SelectedIndex = 0;
@@ -138,22 +125,11 @@ internal sealed class TodoPage : Page, IInspectorContent
         // A wireframe until the first load lands. RenderBoard clears the
         // host, so real content replaces it, like Home's skeleton.
         _boardHost.Children.Add(Motion.SkeletonCard());
-        var scroller = new ScrollViewer
+        Content = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceM),
             Content = _root,
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(scroller, 1);
-        layout.Children.Add(scroller);
-        Content = layout;
-        RebuildChrome();
         RenderDetail();
         Loaded += async (_, _) =>
         {
@@ -170,44 +146,123 @@ internal sealed class TodoPage : Page, IInspectorContent
     /// </summary>
     public UIElement? Inspector => _detailHost;
 
-    private void RebuildChrome()
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The folder this board belongs to, or null on the global board, which
+    /// gets the folder picker in the actions instead.
+    /// </summary>
+    public UIElement? ToolbarScope
     {
-        UIElement? scope = null;
-        if (_scopeWorkspaceId is not null)
+        get
         {
-            scope = Chrome.ScopeChip(FolderLabel(_scopeWorkspaceId));
-        }
-        _barSlot.Content = DetailBar.View(
-            scope: scope,
-            trailing: new List<UIElement>
+            if (_scopeWorkspaceId is null)
             {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload tasks",
-                    async (_, _) => await LoadAsync()),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Create,
-                    "Add a card to To Do",
-                    (_, _) => _quickTitle.Focus(FocusState.Programmatic)),
+                return null;
+            }
+            return Chrome.ScopeChip(FolderLabel(_scopeWorkspaceId));
+        }
+    }
+
+    /// <summary>
+    /// The Mac board's bar: the folder picker on the global board only, then
+    /// new, the newest-or-board sort, and the archive, with this screen's
+    /// reload first.
+    /// </summary>
+    public IList<UIElement> ToolbarActions()
+    {
+        var actions = new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload tasks",
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await LoadAsync();
+                }),
+        };
+        if (_scopeWorkspaceId is null)
+        {
+            actions.Add(_folderFilter);
+        }
+        actions.Add(Buttons.ToolbarIcon(
+            ActionIcon.Create,
+            "Add a card to To Do",
+            (_, _) => _quickTitle.Focus(FocusState.Programmatic)));
+        var sort = SegmentedCapsule.View(
+            new List<(string Value, string Label, ActionIcon? Glyph)>
+            {
+                ("newest", "Newest", null),
+                ("board", "Your order", null),
+            },
+            _newestFirst ? "newest" : "board",
+            value =>
+            {
+                _newestFirst = value == "newest";
+                RenderBoard();
+                RaiseToolbarChangedIfNeeded();
+                return Task.CompletedTask;
             });
+        sort.Width = 220;
+        sort.VerticalAlignment = VerticalAlignment.Center;
+        actions.Add(sort);
+        int archived = ArchivedCount();
+        var archive = Buttons.ToolbarIcon(
+            _showArchive ? ActionIcon.Restore : ActionIcon.Archive,
+            _showArchive ? "Show Done"
+                : archived == 0 ? "No archived cards"
+                : "Show " + archived + " archived card" + (archived == 1 ? "" : "s"),
+            (_, _) =>
+            {
+                _showArchive = !_showArchive;
+                RenderBoard();
+                RaiseToolbarChangedIfNeeded();
+            },
+            _showArchive);
+        archive.IsEnabled = archived > 0 || _showArchive;
+        actions.Add(archive);
+        return actions;
+    }
+
+    private string _toolbarKey = "";
+
+    /// <summary>
+    /// Rebuild the bar only when something on it changed. The folder filter
+    /// lives in the bar and holds its selection there, and the quiet poll
+    /// re-reads every two seconds while a run is live: rebuilding around an
+    /// open dropdown would collapse it under the reader's hand.
+    /// </summary>
+    private void RaiseToolbarChangedIfNeeded()
+    {
+        var key = _showArchive + "|" + _newestFirst + "|" + _folders.Count + "|" + ArchivedCount();
+        if (key == _toolbarKey)
+        {
+            return;
+        }
+        _toolbarKey = key;
+        ToolbarChanged?.Invoke();
+    }
+
+    private int ArchivedCount()
+    {
+        int count = 0;
+        foreach (var card in _cards)
+        {
+            if (Format.Text(card, "kind") != "note" && Format.Text(card, "column") == "archive")
+            {
+                count++;
+            }
+        }
+        return count;
     }
 
     private UIElement FilterBar()
     {
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
-        bar.Children.Add(Labeled("Folder", _folderFilter));
         bar.Children.Add(Labeled("Agent", _agentFilter));
         bar.Children.Add(Labeled("Showing", _attentionFilter));
         bar.Children.Add(Labeled("Search", _search));
-        var toggles = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = Theme.SpaceS,
-            VerticalAlignment = VerticalAlignment.Bottom,
-        };
-        toggles.Children.Add(_archiveToggle);
-        toggles.Children.Add(_sortToggle);
-        bar.Children.Add(toggles);
         return bar;
     }
 
@@ -261,6 +316,44 @@ internal sealed class TodoPage : Page, IInspectorContent
         return false;
     }
 
+    /// <summary>
+    /// One board method against this screen's folder, local or remote. A
+    /// remote folder travels as remote.call with the peer's own folder id.
+    /// Params are copied, never mutated, so a retry cannot forward an already
+    /// rewritten id. The global board has no folder and always stays local.
+    /// </summary>
+    private Task<JsonNode> CallTodoAsync(string method, JsonNode? parameters = null)
+    {
+        if (_scopeWorkspaceId is null
+            || !RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out var peer, out var inner))
+        {
+            return AppServices.Host.CallAsync(method, parameters);
+        }
+        var forwarded = parameters is null
+            ? new JsonObject()
+            : (JsonObject)JsonNode.Parse(parameters.ToJsonString())!;
+        if (Format.Text(forwarded, "workspaceId") == _scopeWorkspaceId)
+        {
+            forwarded["workspaceId"] = inner;
+        }
+        return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
+    }
+
+    /// <summary>
+    /// The protocol of the host that owns these cards: the peer's sessionless
+    /// protocol for a remote folder, the local one otherwise. Null means
+    /// unknown, and unknown means assume the feature is there.
+    /// </summary>
+    private async Task<long?> ProtocolAsync()
+    {
+        if (_scopeWorkspaceId is not null
+            && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out var peer, out _))
+        {
+            return await RemoteFeatureGate.PeerProtocolAsync(peer);
+        }
+        return await WorkbenchOps.ProtocolAsync();
+    }
+
     private async Task LoadAsync(bool quiet = false)
     {
         if (!quiet)
@@ -269,13 +362,13 @@ internal sealed class TodoPage : Page, IInspectorContent
         }
         try
         {
-            _protocol = await WorkbenchOps.ProtocolAsync();
-            var cardsTask = AppServices.Host.CallAsync(
+            _protocol = await ProtocolAsync();
+            var cardsTask = CallTodoAsync(
                 "todo.list", new JsonObject { ["includeArchived"] = true });
-            var runsTask = AppServices.Host.CallAsync("automation.runs", new JsonObject());
+            var runsTask = CallTodoAsync("automation.runs", new JsonObject());
             var foldersTask = AppServices.Host.CallAsync("workspace.list", new JsonObject());
-            var backendsTask = AppServices.Host.CallAsync("automation.backends", new JsonObject());
-            var queueTask = AppServices.Host.CallAsync("automation.queue", new JsonObject());
+            var backendsTask = CallTodoAsync("automation.backends", new JsonObject());
+            var queueTask = CallTodoAsync("automation.queue", new JsonObject());
             await Task.WhenAll(cardsTask, runsTask, foldersTask, backendsTask, queueTask);
             _cards = cardsTask.Result as JsonArray
                 ?? cardsTask.Result["cards"] as JsonArray
@@ -283,6 +376,25 @@ internal sealed class TodoPage : Page, IInspectorContent
             _runs = Format.Items(runsTask.Result) ?? new JsonArray();
             RunNotifications.Shared.SettleAutomations(_runs);
             _folders = ReadFolders(foldersTask.Result);
+            if (_scopeWorkspaceId is not null
+                && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner))
+            {
+                // Cards from the peer carry its own folder id. Namespace them
+                // to this page's folder id so the scope filter below keeps
+                // matching, and list the folder itself so its name resolves.
+                foreach (var card in _cards)
+                {
+                    if (card is JsonObject obj && Format.Text(obj, "workspaceId") == inner)
+                    {
+                        obj["workspaceId"] = _scopeWorkspaceId;
+                    }
+                }
+                if (RemoteWorkspaces.CachedFolder(_scopeWorkspaceId) is RemoteFolder cached
+                    && _folders.All(f => f.Id != _scopeWorkspaceId))
+                {
+                    _folders.Add((_scopeWorkspaceId, cached.DisplayName));
+                }
+            }
             _backends = ReadBackends(backendsTask.Result);
             var budget = queueTask.Result["defaultBudgetSeconds"];
             if (budget is not null)
@@ -290,7 +402,7 @@ internal sealed class TodoPage : Page, IInspectorContent
                 try { _defaultBudgetSeconds = budget.GetValue<ulong>(); } catch { /* keep */ }
             }
             RefreshFilterLists();
-            RebuildChrome();
+            RaiseToolbarChangedIfNeeded();
             RenderBoard();
             RenderDetailSafe(quiet);
         }
@@ -367,7 +479,6 @@ internal sealed class TodoPage : Page, IInspectorContent
         {
             _agentFilter.SelectedIndex = 0;
         }
-        SetButtonLabel(_archiveToggle, _showArchive ? "Open tasks" : "Archive");
     }
 
     private string SelectedFolderId()
@@ -479,27 +590,9 @@ internal sealed class TodoPage : Page, IInspectorContent
         }
     }
 
-    private static void SetButtonLabel(Button button, string label)
-    {
-        if (button.Content is StackPanel panel)
-        {
-            foreach (var child in panel.Children)
-            {
-                if (child is TextBlock text)
-                {
-                    text.Text = label;
-                    return;
-                }
-            }
-        }
-        button.Content = label;
-    }
-
     private void RenderBoard()
     {
         _boardHost.Children.Clear();
-        SetButtonLabel(_archiveToggle, _showArchive ? "Open tasks" : "Archive");
-        SetButtonLabel(_sortToggle, _newestFirst ? "Newest first" : "Board order");
         if (_cards.Count == 0)
         {
             _boardHost.Children.Add(EmptyState.View(
@@ -690,7 +783,7 @@ internal sealed class TodoPage : Page, IInspectorContent
                 parameters["operationId"] = _pendingCreateOp;
                 try
                 {
-                    await AppServices.Host.CallAsync("todo.createOnce", parameters);
+                    await CallTodoAsync("todo.createOnce", parameters);
                     _pendingCreateOp = null;
                     _quickTitle.Text = "";
                     Notice("Task added.");
@@ -704,7 +797,7 @@ internal sealed class TodoPage : Page, IInspectorContent
             }
             else
             {
-                await AppServices.Host.CallAsync("todo.create", parameters);
+                await CallTodoAsync("todo.create", parameters);
                 _quickTitle.Text = "";
                 Notice("Task added.");
             }
@@ -731,7 +824,7 @@ internal sealed class TodoPage : Page, IInspectorContent
         }
         try
         {
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await CallTodoAsync(
                 "todo.creationReceipt", new JsonObject { ["operationId"] = _pendingCreateOp });
             if (receipt is JsonObject receiptObject && receiptObject.Count > 0)
             {
@@ -766,7 +859,7 @@ internal sealed class TodoPage : Page, IInspectorContent
             // Column moves are last-writer-wins like the Mac board. A checked
             // edit would refuse a move whose revision the poller already
             // advanced, so moves stay on the unchecked update.
-            await AppServices.Host.CallAsync(
+            await CallTodoAsync(
                 "todo.update", new JsonObject { ["id"] = id, ["column"] = column });
         }
         catch (Exception ex)
@@ -1169,7 +1262,7 @@ internal sealed class TodoPage : Page, IInspectorContent
                 parameters["expectedRevision"] = revision.Value;
                 try
                 {
-                    await AppServices.Host.CallAsync("todo.edit", parameters);
+                    await CallTodoAsync("todo.edit", parameters);
                 }
                 catch (Exception ex) when (WorkbenchOps.IsConflict(ex))
                 {
@@ -1187,7 +1280,7 @@ internal sealed class TodoPage : Page, IInspectorContent
             }
             else
             {
-                await AppServices.Host.CallAsync("todo.update", parameters);
+                await CallTodoAsync("todo.update", parameters);
             }
             _detailDirty = false;
             _conflictId = null;
@@ -1212,7 +1305,7 @@ internal sealed class TodoPage : Page, IInspectorContent
     {
         try
         {
-            var fresh = await AppServices.Host.CallAsync("todo.get", new JsonObject { ["id"] = id });
+            var fresh = await CallTodoAsync("todo.get", new JsonObject { ["id"] = id });
             return WorkbenchOps.Revision(fresh);
         }
         catch
@@ -1235,12 +1328,12 @@ internal sealed class TodoPage : Page, IInspectorContent
                     Banner("Reload this task before deleting it.");
                     return;
                 }
-                await AppServices.Host.CallAsync(
+                await CallTodoAsync(
                     "todo.delete", new JsonObject { ["id"] = id, ["expectedRevision"] = revision.Value });
             }
             else
             {
-                await AppServices.Host.CallAsync("todo.remove", new JsonObject { ["id"] = id });
+                await CallTodoAsync("todo.remove", new JsonObject { ["id"] = id });
             }
             _selectedId = null;
             _confirmDelete = false;
@@ -1415,7 +1508,7 @@ internal sealed class TodoPage : Page, IInspectorContent
         SnapshotDraft();
         try
         {
-            var answer = await AppServices.Host.CallAsync(
+            var answer = await CallTodoAsync(
                 "automation.transcript",
                 new JsonObject { ["id"] = runId, ["offset"] = 0 });
             var text = Format.Text(answer, "text");
@@ -1495,7 +1588,7 @@ internal sealed class TodoPage : Page, IInspectorContent
                 _runError = null;
                 try
                 {
-                    await AppServices.Host.CallAsync("todo.runTask", new JsonObject
+                    await CallTodoAsync("todo.runTask", new JsonObject
                     {
                         ["id"] = id,
                         ["expectedRevision"] = revision.Value,
@@ -1516,7 +1609,7 @@ internal sealed class TodoPage : Page, IInspectorContent
             }
             else
             {
-                await AppServices.Host.CallAsync("todo.delegate", new JsonObject { ["id"] = id });
+                await CallTodoAsync("todo.delegate", new JsonObject { ["id"] = id });
                 Notice("Handed the task to an agent.");
             }
         }
@@ -1544,7 +1637,7 @@ internal sealed class TodoPage : Page, IInspectorContent
         }
         try
         {
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await CallTodoAsync(
                 "todo.runReceipt", new JsonObject { ["operationId"] = _pendingRunOp });
             if (receipt?["run"] is not null)
             {
@@ -1590,7 +1683,7 @@ internal sealed class TodoPage : Page, IInspectorContent
             }
             // Same operation id as the first attempt: the host answers from
             // the receipt when it already accepted the run.
-            await AppServices.Host.CallAsync("todo.runTask", new JsonObject
+            await CallTodoAsync("todo.runTask", new JsonObject
             {
                 ["id"] = _selectedId,
                 ["expectedRevision"] = revision.Value,
@@ -1630,7 +1723,7 @@ internal sealed class TodoPage : Page, IInspectorContent
                     Banner("Reload this task before stopping it.");
                     return;
                 }
-                await AppServices.Host.CallAsync("todo.stopTask", new JsonObject
+                await CallTodoAsync("todo.stopTask", new JsonObject
                 {
                     ["id"] = id,
                     ["expectedRevision"] = revision.Value,
@@ -1639,7 +1732,7 @@ internal sealed class TodoPage : Page, IInspectorContent
             }
             else
             {
-                await AppServices.Host.CallAsync("todo.stop", new JsonObject { ["id"] = id });
+                await CallTodoAsync("todo.stop", new JsonObject { ["id"] = id });
             }
             Notice("Stopped.");
         }

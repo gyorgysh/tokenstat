@@ -18,10 +18,10 @@ namespace Tokenstat.Pages;
 /// who is signed in, the conversations worth going back to, today and this
 /// week at list rates, the year grid, what each vendor reports is left, and
 /// the devices on the account. Mirrors the Mac Home: the toolbar owns the
-/// scope picker, Refresh lives in the DetailBar, and a pinned day opens in
+/// scope picker, Refresh sits beside it, and a pinned day opens in
 /// the inspector column.
 /// </summary>
-internal sealed class HomePage : Page, IScopeAware, IInspectorContent
+internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarItems
 {
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _signSlot = new() { Spacing = Theme.SpaceL };
@@ -67,27 +67,14 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
 
     public HomePage()
     {
-        var refresh = Buttons.ToolbarIcon(
-            ActionIcon.Refresh,
-            "Re-read the archive for this device's activity and plan usage",
-            async (_, _) => await RefreshAsync());
-        var bar = DetailBar.View(trailing: new List<UIElement> { refresh });
         _root.Children.Add(_status);
-        var scroller = new ScrollViewer
+        // One spacing unit off the sidebar, like the Mac Home gutter: a card
+        // already carries its own padding, so the stack needs only a gutter.
+        Content = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceS),
             Content = _root,
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(bar);
-        Grid.SetRow(scroller, 1);
-        layout.Children.Add(scroller);
-        Content = layout;
         RefreshInspector();
         Loaded += async (_, _) =>
         {
@@ -95,6 +82,22 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
             {
                 await LoadAsync();
             }
+        };
+    }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>Global screen: no folder to name.</summary>
+    public UIElement? ToolbarScope => null;
+
+    public IList<UIElement> ToolbarActions()
+    {
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Re-read the archive for this device's activity and plan usage",
+                async (_, _) => await RefreshAsync()),
         };
     }
 
@@ -128,7 +131,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
     }
 
     /// <summary>
-    /// Explicit re-read, for the DetailBar button and for the shell if it ever
+    /// Explicit re-read, for the toolbar button and for the shell if it ever
     /// wants its own refresh affordance. Always hits the host, drops the
     /// per-day caches, and re-pins the selected day fresh.
     /// </summary>

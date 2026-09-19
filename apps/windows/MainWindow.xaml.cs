@@ -125,6 +125,12 @@ public sealed partial class MainWindow : Window
             Tag = "workspaces:all",
             Icon = new SymbolIcon { Symbol = Symbol.Folder },
         });
+        _nav.MenuItems.Add(new NavigationViewItem
+        {
+            Content = "Add workspace",
+            Tag = "workspaces:add",
+            Icon = new SymbolIcon { Symbol = Symbol.Add },
+        });
 
         // Search is a toolbar icon, like the Mac: it opens the search page from
         // anywhere without taking a row. Account and About keep the footer.
@@ -142,7 +148,7 @@ public sealed partial class MainWindow : Window
         // its compact width. The display mode itself is fixed at Left.
         _nav.RegisterPropertyChangedCallback(
             NavigationView.IsPaneOpenProperty,
-            (_, _) => SyncTitleBarSplit());
+            (_, _) => SyncPaneChrome());
 
         AppServices.OpenTerminal = (workspaceId, sessionId) =>
         {
@@ -151,11 +157,11 @@ public sealed partial class MainWindow : Window
                 SetContent(new TerminalPage(workspaceId, sessionId));
             });
         };
-        AppServices.OpenBrowser = (url, host, port, unlisten) =>
+        AppServices.OpenBrowser = (url, host, port, unlisten, peer) =>
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                SetContent(new BrowserPage(url, host, port, unlisten));
+                SetContent(new BrowserPage(url, host, port, unlisten, peer));
             });
         };
         AppServices.OpenScreen = (peer, name) =>
@@ -173,16 +179,7 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                SetContent(section switch
-                {
-                    WorkspaceSection.Files => new EditorPage(workspaceId),
-                    WorkspaceSection.Notes => new NotesPage(workspaceId),
-                    WorkspaceSection.Workflows => new WorkflowsPage(workspaceId),
-                    WorkspaceSection.Automations => new AutomationsPage(workspaceId),
-                    WorkspaceSection.Pulls => new PullsPage(workspaceId),
-                    WorkspaceSection.Chat => new ChatPage(workspaceId),
-                    _ => new WorkspacePage(workspaceId, section),
-                });
+                SetContent(WorkspaceSectionPage(workspaceId, section));
             });
         };
         AppServices.OpenConversation = (workspaceId, chatId) =>
@@ -242,7 +239,7 @@ public sealed partial class MainWindow : Window
 
         // First frame is the brand on paper, before the helper has answered.
         ShowHostSplash(null);
-        _ = LoadWorkspacesAsync();
+        _ = BootAsync();
         // Live sidebar rows, like the Mac watcher: sessions and chats every
         // ten seconds, counts and the account footer every minute.
         _sidebarPoll = DispatcherQueue.CreateTimer();
@@ -253,6 +250,11 @@ public sealed partial class MainWindow : Window
             _ = RefreshSidebarLiveAsync(slow: _sidebarTick % 6 == 0);
         };
         _sidebarPoll.Start();
+        RemoteWorkspaces.Changed += () => DispatcherQueue.TryEnqueue(() =>
+        {
+            RebuildFolderItems();
+            RebuildSidebarLive();
+        });
         AppServices.Update.Changed += () => DispatcherQueue.TryEnqueue(RefreshUpdateBadge);
     }
 
@@ -290,14 +292,22 @@ public sealed partial class MainWindow : Window
         return parent;
     }
 
-    private async Task LoadWorkspacesAsync()
+    /// <summary>
+    /// Launch in the Mac's beats: splash while the helper comes up, then the
+    /// real window, where pages draw wireframes while their own loads land.
+    /// Bounded like the Mac host deadline: after eight seconds the app shows
+    /// anyway, and the folder rows fill in behind it when the helper answers.
+    /// </summary>
+    private async Task BootAsync()
     {
-        JsonNode listed;
-        while (true)
+        var started = DateTime.UtcNow;
+        var deadline = started.AddSeconds(8);
+        while (DateTime.UtcNow < deadline)
         {
             try
             {
-                listed = await AppServices.Host.CallAsync("workspace.list");
+                // A real method answering, not only a pipe that exists.
+                await AppServices.Host.CallAsync("info", patience: TimeSpan.FromSeconds(2));
                 break;
             }
             catch (Exception ex)
@@ -307,65 +317,17 @@ public sealed partial class MainWindow : Window
                 // Try again shortens the wait. One loop only: the button
                 // wakes this wait rather than starting a second loop.
                 _hostWake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                var wake = _hostWake.Task;
-                try
-                {
-                    await Task.WhenAny(Task.Delay(2000), wake);
-                }
-                catch
-                {
-                    return;
-                }
+                await Task.WhenAny(Task.Delay(250), _hostWake.Task);
             }
         }
-        var array = listed as JsonArray
-            ?? listed["folders"] as JsonArray
-            ?? listed["workspaces"] as JsonArray;
-
+        // Shortest the splash stays, so a hot helper is not a one-frame flash.
+        var elapsed = DateTime.UtcNow - started;
+        if (elapsed < TimeSpan.FromMilliseconds(560))
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(560) - elapsed);
+        }
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (array is not null)
-            {
-                var keep = new List<object>();
-                foreach (var item in _nav.MenuItems)
-                {
-                    if (item is NavigationViewItem nav && (nav.Tag as string)?.StartsWith("ws:") == true)
-                    {
-                        continue;
-                    }
-                    keep.Add(item);
-                }
-                _nav.MenuItems.Clear();
-                foreach (var item in keep)
-                {
-                    _nav.MenuItems.Add(item);
-                }
-                foreach (var folder in array)
-                {
-                    var id = Format.Text(folder, "id");
-                    var name = Format.Text(folder, "name", Format.Text(folder, "path", id));
-                    if (string.IsNullOrEmpty(id))
-                    {
-                        continue;
-                    }
-                    var parent = new NavigationViewItem
-                    {
-                        Content = name,
-                        Tag = "ws:" + id + ":Files",
-                        Icon = new SymbolIcon { Symbol = Symbol.Folder },
-                    };
-                    foreach (var section in Enum.GetValues<WorkspaceSection>())
-                    {
-                        parent.MenuItems.Add(new NavigationViewItem
-                        {
-                            Content = section.Label(),
-                            Tag = "ws:" + id + ":" + section,
-                        });
-                    }
-                    _nav.MenuItems.Add(parent);
-                }
-            }
-            _ = RefreshSidebarLiveAsync(slow: true);
             if (ReferenceEquals(_frame.Content, _hostSplash)
                 && _nav.SelectedItem is NavigationViewItem selected
                 && selected.Tag is string tag)
@@ -377,7 +339,125 @@ public sealed partial class MainWindow : Window
             {
                 ShowOnboarding(firstRun: true);
             }
+            _ = RefreshSidebarLiveAsync(slow: true);
         });
+        await TryLoadFoldersAsync();
+    }
+
+    private bool _foldersLoaded;
+    private JsonArray _localFolders = new();
+
+    /// <summary>
+    /// The folder rows under Workspaces. Runs once after boot mounts content,
+    /// then again on every slow sidebar poll until it lands, so a helper that
+    /// answers late still fills the sidebar in. A miss keeps the old rows.
+    /// </summary>
+    private async Task TryLoadFoldersAsync()
+    {
+        if (_foldersLoaded)
+        {
+            return;
+        }
+        JsonNode listed;
+        try
+        {
+            listed = await AppServices.Host.CallAsync("workspace.list");
+        }
+        catch
+        {
+            return;
+        }
+        var array = listed as JsonArray
+            ?? listed["folders"] as JsonArray
+            ?? listed["workspaces"] as JsonArray;
+        if (array is null)
+        {
+            return;
+        }
+        _foldersLoaded = true;
+        _localFolders = array;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            RebuildFolderItems();
+            RebuildSidebarLive();
+        });
+        _ = RemoteWorkspaces.SweepAsync();
+    }
+
+    /// <summary>
+    /// Local folders and every reachable peer's, each with all sections. The
+    /// Add workspace row stays last, under whatever folders exist.
+    /// </summary>
+    private void RebuildFolderItems()
+    {
+        var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
+        var keep = new List<object>();
+        foreach (var item in _nav.MenuItems)
+        {
+            if (item is NavigationViewItem nav
+                && ((nav.Tag as string)?.StartsWith("ws:") == true
+                    || (nav.Tag as string) == "workspaces:add"))
+            {
+                continue;
+            }
+            keep.Add(item);
+        }
+        _nav.MenuItems.Clear();
+        foreach (var item in keep)
+        {
+            _nav.MenuItems.Add(item);
+        }
+        foreach (var folder in _localFolders)
+        {
+            var id = Format.Text(folder, "id");
+            var name = Format.Text(folder, "name", Format.Text(folder, "path", id));
+            if (string.IsNullOrEmpty(id))
+            {
+                continue;
+            }
+            _nav.MenuItems.Add(FolderParent(id, name, remote: false, Format.Text(folder, "path")));
+        }
+        foreach (var folder in RemoteWorkspaces.CachedFolders())
+        {
+            _nav.MenuItems.Add(FolderParent(folder.Id, folder.DisplayName, remote: true, folder.Path));
+        }
+        _nav.MenuItems.Add(new NavigationViewItem
+        {
+            Content = "Add workspace",
+            Tag = "workspaces:add",
+            Icon = new SymbolIcon { Symbol = Symbol.Add },
+        });
+        if (selectedTag is not null
+            && ((_nav.SelectedItem as NavigationViewItem)?.Tag as string) != selectedTag
+            && FindNavItem(selectedTag) is NavigationViewItem back)
+        {
+            _suppressNav = true;
+            _nav.SelectedItem = back;
+            _suppressNav = false;
+        }
+    }
+
+    private static NavigationViewItem FolderParent(string id, string name, bool remote, string path)
+    {
+        var parent = new NavigationViewItem
+        {
+            Content = name,
+            Tag = "ws:" + id + ":Files",
+            Icon = new SymbolIcon { Symbol = remote ? Symbol.Globe : Symbol.Folder },
+        };
+        if (!string.IsNullOrEmpty(path))
+        {
+            ToolTipService.SetToolTip(parent, path);
+        }
+        foreach (var section in Enum.GetValues<WorkspaceSection>())
+        {
+            parent.MenuItems.Add(new NavigationViewItem
+            {
+                Content = section.Label(),
+                Tag = "ws:" + id + ":" + section,
+            });
+        }
+        return parent;
     }
 
     private TaskCompletionSource? _hostWake;
@@ -444,6 +524,15 @@ public sealed partial class MainWindow : Window
         {
             page.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         }
+        if (_toolbarSource is not null)
+        {
+            _toolbarSource.ToolbarChanged -= OnToolbarChanged;
+        }
+        _toolbarSource = page as IToolbarItems;
+        if (_toolbarSource is not null)
+        {
+            _toolbarSource.ToolbarChanged += OnToolbarChanged;
+        }
         _frame.Content = page;
         _inspectorHost.RouteAllowsInspector = page is not AccountPage;
         _inspectorHost.SetInspector((page as IInspectorContent)?.Inspector);
@@ -455,23 +544,43 @@ public sealed partial class MainWindow : Window
         Motion.PlayArrival(page);
     }
 
+    private IToolbarItems? _toolbarSource;
+
+    private void OnToolbarChanged()
+    {
+        DispatcherQueue.TryEnqueue(RebuildToolbar);
+    }
+
     /// <summary>
-    /// Rebuild the global toolbar for what is on screen: the scope picker only
-    /// on Home and Insights, the inspector toggle on every page that may show
-    /// one. Account never shows an inspector, so it gets no toggle either.
+    /// Rebuild the one top bar for what is on screen, like the Mac contextual
+    /// toolbar: the device scope picker only on Home, then the page's own
+    /// scope chip, then the page's actions before the shared search icon, and
+    /// the inspector toggle last, nearest the edge it opens. Insights is
+    /// local only, like the desktop Mac, so it gets no picker. Account never
+    /// shows an inspector, so it gets no toggle either.
     /// </summary>
     private void RebuildToolbar()
     {
         var content = _frame.Content;
         List<UIElement>? leading = null;
-        if (content is HomePage or InsightsPage)
+        if (content is HomePage)
         {
             leading = new List<UIElement> { ScopePicker() };
         }
-        var trailing = new List<UIElement>
+        if (content is IToolbarItems scoped && scoped.ToolbarScope is UIElement chip)
         {
-            Buttons.ToolbarIcon(ActionIcon.Search, "Search work", (_, _) => OpenSearch()),
-        };
+            leading ??= new List<UIElement>();
+            leading.Add(chip);
+        }
+        var trailing = new List<UIElement>();
+        if (content is IToolbarItems items)
+        {
+            foreach (var action in items.ToolbarActions())
+            {
+                trailing.Add(action);
+            }
+        }
+        trailing.Add(Buttons.ToolbarIcon(ActionIcon.Search, "Search work", (_, _) => OpenSearch()));
         if (content is Page and not AccountPage)
         {
             // Last, nearest the edge it opens, like the Mac: the toggle is the
@@ -621,6 +730,14 @@ public sealed partial class MainWindow : Window
             RefreshUpdateBadge();
             return;
         }
+        if (tag == "workspaces:add")
+        {
+            // An action, not a place: the selection goes back where it was
+            // once the dialog closes, and the content stays put.
+            Show(tag);
+            RefreshUpdateBadge();
+            return;
+        }
         _lastNavTag = tag;
         Show(tag);
         RefreshUpdateBadge();
@@ -664,6 +781,11 @@ public sealed partial class MainWindow : Window
             SetContent(WorkspacesOverviewPage());
             return;
         }
+        if (tag == "workspaces:add")
+        {
+            _ = AddWorkspaceAsync();
+            return;
+        }
         if (tag.StartsWith("ws:", StringComparison.Ordinal))
         {
             var rest = tag["ws:".Length..];
@@ -672,20 +794,80 @@ public sealed partial class MainWindow : Window
                 && Enum.TryParse<WorkspaceSection>(rest[(i + 1)..], out var section))
             {
                 var id = rest[..i];
-                Page page = section switch
-                {
-                    WorkspaceSection.Files => new EditorPage(id),
-                    WorkspaceSection.Notes => new NotesPage(id),
-                    WorkspaceSection.Workflows => new WorkflowsPage(id),
-                    WorkspaceSection.Automations => new AutomationsPage(id),
-                    WorkspaceSection.Pulls => new PullsPage(id),
-                    WorkspaceSection.Chat => new ChatPage(id),
-                    WorkspaceSection.History => WorkspaceHistoryPage(id),
-                    _ => new WorkspacePage(id, section),
-                };
-                SetContent(page);
+                SetContent(WorkspaceSectionPage(id, section));
             }
         }
+    }
+
+    /// <summary>
+    /// The page for one folder section. Local folders open the full
+    /// workbench. A folder on another machine opens the same dedicated pages,
+    /// whose helpers route through the peer, except Notes, which stays local
+    /// like the desktop Mac.
+    /// </summary>
+    private Page WorkspaceSectionPage(string id, WorkspaceSection section)
+    {
+        if (RemoteWorkspaces.IsRemote(id))
+        {
+            return section switch
+            {
+                WorkspaceSection.History => WorkspaceHistoryPage(id),
+                WorkspaceSection.Chat => new ChatPage(id),
+                WorkspaceSection.Todo => new TodoPage(id),
+                WorkspaceSection.Workflows => new WorkflowsPage(id),
+                WorkspaceSection.Automations => new AutomationsPage(id),
+                WorkspaceSection.Pulls => new PullsPage(id),
+                _ => new WorkspacePage(id, section),
+            };
+        }
+        return section switch
+        {
+            WorkspaceSection.Files => new EditorPage(id),
+            WorkspaceSection.Notes => new NotesPage(id),
+            WorkspaceSection.Workflows => new WorkflowsPage(id),
+            WorkspaceSection.Automations => new AutomationsPage(id),
+            WorkspaceSection.Pulls => new PullsPage(id),
+            WorkspaceSection.Chat => new ChatPage(id),
+            WorkspaceSection.History => WorkspaceHistoryPage(id),
+            _ => new WorkspacePage(id, section),
+        };
+    }
+
+    /// <summary>
+    /// The add flow from the sidebar row and the overview button. A new
+    /// folder selects itself, so what was just made is what is on screen.
+    /// </summary>
+    private async Task AddWorkspaceAsync()
+    {
+        var owner = _frame.Content as UIElement ?? (UIElement)_frame;
+        var added = await WorkspaceAddDialog.ShowAsync(owner);
+        if (added is null)
+        {
+            RestoreSelection(_lastNavTag);
+            return;
+        }
+        _foldersLoaded = false;
+        await TryLoadFoldersAsync();
+        var tag = "ws:" + added + ":Files";
+        if (FindNavItem(tag) is NavigationViewItem row)
+        {
+            _nav.SelectedItem = row;
+        }
+        else
+        {
+            Show(tag);
+        }
+        _lastNavTag = tag;
+    }
+
+    private void RestoreSelection(string? tag)
+    {
+        _suppressNav = true;
+        if (tag is not null && FindNavItem(tag) is NavigationViewItem back)
+        {
+            _nav.SelectedItem = back;
+        }
+        _suppressNav = false;
     }
 
     /// <summary>
@@ -700,41 +882,66 @@ public sealed partial class MainWindow : Window
         {
             Content = new ScrollViewer
             {
-                Padding = new Thickness(Theme.SpaceL),
+                Padding = new Thickness(Theme.SpaceM),
                 Content = root,
             },
         };
-        page.Loaded += async (_, _) =>
+        page.Loaded += async (_, _) => await FillOverviewAsync(root, page);
+        return page;
+    }
+
+    private async Task FillOverviewAsync(StackPanel root, Page page)
+    {
+        root.Children.Clear();
+        var head = new StackPanel
         {
-            root.Children.Clear();
-            root.Children.Add(new TextBlock
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceM,
+        };
+        head.Children.Add(new TextBlock
+        {
+            Text = "All folders",
+            FontSize = 18,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var spacer = new Grid { Width = Theme.SpaceM };
+        head.Children.Add(spacer);
+        head.Children.Add(Buttons.Primary(
+            "Add folder", ActionIcon.Create, async (_, _) =>
             {
-                Text = "All folders",
-                FontSize = 18,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            });
-            JsonNode listed;
-            try
-            {
-                listed = await AppServices.Host.CallAsync("workspace.list");
-            }
-            catch (Exception ex)
-            {
-                root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
-                return;
-            }
-            var array = listed as JsonArray
-                ?? listed["folders"] as JsonArray
-                ?? listed["workspaces"] as JsonArray;
-            if (array is null || array.Count == 0)
-            {
-                root.Children.Add(EmptyState.View(
-                    "No folders yet",
-                    "Add a project folder and it will appear here.",
-                    EmptyArtKind.WorkspaceAccess));
-                return;
-            }
-            var list = new StackPanel { Spacing = Theme.SpaceS };
+                await AddWorkspaceAsync();
+                if (ReferenceEquals(_frame.Content, page))
+                {
+                    await FillOverviewAsync(root, page);
+                }
+            }));
+        root.Children.Add(head);
+        JsonNode listed;
+        try
+        {
+            listed = await AppServices.Host.CallAsync("workspace.list");
+        }
+        catch (Exception ex)
+        {
+            root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            return;
+        }
+        var array = listed as JsonArray
+            ?? listed["folders"] as JsonArray
+            ?? listed["workspaces"] as JsonArray;
+        var remote = RemoteWorkspaces.CachedFolders();
+        if ((array is null || array.Count == 0) && remote.Count == 0)
+        {
+            root.Children.Add(EmptyState.View(
+                "No folders yet",
+                "Add a project folder and it will appear here.",
+                EmptyArtKind.WorkspaceAccess));
+            return;
+        }
+        var list = new StackPanel { Spacing = Theme.SpaceS };
+        if (array is not null)
+        {
             foreach (var folder in array)
             {
                 var id = Format.Text(folder, "id");
@@ -742,121 +949,161 @@ public sealed partial class MainWindow : Window
                 {
                     continue;
                 }
-                var captured = "ws:" + id + ":Files";
-                var open = new Button
-                {
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Left,
-                    Content = new StackPanel
-                    {
-                        Spacing = 2,
-                        Children =
-                        {
-                            new TextBlock
-                            {
-                                Text = Format.Text(folder, "name", Format.Text(folder, "path", id)),
-                                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                                TextWrapping = TextWrapping.Wrap,
-                            },
-                            new TextBlock
-                            {
-                                Text = Format.Text(folder, "path", id),
-                                Opacity = 0.7,
-                                TextWrapping = TextWrapping.Wrap,
-                            },
-                        },
-                    },
-                };
-                open.Click += (_, _) =>
-                {
-                    if (FindNavItem(captured) is NavigationViewItem row)
-                    {
-                        _nav.SelectedItem = row;
-                    }
-                    else
-                    {
-                        Show(captured);
-                    }
-                };
-                list.Children.Add(open);
+                list.Children.Add(OverviewFolderRow(
+                    Format.Text(folder, "name", Format.Text(folder, "path", id)),
+                    Format.Text(folder, "path", id),
+                    "ws:" + id + ":Files"));
             }
-            root.Children.Add(Chrome.Card("Folders", list));
+        }
+        foreach (var folder in remote)
+        {
+            list.Children.Add(OverviewFolderRow(
+                folder.DisplayName,
+                string.IsNullOrEmpty(folder.Path) ? "On " + folder.MachineLabel : folder.Path,
+                "ws:" + folder.Id + ":Files"));
+        }
+        root.Children.Add(Chrome.Card("Folders", list));
+    }
+
+    private UIElement OverviewFolderRow(string title, string subtitle, string tag)
+    {
+        var open = new Button
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Content = new StackPanel
+            {
+                Spacing = 2,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = title,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    new TextBlock
+                    {
+                        Text = subtitle,
+                        Opacity = 0.7,
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                },
+            },
         };
-        return page;
+        open.Click += (_, _) =>
+        {
+            if (FindNavItem(tag) is NavigationViewItem row)
+            {
+                _nav.SelectedItem = row;
+            }
+            else
+            {
+                Show(tag);
+            }
+        };
+        return open;
     }
 
     /// <summary>
     /// One folder's commit history, through the shared history card. The diff
     /// opener matches the Changes screen, so a file reads the same from both.
     /// </summary>
-    private static Page WorkspaceHistoryPage(string id)
+    private static Page WorkspaceHistoryPage(string id) => new HistoryPage(id);
+
+    private sealed class HistoryPage : Page, IToolbarItems
     {
-        var root = new StackPanel { Spacing = Theme.SpaceL };
-        var barSlot = new ContentControl
+        private readonly string _id;
+        private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
+
+        private async Task ShowDiffAsync(string filePath)
         {
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        };
-        var page = new Page();
-        async Task LoadAsync()
+            JsonNode? diff;
+            try
+            {
+                diff = await RemoteWorkspaces.CallWorkspaceAsync(
+                    _id,
+                    "workspace.diff",
+                    new JsonObject { ["id"] = _id, ["path"] = filePath });
+            }
+            catch (Exception ex)
+            {
+                _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+                return;
+            }
+            await WorkspaceDiff.ShowFileDiffAsync(this, "Diff · " + filePath, diff);
+        }
+
+        public event Action? ToolbarChanged;
+
+        public HistoryPage(string id)
         {
-            root.Children.Clear();
-            root.Children.Add(new TextBlock
+            _id = id;
+            Content = new ScrollViewer
+            {
+                Padding = new Thickness(Theme.SpaceM),
+                Content = _root,
+            };
+            Loaded += async (_, _) => await LoadAsync();
+        }
+
+        public UIElement? ToolbarScope =>
+            Chrome.ScopeChip(WorkspaceSection.History.Label());
+
+        public IList<UIElement> ToolbarActions()
+        {
+            return new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload history",
+                    async (_, _) =>
+                    {
+                        LogoRefresh.Began();
+                        await LoadAsync();
+                    }),
+            };
+        }
+
+        private async Task LoadAsync()
+        {
+            _root.Children.Clear();
+            _root.Children.Add(new TextBlock
             {
                 Text = WorkspaceSection.History.Label(),
                 FontSize = 18,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
-            var card = await WorkspaceHistory.LoadCardAsync(
-                page,
-                id,
-                async filePath =>
-                {
-                    JsonNode? diff;
-                    try
+            var skeleton = Motion.SkeletonCard();
+            _root.Children.Add(skeleton);
+            var remote = RemoteWorkspaces.IsRemote(_id);
+            var card = remote
+                ? await WorkspaceRemoteHistory.LoadCardAsync(this, _id, ShowDiffAsync)
+                : await WorkspaceHistory.LoadCardAsync(
+                    this,
+                    _id,
+                    async filePath =>
                     {
-                        diff = await AppServices.Host.CallAsync(
-                            "workspace.diff",
-                            new JsonObject { ["id"] = id, ["path"] = filePath });
-                    }
-                    catch (Exception ex)
-                    {
-                        root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
-                        return;
-                    }
-                    await WorkspaceDiff.ShowFileDiffAsync(page, "Diff · " + filePath, diff);
-                });
+                        JsonNode? diff;
+                        try
+                        {
+                            diff = await AppServices.Host.CallAsync(
+                                "workspace.diff",
+                                new JsonObject { ["id"] = _id, ["path"] = filePath });
+                        }
+                        catch (Exception ex)
+                        {
+                            _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+                            return;
+                        }
+                        await WorkspaceDiff.ShowFileDiffAsync(this, "Diff · " + filePath, diff);
+                    });
+            _root.Children.Remove(skeleton);
             if (card is not null)
             {
-                root.Children.Add(card);
+                _root.Children.Add(card);
             }
         }
-        barSlot.Content = DetailBar.View(
-            scope: Chrome.ScopeChip(WorkspaceSection.History.Label()),
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload history",
-                    async (_, _) => await LoadAsync()),
-            });
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(barSlot);
-        var scroller = new ScrollViewer
-        {
-            Padding = new Thickness(Theme.SpaceL),
-            Content = root,
-        };
-        Grid.SetRow(scroller, 1);
-        layout.Children.Add(scroller);
-        page.Content = layout;
-        page.Loaded += async (_, _) => await LoadAsync();
-        return page;
     }
 
     private NavigationViewItem? FindNavItem(string tag)
@@ -918,6 +1165,11 @@ public sealed partial class MainWindow : Window
             var (sessions, chats) = await SidebarLive.FetchFastAsync();
             if (slow)
             {
+                if (!_foldersLoaded)
+                {
+                    _ = TryLoadFoldersAsync();
+                }
+                _ = RemoteWorkspaces.SweepAsync();
                 var (summaries, account) = await SidebarLive.FetchSlowAsync();
                 if (summaries is not null)
                 {
@@ -1221,8 +1473,58 @@ public sealed partial class MainWindow : Window
         // The toolbar bakes its brushes at build time, like the pages do at
         // navigation: rebuild it so a theme change repaints it too.
         RebuildToolbar();
-        SyncTitleBarSplit();
+        SyncPaneChrome();
         TryTitleBarColors();
+    }
+
+    /// <summary>
+    /// Keep the pane chrome on the pane state: the titlebar split follows the
+    /// pane edge, and group headers hide while the pane collapses to icons,
+    /// where they would otherwise render as clipped stubs like "WOR".
+    /// </summary>
+    private void SyncPaneChrome()
+    {
+        SyncTitleBarSplit();
+        _nav.PaneHeader = _nav.IsPaneOpen ? LogoOpen() : LogoClosed();
+        var show = _nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var item in _nav.MenuItems)
+        {
+            if (item is NavigationViewItemHeader header)
+            {
+                header.Visibility = show;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The brand at the top of the sidebar, where the Mac keeps its wordmark.
+    /// A static mark, so every LogoRefresh pulse dips the bars once, like the
+    /// Mac launch-and-refresh motion. Rebuilt per call: panes and themes move.
+    /// </summary>
+    private static UIElement LogoOpen()
+    {
+        return new Border
+        {
+            Padding = new Thickness(Theme.SpaceM, Theme.SpaceM, Theme.SpaceM, Theme.SpaceM),
+            Child = Marks.Wordmark(),
+        };
+    }
+
+    /// <summary>
+    /// The collapsed pane keeps the bars alone, centred in the icon rail.
+    /// </summary>
+    private static UIElement LogoClosed()
+    {
+        return new Border
+        {
+            Padding = new Thickness(0, Theme.SpaceM, 0, Theme.SpaceM),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Child = new Grid
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Children = { Marks.LogoMark(18) },
+            },
+        };
     }
 
     /// <summary>

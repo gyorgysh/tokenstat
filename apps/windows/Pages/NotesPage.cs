@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Windows.System;
 
 namespace Tokenstat.Pages;
@@ -21,14 +22,9 @@ namespace Tokenstat.Pages;
 /// card whose kind is note, so every action here is a todo method that
 /// already existed. Pass a workspace id to scope the screen to that folder.
 /// </summary>
-internal sealed class NotesPage : Page, IInspectorContent
+internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _workspaceId;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _composerHost = new() { Spacing = Theme.SpaceS };
@@ -76,24 +72,32 @@ internal sealed class NotesPage : Page, IInspectorContent
         _root.Children.Add(_scopeHost);
         _root.Children.Add(_listHost);
         _listHost.Children.Add(Motion.SkeletonCard());
-        var scroller = new ScrollViewer
+        Content = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceM),
             Content = _root,
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(scroller, 1);
-        layout.Children.Add(scroller);
-        Content = layout;
-        RebuildChrome();
         RenderDetail();
         Loaded += async (_, _) => await LoadAsync();
+    }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The folder this screen belongs to, or null on the global list, where
+    /// the scope chips in content say which folder each note is in.
+    /// </summary>
+    public UIElement? ToolbarScope
+    {
+        get
+        {
+            if (_workspaceId is null)
+            {
+                return null;
+            }
+            var folder = _folders.FirstOrDefault(f => f.Id == _workspaceId);
+            return Chrome.ScopeChip(string.IsNullOrEmpty(folder.Name) ? "Folder" : folder.Name);
+        }
     }
 
     /// <summary>
@@ -102,14 +106,8 @@ internal sealed class NotesPage : Page, IInspectorContent
     /// </summary>
     public UIElement? Inspector => _detailHost;
 
-    private void RebuildChrome()
+    public IList<UIElement> ToolbarActions()
     {
-        UIElement? scope = null;
-        if (_workspaceId is not null)
-        {
-            var folder = _folders.FirstOrDefault(f => f.Id == _workspaceId);
-            scope = Chrome.ScopeChip(string.IsNullOrEmpty(folder.Name) ? "Folder" : folder.Name);
-        }
         var archive = Buttons.ToolbarIcon(
             _showingArchive ? ActionIcon.Restore : ActionIcon.Archive,
             _showingArchive ? "Show current notes" : "Show archived notes",
@@ -122,40 +120,68 @@ internal sealed class NotesPage : Page, IInspectorContent
             },
             _showingArchive);
         archive.IsEnabled = ArchivedCount() > 0 || _showingArchive;
-        _barSlot.Content = DetailBar.View(
-            scope: scope,
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload notes",
-                    async (_, _) => await LoadAsync()),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Create,
-                    "Write a note",
-                    (_, _) =>
-                    {
-                        _showingArchive = false;
-                        RenderAll();
-                        _draft.Focus(FocusState.Programmatic);
-                    }),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Layout,
-                    _gridLayout ? "Show notes as a list" : "Show notes as cards",
-                    (_, _) =>
-                    {
-                        _gridLayout = !_gridLayout;
-                        RenderAll();
-                    }),
-                archive,
-            });
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload notes",
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await LoadAsync();
+                }),
+            Buttons.ToolbarIcon(
+                ActionIcon.Create,
+                "Write a note",
+                (_, _) =>
+                {
+                    _showingArchive = false;
+                    RenderAll();
+                    _draft.Focus(FocusState.Programmatic);
+                }),
+            Buttons.ToolbarIcon(
+                ActionIcon.Layout,
+                _gridLayout ? "Show notes as a list" : "Show notes as cards",
+                (_, _) =>
+                {
+                    _gridLayout = !_gridLayout;
+                    RenderAll();
+                }),
+            archive,
+        };
+    }
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
+
+    /// <summary>
+    /// One todo method against this screen's folder, local or remote. A
+    /// remote folder travels as remote.call with the peer's own folder id,
+    /// the way the folder page already routes its task list. Params are
+    /// copied, never mutated, so a retry cannot forward an already rewritten
+    /// id. The global list has no folder and always stays local.
+    /// </summary>
+    private Task<JsonNode> CallTodoAsync(string method, JsonNode? parameters = null)
+    {
+        if (_workspaceId is null
+            || !RemoteWorkspaces.TrySplit(_workspaceId, out var peer, out var inner))
+        {
+            return AppServices.Host.CallAsync(method, parameters);
+        }
+        var forwarded = parameters is null
+            ? new JsonObject()
+            : (JsonObject)JsonNode.Parse(parameters.ToJsonString())!;
+        if (Format.Text(forwarded, "workspaceId") == _workspaceId)
+        {
+            forwarded["workspaceId"] = inner;
+        }
+        return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
     }
 
     private async Task LoadAsync()
     {
         try
         {
-            var cardsTask = AppServices.Host.CallAsync(
+            var cardsTask = CallTodoAsync(
                 "todo.list", new JsonObject { ["includeArchived"] = true });
             var foldersTask = AppServices.Host.CallAsync("workspace.list", new JsonObject());
             await Task.WhenAll(cardsTask, foldersTask);
@@ -163,6 +189,25 @@ internal sealed class NotesPage : Page, IInspectorContent
                 ?? cardsTask.Result["cards"] as JsonArray
                 ?? new JsonArray();
             _folders = ReadFolders(foldersTask.Result);
+            if (_workspaceId is not null
+                && RemoteWorkspaces.TrySplit(_workspaceId, out _, out var inner))
+            {
+                // Cards from the peer carry its own folder id. Namespace them
+                // to this page's folder id so the scope filter below keeps
+                // matching, and list the folder itself so its name resolves.
+                foreach (var card in _cards)
+                {
+                    if (card is JsonObject obj && Format.Text(obj, "workspaceId") == inner)
+                    {
+                        obj["workspaceId"] = _workspaceId;
+                    }
+                }
+                if (RemoteWorkspaces.CachedFolder(_workspaceId) is RemoteFolder cached
+                    && _folders.All(f => f.Id != _workspaceId))
+                {
+                    _folders.Add((_workspaceId, cached.DisplayName));
+                }
+            }
             _loaded = true;
         }
         catch (Exception ex)
@@ -170,7 +215,7 @@ internal sealed class NotesPage : Page, IInspectorContent
             Banner(ex.Message);
             return;
         }
-        RebuildChrome();
+        RaiseToolbarChanged();
         RenderAll();
     }
 
@@ -205,7 +250,7 @@ internal sealed class NotesPage : Page, IInspectorContent
 
     private void RenderAll()
     {
-        RebuildChrome();
+        RaiseToolbarChanged();
         RenderComposer();
         RenderLibrary();
         RenderScopes();
@@ -859,7 +904,7 @@ internal sealed class NotesPage : Page, IInspectorContent
         _saving = true;
         try
         {
-            await AppServices.Host.CallAsync(
+            await CallTodoAsync(
                 "todo.create",
                 new JsonObject
                 {
@@ -896,7 +941,7 @@ internal sealed class NotesPage : Page, IInspectorContent
         }
         try
         {
-            await AppServices.Host.CallAsync(
+            await CallTodoAsync(
                 "todo.update", new JsonObject { ["id"] = id, ["title"] = clean });
         }
         catch (Exception ex)
@@ -911,7 +956,7 @@ internal sealed class NotesPage : Page, IInspectorContent
     {
         try
         {
-            await AppServices.Host.CallAsync(
+            await CallTodoAsync(
                 "todo.update",
                 new JsonObject { ["id"] = id, ["column"] = archived ? "archive" : "backlog" });
         }
@@ -947,7 +992,7 @@ internal sealed class NotesPage : Page, IInspectorContent
         }
         try
         {
-            await AppServices.Host.CallAsync(
+            await CallTodoAsync(
                 "todo.update",
                 new JsonObject
                 {
@@ -974,7 +1019,7 @@ internal sealed class NotesPage : Page, IInspectorContent
     {
         try
         {
-            await AppServices.Host.CallAsync("todo.remove", new JsonObject { ["id"] = id });
+            await CallTodoAsync("todo.remove", new JsonObject { ["id"] = id });
             _selectedId = null;
             _confirmDelete = false;
         }

@@ -21,13 +21,8 @@ namespace Tokenstat.Pages;
 /// Account is three jobs, not one scrolling pile: who you are, vendor quota
 /// windows, and what this PC itself does. Mirrors the Mac AccountView panes.
 /// </summary>
-internal sealed class AccountPage : Page
+internal sealed class AccountPage : Page, IToolbarItems
 {
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly ContentControl _tabSlot = new()
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -49,23 +44,19 @@ internal sealed class AccountPage : Page
         _root.Children.Add(_content);
         var scroller = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceM),
             Content = _root,
         };
         var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition
         {
             Height = new GridLength(1, GridUnitType.Star),
         });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(_tabSlot, 1);
         layout.Children.Add(_tabSlot);
-        Grid.SetRow(scroller, 2);
+        Grid.SetRow(scroller, 1);
         layout.Children.Add(scroller);
         Content = layout;
-        RebuildChrome();
         RebuildTabs();
         Loaded += async (_, _) => await LoadAsync();
         Unloaded += (_, _) =>
@@ -78,7 +69,15 @@ internal sealed class AccountPage : Page
         };
     }
 
-    private void RebuildChrome()
+    public event Action? ToolbarChanged;
+
+    /// <summary>Global screen: no folder to name.</summary>
+    public UIElement? ToolbarScope => null;
+
+    /// <summary>
+    /// Sync now, offered only while signed in, like the desktop Mac bar.
+    /// </summary>
+    public IList<UIElement> ToolbarActions()
     {
         var trailing = new List<UIElement>();
         if (_signedIn)
@@ -86,10 +85,16 @@ internal sealed class AccountPage : Page
             trailing.Add(Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
                 "Sync now",
-                async (_, _) => await SyncNowAsync()));
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await SyncNowAsync();
+                }));
         }
-        _barSlot.Content = DetailBar.View(trailing: trailing);
+        return trailing;
     }
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
     private void RebuildTabs()
     {
@@ -123,7 +128,7 @@ internal sealed class AccountPage : Page
             _accountError = FriendlyError.Display(ex.Message);
         }
         _signedIn = _account?["signedIn"]?.GetValue<bool>() ?? false;
-        RebuildChrome();
+        RaiseToolbarChanged();
         RebuildTabs();
         await RenderPaneAsync();
     }
@@ -131,17 +136,26 @@ internal sealed class AccountPage : Page
     private async Task RenderPaneAsync()
     {
         _content.Children.Clear();
-        switch (_pane)
+        var skeleton = Motion.SkeletonCard();
+        _content.Children.Add(skeleton);
+        try
         {
-            case "limits":
-                await RenderLimitsPaneAsync();
-                break;
-            case "pc":
-                await RenderThisPcPaneAsync();
-                break;
-            default:
-                await RenderAccountPaneAsync();
-                break;
+            switch (_pane)
+            {
+                case "limits":
+                    await RenderLimitsPaneAsync();
+                    break;
+                case "pc":
+                    await RenderThisPcPaneAsync();
+                    break;
+                default:
+                    await RenderAccountPaneAsync();
+                    break;
+            }
+        }
+        finally
+        {
+            _content.Children.Remove(skeleton);
         }
     }
 

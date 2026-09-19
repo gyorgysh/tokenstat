@@ -15,17 +15,12 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-internal sealed class WorkspacePage : Page, IInspectorContent
+internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 {
     private const int HugeChars = 200_000;
 
     private readonly string _id;
     private readonly WorkspaceSection _section;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _inspector = new()
     {
@@ -44,26 +39,40 @@ internal sealed class WorkspacePage : Page, IInspectorContent
     {
         _id = id;
         _section = section;
-        var scroller = new ScrollViewer
+        Content = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceM),
             Content = _root,
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(scroller, 1);
-        layout.Children.Add(scroller);
-        Content = layout;
-        RebuildChrome();
         RenderInspector();
         Loaded += async (_, _) => await LoadAsync();
         Unloaded += (_, _) => StopSessionsPoll();
     }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The folder this section belongs to.
+    /// </summary>
+    public UIElement? ToolbarScope =>
+        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? _section.Label() : _folderName);
+
+    public IList<UIElement> ToolbarActions()
+    {
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload " + _section.Label().ToLowerInvariant(),
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await LoadAsync();
+                }),
+        };
+    }
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
     /// <summary>
     /// The inspector column content: which folder is on screen, its branch,
@@ -71,21 +80,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent
     /// so the column stays live without the shell asking again.
     /// </summary>
     public UIElement? Inspector => _inspector;
-
-    private void RebuildChrome()
-    {
-        var scope = Chrome.ScopeChip(
-            string.IsNullOrEmpty(_folderName) ? _section.Label() : _folderName);
-        _barSlot.Content = DetailBar.View(
-            scope: scope,
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload " + _section.Label().ToLowerInvariant(),
-                    async (_, _) => await LoadAsync()),
-            });
-    }
 
     private void RenderInspector()
     {
@@ -133,8 +127,10 @@ internal sealed class WorkspacePage : Page, IInspectorContent
             FontSize = 18,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
+        var skeleton = Motion.SkeletonCard();
+        _root.Children.Add(skeleton);
         _folderName = await FolderNameAsync();
-        RebuildChrome();
+        RaiseToolbarChanged();
         RenderInspector();
         try
         {
@@ -153,9 +149,18 @@ internal sealed class WorkspacePage : Page, IInspectorContent
                     await LoadSessionsAsync();
                     break;
                 case WorkspaceSection.Browser:
-                    await LoadBrowserAsync();
+                    LoadBrowser();
                     break;
                 default:
+                    if (RemoteWorkspaces.IsRemote(_id))
+                    {
+                        _root.Children.Add(Chrome.Empty(
+                            _section.Label() + " is local for now",
+                            "This folder lives on another machine, and " + _section.Label().ToLowerInvariant()
+                            + " for a remote folder stays local, like the desktop Mac.",
+                            ActionIcon.Reveal));
+                        break;
+                    }
                     _root.Children.Add(Chrome.Empty(
                         _section.Label() + " on Windows",
                         "The Mac app has the full " + _section.Label().ToLowerInvariant()
@@ -163,9 +168,11 @@ internal sealed class WorkspacePage : Page, IInspectorContent
                         ActionIcon.Reveal));
                     break;
             }
+            _root.Children.Remove(skeleton);
         }
         catch (Exception ex)
         {
+            _root.Children.Remove(skeleton);
             _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
         }
     }
@@ -194,7 +201,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         });
         _root.Children.Add(chrome);
 
-        var tree = await AppServices.Host.CallAsync(
+        var tree = await RemoteWorkspaces.CallWorkspaceAsync(
+            _id,
             "workspace.tree",
             new JsonObject { ["id"] = _id, ["path"] = _path });
         var array = tree as JsonArray ?? tree["entries"] as JsonArray;
@@ -245,7 +253,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         JsonNode read;
         try
         {
-            read = await AppServices.Host.CallAsync(
+            read = await RemoteWorkspaces.CallWorkspaceAsync(
+                _id,
                 "workspace.read",
                 new JsonObject { ["id"] = _id, ["path"] = path });
         }
@@ -297,7 +306,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         }
         try
         {
-            var outcome = await AppServices.Host.CallAsync(
+            var outcome = await RemoteWorkspaces.CallWorkspaceAsync(
+                _id,
                 "workspace.write",
                 new JsonObject
                 {
@@ -318,7 +328,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent
 
     private async Task LoadChangesAsync()
     {
-        var status = await AppServices.Host.CallAsync(
+        var status = await RemoteWorkspaces.CallWorkspaceAsync(
+            _id,
             "workspace.status",
             new JsonObject { ["id"] = _id });
         var git = status["git"];
@@ -331,9 +342,12 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         var behind = Format.Long(git, "behind");
         var folderName = _folderName;
         _branch = branch;
+        var remote = RemoteWorkspaces.IsRemote(_id);
 
         if (!string.IsNullOrEmpty(branch))
         {
+            // The branch switch and push dialogs route through the peer, so
+            // a folder on another machine gets the same bar as a local one.
             _root.Children.Add(BranchBar(branch, upstream, ahead, behind, folderName));
         }
 
@@ -384,19 +398,22 @@ internal sealed class WorkspacePage : Page, IInspectorContent
             session.ClearSelection();
             await LoadAsync();
         }));
-        selectionRow.Children.Add(ActionIconGlyph.Button("Review and commit", ActionIcon.Commit, async (_, _) =>
+        if (!remote)
         {
-            if (session.SelectedCount == 0)
+            selectionRow.Children.Add(ActionIconGlyph.Button("Review and commit", ActionIcon.Commit, async (_, _) =>
             {
-                _root.Children.Insert(1, Chrome.Banner(
-                    "Select at least one file to review.",
-                    Theme.Warning,
-                    Symbol.Important));
-                return;
-            }
-            await WorkspaceCommitComposer.ShowAsync(this, _id, folderName, branch);
-            await LoadAsync();
-        }));
+                if (session.SelectedCount == 0)
+                {
+                    _root.Children.Insert(1, Chrome.Banner(
+                        "Select at least one file to review.",
+                        Theme.Warning,
+                        Symbol.Important));
+                    return;
+                }
+                await WorkspaceCommitComposer.ShowAsync(this, _id, folderName, branch);
+                await LoadAsync();
+            }));
+        }
         selectionRow.Children.Add(ActionIconGlyph.Button("Review all", ActionIcon.Compare, async (_, _) =>
         {
             if (reviewFiles.Count == 0)
@@ -496,7 +513,22 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         }
         _root.Children.Add(Chrome.Card("Changes", list));
 
-        var history = await WorkspaceHistory.LoadCardAsync(this, _id, ShowDiffAsync);
+        if (remote)
+        {
+            _root.Children.Add(new TextBlock
+            {
+                Text = "Commits for this folder are made on "
+                    + (RemoteWorkspaces.CachedFolder(_id)?.MachineLabel is string machine
+                        && !string.IsNullOrEmpty(machine) ? machine : "that machine")
+                    + ". Stage, unstage and diff work here.",
+                Opacity = 0.7,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        var history = remote
+            ? await WorkspaceRemoteHistory.LoadCardAsync(this, _id, ShowDiffAsync)
+            : await WorkspaceHistory.LoadCardAsync(this, _id, ShowDiffAsync);
         if (history is not null)
         {
             _root.Children.Add(history);
@@ -508,7 +540,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         JsonNode? diff;
         try
         {
-            diff = await AppServices.Host.CallAsync(
+            diff = await RemoteWorkspaces.CallWorkspaceAsync(
+                _id,
                 "workspace.diff",
                 new JsonObject { ["id"] = _id, ["path"] = filePath });
         }
@@ -522,7 +555,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent
 
     private async Task<JsonNode?> LoadOneDiffAsync(string path)
     {
-        return await AppServices.Host.CallAsync(
+        return await RemoteWorkspaces.CallWorkspaceAsync(
+            _id,
             "workspace.diff",
             new JsonObject { ["id"] = _id, ["path"] = path });
     }
@@ -575,7 +609,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent
     {
         try
         {
-            var outcome = await AppServices.Host.CallAsync(method, parameters);
+            var outcome = await RemoteWorkspaces.CallWorkspaceAsync(_id, method, parameters);
             if (!OutcomeOk(outcome, out var message))
             {
                 _root.Children.Insert(1, Chrome.Banner(message, Theme.Danger, Symbol.Important));
@@ -631,7 +665,11 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         _sessionsLoading = true;
         try
         {
-            var listed = await AppServices.Host.CallAsync("pty.list");
+            var peer = RemoteWorkspaces.TrySplit(_id, out var peerKey, out var innerId)
+                ? peerKey : null;
+            var listed = peer is null
+                ? await AppServices.Host.CallAsync("pty.list")
+                : await RemoteWorkspaces.CallOnPeerAsync(peer, "pty.list");
             var array = listed as JsonArray
                 ?? listed["sessions"] as JsonArray
                 ?? listed["items"] as JsonArray;
@@ -648,7 +686,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent
                         continue;
                     }
                     var workspace = Format.Text(item, "workspaceId");
-                    if (workspace != _id)
+                    if (workspace != (peer is null ? _id : innerId))
                     {
                         continue;
                     }
@@ -663,8 +701,12 @@ internal sealed class WorkspacePage : Page, IInspectorContent
                     {
                         running++;
                     }
+                    // Namespaced to the peer, the way the host renamespaces
+                    // its own answers: the id reads as one of this machine's
+                    // and groups under the remote folder in the sidebar.
+                    var openId = peer is null ? id : RemoteWorkspaces.Join(peer, id);
                     list.Children.Add(SessionRow(
-                        id,
+                        openId,
                         Format.Text(item, "command", "shell"),
                         alive,
                         item?["exitCode"] is null ? null : (int?)Format.Long(item, "exitCode")));
@@ -674,7 +716,9 @@ internal sealed class WorkspacePage : Page, IInspectorContent
             {
                 _sessionsHost.Children.Add(EmptyState.View(
                     "No shells in this folder",
-                    "Open a new shell. It runs on this PC through the host.",
+                    RemoteWorkspaces.IsRemote(_id)
+                        ? "Open a new shell. It runs on that machine through the tunnel."
+                        : "Open a new shell. It runs on this PC through the host.",
                     EmptyArtKind.Sessions));
                 _summary = "No shells in this folder.";
             }
@@ -770,7 +814,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         _sessionsPoll = null;
     }
 
-    private async Task LoadBrowserAsync()
+    private void LoadBrowser()
     {
         var portBox = new TextBox
         {
@@ -790,7 +834,9 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         _root.Children.Add(row);
         _root.Children.Add(new TextBlock
         {
-            Text = "Opens a loopback page on this PC in the in-app browser. Use the port a local dev server is already listening on.",
+            Text = RemoteWorkspaces.IsRemote(_id)
+                ? "Opens a page from that machine in the in-app browser, through the tunnel. Use the port its dev server is already listening on."
+                : "Opens a loopback page on this PC in the in-app browser. Use the port a local dev server is already listening on.",
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -818,16 +864,23 @@ internal sealed class WorkspacePage : Page, IInspectorContent
 
         var host = "127.0.0.1";
         var unlistens = false;
+        string? browserPeer = null;
         var url = $"http://{host}:{port}/";
         try
         {
-            var listened = await AppServices.Host.CallAsync(
-                "proxy.listen",
-                new JsonObject
-                {
-                    ["host"] = host,
-                    ["port"] = port,
-                });
+            var parameters = new JsonObject
+            {
+                ["host"] = host,
+                ["port"] = port,
+            };
+            if (RemoteWorkspaces.TrySplit(_id, out var peerKey, out _))
+            {
+                // The dev server listens on the peer's own loopback. The
+                // bridge below binds one here and carries the bytes over.
+                browserPeer = peerKey;
+                parameters["peer"] = browserPeer;
+            }
+            var listened = await AppServices.Host.CallAsync("proxy.listen", parameters);
             var returned = Format.Text(listened, "url");
             if (!string.IsNullOrEmpty(returned))
             {
@@ -837,6 +890,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         }
         catch (Exception ex)
         {
+            if (RemoteWorkspaces.IsRemote(_id))
+            {
+                // The port is on the other machine: there is no local page
+                // to fall back to.
+                _root.Children.Insert(1, Chrome.Banner(
+                    FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+                return;
+            }
             var missingPeer = ex.Message.Contains("peer", StringComparison.OrdinalIgnoreCase)
                 || ex.Message.Contains("missing field", StringComparison.OrdinalIgnoreCase);
             if (!missingPeer)
@@ -847,12 +908,16 @@ internal sealed class WorkspacePage : Page, IInspectorContent
                     Symbol.Important));
             }
         }
-        open(url, host, port, unlistens);
+        open(url, host, port, unlistens, browserPeer);
     }
 
     private async Task LoadTodoAsync()
     {
-        var cards = await AppServices.Host.CallAsync("todo.list");
+        var peer = RemoteWorkspaces.TrySplit(_id, out var peerKey, out var innerId)
+            ? peerKey : null;
+        var cards = peer is null
+            ? await AppServices.Host.CallAsync("todo.list")
+            : await RemoteWorkspaces.CallOnPeerAsync(peer, "todo.list");
         var array = cards as JsonArray ?? cards["cards"] as JsonArray;
         var list = new StackPanel { Spacing = Theme.SpaceS };
         var n = 0;
@@ -861,7 +926,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent
             foreach (var card in array)
             {
                 var workspace = Format.Text(card, "workspaceId");
-                if (!string.IsNullOrEmpty(workspace) && workspace != _id)
+                if (!string.IsNullOrEmpty(workspace) && workspace != (peer is null ? _id : innerId))
                 {
                     continue;
                 }
@@ -875,7 +940,12 @@ internal sealed class WorkspacePage : Page, IInspectorContent
         RenderInspector();
         if (n == 0)
         {
-            _root.Children.Add(EmptyState.View("No tasks in this folder", "Add one from Tasks.", EmptyArtKind.Tasks));
+            // The global Tasks board is this PC's only. A folder on another
+            // machine grows its tasks on its own board instead.
+            var hint = peer is null
+                ? "Add one from Tasks."
+                : "Add one on that machine's board for this folder.";
+            _root.Children.Add(EmptyState.View("No tasks in this folder", hint, EmptyArtKind.Tasks));
             return;
         }
         _root.Children.Add(Chrome.Card("Tasks", list));
@@ -883,6 +953,10 @@ internal sealed class WorkspacePage : Page, IInspectorContent
 
     private async Task<string> FolderNameAsync()
     {
+        if (RemoteWorkspaces.CachedFolder(_id) is RemoteFolder cached)
+        {
+            return cached.DisplayName;
+        }
         try
         {
             var listed = await AppServices.Host.CallAsync("workspace.list");

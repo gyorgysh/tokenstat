@@ -25,9 +25,11 @@ internal static class AppServices
 
     /// <summary>
     /// Open WebView2 on a loopback URL. Host and port are what
-    /// <c>proxy.unlisten</c> needs when this tab opened the listener.
+    /// <c>proxy.unlisten</c> needs when this tab opened the listener, plus
+    /// the peer key when the listener bridges to another machine. Local tabs
+    /// pass null and never unlisten.
     /// </summary>
-    public static Action<string, string, int, bool>? OpenBrowser { get; set; }
+    public static Action<string, string, int, bool, string?>? OpenBrowser { get; set; }
 
     /// <summary>
     /// Open the Legend screen viewer for another host. Peer is that

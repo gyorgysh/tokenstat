@@ -8,9 +8,11 @@
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json.Nodes;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace Tokenstat.Pages;
@@ -22,13 +24,8 @@ namespace Tokenstat.Pages;
 /// came here to do: decide about a machine that is knocking, then read this
 /// PC's own two words to compare with the other end, then add something new.
 /// </summary>
-internal sealed class MachinesPage : Page, IInspectorContent
+internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
 {
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _inspectorRoot = new()
     {
@@ -39,36 +36,125 @@ internal sealed class MachinesPage : Page, IInspectorContent
     private JsonNode? _account;
     private JsonNode? _identity;
     private JsonNode? _status;
+    private JsonNode? _hostPolicy;
     private JsonArray _peers = new();
     private string? _notice;
+
+    /// <summary>
+    /// Devices asking this PC for something, both grants in arrival order.
+    /// Each row carries its kind, from the method that answered, so neither
+    /// host policy has to know the other exists.
+    /// </summary>
+    private List<(JsonNode Row, bool Screen)> _requests = new();
+    private HashSet<string> _workspaceAllowed = new(StringComparer.Ordinal);
+    private Dictionary<string, (bool View, bool Control)> _screenPermissions =
+        new(StringComparer.Ordinal);
+    private DispatcherQueueTimer? _poll;
+    private bool _refreshing;
+    private ScrollViewer? _scroll;
 
     /// <summary>
     /// What the inspector is showing. Keys only, so a refresh cannot pin a
     /// stale device value. Null means nothing is picked yet.
     /// </summary>
     private string? _selectedId;
+    private string? _selectedPeer;
     private bool _selectThis;
 
     public MachinesPage()
     {
-        var scroller = new ScrollViewer
+        _scroll = new ScrollViewer
         {
-            Padding = new Thickness(Theme.SpaceL),
+            Padding = new Thickness(Theme.SpaceM),
             Content = _root,
         };
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(scroller, 1);
-        layout.Children.Add(scroller);
-        Content = layout;
-        RebuildChrome(false);
+        Content = _scroll;
         RefreshInspector();
-        Loaded += async (_, _) => await LoadAsync();
+        Loaded += async (_, _) =>
+        {
+            StartPoll();
+            RemoteWorkspaces.Changed += OnRemoteChanged;
+            await LoadAsync();
+        };
+        Unloaded += (_, _) =>
+        {
+            StopPoll();
+            RemoteWorkspaces.Changed -= OnRemoteChanged;
+        };
+    }
+
+    private void OnRemoteChanged()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            Render();
+            RefreshInspector();
+        });
+    }
+
+    /// <summary>
+    /// Keep the device list live while the screen is open, like the desktop
+    /// Mac five-second refresh. A missed tick keeps the last rows.
+    /// </summary>
+    private void StartPoll()
+    {
+        StopPoll();
+        _poll = DispatcherQueue.CreateTimer();
+        _poll.Interval = TimeSpan.FromSeconds(5);
+        _poll.Tick += (_, _) => _ = RefreshAsync();
+        _poll.Start();
+    }
+
+    private void StopPoll()
+    {
+        _poll?.Stop();
+        _poll = null;
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (_refreshing)
+        {
+            return;
+        }
+        _refreshing = true;
+        try
+        {
+            try
+            {
+                _status = await AppServices.Host.CallAsync("remote.status");
+            }
+            catch
+            {
+            }
+            try
+            {
+                _peers = await AppServices.Host.CallAsync("machine.peers") as JsonArray ?? new();
+            }
+            catch
+            {
+            }
+            try
+            {
+                var account = await AppServices.Host.CallAsync("account.status");
+                if (account["signedIn"]?.GetValue<bool>() ?? false)
+                {
+                    _account = account;
+                }
+            }
+            catch
+            {
+            }
+            await LoadRequestsAsync();
+            Render();
+            _pairAllowed = RemoteReachAllowed(_account);
+            RaiseToolbarChanged();
+            RefreshInspector();
+        }
+        finally
+        {
+            _refreshing = false;
+        }
     }
 
     /// <summary>
@@ -77,27 +163,48 @@ internal sealed class MachinesPage : Page, IInspectorContent
     /// </summary>
     public UIElement? Inspector => _inspectorRoot;
 
-    private void RebuildChrome(bool allowed)
+    public event Action? ToolbarChanged;
+
+    /// <summary>Global screen: no folder to name.</summary>
+    public UIElement? ToolbarScope => null;
+
+    /// <summary>
+    /// The re-read, plus pairing once the account says remote reach is
+    /// allowed, like the desktop Mac bar.
+    /// </summary>
+    public IList<UIElement> ToolbarActions()
     {
         var trailing = new List<UIElement>
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
                 "Re-read this PC and its devices",
-                async (_, _) => await LoadAsync()),
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await LoadAsync();
+                }),
         };
-        if (allowed)
+        if (_pairAllowed)
         {
             trailing.Add(Buttons.ToolbarIcon(
                 ActionIcon.Create,
                 "Paste a key from another device to pair it",
                 async (_, _) => await PairAsync()));
         }
-        _barSlot.Content = DetailBar.View(trailing: trailing);
+        return trailing;
     }
+
+    private bool _pairAllowed;
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
     private async Task LoadAsync()
     {
+        if (_root.Children.Count == 0)
+        {
+            _root.Children.Add(Motion.SkeletonCard());
+        }
         JsonNode account;
         try
         {
@@ -114,7 +221,8 @@ internal sealed class MachinesPage : Page, IInspectorContent
             }
             _root.Children.Add(Chrome.Banner(
                 FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
-            RebuildChrome(false);
+            _pairAllowed = false;
+            RaiseToolbarChanged();
             RefreshInspector();
             return;
         }
@@ -144,10 +252,102 @@ internal sealed class MachinesPage : Page, IInspectorContent
         {
             _peers = new();
         }
+        try
+        {
+            _hostPolicy = await AppServices.Host.CallAsync("host.policy");
+        }
+        catch
+        {
+            _hostPolicy = null;
+        }
+        await LoadRequestsAsync();
+        await LoadPermissionsAsync();
 
         Render();
-        RebuildChrome(RemoteReachAllowed(account));
+        _pairAllowed = RemoteReachAllowed(account);
+        RaiseToolbarChanged();
         RefreshInspector();
+    }
+
+    /// <summary>
+    /// Both kinds of standing request, in one pass, so the queue is ordered
+    /// by when somebody asked rather than by which policy answered first.
+    /// </summary>
+    private async Task LoadRequestsAsync()
+    {
+        var requests = new List<(JsonNode Row, bool Screen)>();
+        try
+        {
+            var screen = await AppServices.Host.CallAsync("screen.access.pending") as JsonArray;
+            if (screen is not null)
+            {
+                foreach (var row in screen.OfType<JsonNode>())
+                {
+                    requests.Add((row, true));
+                }
+            }
+        }
+        catch
+        {
+        }
+        try
+        {
+            var workspace = await AppServices.Host.CallAsync("workspace.access.pending") as JsonArray;
+            if (workspace is not null)
+            {
+                foreach (var row in workspace.OfType<JsonNode>())
+                {
+                    requests.Add((row, false));
+                }
+            }
+        }
+        catch
+        {
+        }
+        requests.Sort((a, b) => Format.Long(a.Row, "askedAt").CompareTo(Format.Long(b.Row, "askedAt")));
+        _requests = requests;
+    }
+
+    private async Task LoadPermissionsAsync()
+    {
+        try
+        {
+            var allowed = await AppServices.Host.CallAsync("workspace.access.list") as JsonArray;
+            _workspaceAllowed = new HashSet<string>(StringComparer.Ordinal);
+            if (allowed is not null)
+            {
+                foreach (var key in allowed)
+                {
+                    var peer = key?.GetValue<string>();
+                    if (!string.IsNullOrEmpty(peer))
+                    {
+                        _workspaceAllowed.Add(peer);
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+        try
+        {
+            var permissions = await AppServices.Host.CallAsync("screen.policy.list") as JsonArray;
+            _screenPermissions = new(StringComparer.Ordinal);
+            if (permissions is not null)
+            {
+                foreach (var row in permissions.OfType<JsonNode>())
+                {
+                    var peer = Format.Text(row, "peerId");
+                    if (!string.IsNullOrEmpty(peer))
+                    {
+                        _screenPermissions[peer] = (Format.Flag(row, "view"), Format.Flag(row, "control"));
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
     }
 
     /// <summary>
@@ -156,6 +356,11 @@ internal sealed class MachinesPage : Page, IInspectorContent
     /// </summary>
     private void Render()
     {
+        // The five-second poll rebuilds these rows. Hold the scroll position
+        // across the rebuild so the list does not jump back to the top.
+        var offsetX = _scroll?.HorizontalOffset ?? 0;
+        var offsetY = _scroll?.VerticalOffset ?? 0;
+        void Restore() => _scroll?.ChangeView(offsetX, offsetY, null, true);
         _root.Children.Clear();
         if (!string.IsNullOrEmpty(_notice))
         {
@@ -165,6 +370,7 @@ internal sealed class MachinesPage : Page, IInspectorContent
         var account = _account;
         if (account is null)
         {
+            Restore();
             return;
         }
         if (!(account["signedIn"]?.GetValue<bool>() ?? false))
@@ -173,12 +379,19 @@ internal sealed class MachinesPage : Page, IInspectorContent
                 "Sign in to see devices",
                 "Devices live on the account, so a closed laptop still counts. Open Account in the sidebar to link this machine.",
                 ActionIcon.Device));
+            Restore();
             return;
         }
 
         var allowed = RemoteReachAllowed(account);
         if (allowed)
         {
+            // Above pairing, because a device asking for either grant is
+            // already paired: it got far enough to ask.
+            if (_requests.Count > 0)
+            {
+                _root.Children.Add(WaitingForYouCard());
+            }
             var pending = PendingPeers();
             if (pending.Count > 0)
             {
@@ -201,6 +414,12 @@ internal sealed class MachinesPage : Page, IInspectorContent
             {
                 _root.Children.Add(OtherApprovedCard(unlisted));
             }
+            _root.Children.Add(AlwaysOnHostCard());
+            var approved = ApprovedPeers();
+            if (approved.Count > 0)
+            {
+                _root.Children.Add(DevicePermissionsCard(approved));
+            }
             _root.Children.Add(ThisMachineCard(account, allowed, TunnelOn()));
             // Pairing is only needed for a machine that is not on the account
             // yet, so the paste card stays off the first screenful once a list
@@ -214,6 +433,7 @@ internal sealed class MachinesPage : Page, IInspectorContent
         else
         {
             _root.Children.Add(RemoteLockedCard(account));
+            _root.Children.Add(AlwaysOnHostCard());
             var machines = account["machines"] as JsonArray;
             if (machines is not null && machines.Count > 0)
             {
@@ -221,6 +441,7 @@ internal sealed class MachinesPage : Page, IInspectorContent
             }
             _root.Children.Add(EncryptionNote());
         }
+        Restore();
     }
 
     /// <summary>
@@ -405,6 +626,14 @@ internal sealed class MachinesPage : Page, IInspectorContent
                 "Approve", ActionIcon.Approve, async (_, _) => await ApproveAsync(key, name)));
             actions.Children.Add(ActionIconGlyph.Button(
                 "Forget", ActionIcon.Delete, async (_, _) => await ConfirmForgetAsync(key, name)));
+            actions.Children.Add(ActionIconGlyph.Button("Details", ActionIcon.Reveal, (_, _) =>
+            {
+                _selectThis = false;
+                _selectedId = null;
+                _selectedPeer = key;
+                Render();
+                RefreshInspector();
+            }));
             row.Children.Add(actions);
             body.Children.Add(row);
         }
@@ -419,6 +648,320 @@ internal sealed class MachinesPage : Page, IInspectorContent
             "Needs your approval",
             body,
             "Nothing can run here until you approve it.");
+    }
+
+    private List<JsonNode> ApprovedPeers()
+    {
+        var self = SelfKey();
+        var approved = new List<JsonNode>();
+        foreach (var peer in _peers.OfType<JsonNode>())
+        {
+            if (Format.Text(peer, "trust") == "approved" && Format.Text(peer, "key") != self)
+            {
+                approved.Add(peer);
+            }
+        }
+        return approved;
+    }
+
+    /// <summary>
+    /// Devices that have asked for something and are still waiting. The same
+    /// answers the desktop Mac offers, where somebody would go looking after
+    /// a notification has gone. Being approved is not being let in: each of
+    /// these is a separate yes from whoever is at this PC.
+    /// </summary>
+    private UIElement WaitingForYouCard()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        foreach (var (row, screen) in _requests)
+        {
+            var peerId = Format.Text(row, "peerId");
+            var label = Format.Text(row, "label");
+            var name = !string.IsNullOrEmpty(label)
+                ? label
+                : peerId.Length > 0
+                    ? "Device " + peerId[..Math.Min(8, peerId.Length)]
+                    : "An unknown device";
+            var control = Format.Flag(row, "control");
+            var line = new StackPanel { Spacing = Theme.SpaceS };
+            line.Children.Add(new TextBlock
+            {
+                Text = screen ? $"{name} wants to see this screen" : $"{name} wants to open your work",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            line.Children.Add(new TextBlock
+            {
+                Text = screen
+                    ? control
+                        ? "It asked for the picture, and for mouse and keyboard."
+                        : "It asked for the picture only."
+                    : "Folders, files, terminals and the agents running in them.",
+                Opacity = 0.7,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = Theme.SpaceS,
+            };
+            var captured = row;
+            if (screen)
+            {
+                // Both answers, always, for a screen. Offering only what the
+                // device happened to ask for left no way to hand over the
+                // mouse without making somebody go back to their phone.
+                actions.Children.Add(ActionIconGlyph.Button(
+                    "View only", ActionIcon.Preview, async (_, _) =>
+                        await AnswerRequestAsync(captured, true, true, false, name)));
+                actions.Children.Add(Buttons.Primary(
+                    "Full access", ActionIcon.Approve, async (_, _) =>
+                        await AnswerRequestAsync(captured, true, true, true, name)));
+            }
+            else
+            {
+                actions.Children.Add(Buttons.Primary(
+                    "Allow", ActionIcon.Approve, async (_, _) =>
+                        await AnswerRequestAsync(captured, false, true, false, name)));
+            }
+            actions.Children.Add(Buttons.Destructive(
+                "Deny", ActionIcon.Revoke, async (_, _) =>
+                    await AnswerRequestAsync(captured, screen, false, false, name)));
+            line.Children.Add(actions);
+            body.Children.Add(line);
+        }
+        return Chrome.Card(
+            "Waiting for you",
+            body,
+            "Approve only a device you recognise. You can take it back below.");
+    }
+
+    private async Task AnswerRequestAsync(JsonNode row, bool screen, bool view, bool control, string name)
+    {
+        var peerId = Format.Text(row, "peerId");
+        try
+        {
+            if (screen)
+            {
+                await AppServices.Host.CallAsync(
+                    "screen.access.answer",
+                    new JsonObject { ["peerId"] = peerId, ["view"] = view, ["control"] = control });
+            }
+            else
+            {
+                await AppServices.Host.CallAsync(
+                    "workspace.access.set",
+                    new JsonObject { ["peerId"] = peerId, ["allow"] = view });
+            }
+            _notice = !view
+                ? $"{name} was not let in."
+                : screen
+                    ? control ? $"{name} can see this screen and drive it." : $"{name} can see this screen."
+                    : $"{name} may now open your work.";
+        }
+        catch (Exception ex)
+        {
+            _root.Children.Insert(0, Chrome.Banner(
+                FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+            return;
+        }
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Whether this PC stays a host after the app quits. Mirrors the Account
+    /// screen's setting so it sits where somebody is deciding whether other
+    /// devices may reach this PC.
+    /// </summary>
+    private UIElement AlwaysOnHostCard()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        if (_hostPolicy is null)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "The host helper has not answered yet.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        else
+        {
+            var alwaysOn = Format.Flag(_hostPolicy, "alwaysOn");
+            var battery = Format.Flag(_hostPolicy, "hasInternalBattery");
+            body.Children.Add(Chrome.ToggleChip("Keep this PC reachable", alwaysOn, async on =>
+            {
+                try
+                {
+                    await AppServices.ApplyHostPolicyAsync(on);
+                }
+                catch (Exception ex)
+                {
+                    _root.Children.Insert(0, Chrome.Banner(
+                        FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+                    return;
+                }
+                _notice = on
+                    ? "The host helper stays up after you quit."
+                    : "The host helper stops when you quit.";
+                await LoadAsync();
+            }));
+            body.Children.Add(new TextBlock
+            {
+                Text = alwaysOn
+                    ? "The host helper keeps running after you quit tokenstat, so other devices can reach this PC. This PC will not idle-sleep. A laptop still sleeps when you close the lid."
+                    : "The host helper stops when you quit tokenstat, so this PC can sleep. Other devices cannot open folders or terminals here until you open the app again.",
+                Opacity = 0.7,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            if (alwaysOn && battery)
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = "Uses more power.",
+                    Opacity = 0.7,
+                    FontSize = 12,
+                });
+            }
+            if (!alwaysOn)
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = "Automations run only while tokenstat is open.",
+                    Opacity = 0.7,
+                    FontSize = 12,
+                });
+            }
+        }
+        return Chrome.Card(
+            "Always-on host",
+            body,
+            "Whether the host helper stays up after you quit");
+    }
+
+    /// <summary>
+    /// What each paired device is allowed to do here. Being approved is not
+    /// being let in, so reaching the work on this PC is its own switch, and
+    /// it is first because it is the broadest of the three.
+    /// </summary>
+    private UIElement DevicePermissionsCard(List<JsonNode> peers)
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        foreach (var peer in peers)
+        {
+            var key = Format.Text(peer, "key");
+            var label = Format.Text(peer, "label");
+            var name = string.IsNullOrEmpty(label) ? "Approved device" : label;
+            var row = new StackPanel { Spacing = Theme.SpaceS };
+            row.Children.Add(new TextBlock
+            {
+                Text = name,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            var words = Format.Text(peer, "words");
+            if (!string.IsNullOrEmpty(words))
+            {
+                row.Children.Add(new TextBlock
+                {
+                    Text = words,
+                    Opacity = 0.7,
+                    FontSize = 12,
+                });
+            }
+            var switches = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = Theme.SpaceM,
+            };
+            var captured = key;
+            var screen = _screenPermissions.TryGetValue(key, out var held)
+                ? held : (View: false, Control: false);
+            switches.Children.Add(PermissionSwitch(
+                "Workspaces", _workspaceAllowed.Contains(key), async on =>
+                {
+                    await AppServices.Host.CallAsync(
+                        "workspace.access.set",
+                        new JsonObject { ["peerId"] = captured, ["allow"] = on });
+                    if (on)
+                    {
+                        _workspaceAllowed.Add(captured);
+                    }
+                    else
+                    {
+                        _workspaceAllowed.Remove(captured);
+                    }
+                }));
+            var viewSwitch = PermissionSwitch("View", screen.View, async on =>
+            {
+                var control = on && _screenPermissions.TryGetValue(captured, out var current) && current.Control;
+                await AppServices.Host.CallAsync(
+                    "screen.policy.set",
+                    new JsonObject { ["peerId"] = captured, ["view"] = on, ["control"] = control });
+                _screenPermissions[captured] = (on, control);
+            });
+            switches.Children.Add(viewSwitch);
+            var controlSwitch = PermissionSwitch("Control", screen.Control, async on =>
+            {
+                await AppServices.Host.CallAsync(
+                    "screen.policy.set",
+                    new JsonObject { ["peerId"] = captured, ["view"] = true, ["control"] = on });
+                _screenPermissions[captured] = (true, on);
+            });
+            controlSwitch.IsEnabled = screen.View;
+            ToolTipService.SetToolTip(controlSwitch, "Control requires screen viewing access");
+            switches.Children.Add(controlSwitch);
+            row.Children.Add(switches);
+            body.Children.Add(row);
+        }
+        body.Children.Add(new TextBlock
+        {
+            Text = "Control requires View. Devices can also request access; pending requests appear at the top of this page.",
+            Opacity = 0.7,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        return Chrome.Card(
+            "Device permissions",
+            body,
+            "Choose what each approved device can access on this PC");
+    }
+
+    private ToggleSwitch PermissionSwitch(string title, bool isOn, Func<bool, Task> set)
+    {
+        var toggle = new ToggleSwitch
+        {
+            Header = title,
+            IsOn = isOn,
+            OnContent = "",
+            OffContent = "",
+        };
+        var reverting = false;
+        toggle.Toggled += async (_, _) =>
+        {
+            if (reverting)
+            {
+                return;
+            }
+            try
+            {
+                await set(toggle.IsOn);
+            }
+            catch (Exception ex)
+            {
+                reverting = true;
+                toggle.IsOn = !toggle.IsOn;
+                reverting = false;
+                _root.Children.Insert(0, Chrome.Banner(
+                    FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+                return;
+            }
+            Render();
+            RefreshInspector();
+        };
+        return toggle;
     }
 
     /// <summary>
@@ -467,6 +1010,14 @@ internal sealed class MachinesPage : Page, IInspectorContent
             }
             actions.Children.Add(ActionIconGlyph.Button(
                 "Forget", ActionIcon.Delete, async (_, _) => await ConfirmForgetAsync(key, name)));
+            actions.Children.Add(ActionIconGlyph.Button("Details", ActionIcon.Reveal, (_, _) =>
+            {
+                _selectThis = false;
+                _selectedId = null;
+                _selectedPeer = key;
+                Render();
+                RefreshInspector();
+            }));
             row.Children.Add(actions);
             body.Children.Add(row);
         }
@@ -538,7 +1089,7 @@ internal sealed class MachinesPage : Page, IInspectorContent
             row.Children.Add(head);
             row.Children.Add(new TextBlock
             {
-                Text = HomePage.StatusLine(machine, isSelf),
+                Text = StatusLine(machine, isSelf),
                 Opacity = 0.7,
                 FontSize = 12,
             });
@@ -677,6 +1228,7 @@ internal sealed class MachinesPage : Page, IInspectorContent
             {
                 _selectThis = true;
                 _selectedId = null;
+                _selectedPeer = null;
                 Render();
                 RefreshInspector();
             }));
@@ -790,6 +1342,121 @@ internal sealed class MachinesPage : Page, IInspectorContent
     }
 
     /// <summary>
+    /// One caption line under a machine's name. The presence light is the
+    /// quick read; this carries the detail, and the two never collide.
+    /// Matches the desktop Mac wording.
+    /// </summary>
+    private string StatusLine(JsonNode? machine, bool isSelf)
+    {
+        if (isSelf)
+        {
+            return "This device";
+        }
+        var isHost = Format.Text(machine, "kind") != "client";
+        if (!isHost)
+        {
+            // A phone holds the tunnel only while somebody is using it, so
+            // "offline" here means "not in the app right now", not "broken".
+            if (MachineOnline(machine) == true)
+            {
+                return "Phone · in the app now";
+            }
+            var used = RelativeOrNull(Format.Text(machine, "lastSeenAt"));
+            if (used is not null)
+            {
+                return "Phone · last used " + used;
+            }
+            return "Phone · signed in on this account";
+        }
+        if (string.IsNullOrEmpty(Format.Text(machine, "publicIdentity")))
+        {
+            return "No connection key yet";
+        }
+        if (MachineOnline(machine) == false)
+        {
+            var seen = RelativeOrNull(Format.Text(machine, "lastSeenAt"));
+            return seen is null ? "Offline" : "Offline · last seen " + seen;
+        }
+        var peer = PeerForMachine(machine);
+        if (peer is not null && RemoteWorkspaces.IsConnected(Format.Text(peer, "key")))
+        {
+            return "Connected · workspaces in sidebar";
+        }
+        var lastSeen = RelativeOrNull(Format.Text(machine, "lastSeenAt"));
+        if (lastSeen is not null)
+        {
+            return "Seen " + lastSeen;
+        }
+        var synced = RelativeOrNull(Format.Text(machine, "lastSyncAt"));
+        if (synced is not null)
+        {
+            return "Last synced " + synced;
+        }
+        return "No sync recorded";
+    }
+
+    private static bool? MachineOnline(JsonNode? machine)
+    {
+        try
+        {
+            return machine?["online"]?.GetValue<bool?>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? RelativeOrNull(string value) =>
+        string.IsNullOrEmpty(value) ? null : Format.Relative(value);
+
+    /// <summary>
+    /// Whether Connect is honest for this account machine right now. Offline
+    /// machines cannot answer a dial. Unknown presence still allows it:
+    /// presence can lag behind a machine that just woke.
+    /// </summary>
+    private bool CanConnect(JsonNode? machine)
+    {
+        var thisId = Format.Text(_account, "thisMachineId");
+        if (!string.IsNullOrEmpty(thisId) && MachineId(machine) == thisId)
+        {
+            return false;
+        }
+        if (Format.Text(machine, "publicIdentity") == SelfKey())
+        {
+            return false;
+        }
+        if (MachineOnline(machine) == false)
+        {
+            return false;
+        }
+        if (!RemoteReachAllowed(_account))
+        {
+            return false;
+        }
+        return TunnelOn();
+    }
+
+    /// <summary>
+    /// The presence light before a machine's name: solid when reachable,
+    /// grey when offline, amber while its state is not confirmed yet.
+    /// </summary>
+    private static Border PresenceDot(bool? online, bool isSelf, bool tunnelUp)
+    {
+        var color = isSelf
+            ? tunnelUp ? Theme.Success : Theme.StateIdle
+            : online == true ? Theme.Success : online == false ? Theme.StateIdle : Theme.Warning;
+        return new Border
+        {
+            Width = 8,
+            Height = 8,
+            CornerRadius = new CornerRadius(4),
+            Background = Theme.Brush(color),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+    }
+
+    /// <summary>
     /// One account device. The title is never the id: the code sits under it
     /// in monospace, where an identifier belongs.
     /// </summary>
@@ -800,6 +1467,8 @@ internal sealed class MachinesPage : Page, IInspectorContent
         var title = DeviceTitle(machine);
         var body = new StackPanel { Spacing = Theme.SpaceS };
         var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        head.Children.Add(PresenceDot(
+            MachineOnline(machine), isSelf, _status?["tunnelOnline"]?.GetValue<bool>() ?? false));
         head.Children.Add(new TextBlock
         {
             Text = title,
@@ -838,13 +1507,18 @@ internal sealed class MachinesPage : Page, IInspectorContent
         }
         body.Children.Add(new TextBlock
         {
-            Text = HomePage.StatusLine(machine, isSelf),
+            Text = StatusLine(machine, isSelf),
             Opacity = 0.7,
             FontSize = 12,
         });
 
         var key = Format.Text(machine, "publicIdentity");
         var isHost = Format.Text(machine, "kind") != "client";
+        var linked = PeerForMachine(machine);
+        if (isHost && !isSelf && linked is not null)
+        {
+            body.Children.Add(AutoConnectRow(linked, machine));
+        }
         var actions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -852,6 +1526,7 @@ internal sealed class MachinesPage : Page, IInspectorContent
         };
         if (isHost && !isSelf)
         {
+            AddConnectionActions(actions, machine, linked, title);
             viewable++;
             var peerKey = key;
             var deviceName = title;
@@ -900,13 +1575,14 @@ internal sealed class MachinesPage : Page, IInspectorContent
         actions.Children.Add(ActionIconGlyph.Button("Details", ActionIcon.Reveal, (_, _) =>
         {
             _selectThis = false;
+            _selectedPeer = null;
             _selectedId = id;
             Render();
             RefreshInspector();
         }));
         body.Children.Add(actions);
 
-        var selected = !_selectThis && _selectedId == id;
+        var selected = !_selectThis && _selectedPeer is null && _selectedId == id;
         return new Border
         {
             Child = body,
@@ -918,8 +1594,232 @@ internal sealed class MachinesPage : Page, IInspectorContent
         };
     }
 
+    /// <summary>
+    /// Connect, or the peer trust action the row needs first. Phones are
+    /// shown but never dialled: a client reaches a host, not the reverse.
+    /// </summary>
+    private void AddConnectionActions(
+        StackPanel actions, JsonNode? machine, JsonNode? peer, string title)
+    {
+        var key = Format.Text(machine, "publicIdentity");
+        if (peer is not null)
+        {
+            var peerKey = Format.Text(peer, "key");
+            var peerLabel = Format.Text(peer, "label");
+            var name = string.IsNullOrEmpty(peerLabel) ? title : peerLabel;
+            if (RemoteWorkspaces.IsConnected(peerKey))
+            {
+                actions.Children.Add(ActionIconGlyph.Button(
+                    "Disconnect", ActionIcon.Disconnect, async (_, _) =>
+                        await DisconnectPeerAsync(peerKey, name)));
+                return;
+            }
+            switch (Format.Text(peer, "trust"))
+            {
+                case "pending":
+                    actions.Children.Add(Buttons.Primary(
+                        "Approve", ActionIcon.Approve, async (_, _) =>
+                            await ApproveAsync(peerKey, name)));
+                    break;
+                case "approved":
+                    if (CanConnect(machine))
+                    {
+                        actions.Children.Add(Buttons.Primary(
+                            "Connect", ActionIcon.Connect, async (_, _) =>
+                                await ConnectPeerAsync(peerKey, name, MachineOnline(machine))));
+                    }
+                    actions.Children.Add(ActionIconGlyph.Button(
+                        "Revoke", ActionIcon.Revoke, async (_, _) =>
+                            await ConfirmRevokeAsync(peerKey, name)));
+                    break;
+                default:
+                    actions.Children.Add(ActionIconGlyph.Button(
+                        "Approve", ActionIcon.Approve, async (_, _) =>
+                            await ApproveAsync(peerKey, name)));
+                    break;
+            }
+            return;
+        }
+        if (!string.IsNullOrEmpty(key) && CanConnect(machine))
+        {
+            var captured = machine;
+            actions.Children.Add(Buttons.Primary(
+                "Connect", ActionIcon.Connect, async (_, _) =>
+                    await ConnectMachineAsync(captured)));
+        }
+    }
+
+    /// <summary>
+    /// Whether the sweep dials this machine on its own, beside the connection
+    /// itself. Off stops the dialling and leaves a live connection alone;
+    /// only Disconnect drops it.
+    /// </summary>
+    private UIElement AutoConnectRow(JsonNode peer, JsonNode? machine)
+    {
+        var peerKey = Format.Text(peer, "key");
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceS,
+        };
+        row.Children.Add(new TextBlock
+        {
+            Text = "Auto-connect",
+            FontSize = 12,
+            Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var toggle = new ToggleSwitch
+        {
+            IsOn = RemoteWorkspaces.IsAutoConnectEnabled(peerKey),
+            OnContent = "",
+            OffContent = "",
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        ToolTipService.SetToolTip(toggle, "Auto-connect " + Format.Text(peer, "label", "this device"));
+        toggle.Toggled += (_, _) => SetAutoConnect(toggle.IsOn, peerKey, machine);
+        row.Children.Add(toggle);
+        return row;
+    }
+
+    private async Task ConnectPeerAsync(string peerKey, string name, bool? online)
+    {
+        var result = await RemoteWorkspaces.ConnectAsync(peerKey, name, TunnelOn(), online);
+        if (result.IsNotice || result.Connected)
+        {
+            _notice = result.Message;
+        }
+        else
+        {
+            _root.Children.Insert(0, Chrome.Banner(
+                result.Message, Theme.Danger, Symbol.Important));
+            return;
+        }
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Connect to a machine that belongs to this account. The account record
+    /// carries the public key, so this pins the identity and dials without
+    /// anybody copying or comparing anything.
+    /// </summary>
+    private async Task ConnectMachineAsync(JsonNode? machine)
+    {
+        var key = Format.Text(machine, "publicIdentity");
+        var title = DeviceTitle(machine);
+        if (string.IsNullOrEmpty(key))
+        {
+            _root.Children.Insert(0, Chrome.Banner(
+                $"{title} has no connection key on this account record yet. Open the Devices screen on that device so it registers one, then try again.",
+                Theme.Warning,
+                Symbol.Important));
+            return;
+        }
+        if (key == SelfKey())
+        {
+            return;
+        }
+        try
+        {
+            await AppServices.Host.CallAsync(
+                "machine.pair",
+                new JsonObject { ["key"] = key, ["label"] = title });
+            _peers = await AppServices.Host.CallAsync("machine.peers") as JsonArray ?? new();
+        }
+        catch (Exception ex)
+        {
+            _root.Children.Insert(0, Chrome.Banner(
+                FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+            return;
+        }
+        var peer = PeerForMachine(machine);
+        var peerKey = peer is null ? key : Format.Text(peer, "key");
+        await ConnectPeerAsync(peerKey, title, MachineOnline(machine));
+    }
+
+    private async Task DisconnectPeerAsync(string peerKey, string name)
+    {
+        RemoteWorkspaces.Disconnect(peerKey);
+        // Revoke ends trust and any workspace listing for this peer. Leaving
+        // Connected set after revoke made the row offer Disconnect for a
+        // machine that could no longer answer. Disconnect itself keeps trust:
+        // it only drops the folders from the sidebar.
+        _notice = $"Disconnected from {name}. Its workspaces are no longer in the sidebar.";
+        await LoadAsync();
+    }
+
+    private void SetAutoConnect(bool on, string peerKey, JsonNode? machine)
+    {
+        RemoteWorkspaces.SetAutoConnect(on, peerKey);
+        if (on)
+        {
+            if (machine is not null && !CanConnect(machine))
+            {
+                // The sweep picks it up when it wakes, which is what the
+                // switch promises. Without a machine record there is no
+                // reachability to check, so the dial reports honestly.
+                Render();
+                RefreshInspector();
+                return;
+            }
+            _ = ConnectPeerAsync(peerKey, Format.Text(PeerByKey(peerKey), "label"), null);
+            return;
+        }
+        Render();
+        RefreshInspector();
+    }
+
+    private JsonNode? PeerByKey(string key)
+    {
+        foreach (var peer in _peers.OfType<JsonNode>())
+        {
+            if (Format.Text(peer, "key") == key)
+            {
+                return peer;
+            }
+        }
+        return null;
+    }
+
+    private string _inspectorKey = "";
+
+    /// <summary>
+    /// What the inspector shows, fingerprinted: the selection, the fetched
+    /// state it reads, and the per-peer connection switches it also reads.
+    /// The five-second poll calls RefreshInspector every pass; an unchanged
+    /// key skips the rebuild so the column stops flickering.
+    /// </summary>
+    private string InspectorKey()
+    {
+        var peerKey = _selectedPeer;
+        if (peerKey is null && FindMachine(_selectedId) is JsonNode machine
+            && PeerForMachine(machine) is JsonNode linked)
+        {
+            peerKey = Format.Text(linked, "key");
+        }
+        var connected = peerKey is not null && RemoteWorkspaces.IsConnected(peerKey);
+        var auto = peerKey is null || RemoteWorkspaces.IsAutoConnectEnabled(peerKey);
+        return string.Join(
+            "|",
+            _selectThis,
+            _selectedId ?? "",
+            _selectedPeer ?? "",
+            _identity?.ToJsonString() ?? "",
+            _status?.ToJsonString() ?? "",
+            _peers.ToJsonString(),
+            _account?.ToJsonString() ?? "",
+            connected,
+            auto);
+    }
+
     private void RefreshInspector()
     {
+        var key = InspectorKey();
+        if (key == _inspectorKey && _inspectorRoot.Children.Count > 0)
+        {
+            return;
+        }
+        _inspectorKey = key;
         _inspectorRoot.Children.Clear();
         _inspectorRoot.Children.Add(new TextBlock
         {
@@ -930,6 +1830,11 @@ internal sealed class MachinesPage : Page, IInspectorContent
         if (_selectThis && _identity is not null)
         {
             ThisMachineInspector();
+            return;
+        }
+        if (_selectedPeer is not null && PeerByKey(_selectedPeer) is JsonNode peer)
+        {
+            PeerInspector(peer);
             return;
         }
         var machine = FindMachine(_selectedId);
@@ -993,8 +1898,82 @@ internal sealed class MachinesPage : Page, IInspectorContent
             _status?["tunnelOnline"]?.GetValue<bool>() == true
                 ? "Tunnel up"
                 : "Not reachable from elsewhere"));
+        body.Children.Add(HostStatsCard(null));
+        body.Children.Add(HostUpdateCard(null, local: true));
         _inspectorRoot.Children.Add(body);
     }
+
+    private void PeerInspector(JsonNode peer)
+    {
+        var key = Format.Text(peer, "key");
+        var label = Format.Text(peer, "label");
+        var name = string.IsNullOrEmpty(label) ? "Unnamed device" : label;
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        body.Children.Add(new TextBlock
+        {
+            Text = name,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var words = Format.Text(peer, "words");
+        if (!string.IsNullOrEmpty(words))
+        {
+            body.Children.Add(Labeled("Known as", words));
+        }
+        body.Children.Add(Labeled("Trust", TrustLabel(Format.Text(peer, "trust"))));
+        var connected = RemoteWorkspaces.IsConnected(key);
+        if (connected)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "Workspaces from this device are in the sidebar.",
+                Opacity = 0.7,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            body.Children.Add(HostStatsCard(key));
+            body.Children.Add(HostUpdateCard(key, local: false));
+        }
+        var actions = new StackPanel { Spacing = Theme.SpaceS };
+        if (Format.Text(peer, "trust") == "approved")
+        {
+            if (connected)
+            {
+                actions.Children.Add(ActionIconGlyph.Button(
+                    "Disconnect", ActionIcon.Disconnect, async (_, _) =>
+                        await DisconnectPeerAsync(key, name)));
+            }
+            else
+            {
+                actions.Children.Add(Buttons.Primary(
+                    "Connect", ActionIcon.Connect, async (_, _) =>
+                        await ConnectPeerAsync(key, name, online: null)));
+            }
+            actions.Children.Add(AutoConnectRow(peer, machine: null));
+            actions.Children.Add(ActionIconGlyph.Button(
+                "Revoke", ActionIcon.Revoke, async (_, _) =>
+                    await ConfirmRevokeAsync(key, name)));
+        }
+        else
+        {
+            actions.Children.Add(Buttons.Primary(
+                "Approve", ActionIcon.Approve, async (_, _) =>
+                    await ApproveAsync(key, name)));
+        }
+        actions.Children.Add(ActionIconGlyph.Button(
+            "Forget", ActionIcon.Delete, async (_, _) =>
+                await ConfirmForgetAsync(key, name)));
+        body.Children.Add(actions);
+        _inspectorRoot.Children.Add(body);
+    }
+
+    private static string TrustLabel(string trust) => trust switch
+    {
+        "pending" => "Waiting for approval",
+        "approved" => "Approved",
+        "revoked" => "Revoked",
+        _ => trust,
+    };
 
     private void AccountMachineInspector(JsonNode machine)
     {
@@ -1014,7 +1993,7 @@ internal sealed class MachinesPage : Page, IInspectorContent
         {
             body.Children.Add(Labeled("Platform", platform));
         }
-        body.Children.Add(Labeled("Status", HomePage.StatusLine(machine, isSelf)));
+        body.Children.Add(Labeled("Status", StatusLine(machine, isSelf)));
         var words = Format.Text(PeerForMachine(machine), "words");
         if (!string.IsNullOrEmpty(words))
         {
@@ -1022,11 +2001,56 @@ internal sealed class MachinesPage : Page, IInspectorContent
         }
         var actions = new StackPanel { Spacing = Theme.SpaceS };
         var isHost = Format.Text(machine, "kind") != "client";
+        var peerKey = Format.Text(machine, "publicIdentity");
+        if (isSelf)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "This device.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            body.Children.Add(HostStatsCard(null));
+            body.Children.Add(HostUpdateCard(null, local: true));
+        }
+        else if (PeerForMachine(machine) is JsonNode linked)
+        {
+            var linkedKey = Format.Text(linked, "key");
+            var linkedName = Format.Text(linked, "label");
+            var name = string.IsNullOrEmpty(linkedName) ? title : linkedName;
+            if (MachineOnline(machine) == true && !string.IsNullOrEmpty(peerKey))
+            {
+                body.Children.Add(HostStatsCard(peerKey));
+                body.Children.Add(HostUpdateCard(peerKey, local: false));
+            }
+            if (RemoteWorkspaces.IsConnected(linkedKey))
+            {
+                actions.Children.Add(ActionIconGlyph.Button(
+                    "Disconnect", ActionIcon.Disconnect, async (_, _) =>
+                        await DisconnectPeerAsync(linkedKey, name)));
+            }
+            else
+            {
+                actions.Children.Add(Buttons.Primary(
+                    "Connect", ActionIcon.Connect, async (_, _) =>
+                        await ConnectPeerAsync(linkedKey, name, MachineOnline(machine))));
+            }
+            actions.Children.Add(AutoConnectRow(linked, machine));
+        }
+        else if (CanConnect(machine))
+        {
+            if (MachineOnline(machine) == true && !string.IsNullOrEmpty(peerKey))
+            {
+                body.Children.Add(HostStatsCard(peerKey));
+            }
+            actions.Children.Add(Buttons.Primary(
+                "Connect", ActionIcon.Connect, async (_, _) =>
+                    await ConnectMachineAsync(machine)));
+        }
         if (isHost && !isSelf)
         {
-            var peerKey = Format.Text(machine, "publicIdentity");
             var deviceName = title;
-            actions.Children.Add(Buttons.Primary(
+            actions.Children.Add(ActionIconGlyph.Button(
                 "View screen", ActionIcon.Preview, (_, _) =>
                 {
                     var open = AppServices.OpenScreen;
@@ -1053,6 +2077,302 @@ internal sealed class MachinesPage : Page, IInspectorContent
         body.Children.Add(actions);
         _inspectorRoot.Children.Add(body);
     }
+
+    /// <summary>
+    /// Compact power, CPU and memory for a machine, filled after the read
+    /// lands. Peer set: ask that host. Peer null: this PC. Missing readings
+    /// stay off the bar rather than drawing as zero.
+    /// </summary>
+    private UIElement HostStatsCard(string? peerKey)
+    {
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceM,
+        };
+        row.Children.Add(new TextBlock
+        {
+            Text = "…",
+            Opacity = 0.5,
+        });
+        _ = FillHostStatsAsync(row, peerKey);
+        return row;
+    }
+
+    private static async Task FillHostStatsAsync(StackPanel row, string? peerKey)
+    {
+        JsonNode? stats = null;
+        try
+        {
+            stats = peerKey is null
+                ? await AppServices.Host.CallAsync("host.stats")
+                : await RemoteWorkspaces.CallOnPeerAsync(peerKey, "host.stats");
+        }
+        catch
+        {
+        }
+        row.Children.Clear();
+        if (stats is null)
+        {
+            row.Children.Add(Chrome.Stat("Power", "n/a"));
+            row.Children.Add(Chrome.Stat("CPU", "n/a"));
+            return;
+        }
+        row.Children.Add(Chrome.Stat("Power", PowerLabel(stats)));
+        if (stats["cpu"] is not null)
+        {
+            row.Children.Add(Chrome.Stat("CPU", CpuLabel(Format.Number(stats, "cpu"))));
+        }
+        if (stats["ramTotalBytes"] is not null)
+        {
+            row.Children.Add(Chrome.Stat(
+                "Memory",
+                RamLabel(Format.Long(stats, "ramUsedBytes"), Format.Long(stats, "ramTotalBytes"))));
+        }
+    }
+
+    private static string PowerLabel(JsonNode stats)
+    {
+        var charging = Format.Flag(stats, "charging");
+        var percent = stats["percent"] is null ? (long?)null : Format.Long(stats, "percent");
+        if (charging && percent.HasValue)
+        {
+            return $"{percent}%";
+        }
+        if (Format.Text(stats, "power") == "ac" && !percent.HasValue)
+        {
+            return "Plugged in";
+        }
+        if (percent.HasValue)
+        {
+            return $"{percent}%";
+        }
+        if (Format.Text(stats, "power") == "battery")
+        {
+            return "On battery";
+        }
+        if (Format.Text(stats, "power") == "ac")
+        {
+            return "Plugged in";
+        }
+        return "n/a";
+    }
+
+    private static string CpuLabel(double cpu) => $"{(int)Math.Round(cpu * 100)}%";
+
+    private static string RamLabel(long used, long total)
+    {
+        const double g = 1024d * 1024 * 1024;
+        var u = used / g;
+        var t = total / g;
+        return t >= 10 ? $"{u:0} / {t:0} GB" : $"{u:0.0} / {t:0.0} GB";
+    }
+
+    /// <summary>
+    /// The host release on this PC or on a peer, with Install and Restart
+    /// where they do something. Matches the desktop Mac Software card.
+    /// </summary>
+    private UIElement HostUpdateCard(string? peerKey, bool local)
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(new TextBlock
+        {
+            Text = "Software",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        var state = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(state);
+        _ = FillHostUpdateAsync(state, peerKey, local);
+        return body;
+    }
+
+    private static async Task FillHostUpdateAsync(StackPanel state, string? peerKey, bool local)
+    {
+        state.Children.Clear();
+        state.Children.Add(new TextBlock
+        {
+            Text = "Looking for a newer release",
+            Opacity = 0.7,
+            FontSize = 12,
+        });
+        JsonNode? check = null;
+        try
+        {
+            check = peerKey is null
+                ? await AppServices.Host.CallAsync("host.updateCheck")
+                : await RemoteWorkspaces.CallOnPeerAsync(peerKey, "host.updateCheck");
+        }
+        catch (Exception ex)
+        {
+            state.Children.Clear();
+            state.Children.Add(new TextBlock
+            {
+                Text = FriendlyError.Display(ex.Message),
+                Foreground = Theme.Brush(Theme.Danger),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            state.Children.Add(ActionIconGlyph.Button(
+                "Check again", ActionIcon.Refresh, async (_, _) =>
+                    await FillHostUpdateAsync(state, peerKey, local)));
+            return;
+        }
+        state.Children.Clear();
+        var version = Format.Text(check, "hostVersion");
+        var latest = Format.Text(check, "latest");
+        var newer = Format.Flag(check, "newer");
+        var restartPending = Format.Flag(check, "restartPending");
+        var canRestart = Format.Flag(check, "canRestart");
+        var appManaged = Format.Flag(check, "appManaged");
+        var autoApply = Format.Flag(check, "autoApply");
+        state.Children.Add(new TextBlock
+        {
+            Text = restartPending
+                ? $"Running {version}"
+                : newer ? $"{version} → {latest}" : version,
+            FontFamily = Fonts.Mono,
+            FontSize = 12,
+        });
+        if (restartPending)
+        {
+            state.Children.Add(UpdateNote(
+                local ? "Installed. Restart the helper to use it." : "Installed. Restart it there to use it."));
+        }
+        else if (newer)
+        {
+            state.Children.Add(UpdateNote($"Version {latest} is available."));
+        }
+        else
+        {
+            state.Children.Add(UpdateNote("Up to date."));
+        }
+        if (appManaged)
+        {
+            state.Children.Add(UpdateNote(
+                local
+                    ? "The tokenstat application owns this helper and replaces it when it updates itself."
+                    : "The tokenstat application there owns its helper and replaces it when it updates itself."));
+        }
+        else
+        {
+            if (newer && !canRestart)
+            {
+                state.Children.Add(UpdateNote(
+                    "It installs but cannot restart itself, so it keeps running the version it started with until it is restarted."));
+            }
+            if (autoApply)
+            {
+                state.Children.Add(UpdateNote("Checks daily on its own."));
+            }
+        }
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceS,
+        };
+        if (restartPending)
+        {
+            // The only thing left is the restart, and it ends whatever that
+            // machine is running, so it is never automatic here.
+            if (canRestart)
+            {
+                actions.Children.Add(Buttons.Primary(
+                    "Restart", ActionIcon.Refresh, async (_, _) =>
+                        await ApplyHostUpdateAsync(state, peerKey, local, restartNow: true)));
+            }
+        }
+        else if (newer && !appManaged)
+        {
+            actions.Children.Add(Buttons.Primary(
+                "Install", ActionIcon.Download, async (_, _) =>
+                    await ApplyHostUpdateAsync(state, peerKey, local, restartNow: false)));
+        }
+        else if (appManaged && newer)
+        {
+            actions.Children.Add(Buttons.Primary(
+                local ? "Download" : "Fetch", ActionIcon.Download, async (_, _) =>
+                    await ApplyHostUpdateAsync(state, peerKey, local, restartNow: false)));
+        }
+        actions.Children.Add(ActionIconGlyph.Button(
+            "Check again", ActionIcon.Refresh, async (_, _) =>
+                await FillHostUpdateAsync(state, peerKey, local)));
+        state.Children.Add(actions);
+    }
+
+    private static async Task ApplyHostUpdateAsync(
+        StackPanel state, string? peerKey, bool local, bool restartNow)
+    {
+        state.Children.Clear();
+        state.Children.Add(new TextBlock
+        {
+            Text = "Downloading, checking and installing. This takes a minute.",
+            Opacity = 0.7,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        JsonNode? applied;
+        try
+        {
+            var parameters = new JsonObject { ["restartNow"] = restartNow };
+            applied = peerKey is null
+                ? await AppServices.Host.CallAsync("host.updateApply", parameters)
+                : await RemoteWorkspaces.CallOnPeerAsync(peerKey, "host.updateApply", parameters);
+        }
+        catch (Exception ex)
+        {
+            state.Children.Clear();
+            state.Children.Add(new TextBlock
+            {
+                Text = FriendlyError.Display(ex.Message),
+                Foreground = Theme.Brush(Theme.Danger),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            state.Children.Add(ActionIconGlyph.Button(
+                "Check again", ActionIcon.Refresh, async (_, _) =>
+                    await FillHostUpdateAsync(state, peerKey, local)));
+            return;
+        }
+        state.Children.Clear();
+        var detail = Format.Text(applied, "detail");
+        if (!string.IsNullOrEmpty(detail))
+        {
+            state.Children.Add(UpdateNote(detail));
+        }
+        else if (Format.Flag(applied, "restarting"))
+        {
+            var to = Format.Text(applied, "to", "the new version");
+            state.Children.Add(UpdateNote(
+                $"Installed {to}. Restarting on it now, so this may go quiet for a moment."));
+        }
+        else if (!string.IsNullOrEmpty(Format.Text(applied, "appImage"))
+            && Format.Flag(applied, "appManaged"))
+        {
+            state.Children.Add(UpdateNote("The application's download is ready on that machine."));
+        }
+        else
+        {
+            state.Children.Add(UpdateNote(
+                local ? "Installed. Restart the helper to use it." : "Installed. Restart it there to use it."));
+        }
+        if (Format.Flag(applied, "restartPending") && Format.Flag(applied, "canRestart"))
+        {
+            state.Children.Add(Buttons.Primary(
+                "Restart", ActionIcon.Refresh, async (_, _) =>
+                    await ApplyHostUpdateAsync(state, peerKey, local, restartNow: true)));
+        }
+        state.Children.Add(ActionIconGlyph.Button(
+            "Check again", ActionIcon.Refresh, async (_, _) =>
+                await FillHostUpdateAsync(state, peerKey, local)));
+    }
+
+    private static TextBlock UpdateNote(string text) => new()
+    {
+        Text = text,
+        Opacity = 0.7,
+        FontSize = 12,
+        TextWrapping = TextWrapping.Wrap,
+    };
 
     private static UIElement Labeled(string title, string value)
     {
@@ -1151,6 +2471,19 @@ internal sealed class MachinesPage : Page, IInspectorContent
             return;
         }
         var key = keyBox.Text.Trim();
+        var address = addressBox.Text.Trim();
+        if (string.IsNullOrEmpty(address))
+        {
+            // A live invite is key@host:port. Split at the last @; a bare
+            // key has no address, which is right for a machine that only
+            // ever connects to this one.
+            var at = key.LastIndexOf('@');
+            if (at > 0 && at + 1 < key.Length)
+            {
+                address = key[(at + 1)..].Trim();
+                key = key[..at].Trim();
+            }
+        }
         if (key == SelfKey())
         {
             _root.Children.Insert(0, Chrome.Banner(
@@ -1167,7 +2500,7 @@ internal sealed class MachinesPage : Page, IInspectorContent
                 {
                     ["key"] = key,
                     ["label"] = labelBox.Text.Trim(),
-                    ["address"] = addressBox.Text.Trim(),
+                    ["address"] = address,
                 });
             var name = Format.Text(peer, "label");
             _notice = string.IsNullOrEmpty(name)
@@ -1220,6 +2553,8 @@ internal sealed class MachinesPage : Page, IInspectorContent
         try
         {
             await AppServices.Host.CallAsync("machine.revoke", new JsonObject { ["key"] = key });
+            // Revoke ends trust and any workspace listing for this peer.
+            RemoteWorkspaces.Disconnect(key);
             _notice = $"{name} can no longer reach this device.";
         }
         catch (Exception ex)

@@ -23,14 +23,9 @@ namespace Tokenstat.Pages;
 /// was dirty raises a conflict card, and saving stays off until a copy is
 /// chosen.
 /// </summary>
-internal sealed class EditorPage : Page, IInspectorContent
+internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string _workspaceId;
-    private readonly ContentControl _barSlot = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-    };
     private readonly StackPanel _inspector = new()
     {
         Spacing = Theme.SpaceM,
@@ -73,7 +68,7 @@ internal sealed class EditorPage : Page, IInspectorContent
         editor.Children.Add(_pageStatus);
         editor.Children.Add(_tabs);
 
-        var split = new Grid { Margin = new Thickness(Theme.SpaceL) };
+        var split = new Grid { Margin = new Thickness(Theme.SpaceM) };
         split.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumn(files, 0);
@@ -81,17 +76,7 @@ internal sealed class EditorPage : Page, IInspectorContent
         split.Children.Add(files);
         split.Children.Add(editor);
 
-        var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition
-        {
-            Height = new GridLength(1, GridUnitType.Star),
-        });
-        layout.Children.Add(_barSlot);
-        Grid.SetRow(split, 1);
-        layout.Children.Add(split);
-        Content = layout;
-        RebuildChrome();
+        Content = split;
         RenderInspector();
         _tabs.TabCloseRequested += async (_, args) =>
         {
@@ -104,10 +89,45 @@ internal sealed class EditorPage : Page, IInspectorContent
         Loaded += async (_, _) =>
         {
             _folderName = await FolderNameAsync();
-            RebuildChrome();
+            RaiseToolbarChanged();
             await LoadTreeAsync();
         };
     }
+
+    public event Action? ToolbarChanged;
+
+    /// <summary>
+    /// The folder these files belong to.
+    /// </summary>
+    public UIElement? ToolbarScope =>
+        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? "Files" : _folderName);
+
+    public IList<UIElement> ToolbarActions()
+    {
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload the file tree",
+                async (_, _) =>
+                {
+                    LogoRefresh.Began();
+                    await LoadTreeAsync();
+                }),
+            Buttons.ToolbarIcon(
+                ActionIcon.Save,
+                "Save the current file",
+                async (_, _) =>
+                {
+                    if (CurrentTab() is EditorTab tab)
+                    {
+                        await tab.SaveAsync();
+                    }
+                }),
+        };
+    }
+
+    private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
     /// <summary>
     /// The inspector column content: the open files with their dirty marks,
@@ -115,31 +135,6 @@ internal sealed class EditorPage : Page, IInspectorContent
     /// it, so the column stays live without the shell asking again.
     /// </summary>
     public UIElement? Inspector => _inspector;
-
-    private void RebuildChrome()
-    {
-        var scope = Chrome.ScopeChip(
-            string.IsNullOrEmpty(_folderName) ? "Files" : _folderName);
-        _barSlot.Content = DetailBar.View(
-            scope: scope,
-            trailing: new List<UIElement>
-            {
-                Buttons.ToolbarIcon(
-                    ActionIcon.Refresh,
-                    "Reload the file tree",
-                    async (_, _) => await LoadTreeAsync()),
-                Buttons.ToolbarIcon(
-                    ActionIcon.Save,
-                    "Save the current file",
-                    async (_, _) =>
-                    {
-                        if (CurrentTab() is EditorTab tab)
-                        {
-                            await tab.SaveAsync();
-                        }
-                    }),
-            });
-    }
 
     private void RenderInspector()
     {
@@ -225,6 +220,8 @@ internal sealed class EditorPage : Page, IInspectorContent
     {
         _tree.Children.Clear();
         _pageStatus.Children.Clear();
+        var skeleton = Motion.SkeletonCard();
+        _tree.Children.Add(skeleton);
         try
         {
             var request = new JsonObject { ["id"] = _workspaceId };
@@ -287,6 +284,7 @@ internal sealed class EditorPage : Page, IInspectorContent
                     _tree.Children.Add(pick);
                 }
             }
+            _tree.Children.Remove(skeleton);
             if (_tree.Children.Count == 0)
             {
                 _tree.Children.Add(new TextBlock { Text = "This folder is empty.", Opacity = 0.7 });
@@ -294,6 +292,7 @@ internal sealed class EditorPage : Page, IInspectorContent
         }
         catch (Exception ex)
         {
+            _tree.Children.Remove(skeleton);
             _pageStatus.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
         }
     }

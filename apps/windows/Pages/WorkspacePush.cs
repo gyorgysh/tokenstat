@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
@@ -89,7 +90,8 @@ internal sealed class WorkspacePushSession
         Error = null;
         try
         {
-            Review = await AppServices.Host.CallAsync(
+            Review = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.pushReview",
                 new JsonObject { ["id"] = workspaceId });
             OutcomeState = null;
@@ -118,7 +120,8 @@ internal sealed class WorkspacePushSession
         SubmittedReviewJson = Review.ToJsonString();
         try
         {
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.pushReviewed",
                 new JsonObject
                 {
@@ -150,7 +153,8 @@ internal sealed class WorkspacePushSession
         Error = null;
         try
         {
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.pushReceipt",
                 new JsonObject
                 {
@@ -165,7 +169,8 @@ internal sealed class WorkspacePushSession
             }
             else if (!IsFinished(Format.Text(receipt, "state")))
             {
-                var recovered = await AppServices.Host.CallAsync(
+                var recovered = await RemoteWorkspaces.CallWorkspaceAsync(
+                    workspaceId,
                     "workspace.pushRecover",
                     new JsonObject
                     {
@@ -201,7 +206,8 @@ internal sealed class WorkspacePushSession
         try
         {
             var review = JsonNode.Parse(SubmittedReviewJson);
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.pushReviewed",
                 new JsonObject
                 {

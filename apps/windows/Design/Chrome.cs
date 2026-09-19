@@ -16,7 +16,7 @@ namespace Tokenstat.Design;
 
 internal static class Chrome
 {
-    public static Border Card(string title, UIElement body, string? subtitle = null)
+    public static Border Card(string title, UIElement body, string? subtitle = null, UIElement? accessory = null)
     {
         var header = new StackPanel { Spacing = 2 };
         header.Children.Add(new TextBlock
@@ -36,7 +36,29 @@ internal static class Chrome
         }
 
         var stack = new StackPanel { Spacing = Theme.SpaceM };
-        stack.Children.Add(header);
+        if (accessory is null)
+        {
+            stack.Children.Add(header);
+        }
+        else
+        {
+            // The Mac card accessory: a trailing action in the header row,
+            // like the ranking cards' View all, rather than below the body.
+            var head = new Grid { ColumnSpacing = Theme.SpaceM };
+            head.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star),
+            });
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            head.Children.Add(header);
+            if (accessory is FrameworkElement framed)
+            {
+                framed.VerticalAlignment = VerticalAlignment.Center;
+            }
+            Grid.SetColumn(accessory, 1);
+            head.Children.Add(accessory);
+            stack.Children.Add(head);
+        }
         stack.Children.Add(body);
 
         return new Border

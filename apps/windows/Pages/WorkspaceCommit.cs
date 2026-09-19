@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Windows.UI;
 
 namespace Tokenstat.Pages;
@@ -228,7 +229,8 @@ internal sealed class WorkspaceCommitSession
             {
                 sorted.Add(JsonValue.Create(path));
             }
-            Review = await AppServices.Host.CallAsync(
+            Review = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.commitReview",
                 new JsonObject { ["id"] = workspaceId, ["paths"] = sorted });
             OutcomeState = null;
@@ -259,7 +261,8 @@ internal sealed class WorkspaceCommitSession
         SubmittedMessage = Message;
         try
         {
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.commitSelected",
                 new JsonObject
                 {
@@ -294,7 +297,8 @@ internal sealed class WorkspaceCommitSession
         Error = null;
         try
         {
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.commitReceipt",
                 new JsonObject
                 {
@@ -309,7 +313,8 @@ internal sealed class WorkspaceCommitSession
             }
             else if (recover && IsUnresolved(Format.Text(receipt, "state")))
             {
-                var reconciled = await AppServices.Host.CallAsync(
+                var reconciled = await RemoteWorkspaces.CallWorkspaceAsync(
+                    workspaceId,
                     "workspace.commitRecover",
                     new JsonObject
                     {
@@ -344,7 +349,8 @@ internal sealed class WorkspaceCommitSession
         CanRetry = false;
         try
         {
-            var receipt = await AppServices.Host.CallAsync(
+            var receipt = await RemoteWorkspaces.CallWorkspaceAsync(
+                workspaceId,
                 "workspace.commitSelected",
                 new JsonObject
                 {
@@ -671,7 +677,8 @@ internal static class WorkspaceCommitComposer
         {
             return null;
         }
-        return await AppServices.Host.CallAsync(
+        return await RemoteWorkspaces.CallWorkspaceAsync(
+            workspaceId,
             "workspace.commitReviewDiff",
             new JsonObject
             {
