@@ -65,9 +65,21 @@ internal static class WorkspaceHistory
             }.Where(part => !string.IsNullOrEmpty(part)));
             if (commit?["tags"] is JsonArray tags && tags.Count > 0)
             {
-                var names = tags
-                    .Select(tag => tag?.GetValue<string>() ?? "")
-                    .Where(tag => !string.IsNullOrEmpty(tag));
+                // A non-string tag must not take down the whole list. The
+                // parse materializes inside the try, so a bad entry lands
+                // here instead of at the join below.
+                List<string> names;
+                try
+                {
+                    names = tags
+                        .Select(tag => tag?.GetValue<string>() ?? "")
+                        .Where(tag => !string.IsNullOrEmpty(tag))
+                        .ToList();
+                }
+                catch
+                {
+                    names = new List<string>();
+                }
                 var joined = string.Join(", ", names);
                 if (!string.IsNullOrEmpty(joined))
                 {
