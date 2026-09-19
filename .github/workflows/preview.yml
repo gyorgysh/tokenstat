@@ -75,7 +75,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: preview-windows
-          save-if: false
+          # Main-branch runs save so the next dispatch restores warm.
+          # Label runs on PRs stay restore-only, like the release caches.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: actions/setup-dotnet@v6
         with:
@@ -133,7 +135,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: preview-mac
-          save-if: false
+          # Main-branch runs save so the next dispatch restores warm.
+          # Label runs on PRs stay restore-only, like the release caches.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -193,7 +197,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: preview-android
-          save-if: false
+          # Main-branch runs save so the next dispatch restores warm.
+          # Label runs on PRs stay restore-only, like the release caches.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the Rust Android driver
         run: cargo install cargo-ndk --locked
@@ -262,7 +268,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: preview-cli-${{ matrix.target }}
-          save-if: false
+          # Main-branch runs save so the next dispatch restores warm.
+          # Label runs on PRs stay restore-only, like the release caches.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-cli
