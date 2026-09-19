@@ -1411,9 +1411,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         string.IsNullOrEmpty(value) ? null : Format.Relative(value);
 
     /// <summary>
-    /// Whether Connect is honest for this account machine right now. Offline
-    /// machines cannot answer a dial. Unknown presence still allows it:
-    /// presence can lag behind a machine that just woke.
+    /// Keep Connect available for other computers. Presence can lag behind
+    /// wake or sign-in; an explicit attempt reports the actual result.
     /// </summary>
     private bool CanConnect(JsonNode? machine)
     {
@@ -1422,19 +1421,13 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         {
             return false;
         }
-        if (Format.Text(machine, "publicIdentity") == SelfKey())
+        if (!string.IsNullOrEmpty(SelfKey()) && Format.Text(machine, "publicIdentity") == SelfKey())
         {
             return false;
         }
-        if (MachineOnline(machine) == false)
-        {
-            return false;
-        }
-        if (!RemoteReachAllowed(_account))
-        {
-            return false;
-        }
-        return TunnelOn();
+        // Presence can lag after wake/sign-in. Keep the explicit action
+        // available; the connection result explains any unmet prerequisite.
+        return Format.Text(machine, "kind") != "client";
     }
 
     /// <summary>
@@ -2056,6 +2049,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                     var open = AppServices.OpenScreen;
                     if (string.IsNullOrEmpty(peerKey) || open is null)
                     {
+                        _notice = "Open Devices on that computer so it registers its connection key, then refresh this list.";
+                        _ = LoadAsync();
                         return;
                     }
                     open(peerKey, deviceName);

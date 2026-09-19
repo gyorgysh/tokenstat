@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 using System.Text.Json.Nodes;
+using System.Runtime.InteropServices;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -63,6 +64,7 @@ public sealed partial class MainWindow : Window
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _sidebarPoll;
     private int _sidebarTick;
     private bool _sidebarRefreshing;
+    private bool _sidebarSlowRefreshPending;
     private bool _suppressNav;
     private string? _lastNavTag;
     private JsonArray _liveSessions = new();
@@ -131,9 +133,8 @@ public sealed partial class MainWindow : Window
         });
 
         // Search is a toolbar icon, like the Mac: it opens the search page from
-        // anywhere without taking a row. Account and About keep the footer.
-        _nav.FooterMenuItems.Add(Item(GlobalSection.Account));
-        _nav.FooterMenuItems.Add(Item(GlobalSection.About));
+        // anywhere without taking a row. Account and About live in the profile menu.
+        RefreshAccountFooter();
 
         _nav.Content = _contentHost;
         _nav.SelectionChanged += NavOnSelectionChanged;
@@ -255,6 +256,7 @@ public sealed partial class MainWindow : Window
             RebuildFolderItems();
             RebuildSidebarLive();
         });
+        AppServices.AccountChanged += () => DispatcherQueue.TryEnqueue(() => _ = RefreshSidebarLiveAsync(slow: true));
         AppServices.Update.Changed += () => DispatcherQueue.TryEnqueue(RefreshUpdateBadge);
     }
 
@@ -1149,15 +1151,8 @@ public sealed partial class MainWindow : Window
 
     private void RefreshUpdateBadge()
     {
-        foreach (var item in _nav.FooterMenuItems)
-        {
-            if (item is NavigationViewItem nav && (nav.Tag as string) == "global:Account")
-            {
-                nav.InfoBadge = AppServices.Update.IsReady || AppServices.Update.IsAvailable
-                    ? new InfoBadge { Value = 1 }
-                    : null;
-            }
-        }
+        _liveFooterKey = "";
+        RefreshAccountFooter();
     }
 
     /// <summary>
@@ -1169,6 +1164,7 @@ public sealed partial class MainWindow : Window
     {
         if (_sidebarRefreshing)
         {
+            _sidebarSlowRefreshPending |= slow;
             return;
         }
         _sidebarRefreshing = true;
@@ -1209,6 +1205,11 @@ public sealed partial class MainWindow : Window
         finally
         {
             _sidebarRefreshing = false;
+            if (_sidebarSlowRefreshPending)
+            {
+                _sidebarSlowRefreshPending = false;
+                _ = RefreshSidebarLiveAsync(slow: true);
+            }
         }
     }
 
@@ -1380,8 +1381,8 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Who is signed in, above the Account footer row. Signed out, or before
-    /// the first answer, the plain Account row stands alone.
+    /// One profile row with Account and About in its menu. Signed out,
+    /// the same row leads with Sign in.
     /// </summary>
     private void RefreshAccountFooter()
     {
@@ -1408,17 +1409,33 @@ public sealed partial class MainWindow : Window
         _liveFooterKey = key;
         if (!signedIn || account is null)
         {
-            _nav.PaneFooter = null;
+            _nav.PaneFooter = AccountMenu(new JsonObject { ["displayName"] = "Sign in" });
             return;
         }
-        var captured = account;
-        _nav.PaneFooter = SidebarLive.AccountFooter(captured, () =>
+        _nav.PaneFooter = AccountMenu(account);
+    }
+
+    private UIElement AccountMenu(JsonNode account)
+    {
+        var footer = (Button)SidebarLive.AccountFooter(account, () => { });
+        var menu = new MenuFlyout();
+        foreach (var section in new[] { GlobalSection.Account, GlobalSection.About })
         {
-            if (FindNavItem("global:Account") is NavigationViewItem row)
+            var item = new MenuFlyoutItem
             {
-                _nav.SelectedItem = row;
-            }
-        });
+                Text = section == GlobalSection.Account && (AppServices.Update.IsReady || AppServices.Update.IsAvailable)
+                    ? "Account · Update available" : section.ToString(),
+            };
+            item.Click += (_, _) =>
+            {
+                _nav.SelectedItem = null;
+                _lastNavTag = "global:" + section;
+                Show(_lastNavTag);
+            };
+            menu.Items.Add(item);
+        }
+        footer.Flyout = menu;
+        return footer;
     }
 
     private void TrySize()
@@ -1470,6 +1487,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref uint value, int size);
+
     /// <summary>
     /// Repaint every flat surface from the theme tokens. Runs once at launch
     /// and again whenever the system theme changes, so the window frame never
@@ -1488,6 +1508,10 @@ public sealed partial class MainWindow : Window
         RebuildToolbar();
         SyncPaneChrome();
         TryTitleBarColors();
+        // Windows 11 otherwise uses the user's accent for the window outline.
+        // DWMWA_COLOR_NONE suppresses it; older Windows ignores this attribute.
+        var noBorder = 0xfffffffeu;
+        _ = DwmSetWindowAttribute(WindowNative.GetWindowHandle(this), 34, ref noBorder, sizeof(uint));
     }
 
     /// <summary>

@@ -20,12 +20,19 @@ internal static class HostProcess
     /// </summary>
     private const string ExpectedProtocolVersion = "22";
 
-    public static void EnsureRunning()
+    public static void EnsureRunning() => EnsureRunning(replaceOld: true);
+
+    // An ordinary request timeout is not evidence of an outdated helper.
+    // Recovery must never terminate a busy helper and its running terminals.
+    public static void RecoverIfMissing() => EnsureRunning(replaceOld: false);
+
+    private static void EnsureRunning(bool replaceOld)
     {
         // A pipe that answers is not enough: the scheduled task can be running
         // a helper from an older install, and every method added since would
         // come back as "unknown method".
         var answering = PipeUp();
+        if (answering && !replaceOld) return;
         if (answering && SpeaksThisVersion())
         {
             RefreshTaskShape();
@@ -201,7 +208,7 @@ internal static class HostProcess
     {
         try
         {
-            var answer = AppServices.Host.Call("protocol", null, TimeSpan.FromSeconds(5));
+            var answer = new HostClient().Call("protocol", null, TimeSpan.FromSeconds(5));
             var spoken = answer["protocolVersion"]?.GetValue<string>();
             return spoken == ExpectedProtocolVersion;
         }

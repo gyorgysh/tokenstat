@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <NoWarn>CA1416</NoWarn><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../apps/windows/Host/HostOwnerLock.cs" Link="HostOwnerLock.cs" />
+    <Compile Include="../../../apps/windows/Host/HostClient.cs" Link="HostClient.cs" />
+    <Compile Include="../../../apps/windows/Pages/SshVaultSync.cs" Link="SshVaultSync.cs" />
+    <Compile Include="../../../apps/windows/Pages/Format.cs" Link="Format.cs" />
+  </ItemGroup>
+</Project>

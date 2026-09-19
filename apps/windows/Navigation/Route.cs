@@ -49,6 +49,7 @@ internal enum SSHSection
     Keys,
     Snippets,
     KnownHosts,
+    Vault,
 }
 
 internal static class Sections
@@ -64,7 +65,7 @@ internal static class Sections
         [GlobalSection.Todo, GlobalSection.Notes, GlobalSection.Workflows, GlobalSection.Automations];
 
     public static readonly SSHSection[] SshRows =
-        [SSHSection.Hosts, SSHSection.Keys, SSHSection.Snippets, SSHSection.KnownHosts];
+        [SSHSection.Hosts, SSHSection.Keys, SSHSection.Snippets, SSHSection.KnownHosts, SSHSection.Vault];
 
     public static string Label(this GlobalSection section) => section switch
     {

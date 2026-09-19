@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using System.IO.Pipes;
+using System.Text;
+using System.Text.Json.Nodes;
+using Tokenstat.Host;
+using Tokenstat.Pages;
+
+// Isolate from any actual helper, including on Windows.
+Environment.SetEnvironmentVariable("USERNAME", "t-" + Guid.NewGuid().ToString("N")[..8]);
+static void Check(bool pass, string message) { if (!pass) throw new Exception(message); }
+static NamedPipeServerStream Server() => new(HostClient.PipeName, PipeDirection.InOut, 20,
+    PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+static async Task Reply(NamedPipeServerStream pipe, string result)
+{
+    using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+    await writer.WriteLineAsync("{\"ok\":true,\"result\":" + result + "}");
+}
+static async Task<string?> Read(NamedPipeServerStream pipe)
+{
+    using var reader = new StreamReader(pipe, leaveOpen: true);
+    return await reader.ReadLineAsync();
+}
+
+if (OperatingSystem.IsWindows())
+{
+    var lockPath = Path.Combine(Path.GetTempPath(), "tokenstat-owner-" + Guid.NewGuid() + ".lock");
+    HostOwnerLock.AcquireAt(lockPath);
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    using (var probe = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+    {
+        var held = false;
+        try { probe.Lock(0, 1); probe.Unlock(0, 1); }
+        catch (IOException) { held = true; }
+        Check(held, "Owner lock was lost while the app is open");
+        HostOwnerLock.Release();
+        probe.Lock(0, 1);
+        probe.Unlock(0, 1);
+    }
+    File.Delete(lockPath);
+    Console.WriteLine("PASS: Windows owner lock survives GC and releases on quit");
+}
+else Console.WriteLine("SKIP: native owner-lock test requires Windows");
+
+var client = new HostClient();
+using (var slowServer = Server())
+{
+    var slow = client.CallAsync("scan", patience: TimeSpan.FromSeconds(5));
+    await slowServer.WaitForConnectionAsync();
+    await Read(slowServer);
+    using var fastServer = Server();
+    var fast = client.CallAsync("account.status");
+    await fastServer.WaitForConnectionAsync().WaitAsync(TimeSpan.FromSeconds(2));
+    await Read(fastServer);
+    await Reply(fastServer, "{\"signedIn\":true}");
+    Check((await fast.WaitAsync(TimeSpan.FromSeconds(2)))["signedIn"]!.GetValue<bool>(), "Fast request blocked by scan");
+    await Reply(slowServer, "{}");
+    await slow;
+}
+using (var server = Server())
+{
+    var pending = client.CallAsync("slow", patience: TimeSpan.FromMilliseconds(100));
+    await server.WaitForConnectionAsync();
+    await Read(server);
+    try { await pending; throw new Exception("Missing timeout"); }
+    catch (HostException ex) { Check(ex.Code == "timeout", "Wrong timeout error"); }
+}
+using (var server = Server())
+{
+    var recovered = 0;
+    var noReplay = new HostClient(() => recovered++);
+    var pending = noReplay.CallAsync("workspace.add");
+    await server.WaitForConnectionAsync();
+    await Read(server);
+    server.Dispose();
+    try { await pending; throw new Exception("Missing disconnect error"); }
+    catch (HostException ex) { Check(ex.Code is "eof" or "io", "Wrong disconnect error"); }
+    Check(recovered == 0, "Interrupted mutation was replayed");
+}
+NamedPipeServerStream? restarted = null;
+var recovery = new HostClient(() => restarted = Server());
+var recoverCall = recovery.CallAsync("account.status");
+while (restarted is null) await Task.Delay(20);
+await restarted.WaitForConnectionAsync();
+await Read(restarted);
+await Reply(restarted, "{}");
+await recoverCall;
+restarted.Dispose();
+Console.WriteLine("PASS: concurrent requests, timeout, no mutation replay, recovery before sending");
+
+var local = new Dictionary<string, JsonObject>();
+var remote = new JsonArray();
+var pushed = new List<string>();
+static JsonObject Record(string kind, string id, long stamp, string? parent = null) => new()
+{ ["id"] = id, ["updatedMs"] = stamp, [kind == "folder" ? "parentId" : "folderId"] = parent };
+static JsonObject Envelope(string kind, JsonObject row) => new()
+{ ["id"] = kind + ":" + row["id"]!.GetValue<string>(), ["plaintext"] = new JsonObject { ["kind"] = kind, [kind] = row }.ToJsonString() };
+remote.Add(Envelope("folder", Record("folder", "child", 1, "parent")));
+remote.Add(Envelope("host", Record("host", "host1", 1, "child")));
+remote.Add(Envelope("folder", Record("folder", "parent", 1)));
+remote.Add(Envelope("host", Record("host", "newer", 1, "old-missing-parent")));
+remote.Add(new JsonObject { ["id"] = "key:gone", ["deleted"] = true });
+remote.Add(new JsonObject { ["id"] = "host:future", ["plaintext"] = "unknown-new-format" });
+remote.Add(Envelope("key", new JsonObject { ["id"] = "synced", ["updatedMs"] = 1, ["privateKey"] = "test-private-key", ["publicKey"] = "test-public-key" }));
+local["host:newer"] = Record("host", "newer", 20);
+local["host:future"] = Record("host", "future", 1);
+remote.Add(new JsonObject { ["id"] = "folder:doomed", ["deleted"] = true });
+remote.Add(Envelope("host", Record("host", "orphan", 1, "doomed")));
+local["folder:doomed"] = Record("folder", "doomed", 1);
+local["host:orphan"] = Record("host", "orphan", 1, "doomed");
+var mismatched = Envelope("host", Record("host", "wrong-id", 1));
+mismatched["id"] = "host:expected-id";
+remote.Add(mismatched);
+local["key:gone"] = new JsonObject { ["id"] = "gone", ["secretRef"] = "wincred:gone" };
+Tokenstat.AppServices.Host.Handler = (method, parameters) =>
+{
+    if (method == "ssh.vault.record.list") return new JsonObject { ["records"] = remote.DeepClone() };
+    if (method == "ssh.vault.record.put") { pushed.Add(Format.Text(parameters, "id")); return new JsonObject(); }
+    var kind = method.Split('.')[1];
+    if (method.EndsWith(".list")) return new JsonArray(local.Where(p => p.Key.StartsWith(kind + ":")).Select(p => p.Value.DeepClone()).ToArray());
+    var key = kind + ":" + Format.Text(parameters, "id");
+    if (method.EndsWith(".delete"))
+    {
+        local.Remove(key);
+        if (key == "folder:doomed")
+        {
+            local["host:orphan"]["folderId"] = null;
+            local["host:orphan"]["updatedMs"] = 40;
+        }
+        return new JsonObject();
+    }
+    Check(parameters?["privateKey"] is null, "Private material leaked into record metadata");
+    Check(Format.Flag(parameters, "keepUpdatedMs"), "Lost remote timestamp");
+    var parent = Format.Text(parameters, kind == "folder" ? "parentId" : "folderId");
+    Check(parent.Length == 0 || local.ContainsKey("folder:" + parent), "Child applied before parent");
+    local[key] = (JsonObject)parameters!.DeepClone();
+    return local[key].DeepClone();
+};
+await SshVaultSync.SyncAsync();
+Check(local.ContainsKey("host:host1"), "Remote host missing");
+Check(!local.ContainsKey("key:gone") && SshSecrets.Forgot.Contains("wincred:gone"), "Tombstone left a secret behind");
+Check(pushed.ToHashSet().SetEquals(new[] { "host:newer", "host:orphan" }), "Overwrote unreadable record or lost newer local record: " + string.Join(",", pushed));
+Check(SshSecrets.Get(Format.Text(local["key:synced"], "secretRef")) == "test-private-key", "Synced key not stored in credential vault");
+Check(!local.ContainsKey("host:wrong-id"), "Applied mismatched vault identity");
+Check(local["host:orphan"]["folderId"] is null, "Restored a deleted folder reference");
+Console.WriteLine("PASS: vault folder ordering, timestamps, tombstones, unknown records, private-key separation");
+var originalHandler = Tokenstat.AppServices.Host.Handler;
+remote.Clear();
+remote.Add(Envelope("key", new JsonObject { ["id"] = "synced", ["updatedMs"] = 50, ["privateKey"] = "replacement-key" }));
+var originalSecret = Format.Text(local["key:synced"], "secretRef");
+Tokenstat.AppServices.Host.Handler = (method, parameters) => method == "ssh.key.save"
+    ? throw new InvalidOperationException("simulated metadata save failure") : originalHandler(method, parameters);
+try { await SshVaultSync.SyncAsync(); throw new Exception("Missing metadata save error"); }
+catch (InvalidOperationException) { }
+Check(SshSecrets.Get(originalSecret) == "test-private-key", "Failed metadata save destroyed the original private key");
+Console.WriteLine("PASS: rejected key update preserves the working credential");
+var writes = 0;
+Tokenstat.AppServices.Host.Handler = (method, parameters) => method switch
+{
+    "account.status" => new JsonObject { ["signedIn"] = true },
+    "ssh.vault.status" => new JsonObject { ["created"] = true, ["locked"] = true },
+    _ => new JsonObject { ["writes"] = ++writes },
+};
+try { await SshVaultSync.WriteAsync("ssh.host.save", new JsonObject()); throw new Exception("Edited locked vault"); }
+catch (InvalidOperationException) { }
+Check(writes == 0, "Mutated data while vault locked");
+Tokenstat.AppServices.Host.Handler = (method, parameters) => method == "account.status"
+    ? new JsonObject { ["signedIn"] = false } : new JsonObject { ["writes"] = ++writes };
+await SshVaultSync.WriteAsync("ssh.host.save", new JsonObject());
+Check(writes == 1, "Signed-out local SSH editing broken");
+Console.WriteLine("PASS: locked-vault protection and signed-out local editing");
+
+namespace Tokenstat
+{
+    internal static class AppServices { public static FakeHost Host { get; } = new(); }
+    internal sealed class FakeHost
+    {
+        public Func<string, JsonNode?, JsonNode> Handler = (_, _) => new JsonObject();
+        public Task<JsonNode> CallAsync(string method, JsonNode? parameters = null) => Task.FromResult(JsonNode.Parse(Handler(method, parameters).ToJsonString())!);
+    }
+}
+namespace Tokenstat.Pages
+{
+    internal static class SshSecrets
+    {
+        public static readonly List<string> Forgot = new();
+        private static readonly Dictionary<string, string> Secrets = new();
+        public static bool Put(string id, string pem) { Secrets[id] = pem; return pem.Length > 0; }
+        public static string? Get(string id) => Secrets.GetValueOrDefault(id);
+        public static bool Has(string id) => Secrets.ContainsKey(id);
+        public static void Forget(string id) { Forgot.Add(id); Secrets.Remove(id); }
+    }
+    internal static class CredentialVault { public static string RefFor(string id) => "wincred:" + id; }
+}

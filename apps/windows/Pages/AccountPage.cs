@@ -363,7 +363,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         body.Children.Add(row);
         body.Children.Add(ActionIconGlyph.Button("Sign out", ActionIcon.SignOut, async (_, _) =>
         {
-            try { await AppServices.Host.CallAsync("account.logout"); }
+            try { await AppServices.Host.CallAsync("account.logout"); AppServices.NotifyAccountChanged(); }
             catch { /* stay on the page */ }
             await LoadAsync();
         }));

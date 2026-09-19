@@ -16,7 +16,10 @@ internal static class AppServices
 {
     private static readonly SemaphoreSlim HostPolicyGate = new(1, 1);
 
-    public static HostClient Host { get; } = new();
+    public static HostClient Host { get; } = new(HostProcess.RecoverIfMissing);
+    public static event Action? AccountChanged;
+    public static void NotifyAccountChanged() => AccountChanged?.Invoke();
+
     public static AppUpdateModel Update { get; } = new();
 
     /// <summary>

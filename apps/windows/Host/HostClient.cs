@@ -28,11 +28,12 @@ internal sealed class HostException : Exception
 /// </summary>
 internal sealed class HostClient
 {
-    private readonly object _gate = new();
     private long _nextId = 1;
-    private NamedPipeClientStream? _pipe;
-    private StreamReader? _reader;
-    private StreamWriter? _writer;
+    private readonly Action? _recover;
+    private readonly object _recoveryGate = new();
+    private DateTime _lastRecovery;
+
+    public HostClient(Action? recover = null) => _recover = recover;
 
     public static string PipeName
     {
@@ -72,89 +73,60 @@ internal sealed class HostClient
         };
         var line = payload.ToJsonString();
 
-        lock (_gate)
+        // hostd shares its session across connections. Give each request its
+        // own pipe so a scan or remote dial cannot queue every page behind it.
+        using var pipe = new NamedPipeClientStream(
+            ".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        try
         {
-            EnsureConnected(timeout);
             try
             {
-                _writer!.WriteLine(line);
-                _writer.Flush();
-                // Named pipes report CanTimeout false even when opened
-                // asynchronously, so ReadTimeout always throws here ("Timeouts are
-                // not supported on this stream."). Bound the read with WaitAsync
-                // instead: same timeout, no setter.
-                string? response;
-                try
-                {
-                    response = _reader!.ReadLineAsync().WaitAsync(timeout).GetAwaiter().GetResult();
-                }
-                catch (TimeoutException)
-                {
-                    Drop();
-                    throw new HostException("timeout", $"The host did not answer {method} in time.");
-                }
-
-                if (response is null)
-                {
-                    Drop();
-                    throw new HostException("eof", "The host closed the connection.");
-                }
-                return Decode(method, response);
+                pipe.Connect(1000);
             }
-            catch (IOException ex)
+            catch (TimeoutException) when (_recover is not null)
             {
-                Drop();
-                throw new HostException("io", ex.Message);
+                // Recover only before sending. Replaying an interrupted write
+                // could create a second terminal, workspace or other mutation.
+                lock (_recoveryGate)
+                {
+                    // All pages may notice the same outage. One restart
+                    // attempt serves them all, including when startup fails.
+                    if (DateTime.UtcNow - _lastRecovery > TimeSpan.FromSeconds(15))
+                    {
+                        try { _recover(); }
+                        finally { _lastRecovery = DateTime.UtcNow; }
+                    }
+                }
+                pipe.Connect(1000);
             }
+            using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, leaveOpen: true);
+            using var deadline = new CancellationTokenSource(timeout);
+            // Bound writes as well as reads; a live but stuck helper must not
+            // leave a page waiting indefinitely.
+            pipe.WriteAsync(Encoding.UTF8.GetBytes(line + "\n"), deadline.Token).AsTask().GetAwaiter().GetResult();
+            var response = reader.ReadLineAsync(deadline.Token).AsTask().GetAwaiter().GetResult();
+            if (response is null)
+            {
+                throw new HostException("eof", "The host closed the connection. Try again.");
+            }
+            return Decode(method, response);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new HostException("timeout", $"The host did not answer {method} in time. Try again.");
+        }
+        catch (TimeoutException)
+        {
+            throw new HostException("connect", "The local host could not be started. Try again or reopen tokenstat.");
+        }
+        catch (IOException ex)
+        {
+            throw new HostException("io", ex.Message);
         }
     }
 
     public Task<JsonNode> CallAsync(string method, JsonNode? parameters = null, TimeSpan? patience = null) =>
         Task.Run(() => Call(method, parameters, patience));
-
-    private void EnsureConnected(TimeSpan timeout)
-    {
-        if (_pipe is { IsConnected: true } && _reader is not null && _writer is not null)
-        {
-            return;
-        }
-        Drop();
-        // Asynchronous is load-bearing: the read uses ReadLineAsync, and
-        // named pipes report CanTimeout false either way, so ReadTimeout
-        // ("Timeouts are not supported on this stream.") can never be used here.
-        var pipe = new NamedPipeClientStream(
-            ".",
-            PipeName,
-            PipeDirection.InOut,
-            PipeOptions.Asynchronous);
-        try
-        {
-            pipe.Connect((int)Math.Min(Math.Max(timeout.TotalMilliseconds, 250), 10_000));
-        }
-        catch (TimeoutException)
-        {
-            pipe.Dispose();
-            throw new HostException("connect", $"Could not reach {PipeName}.");
-        }
-        pipe.ReadMode = PipeTransmissionMode.Byte;
-        _pipe = pipe;
-        _reader = new StreamReader(pipe, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
-        _writer = new StreamWriter(pipe, new UTF8Encoding(false), bufferSize: 4096, leaveOpen: true)
-        {
-            NewLine = "\n",
-            AutoFlush = true,
-        };
-    }
-
-    private void Drop()
-    {
-        try { _writer?.Dispose(); } catch { /* ignore */ }
-        try { _reader?.Dispose(); } catch { /* ignore */ }
-        try { _pipe?.Dispose(); } catch { /* ignore */ }
-        _writer = null;
-        _reader = null;
-        _pipe = null;
-    }
 
     private static JsonNode Decode(string method, string raw)
     {

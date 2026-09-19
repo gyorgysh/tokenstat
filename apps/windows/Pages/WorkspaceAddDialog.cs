@@ -97,36 +97,46 @@ internal static class WorkspaceAddDialog
             DefaultButton = ContentDialogButton.Primary,
         };
         JsonNode? added = null;
-        while (added is null)
+        dialog.Closing += (_, args) => args.Cancel = !dialog.IsPrimaryButtonEnabled && added is null;
+        dialog.PrimaryButtonClick += async (_, args) =>
         {
-            var result = await Chrome.ShowDialog(owner, dialog);
-            if (result == ContentDialogResult.Secondary)
-            {
-                return await RemoteWorkspaceAddDialog.ShowAsync(owner);
-            }
-            if (result != ContentDialogResult.Primary)
-            {
-                return null;
-            }
+            args.Cancel = true;
             var path = pathBox.Text.Trim();
             if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
             {
                 error.Text = "Pick a folder that exists. Browse opens the folder picker.";
                 error.Visibility = Visibility.Visible;
-                continue;
+                return;
             }
+            dialog.IsPrimaryButtonEnabled = false;
+            dialog.IsSecondaryButtonEnabled = false;
+            dialog.PrimaryButtonText = "Adding…";
+            error.Visibility = Visibility.Collapsed;
             try
             {
                 added = await AppServices.Host.CallAsync(
-                    "workspace.add",
-                    new JsonObject { ["path"] = path });
+                    "workspace.add", new JsonObject { ["path"] = path });
+                if (string.IsNullOrEmpty(Format.Text(added, "id")))
+                    throw new InvalidOperationException("The host did not return the added workspace. Try again.");
+                dialog.Hide();
             }
             catch (Exception ex)
             {
+                added = null;
                 error.Text = FriendlyError.Display(ex.Message);
                 error.Visibility = Visibility.Visible;
             }
-        }
+            finally
+            {
+                dialog.IsPrimaryButtonEnabled = true;
+                dialog.IsSecondaryButtonEnabled = true;
+                dialog.PrimaryButtonText = "Add workspace";
+            }
+        };
+        var result = await Chrome.ShowDialog(owner, dialog);
+        if (result == ContentDialogResult.Secondary)
+            return await RemoteWorkspaceAddDialog.ShowAsync(owner);
+        if (added is null) return null;
         var id = Format.Text(added, "id");
         if (string.IsNullOrEmpty(id))
         {

@@ -334,8 +334,7 @@ internal static class SidebarLive
     }
 
     /// <summary>
-    /// Who is signed in, for the pane footer above the Account row: avatar or
-    /// mark, name, and tier badge. Tapping opens Account.
+    /// Who is signed in: avatar, name and tier badge, with a menu affordance.
     /// </summary>
     public static UIElement AccountFooter(JsonNode account, Action onOpen)
     {
@@ -379,6 +378,12 @@ internal static class SidebarLive
             Grid.SetColumn(badge, 2);
             row.Children.Add(badge);
         }
+
+        var chevronColumn = row.ColumnDefinitions.Count;
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var chevron = new FontIcon { Glyph = "\uE70D", FontSize = 10, Margin = new Thickness(8, 0, 0, 0) };
+        Grid.SetColumn(chevron, chevronColumn);
+        row.Children.Add(chevron);
 
         var open = new Button
         {

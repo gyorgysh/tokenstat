@@ -207,6 +207,9 @@ internal sealed class SshPage : Page, IToolbarItems
 
         switch (_section)
         {
+            case SSHSection.Vault:
+                _listRoot.Children.Add(await SshVault.CardAsync(this, LoadAsync));
+                break;
             case SSHSection.Keys:
                 await LoadKeysTabAsync();
                 break;
@@ -217,6 +220,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 await LoadKnownHostsAsync();
                 break;
             default:
+                _listRoot.Children.Add(await SshVault.CardAsync(this, LoadAsync));
                 await LoadHostsAsync();
                 await LoadSessionsAsync();
                 await LoadFoldersAsync();
@@ -397,7 +401,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 body.Children.Add(row);
             }
         }
-        _listRoot.Children.Add(Chrome.Card("Credential vault", body));
+        _listRoot.Children.Add(Chrome.Card("Keys on this PC", body));
     }
 
     private async Task RemoveKeyAsync(JsonNode? key)
@@ -412,7 +416,7 @@ internal sealed class SshPage : Page, IToolbarItems
         var dialog = new ContentDialog
         {
             Title = "Remove key",
-            Content = $"Remove {label} from this PC? Saved hosts that use it will ask for a password or a pasted key.",
+            Content = $"Remove {label} from this PC and the account vault, if configured? Saved hosts that use it will ask for a password or a pasted key.",
             PrimaryButtonText = "Remove",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
@@ -423,7 +427,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         try
         {
-            await AppServices.Host.CallAsync("ssh.key.delete", new JsonObject { ["id"] = id });
+            await SshVaultSync.WriteAsync("ssh.key.delete", new JsonObject { ["id"] = id });
         }
         catch (Exception ex)
         {
@@ -572,7 +576,7 @@ internal sealed class SshPage : Page, IToolbarItems
                     Symbol.Important));
                 return;
             }
-            await AppServices.Host.CallAsync(
+            await SshVaultSync.WriteAsync(
                 "ssh.key.save",
                 new JsonObject
                 {
@@ -853,7 +857,7 @@ internal sealed class SshPage : Page, IToolbarItems
                     }
                 }
             }
-            await AppServices.Host.CallAsync("ssh.host.save", payload);
+            await SshVaultSync.WriteAsync("ssh.host.save", payload);
         }
         catch (Exception ex)
         {
@@ -885,7 +889,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         try
         {
-            await AppServices.Host.CallAsync("ssh.host.delete", new JsonObject { ["id"] = id });
+            await SshVaultSync.WriteAsync("ssh.host.delete", new JsonObject { ["id"] = id });
         }
         catch (Exception ex)
         {
@@ -939,7 +943,7 @@ internal sealed class SshPage : Page, IToolbarItems
             };
         }
         save["hostKeys"] = new JsonArray { JsonValue.Create(fingerprint) };
-        await AppServices.Host.CallAsync("ssh.host.save", save);
+        await SshVaultSync.WriteAsync("ssh.host.save", save);
         return new JsonArray { JsonValue.Create(fingerprint) };
     }
 
@@ -1306,7 +1310,7 @@ internal sealed class SshPage : Page, IToolbarItems
                     }
                 }
             }
-            await AppServices.Host.CallAsync("ssh.snippet.save", payload);
+            await SshVaultSync.WriteAsync("ssh.snippet.save", payload);
         }
         catch (Exception ex)
         {
@@ -1337,7 +1341,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         try
         {
-            await AppServices.Host.CallAsync("ssh.snippet.delete", new JsonObject { ["id"] = id });
+            await SshVaultSync.WriteAsync("ssh.snippet.delete", new JsonObject { ["id"] = id });
         }
         catch (Exception ex)
         {
@@ -1531,7 +1535,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         try
         {
-            await AppServices.Host.CallAsync(
+            await SshVaultSync.WriteAsync(
                 "ssh.folder.save",
                 new JsonObject { ["name"] = nameBox.Text.Trim() });
         }
@@ -1559,7 +1563,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         try
         {
-            await AppServices.Host.CallAsync("ssh.folder.delete", new JsonObject { ["id"] = id });
+            await SshVaultSync.WriteAsync("ssh.folder.delete", new JsonObject { ["id"] = id });
         }
         catch (Exception ex)
         {

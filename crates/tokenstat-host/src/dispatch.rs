@@ -1645,6 +1645,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     .envelope()
                 }
                 tokenstat_sync::DeviceStatus::Confirmed(result) => {
+                    crate::account_activity::invalidate();
                     with_session(s, |b| {
                         b.pending_login = None;
                         Ok(())

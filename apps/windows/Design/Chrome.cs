@@ -200,6 +200,17 @@ internal static class Chrome
             return ContentDialogResult.None;
         }
         dialog.XamlRoot = root;
+        dialog.RequestedTheme = Theme.IsDark ? ElementTheme.Dark : ElementTheme.Light;
+        dialog.Background = Theme.PanelBrush;
+        dialog.BorderBrush = Theme.BorderBrush;
+        dialog.Resources["ContentDialogBackground"] = Theme.PanelBrush;
+        dialog.Resources["ContentDialogTopOverlay"] = Theme.PanelBrush;
+        dialog.Resources["ContentDialogBorderBrush"] = Theme.BorderBrush;
+        dialog.Resources["ContentDialogSeparatorBorderBrush"] = Theme.BorderBrush;
+        dialog.Resources["TextControlBackground"] = Theme.BackgroundBrush;
+        dialog.Resources["TextControlBackgroundPointerOver"] = Theme.SidebarBrush;
+        dialog.Resources["TextControlBackgroundFocused"] = Theme.BackgroundBrush;
+        dialog.Resources["ButtonBackground"] = Theme.AccentSoftBrush;
         try
         {
             return await dialog.ShowAsync();

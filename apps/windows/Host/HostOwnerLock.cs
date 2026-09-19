@@ -19,17 +19,19 @@ internal static class HostOwnerLock
 {
     private static FileStream? _stream;
 
-    public static void Acquire()
+    public static void Acquire() => AcquireAt(LockPath);
+
+    internal static void AcquireAt(string path)
     {
         if (_stream is not null)
         {
             return;
         }
-        var path = LockPath;
+        FileStream? stream = null;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var stream = new FileStream(
+            stream = new FileStream(
                 path,
                 FileMode.OpenOrCreate,
                 FileAccess.ReadWrite,
@@ -39,18 +41,21 @@ internal static class HostOwnerLock
             // this process (or another tokenstat window) is open.
             if (!LockFileEx(stream.SafeFileHandle, 0, 0, 1, 0, ref overlapped))
             {
-                stream.Dispose();
                 return;
             }
-            stream.SetLength(0);
-            var pid = System.Text.Encoding.UTF8.GetBytes(Environment.ProcessId.ToString());
-            stream.Write(pid, 0, pid.Length);
-            stream.Flush();
+            // Windows shared byte-range locks prohibit writes, even through
+            // the handle holding the lock. Writing a PID here throws before
+            // retaining the stream, and GC then silently drops app ownership.
             _stream = stream;
+            stream = null;
         }
         catch
         {
             // A missing lock is the same as no owner: hostd may exit on a laptop.
+        }
+        finally
+        {
+            stream?.Dispose();
         }
     }
 

@@ -23,7 +23,7 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarItems
 {
-    private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
+    private readonly StackPanel _root = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _signSlot = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _inspectorRoot = new()
     {
@@ -68,6 +68,9 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
     public HomePage()
     {
         _root.Children.Add(_status);
+        _status.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) =>
+            _status.Visibility = string.IsNullOrEmpty(_status.Text) ? Visibility.Collapsed : Visibility.Visible);
+        _signSlot.Visibility = Visibility.Collapsed;
         // One spacing unit off the sidebar, like the Mac Home gutter: a card
         // already carries its own padding, so the stack needs only a gutter.
         Content = new ScrollViewer
@@ -448,7 +451,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         row.Children.Add(ActionIconGlyph.Button(
             signedIn ? "Reconnect" : "Sign in",
             ActionIcon.SignIn,
-            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync())));
+            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync(force: true))));
         var banner = new Border
         {
             Background = Theme.AccentSoftBrush,
@@ -854,7 +857,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         {
             signRow.Children.Add(ActionIconGlyph.Button(
                 "Sign in", ActionIcon.SignIn,
-                async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync())));
+                async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync(force: true))));
         }
         body.Children.Add(signRow);
         return Chrome.Card("Get tokenstat counting", body);

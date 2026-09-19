@@ -185,10 +185,6 @@ internal static class RemoteWorkspaces
             return new RemoteConnectResult(
                 false, $"Turn on Reach devices from anywhere before connecting to {name}.", false);
         }
-        if (online == false)
-        {
-            return new RemoteConnectResult(false, $"{name} is offline. Connect when it is awake.", false);
-        }
         try
         {
             var folders = await ReadPeerFoldersAsync(peerKey, label);

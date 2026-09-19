@@ -125,6 +125,7 @@ namespace Tokenstat.Host
 {
     internal sealed class HostClient
     {
+        public HostClient(Action? recover = null) { }
         public const string PipeName = "test";
         public static Func<Task<JsonNode>> Reply = () => Task.FromResult<JsonNode>(new JsonObject());
         public Task<JsonNode> CallAsync(string method, JsonNode? args = null, TimeSpan? patience = null) => Reply();

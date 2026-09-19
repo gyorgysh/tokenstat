@@ -489,14 +489,6 @@ final class MachinesModel {
             errorMessage = "Turn on Reach devices from anywhere before connecting to \(peer.label)."
             return
         }
-        // Presence can lag; still refuse a hard offline so Connect is not a
-        // button that only produces a failure toast.
-        if let machine = accountMachines.first(where: { self.peer(for: $0)?.key == peer.key }),
-           machine.online == false
-        {
-            errorMessage = "\(peer.label) is offline. Connect when it is awake."
-            return
-        }
         await dial(peer)
     }
 
@@ -633,16 +625,14 @@ final class MachinesModel {
 
     /// Whether Connect is honest for this account machine right now.
     ///
-    /// Offline machines cannot answer a dial. Offering Connect there is a
-    /// button whose only outcome is a failure notice. Unknown presence still
-    /// allows Connect: presence can lag behind a machine that just woke.
+    /// Presence can lag behind wake or sign-in. Keep the explicit action
+    /// available and report the actual connection result.
     func canConnect(_ machine: Machine) -> Bool {
         if machine.machineID == account?.thisMachineID { return false }
-        if machine.publicIdentity == identity?.key { return false }
-        if machine.online == false { return false }
-        if !remoteReachAllowed { return false }
-        if status?.tunnel != true { return false }
-        return true
+        if let key = identity?.key, machine.publicIdentity == key { return false }
+        // Presence may be stale after wake or sign-in. An explicit attempt
+        // reports missing reachability settings instead of hiding the action.
+        return machine.kind != "client"
     }
 
     /// After a purchase the 5s refresh sees `canRemote`, but hostd may still

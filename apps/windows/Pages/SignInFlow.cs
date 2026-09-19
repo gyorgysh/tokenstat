@@ -32,6 +32,7 @@ internal static class SignInFlow
             return;
         }
         _running = true;
+        slot.Visibility = Visibility.Visible;
         using var cts = new CancellationTokenSource();
         void OnUnloaded(object sender, RoutedEventArgs args) => cts.Cancel();
         owner.Unloaded += OnUnloaded;
@@ -60,6 +61,7 @@ internal static class SignInFlow
                 try { await AppServices.Host.CallAsync("account.cancelLogin"); }
                 catch { /* leaving the page must not throw */ }
             }
+            slot.Visibility = slot.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             _running = false;
         }
     }
@@ -208,6 +210,7 @@ internal static class SignInFlow
                     {
                         slot.Children.Remove(card);
                     }
+                    AppServices.NotifyAccountChanged();
                     await onSignedIn();
                     return;
                 }
