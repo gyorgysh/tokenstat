@@ -16,6 +16,8 @@ internal sealed class WorkspaceTabStrip
     {
         View.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         View.VerticalContentAlignment = VerticalAlignment.Stretch;
+        View.Loaded += (_, _) => StretchContentPresenter();
+        View.ActualThemeChanged += (_, _) => StretchContentPresenter();
         View.IsAddTabButtonVisible = false;
         View.TabWidthMode = TabViewWidthMode.SizeToContent;
         View.Resources["TabViewBackground"] = Theme.TabStripBrush;
@@ -24,6 +26,25 @@ internal sealed class WorkspaceTabStrip
         View.Resources["TabViewItemHeaderBackgroundPressed"] = Theme.Brush(static () => Theme.RowHighlight);
         View.Resources["TabViewItemHeaderDragBackground"] = Theme.PanelBrush;
         View.Resources["TabViewItemHeaderBackgroundPointerOver"] = Theme.Brush(static () => Theme.RowHighlight);
+    }
+
+    // The native template's presenter does not bind the control's content
+    // alignment. Set it explicitly without replacing or subclassing TabView.
+    private void StretchContentPresenter()
+    {
+        View.ApplyTemplate();
+        void Visit(DependencyObject node)
+        {
+            if (node is ContentPresenter { Name: "TabContentPresenter" } presenter)
+            {
+                presenter.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+                presenter.VerticalContentAlignment = VerticalAlignment.Stretch;
+                return;
+            }
+            for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(node); i++)
+                Visit(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(node, i));
+        }
+        Visit(View);
     }
 
     public TabViewItem Open(string key, string label, Func<UIElement> create, bool closable = true)
