@@ -175,6 +175,19 @@ jobs:
       - name: The Windows zip runs with nothing installed
         run: bash scripts/check-windows-packaging.sh
 
+  # Its own job for the same reason: this one is a transport mismatch between
+  # .NET and the host protocol, not a packaging rule, and it fails silently
+  # at runtime as a version mismatch that restarts a healthy helper. A red
+  # check with its own name is the only warning there is.
+  windows-pipe:
+    name: windows pipe timeouts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The host pipe times out without ReadTimeout
+        run: bash scripts/check-windows-pipe.sh
+
   installer-tests:
     name: installer rollback
     runs-on: ubuntu-latest

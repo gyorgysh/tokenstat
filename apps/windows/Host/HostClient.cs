@@ -79,8 +79,21 @@ internal sealed class HostClient
             {
                 _writer!.WriteLine(line);
                 _writer.Flush();
-                _pipe!.ReadTimeout = (int)Math.Min(timeout.TotalMilliseconds, int.MaxValue);
-                var response = _reader!.ReadLine();
+                // Named pipes report CanTimeout false even when opened
+                // asynchronously, so ReadTimeout always throws here ("Timeouts are
+                // not supported on this stream."). Bound the read with WaitAsync
+                // instead: same timeout, no setter.
+                string? response;
+                try
+                {
+                    response = _reader!.ReadLineAsync().WaitAsync(timeout).GetAwaiter().GetResult();
+                }
+                catch (TimeoutException)
+                {
+                    Drop();
+                    throw new HostException("timeout", $"The host did not answer {method} in time.");
+                }
+
                 if (response is null)
                 {
                     Drop();
@@ -106,11 +119,14 @@ internal sealed class HostClient
             return;
         }
         Drop();
+        // Asynchronous is load-bearing: the read uses ReadLineAsync, and
+        // named pipes report CanTimeout false either way, so ReadTimeout
+        // ("Timeouts are not supported on this stream.") can never be used here.
         var pipe = new NamedPipeClientStream(
             ".",
             PipeName,
             PipeDirection.InOut,
-            PipeOptions.None);
+            PipeOptions.Asynchronous);
         try
         {
             pipe.Connect((int)Math.Min(Math.Max(timeout.TotalMilliseconds, 250), 10_000));
