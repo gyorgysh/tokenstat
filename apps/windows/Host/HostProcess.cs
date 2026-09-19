@@ -28,6 +28,7 @@ internal static class HostProcess
         var answering = PipeUp();
         if (answering && SpeaksThisVersion())
         {
+            RefreshTaskShape();
             return;
         }
 
@@ -74,6 +75,64 @@ internal static class HostProcess
                 return;
             }
             Thread.Sleep(150);
+        }
+    }
+
+    /// <summary>
+    /// Re-register a task that still runs hostd directly. Older installs
+    /// registered the helper as the task action, which opens a visible
+    /// console window; the current shape wraps it hidden. The task itself is
+    /// the source of truth, so this heals exactly once: after re-registering,
+    /// the action reads back hidden and this becomes a quiet query per
+    /// launch. It never touches the running helper, only the registration.
+    /// </summary>
+    private static void RefreshTaskShape()
+    {
+        try
+        {
+            var hostd = FindHostd();
+            if (hostd is null || !TaskRunsHostdDirectly())
+            {
+                return;
+            }
+            TryInstallTask(hostd);
+        }
+        catch
+        {
+            // A visible helper still answers the pipe. Leave it.
+        }
+    }
+
+    private static bool TaskRunsHostdDirectly()
+    {
+        try
+        {
+            using var query = Process.Start(new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/Query /TN \"{SelfInstall.HostTaskName}\" /XML",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+            });
+            if (query is null)
+            {
+                return false;
+            }
+            var xml = query.StandardOutput.ReadToEnd();
+            query.WaitForExit(8000);
+            var open = xml.IndexOf("<Command>", StringComparison.OrdinalIgnoreCase);
+            var close = xml.IndexOf("</Command>", StringComparison.OrdinalIgnoreCase);
+            if (open < 0 || close <= open)
+            {
+                return false;
+            }
+            var command = xml.Substring(open + "<Command>".Length, close - open - "<Command>".Length);
+            return command.Trim().EndsWith("tokenstat-hostd.exe", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 

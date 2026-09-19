@@ -103,17 +103,28 @@ if (Test-Path -LiteralPath $HostJson) {
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
-$Action = New-ScheduledTaskAction -Execute $Bin
+# The action wraps hostd in a hidden powershell that starts it hidden. hostd
+# is a console binary, and a task action that runs it directly with an
+# interactive logon principal opens a visible console window on every logon
+# and every task start. Both layers stay hidden: -WindowStyle Hidden on the
+# powershell the task starts, and again on the Start-Process that starts the
+# helper. The C# schtasks fallback in SelfInstall mirrors this shape.
+$BinQuoted = $Bin -replace "'", "''"
+$WorkDirQuoted = (Split-Path -Parent $Bin) -replace "'", "''"
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument `
+    "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"Start-Process -FilePath '$BinQuoted' -WorkingDirectory '$WorkDirQuoted' -WindowStyle Hidden`""
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+# Restart on failure applies always, not only when always-on: hostd exits 0
+# on intentional stops (owner lock gone, self update), and the scheduler only
+# restarts nonzero exits, so a laptop quit does not resurrect the helper
+# while a real crash comes back within a minute, three attempts deep.
 $settingsArgs = @{
     AllowStartIfOnBatteries     = $true
     DontStopIfGoingOnBatteries  = $true
     ExecutionTimeLimit          = [TimeSpan]::Zero
     MultipleInstances           = "IgnoreNew"
-}
-if ($AlwaysOn) {
-    $settingsArgs.RestartCount = 3
-    $settingsArgs.RestartInterval = New-TimeSpan -Minutes 1
+    RestartCount                = 3
+    RestartInterval             = New-TimeSpan -Minutes 1
 }
 $Settings = New-ScheduledTaskSettingsSet @settingsArgs
 if ($AlwaysOn) {

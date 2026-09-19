@@ -248,7 +248,14 @@ internal static class SelfInstall
                 // Fall through to schtasks.
             }
         }
-        RunSchTasks($"/Create /TN \"{HostTaskName}\" /TR \"\\\"{hostdExe}\\\"\" /SC ONLOGON /RL LIMITED /F");
+        // Same hidden shape as the script: hostd is a console binary, and a
+        // task action that runs it directly opens a visible console window.
+        // schtasks cannot express restart-on-failure, so this fallback stays
+        // degraded next to the script; it only runs when the script is gone.
+        var quoted = hostdExe.Replace("'", "''");
+        var work = (Path.GetDirectoryName(hostdExe) ?? InstallDirectory).Replace("'", "''");
+        var launch = $"powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command \\\"Start-Process -FilePath '{quoted}' -WorkingDirectory '{work}' -WindowStyle Hidden\\\"";
+        RunSchTasks($"/Create /TN \"{HostTaskName}\" /TR \"{launch}\" /SC ONLOGON /RL LIMITED /F");
         RunSchTasks($"/Run /TN \"{HostTaskName}\"");
     }
 
