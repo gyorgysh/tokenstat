@@ -32,7 +32,12 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         Spacing = Theme.SpaceM,
         Padding = new Thickness(Theme.SpaceM),
     };
-    private readonly TreeView _tree = new() { SelectionMode = TreeViewSelectionMode.Single };
+    private readonly TreeView _tree = new()
+    {
+        SelectionMode = TreeViewSelectionMode.Single,
+        // WinUI otherwise moves nodes visually without moving files on disk.
+        CanDragItems = false, CanReorderItems = false, AllowDrop = false,
+    };
     private readonly TextBlock _treeCrumb = new() { Opacity = 0.7 };
     private readonly StackPanel _pageStatus = new() { Spacing = Theme.SpaceS };
     private readonly TabView _tabs = new() { IsAddTabButtonVisible = false, TabWidthMode = TabViewWidthMode.SizeToContent };
