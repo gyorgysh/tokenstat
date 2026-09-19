@@ -13,6 +13,32 @@ at the end.
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-09-20
+
+The Windows app arrives as a complete desktop client beside the Mac,
+Android matches the iPhone client screen for screen, and Mac Insights
+gains an All devices view. The CLI runs faster and shows daily value.
+
+### Added
+
+- A Windows desktop app at Mac parity. Sidebar, Home with the activity
+  heatmap, Insights with the daily chart, Devices, Account, the four
+  boards, and workspace pages with the inspector column. Real terminals,
+  bidirectional screen sharing, the persona characters, live sessions in
+  the sidebar, install and update flows, and a helper that restarts on
+  failure.
+- Android at iPhone parity. Home, tabs, billing, legal, devices,
+  workspaces, SSH, launch, chat queue, notifications, pull requests, and
+  sign-in match the iPhone client, sheets and dialogs use the theme, and
+  push registration reaches Android.
+- All devices in Mac Insights. A scope switcher flips between This device
+  and synced usage across every device, with a filter over models,
+  harnesses, and days.
+- Commit Review all on Windows. A commit opens its whole diff in a
+  workbench tab, like the Mac.
+- A dismiss control on the sidebar connection warning. Dismissing hides
+  it until the failure set changes.
+
 ### Changed
 
 - The CLI uses the website's violet and pink palette. Activity heatmaps now
@@ -26,6 +52,10 @@ at the end.
 
 ### Fixed
 
+- The model picker lists Muse and Claude models again. Both showed only
+  Default; the Spark set and the haiku and sonnet aliases are back.
+- Pricing updates apply even after large list-rate moves when the local
+  rates went stale.
 - Monthly session counts respect the selected date range and filters.
 - Scrolling stops at the last full page instead of leaving a nearly blank
   report below the last row.
