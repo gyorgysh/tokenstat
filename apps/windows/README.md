@@ -127,7 +127,7 @@ python3 scripts/generate-windows-icon.py
 Devices puts Remote access beside Always-on host, before the machine list.
 Connected machines group their folders in the sidebar. Folder rows include the
 branch and working-tree additions/removals. Sessions offers the target machine's
-shells and agents, including explicit Install and Sign in actions. Clicking a
+shells and agents, with Install/Reinstall in each agent's setup menu. Clicking a
 folder opens its launcher, with shortcuts to workspace sections and the Mac
 client's bundled agent artwork. Remote conversations appear under Chat.
 
@@ -136,8 +136,14 @@ WebView2. The terminal renders VT control sequences, colors and full-screen
 programs, preserves UTF-8 across reads, and forwards keyboard and mouse input
 directly. Copy/paste uses the Windows clipboard and terminal bracketed paste.
 
-Files and Browser retain their tabs while changing workspace sections. Remote
-files use the same editor as local files. Remote loopback addresses in the
+Each workspace holds one tab strip for its launcher, terminals, individual
+files, browser pages and workspace sections. The file tree stays in the right
+inspector, and open documents retain unsaved edits when switching tabs or
+folders during the app session. Closing a document checks unsaved changes;
+closing a terminal tab detaches the viewer without killing its process. Remote
+files use the same editor as local files. Windows launches npm batch shims
+through an interpreter and discovers the standalone Codex install directory
+without requiring a daemon restart. Remote loopback addresses in the
 browser use encrypted forwarding; tabs share a listener until the last user
 closes it. SSH connections explicitly choose a saved key, a password, or pasted
 private-key material.

@@ -136,7 +136,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         layout.Children.Add(_composerDock);
         Content = layout;
         RenderInspector();
-        Loaded += async (_, _) => await ShowListAsync();
+        Loaded += async (_, _) =>
+        {
+            if (_openId is not null) StartPoll();
+            else await ShowListAsync();
+        };
         Unloaded += (_, _) => _poll?.Cancel();
     }
 

@@ -59,6 +59,10 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     private readonly Grid _startOverlay = new();
     private readonly TextBlock _startTitle = new();
     private bool _loaded;
+    private bool _released;
+    private int _generation;
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    internal string TabTitle => StartingLabel();
 
     public TerminalPage(string workspaceId, string? sessionId)
     {
@@ -137,11 +141,22 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         _terminal.Failed += Banner;
         Loaded += async (_, _) =>
         {
+            var generation = ++_generation;
             _folderName = await FolderNameAsync();
+            if (generation != _generation || !IsLoaded) return;
             RaiseToolbarChanged();
-            await StartAsync();
+            await StartAsync(generation);
         };
-        Unloaded += (_, _) => { Stop(); _terminal.Close(); };
+        Unloaded += (_, _) => { if (!_released) Stop(); };
+        if (App.CurrentWindow is { } window) window.Closed += (_, _) => Release();
+    }
+
+    internal void Release()
+    {
+        if (_released) return;
+        _released = true;
+        Stop();
+        _terminal.Close();
     }
 
     public event Action? ToolbarChanged;
@@ -234,28 +249,41 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     private int CurrentRows() => _terminal.Rows;
     private int CurrentCols() => _terminal.Cols;
 
-    private async Task StartAsync()
+    private async Task StartAsync(int generation)
     {
-        try { await _terminal.Ready; }
-        catch (Exception ex) { Banner("Terminal could not open: " + ex.Message); return; }
-        if (!IsLoaded) return;
-        _session.Output += Append;
-        _session.Changed += Refresh;
-        try { await _session.AttachAsync(CurrentRows(), CurrentCols()); }
-        catch (Exception ex) { if (IsLoaded) Banner(ex.Message); return; }
-        if (!IsLoaded) { await _session.DetachAsync(); return; }
-        _loaded = true;
-        await _session.ResizeAsync(CurrentRows(), CurrentCols());
-        RefreshOnUi();
-        _terminal.FocusTerminal();
+        await _lifecycle.WaitAsync();
+        try
+        {
+            await _terminal.Ready;
+            if (generation != _generation || !IsLoaded) return;
+            _terminal.Reset();
+            _session.Output += Append;
+            _session.Changed += Refresh;
+            await _session.AttachAsync(CurrentRows(), CurrentCols());
+            if (generation != _generation || !IsLoaded) return;
+            _loaded = true;
+            await _session.ResizeAsync(CurrentRows(), CurrentCols());
+            RefreshOnUi();
+            _terminal.FocusTerminal();
+        }
+        catch (Exception ex) { if (generation == _generation && IsLoaded) Banner(ex.Message); }
+        finally { _lifecycle.Release(); }
     }
 
     private void Stop()
     {
+        ++_generation;
         _loaded = false;
         _session.Output -= Append;
         _session.Changed -= Refresh;
-        _ = _session.DetachAsync();
+        _ = DetachAsync();
+    }
+
+    private async Task DetachAsync()
+    {
+        await _lifecycle.WaitAsync();
+        try { await _session.DetachAsync(); }
+        finally { _lifecycle.Release(); }
     }
 
     private void Append(byte[] bytes)
@@ -280,7 +308,8 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
             && string.IsNullOrEmpty(_session.LastError)
             ? Visibility.Visible
             : Visibility.Collapsed;
-        _title.Text = StartingLabel();
+        var title = StartingLabel();
+        if (_title.Text != title) { _title.Text = title; RaiseToolbarChanged(); }
         _size.Text = $"{_session.Cols}×{_session.Rows}";
         _terminal.SetGeometry(_session.Rows, _session.Cols);
         _kill.IsEnabled = _session.Alive && !_session.Closed;
@@ -327,7 +356,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         {
             command = command[(cut + 1)..];
         }
-        if (command.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        if (new[] { ".exe", ".cmd", ".bat" }.Any(extension => command.EndsWith(extension, StringComparison.OrdinalIgnoreCase)))
         {
             command = command[..^4];
         }

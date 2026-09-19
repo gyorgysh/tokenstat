@@ -21,6 +21,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
+    <Compile Include="../../../apps/windows/Pages/WorkspaceTabStrip.cs" Link="WorkspaceTabStrip.cs" />
     <Compile Include="../../../apps/windows/Pages/EditorTree.cs" Link="EditorTree.cs" />
     <Compile Include="../../../apps/windows/Pages/EditorText.cs" Link="EditorText.cs" />
     <Compile Include="../../../apps/windows/Pages/H264Streamer.cs" Link="H264Streamer.cs" />

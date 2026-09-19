@@ -993,13 +993,13 @@ fn resolve_profile(profile: &Profile, path: &[String], home: &Path) -> Option<St
         return None;
     }
     for name in command_names(profile) {
-        let found = profile
+        let directories = profile
             .install_dirs
             .iter()
-            .map(|dir| home.join(dir).join(name))
-            .find(|candidate| is_executable(candidate));
-        if let Some(candidate) = found {
-            return Some(candidate.display().to_string());
+            .map(|dir| home.join(dir).display().to_string())
+            .collect::<Vec<_>>();
+        if let Some(found) = resolve_on_path(name, &directories) {
+            return Some(found);
         }
     }
     None
@@ -1140,25 +1140,27 @@ pub(crate) fn search_path_var() -> String {
 
 /// First executable match for a bare command name on the search path.
 fn resolve_on_path(command: &str, path: &[String]) -> Option<String> {
-    if absolute_command(command) {
-        return is_executable(Path::new(command)).then(|| command.to_string());
-    }
-    for dir in path {
-        let candidate = Path::new(dir).join(command);
-        if is_executable(&candidate) {
-            return Some(candidate.display().to_string());
-        }
+    let candidates = if absolute_command(command) {
+        vec![Path::new(command).to_path_buf()]
+    } else {
+        path.iter()
+            .map(|dir| Path::new(dir).join(command))
+            .collect()
+    };
+    for candidate in candidates {
         #[cfg(windows)]
-        {
-            for ext in [".exe", ".cmd", ".bat"] {
-                if command.ends_with(ext) {
-                    continue;
-                }
-                let with_ext = Path::new(dir).join(format!("{command}{ext}"));
-                if is_executable(&with_ext) {
-                    return Some(with_ext.display().to_string());
+        if candidate.extension().is_none() {
+            // npm installs a POSIX shim beside its Windows command file.
+            // CreateProcess cannot execute the extensionless shell script.
+            for ext in ["exe", "com", "cmd", "bat"] {
+                let executable = candidate.with_extension(ext);
+                if is_executable(&executable) {
+                    return Some(executable.display().to_string());
                 }
             }
+        }
+        if is_executable(&candidate) {
+            return Some(candidate.display().to_string());
         }
     }
     None
@@ -1175,7 +1177,17 @@ fn is_executable(path: &Path) -> bool {
             .map(|m| m.permissions().mode() & 0o111 != 0)
             .unwrap_or(false)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        path.extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|ext| {
+                ["exe", "com", "cmd", "bat"]
+                    .iter()
+                    .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+            })
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         true
     }
@@ -1208,11 +1220,18 @@ fn search_path() -> Vec<String> {
 fn conventional_paths(home: &str) -> Vec<String> {
     #[cfg(windows)]
     {
-        vec![
+        let local =
+            std::env::var("LOCALAPPDATA").unwrap_or_else(|_| format!(r"{home}\AppData\Local"));
+        let mut paths = vec![
+            format!(r"{local}\Programs\OpenAI\Codex\bin"),
             format!(r"{home}\.local\bin"),
             format!(r"{home}\AppData\Roaming\npm"),
             format!(r"{home}\scoop\shims"),
-        ]
+        ];
+        if let Ok(dir) = std::env::var("CODEX_INSTALL_DIR") {
+            paths.push(dir);
+        }
+        paths
     }
     #[cfg(not(windows))]
     {
@@ -1361,6 +1380,34 @@ mod tests {
         assert!(found.ends_with("preferred/grok"), "{found}");
         let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_discovery_skips_posix_npm_shims_and_finds_native_installs() {
+        let home = std::env::temp_dir().join(format!("tokenstat-discovery-{}", std::process::id()));
+        let bin = home.join("npm");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("claude"), "#!/bin/sh\n").unwrap();
+        std::fs::write(bin.join("claude.cmd"), "@echo off\r\n").unwrap();
+        let path = vec![bin.display().to_string()];
+        let found = super::resolve_on_path("claude", &path).unwrap();
+        assert!(found.ends_with("claude.cmd"), "{found}");
+        assert_eq!(
+            super::resolve_on_path(&bin.join("claude").display().to_string(), &[]),
+            Some(found)
+        );
+        std::fs::remove_file(bin.join("claude.cmd")).unwrap();
+        assert!(super::resolve_on_path("claude", &path).is_none());
+        std::fs::write(bin.join("codex.exe"), "fixture").unwrap();
+        let found = resolve_profile(&profile("codex", &["npm"]), &[], &home).unwrap();
+        assert!(found.ends_with("codex.exe"), "{found}");
+        assert!(
+            super::conventional_paths(&home.display().to_string())
+                .iter()
+                .any(|p| p.ends_with(r"Programs\OpenAI\Codex\bin"))
+        );
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]

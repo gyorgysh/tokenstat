@@ -38,10 +38,13 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
     private readonly TabView _tabs = new() { IsAddTabButtonVisible = false, TabWidthMode = TabViewWidthMode.SizeToContent };
     private readonly List<EditorTab> _open = [];
     private string _folderName = "";
+    private bool _initialized;
+    internal FrameworkElement FileTree { get; private set; } = null!;
 
-    public EditorPage(string workspaceId)
+    public EditorPage(string workspaceId, TabView? workspaceTabs = null)
     {
         _workspaceId = workspaceId;
+        if (workspaceTabs is not null) _tabs = workspaceTabs;
 
         var files = new Grid { Width = 240, Margin = new Thickness(0, 0, Theme.SpaceS, 0) };
         files.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -77,9 +80,9 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         editor.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         editor.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         Grid.SetRow(_pageStatus, 0);
-        Grid.SetRow(_tabs, 1);
+        if (workspaceTabs is null) Grid.SetRow(_tabs, 1);
         editor.Children.Add(_pageStatus);
-        editor.Children.Add(_tabs);
+        if (workspaceTabs is null) editor.Children.Add(_tabs);
 
         var split = new Grid { Margin = new Thickness(Theme.SpaceM) };
         split.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -89,7 +92,20 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         split.Children.Add(files);
         split.Children.Add(editor);
 
-        Content = split;
+        if (workspaceTabs is null) Content = split;
+        else
+        {
+            split.Children.Remove(files);
+            files.Width = double.NaN;
+            files.Margin = new Thickness(Theme.SpaceM);
+            editor.Children.Remove(_pageStatus);
+            files.RowDefinitions.Insert(2, new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(_pageStatus, 2);
+            Grid.SetRow(treeList, 3);
+            files.Children.Add(_pageStatus);
+            FileTree = files;
+            Content = new TextBlock { Text = "Choose a file in the file browser.", Margin = new Thickness(Theme.SpaceM) };
+        }
         RenderInspector();
         _tabs.TabCloseRequested += async (_, args) =>
         {
@@ -99,13 +115,19 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             }
         };
         _tabs.SelectionChanged += (_, _) => RenderInspector();
-        Loaded += async (_, _) =>
-        {
-            _folderName = await FolderNameAsync();
-            RaiseToolbarChanged();
-            await LoadTreeAsync();
-        };
+        Loaded += async (_, _) => await InitializeAsync();
     }
+
+    internal async Task InitializeAsync()
+    {
+        if (_initialized) return;
+        _initialized = true;
+        _folderName = await FolderNameAsync();
+        RaiseToolbarChanged();
+        await LoadTreeAsync();
+    }
+
+    internal bool Owns(TabViewItem item) => item.Tag is EditorTab;
 
     public event Action? ToolbarChanged;
 
@@ -255,10 +277,10 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 var label = new Grid { ColumnSpacing = 7, Tag = new FileEntry(Format.Text(entry, "path"), isDirectory), Opacity = Format.Flag(entry, "ignored") ? 0.45 : 1 };
                 label.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 label.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                label.Children.Add(new SymbolIcon
+                label.Children.Add(new FontIcon
                 {
-                    Symbol = isDirectory ? Symbol.Folder : Symbol.Document,
-                    Width = 16, Height = 16, Foreground = isDirectory ? Theme.AccentBrush : Theme.Brush(static () => Theme.DefaultText),
+                    Glyph = isDirectory ? "\uE8B7" : "\uE8A5", FontSize = 16,
+                    Foreground = isDirectory ? Theme.AccentBrush : Theme.Brush(static () => Theme.DefaultText),
                 });
                 var name = new TextBlock { Text = Format.Text(entry, "name"), FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
                 Grid.SetColumn(name, 1);
@@ -301,6 +323,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         var item = new TabViewItem
         {
             Header = tab.Title,
+            IconSource = new FontIconSource { Glyph = "\uE8A5" },
             Content = tab.View,
             IsClosable = true,
         };
@@ -349,7 +372,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
             };
-            if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+            if (await Chrome.ShowDialog(_tabs, dialog) != ContentDialogResult.Primary)
             {
                 return;
             }

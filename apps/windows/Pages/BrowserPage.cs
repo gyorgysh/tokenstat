@@ -26,6 +26,7 @@ namespace Tokenstat.Pages;
 internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _peer;
+    private readonly bool _sharedTabs;
     private readonly TabView _tabs = new()
     {
         IsAddTabButtonVisible = true,
@@ -37,10 +38,12 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         Padding = new Thickness(Theme.SpaceM),
     };
 
-    public BrowserPage(string url, string host, int port, bool unlisten, string? peer = null)
+    public BrowserPage(string url, string host, int port, bool unlisten, string? peer = null, TabView? workspaceTabs = null)
     {
         _peer = peer;
-        _tabs.AddTabButtonClick += (_, _) => AddTab("", "127.0.0.1", 0, false, peer);
+        _sharedTabs = workspaceTabs is not null;
+        if (workspaceTabs is not null) _tabs = workspaceTabs;
+        if (!_sharedTabs) _tabs.AddTabButtonClick += (_, _) => AddTab("", "127.0.0.1", 0, false, peer);
         _tabs.TabCloseRequested += async (_, args) =>
         {
             if (args.Item is TabViewItem item && item.Tag is BrowserTab tab)
@@ -49,11 +52,11 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             }
         };
         _tabs.SelectionChanged += (_, _) => RenderInspector();
-        Content = _tabs;
+        if (!_sharedTabs) Content = _tabs;
         RenderInspector();
         Loaded += (_, _) =>
         {
-            if (_tabs.TabItems.Count == 0)
+            if (!_sharedTabs && _tabs.TabItems.Count == 0)
             {
                 AddTab(url, host, port, unlisten, peer);
             }
@@ -107,7 +110,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         _inspector.Children.Clear();
         _inspector.Children.Add(new TextBlock
         {
-            Text = $"Open tabs ({_tabs.TabItems.Count})",
+            Text = $"Open tabs ({_tabs.TabItems.OfType<TabViewItem>().Count(Owns)})",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         foreach (var entry in _tabs.TabItems)
@@ -137,15 +140,18 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
+    internal bool Owns(TabViewItem item) => item.Tag is BrowserTab;
+
     private BrowserTab? CurrentTab() =>
         (_tabs.SelectedItem as TabViewItem)?.Tag as BrowserTab;
 
-    private void AddTab(string url, string host, int port, bool unlisten, string? peer = null)
+    internal void AddTab(string url, string host, int port, bool unlisten, string? peer = null)
     {
         var tab = new BrowserTab(this, url, host, port, unlisten, peer, CloseRequested);
         var item = new TabViewItem
         {
             Header = tab.Title,
+            IconSource = new FontIconSource { Glyph = "\uE774" },
             Content = tab.View,
             IsClosable = true,
         };
@@ -181,7 +187,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             _tabs.TabItems.Remove(item);
         }
         await tab.CloseAsync();
-        if (_tabs.TabItems.Count == 0)
+        if (!_sharedTabs && _tabs.TabItems.Count == 0)
         {
             AddTab("", "127.0.0.1", 0, false, _peer);
         }

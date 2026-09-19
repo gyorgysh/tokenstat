@@ -227,7 +227,9 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                SetContent(new TerminalPage(workspaceId, sessionId));
+                var workbench = WorkspaceTabs(workspaceId);
+                workbench.OpenTerminal(sessionId);
+                SetContent(workbench);
                 if (sessionId is not null)
                     RestoreSelection(LiveRoute.Join(SidebarLive.SessionPrefix, workspaceId, sessionId));
                 _lastNavTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
@@ -237,7 +239,9 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                SetContent(new BrowserPage(url, host, port, unlisten, peer));
+                if (_frame.Content is WorkspaceTabsPage workbench)
+                    workbench.OpenBrowser(url, host, port, unlisten, peer);
+                else SetContent(new BrowserPage(url, host, port, unlisten, peer));
             });
         };
         AppServices.OpenScreen = (peer, name) =>
@@ -262,24 +266,10 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                // Through the sidebar row, so the pane and the content agree,
-                // then the named conversation reveals onto the mounted page.
-                // The page holds the id until its list loads, like the Mac
-                // pending reveal, and falls back to the list when the thread
-                // is gone.
-                var tag = "ws:" + workspaceId + ":Chat";
-                if (FindNavItem(tag) is NavigationViewItem row)
-                {
-                    _nav.SelectedItem = row;
-                    if (_frame.Content is ChatPage page)
-                    {
-                        _ = page.RevealAsync(chatId);
-                    }
-                }
-                else
-                {
-                    SetContent(new ChatPage(workspaceId, chatId));
-                }
+                var workbench = WorkspaceTabs(workspaceId);
+                workbench.Open(WorkspaceSection.Chat);
+                SetContent(workbench);
+                if (workbench.ActivePage is ChatPage page) _ = page.RevealAsync(chatId);
             });
         };
         AppServices.OpenInsightsDay = (date) =>
@@ -430,7 +420,6 @@ public sealed partial class MainWindow : Window
         await TryLoadFoldersAsync();
     }
 
-    private readonly Dictionary<(string Id, WorkspaceSection Section), Page> _workspacePages = new();
     private readonly SemaphoreSlim _folderLoadGate = new(1, 1);
     private bool _foldersLoaded;
     private JsonArray _localFolders = new();
@@ -682,7 +671,11 @@ public sealed partial class MainWindow : Window
 
     private void OnToolbarChanged()
     {
-        DispatcherQueue.TryEnqueue(RebuildToolbar);
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector);
+            RebuildToolbar();
+        });
     }
 
     /// <summary>
@@ -937,7 +930,10 @@ public sealed partial class MainWindow : Window
                 && Enum.TryParse<WorkspaceSection>(rest[(i + 1)..], out var section))
             {
                 var id = rest[..i];
-                SetContent(WorkspaceSectionPage(id, section), preserveSelection: true);
+                var workbench = WorkspaceTabs(id);
+                workbench.Open(section);
+                if (section == WorkspaceSection.Files) _inspectorHost.IsOpen = true;
+                SetContent(workbench, preserveSelection: true);
             }
         }
     }
@@ -948,21 +944,19 @@ public sealed partial class MainWindow : Window
     /// whose helpers route through the peer, except Notes, which stays local
     /// like the desktop Mac.
     /// </summary>
+    private readonly Dictionary<string, WorkspaceTabsPage> _workbenches = new();
+    private WorkspaceTabsPage WorkspaceTabs(string id)
+    {
+        if (!_workbenches.TryGetValue(id, out var page))
+        {
+            page = new WorkspaceTabsPage(id, section => WorkspaceSectionPage(id, section));
+            _workbenches.Add(id, page);
+        }
+        return page;
+    }
+
     private Page WorkspaceSectionPage(string id, WorkspaceSection section)
     {
-        if (section is WorkspaceSection.Files or WorkspaceSection.Browser)
-        {
-            var key = (id, section);
-            if (!_workspacePages.TryGetValue(key, out var cached))
-            {
-                cached = section == WorkspaceSection.Files ? new EditorPage(id)
-                    : new BrowserPage("", "127.0.0.1", 0, false,
-                        RemoteWorkspaces.TrySplit(id, out var peer, out _) ? peer : null);
-                _workspacePages[key] = cached;
-            }
-            return cached;
-        }
-
         if (RemoteWorkspaces.IsRemote(id))
         {
             return section switch

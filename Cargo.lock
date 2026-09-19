@@ -3720,6 +3720,7 @@ dependencies = [
 name = "tokenstat-pty"
 version = "1.0.6"
 dependencies = [
+ "base64",
  "portable-pty",
  "serde",
  "thiserror 2.0.20",

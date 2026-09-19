@@ -398,10 +398,10 @@ impl Manager {
             .openpty(size)
             .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
-        let mut cmd = CommandBuilder::new(&req.command);
-        for a in &req.args {
-            cmd.arg(a);
-        }
+        let mut cmd = session_command(&req.command, &req.args);
+        #[cfg(windows)]
+        cmd.cwd(windows_shell_path(&req.cwd.to_string_lossy()));
+        #[cfg(not(windows))]
         cmd.cwd(&req.cwd);
         // Environment order matters. CommandBuilder starts from the process
         // env (launchd's thin set for hostd). The login shell's full env is
@@ -1106,6 +1106,53 @@ impl Manager {
 #[cfg(unix)]
 pub fn login_shell() -> String {
     resolve_shell(std::env::var("SHELL").ok().as_deref())
+}
+
+#[cfg(windows)]
+fn windows_shell_path(path: &str) -> &str {
+    // canonicalize adds the extended drive prefix; cmd treats it as a UNC
+    // working directory and silently falls back to the Windows directory.
+    path.strip_prefix(r"\\?\")
+        .filter(|p| p.as_bytes().get(1) == Some(&b':'))
+        .unwrap_or(path)
+}
+
+/// Batch shims require an interpreter, including when launched by a remote
+/// client. Encode the PowerShell invocation so paths and arguments are data,
+/// never interpolated into the Windows command line as shell syntax.
+fn session_command(command: &str, args: &[String]) -> CommandBuilder {
+    #[cfg(windows)]
+    if std::path::Path::new(command)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
+    {
+        use base64::Engine;
+        let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
+        let mut script = format!("& {}", quote(windows_shell_path(command)));
+        for arg in args {
+            script.push(' ');
+            script.push_str(&quote(arg));
+        }
+        script.push_str("; exit $LASTEXITCODE");
+        let bytes = script
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let mut builder = CommandBuilder::new("powershell.exe");
+        builder.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+        ]);
+        builder.arg(base64::engine::general_purpose::STANDARD.encode(bytes));
+        return builder;
+    }
+    let mut builder = CommandBuilder::new(command);
+    builder.args(args);
+    builder
 }
 
 #[cfg(unix)]
@@ -2454,6 +2501,45 @@ mod tests {
         );
         let _ = m.kill(&visible.id);
         let _ = m.kill(&hidden.id);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn batch_shims_launch_in_the_workspace_with_literal_arguments() {
+        let directory =
+            std::env::temp_dir().join(format!("tokenstat npm shim {}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let script = directory.join("agent.cmd");
+        std::fs::write(
+            &script,
+            "@echo off\r\necho shim-arg:%~1\r\necho shim-cwd:%CD%\r\n",
+        )
+        .unwrap();
+        let m = Manager::new();
+        let session = m
+            .spawn(&Spawn {
+                command: script.display().to_string(),
+                args: vec!["hello world".into()],
+                cwd: std::fs::canonicalize(&directory).unwrap(),
+                workspace_id: None,
+                hidden: false,
+                rows: 24,
+                cols: 160,
+                no_color: false,
+                dark: None,
+                environment: vec![],
+            })
+            .expect("batch shim through an interpreter");
+        assert!(wait_for(|| m
+            .read(&session.id, 0)
+            .map(|chunk| {
+                let text = String::from_utf8_lossy(&chunk.bytes);
+                text.contains("shim-arg:hello world")
+                    && text.contains(&format!("shim-cwd:{}", directory.display()))
+            })
+            .unwrap_or(false)));
+        let _ = m.close(&session.id);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

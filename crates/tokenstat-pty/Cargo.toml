@@ -11,6 +11,7 @@ publish.workspace = true
 description = "Pseudoterminal sessions for the agent CLIs a workspace runs"
 
 [dependencies]
+base64 = "0.22"
 serde.workspace = true
 thiserror.workspace = true
 # Only for the home directory. A daemon started as a systemd system service

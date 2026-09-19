@@ -3140,11 +3140,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 p.model_provider.as_deref(),
                 p.model_id.as_deref(),
             ));
-            let command = if crate::launcher::absolute_command(&p.command) {
-                p.command.clone()
-            } else {
-                crate::launcher::spawn_command(&p.command)
-            };
+            let command = crate::launcher::spawn_command(&p.command);
             let info = tokenstat_pty::manager()
                 .spawn(&tokenstat_pty::Spawn {
                     command,

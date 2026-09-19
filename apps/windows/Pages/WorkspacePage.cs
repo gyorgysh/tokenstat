@@ -714,27 +714,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                             await LoadLaunchersAsync(host);
                             return;
                         }
-                        JsonNode session;
-                        if (operation == "signIn")
+                        var session = await AppServices.Host.CallAsync("pty.spawn", new JsonObject
                         {
-                            session = await CallTargetAsync("launcher.signIn", new JsonObject
-                            {
-                                ["id"] = id, ["rows"] = 30, ["cols"] = 100, ["dark"] = Theme.IsDark,
-                            });
-                        }
-                        else
-                        {
-                            session = await AppServices.Host.CallAsync("pty.spawn", new JsonObject
-                            {
-                                ["workspaceId"] = _id, ["command"] = Format.Text(profile, "command"),
-                                ["args"] = profile["args"]?.DeepClone() ?? new JsonArray(),
-                                ["rows"] = 30, ["cols"] = 100, ["dark"] = Theme.IsDark,
-                            });
-                        }
+                            ["workspaceId"] = _id, ["command"] = Format.Text(profile, "command"),
+                            ["args"] = profile["args"]?.DeepClone() ?? new JsonArray(),
+                            ["rows"] = 30, ["cols"] = 100, ["dark"] = Theme.IsDark,
+                        });
                         var sessionId = Format.Text(session, "id");
                         if (string.IsNullOrEmpty(sessionId)) throw new InvalidOperationException("The host did not return a session.");
-                        if (operation == "signIn" && RemoteWorkspaces.TrySplit(_id, out var peer, out _))
-                            sessionId = RemoteWorkspaces.Join(peer, sessionId);
                         AppServices.OpenTerminal?.Invoke(_id, sessionId);
                     }
                     catch (Exception ex)
@@ -755,22 +742,15 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 ToolTipService.SetToolTip(launch, installed ? "Launch " + Format.Text(profile, "name", id) : "Install " + Format.Text(profile, "name", id));
                 var tile = new Grid();
                 tile.Children.Add(launch);
-                var setup = Buttons.ToolbarIcon(ActionIcon.Settings, "Set up " + Format.Text(profile, "name", id), (_, _) => { });
+                var setup = Buttons.ToolbarIcon(ActionIcon.Settings, "Set up " + Format.Text(profile, "name", id), (_, _) => { }, isAccent: true);
                 setup.HorizontalAlignment = HorizontalAlignment.Right;
                 setup.VerticalAlignment = VerticalAlignment.Top;
                 setup.Margin = new Thickness(8);
                 setup.Width = 24; setup.Height = 24;
                 setup.Foreground = Theme.AccentBrush;
-                if (setup.Content is FontIcon gear) gear.FontSize = 14;
-                if (setup.Content is SymbolIcon symbol) { symbol.Width = 14; symbol.Height = 14; }
+                setup.Content = new FontIcon { Glyph = "\uE713", FontSize = 14 };
                 var options = new Flyout { Content = actions };
                 setup.Flyout = options;
-                if (Format.Flag(profile["signIn"], "supported"))
-                {
-                    var signIn = ActionIconGlyph.Button("Sign in", ActionIcon.SignIn, (_, _) => { });
-                    signIn.Click += async (_, _) => { options.Hide(); await RunAsync(signIn, "signIn"); };
-                    actions.Children.Add(signIn);
-                }
                 if (!string.IsNullOrEmpty(Format.Text(profile, "installCommand")))
                 {
                     var install = ActionIconGlyph.Button(installed ? "Reinstall" : "Install", ActionIcon.Download, (_, _) => { });
