@@ -21,8 +21,53 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal static class SignInFlow
 {
+    private static bool _running;
+
     public static async Task RunAsync(Page owner, StackPanel slot, Func<Task> onSignedIn)
     {
+        // The host owns one device flow. Reserve it before the first await,
+        // including while deviceStart is still waiting on the network.
+        if (_running)
+        {
+            return;
+        }
+        _running = true;
+        using var cts = new CancellationTokenSource();
+        void OnUnloaded(object sender, RoutedEventArgs args) => cts.Cancel();
+        owner.Unloaded += OnUnloaded;
+        try
+        {
+            await RunCoreAsync(owner, slot, onSignedIn, cts);
+        }
+        catch (Exception) when (cts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            slot.Children.Add(Chrome.Banner(
+                FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Contact));
+        }
+        finally
+        {
+            owner.Unloaded -= OnUnloaded;
+            if (cts.IsCancellationRequested)
+            {
+                foreach (var card in slot.Children.OfType<Border>()
+                    .Where(card => card.Name == "SignInFlowCard").ToList())
+                {
+                    slot.Children.Remove(card);
+                }
+                try { await AppServices.Host.CallAsync("account.cancelLogin"); }
+                catch { /* leaving the page must not throw */ }
+            }
+            _running = false;
+        }
+    }
+
+    private static async Task RunCoreAsync(
+        Page owner, StackPanel slot, Func<Task> onSignedIn, CancellationTokenSource cts)
+    {
+        var token = cts.Token;
         foreach (var child in slot.Children)
         {
             if (child is Border framed && framed.Name == "SignInFlowCard")
@@ -37,10 +82,12 @@ internal static class SignInFlow
         }
         catch (Exception ex)
         {
+            token.ThrowIfCancellationRequested();
             slot.Children.Add(Chrome.Banner(
                 FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Contact));
             return;
         }
+        token.ThrowIfCancellationRequested();
         var openUrl = Format.Text(started, "openUrl");
         var code = Format.Text(started, "userCode");
         var verify = Format.Text(started, "verificationUri");
@@ -51,8 +98,6 @@ internal static class SignInFlow
             Open(openUrl);
         }
 
-        var cts = new CancellationTokenSource();
-        var token = cts.Token;
         var notice = new TextBlock { FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         void Note(string text)
         {
@@ -66,7 +111,8 @@ internal static class SignInFlow
         // the screen would look exactly as it did before the tap.
         var body = new StackPanel { Spacing = Theme.SpaceM };
         var waiting = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        waiting.Children.Add(new ProgressRing { Width = 18, Height = 18, IsActive = true });
+        var progress = new ProgressRing { Width = 18, Height = 18, IsActive = true };
+        waiting.Children.Add(progress);
         waiting.Children.Add(new TextBlock
         {
             Text = "Waiting for approval",
@@ -107,12 +153,14 @@ internal static class SignInFlow
         }
         buttons.Children.Add(ActionIconGlyph.Button("Cancel", ActionIcon.Dismiss, (_, _) =>
         {
-            cts.Cancel();
+            if (progress.IsActive)
+            {
+                cts.Cancel();
+            }
             if (card is not null)
             {
                 slot.Children.Remove(card);
             }
-            _ = AppServices.Host.CallAsync("account.cancelLogin");
         }));
         body.Children.Add(buttons);
         card = Chrome.Card(
@@ -151,6 +199,7 @@ internal static class SignInFlow
                     Note("Waiting for the network.");
                     continue;
                 }
+                token.ThrowIfCancellationRequested();
                 failures = 0;
                 Note("");
                 if (Format.Text(poll, "state") == "confirmed")
@@ -177,7 +226,19 @@ internal static class SignInFlow
         }
         catch (OperationCanceledException)
         {
-            // Cancelled from the card. The card is already gone.
+            // The wrapper cancels the host flow before accepting another.
+        }
+        finally
+        {
+            progress.IsActive = false;
+        }
+        if (!token.IsCancellationRequested)
+        {
+            buttons.Children.Add(ActionIconGlyph.Button("Try again", ActionIcon.Refresh, async (_, _) =>
+            {
+                slot.Children.Remove(card);
+                await RunAsync(owner, slot, onSignedIn);
+            }));
         }
     }
 
