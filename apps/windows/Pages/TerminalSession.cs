@@ -39,6 +39,13 @@ internal sealed class TerminalSession
 
     public bool Alive { get; private set; } = true;
 
+    /// <summary>
+    /// True after the first host output has arrived. Agent CLIs spend
+    /// seconds between spawn and their first paint, and the pane shows a
+    /// starting state for that gap rather than an empty terminal.
+    /// </summary>
+    public bool HasOutput { get; private set; }
+
     public bool Closed { get; private set; }
 
     public long Dropped { get; private set; }
@@ -229,6 +236,7 @@ internal sealed class TerminalSession
         Id = "";
         Offset = 0;
         Alive = true;
+        HasOutput = false;
         Closed = false;
         Dropped = 0;
         Paused = false;
@@ -337,6 +345,7 @@ internal sealed class TerminalSession
             }
             Offset = 0;
             Alive = true;
+            HasOutput = false;
             Closed = false;
             LastError = string.IsNullOrEmpty(Id) ? "The host did not return a session id." : "";
             ByWorkspace[WorkspaceId] = this;
@@ -510,6 +519,7 @@ internal sealed class TerminalSession
                 try
                 {
                     var bytes = Convert.FromBase64String(encoded);
+                    HasOutput = true;
                     Output?.Invoke(Encoding.UTF8.GetString(bytes));
                 }
                 catch

@@ -30,4 +30,14 @@ internal static class TerminalPalette
     public static Color Background(bool dark) => FromHex(BackgroundHex(dark));
 
     public static Color Foreground(bool dark) => FromHex(ForegroundHex(dark));
+
+    /// <summary>
+    /// The same background for the pane a terminal sits in rather than the
+    /// cells themselves. A terminal view does not fill its container: the
+    /// strip of a pane wider than the columns fit, and the moment before
+    /// the first frame, are all drawn by whatever is behind it. Taking that
+    /// shade from the same number the cells use means the seam cannot be
+    /// seen at all.
+    /// </summary>
+    public static Color Surface(bool dark) => Background(dark);
 }

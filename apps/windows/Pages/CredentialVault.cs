@@ -74,6 +74,40 @@ internal static class CredentialVault
             ? null
             : secretRef[Scheme.Length..];
 
+    /// <summary>
+    /// Store a secret and return the reference metadata keeps, mirroring the
+    /// Mac store call. Empty string when the store refused the write.
+    /// </summary>
+    public static string Store(string secret, string id) =>
+        Save(id, secret) ? RefFor(id) : "";
+
+    /// <summary>Load through a stored reference rather than a bare id.</summary>
+    public static string? LoadReference(string? secretRef)
+    {
+        var id = IdFromRef(secretRef);
+        return id is null ? null : Load(id);
+    }
+
+    /// <summary>Whether a stored reference still resolves to a secret.</summary>
+    public static bool ContainsReference(string? secretRef)
+    {
+        var id = IdFromRef(secretRef);
+        return id is not null && Contains(id);
+    }
+
+    /// <summary>
+    /// Delete through a stored reference. Unknown references are ignored,
+    /// matching the Mac delete.
+    /// </summary>
+    public static void Delete(string? secretRef)
+    {
+        var id = IdFromRef(secretRef);
+        if (id is not null)
+        {
+            Remove(id);
+        }
+    }
+
     public static bool Save(string id, string secret)
     {
         if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(secret))

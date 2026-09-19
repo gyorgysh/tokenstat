@@ -98,13 +98,14 @@ internal sealed class OnboardingPage : Page
         root.Children.Add(Section(
             "Machines",
             "Choose where the work runs",
-            "Use this PC or a cloud server. That machine needs to be awake "
-            + "while you work. Sign in to see every device on one account."));
+            "Use this PC or a cloud server, with guided setup for a server. "
+            + "That machine needs to be awake while you work, and this PC "
+            + "is how you reach it."));
         root.Children.Add(Section(
             "Usage",
             "Know where the tokens go",
             "See activity and estimated cost by tool, model, and project, "
-            + "plus supported plans' usage and reset times. Synced numbers "
+            + "plus supported plans’ usage and reset times. Synced numbers "
             + "stay available with every computer asleep. Plan usage is "
             + "shown separately from cost."));
         root.Children.Add(Section(

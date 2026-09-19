@@ -79,15 +79,7 @@ internal sealed class ListPage : Page
             {
                 continue;
             }
-            var label = Format.Text(item, _itemKey, Format.Text(item, "id", "(item)"));
-            var extra = Format.Text(item, "enabled") is { Length: > 0 }
-                ? ""
-                : Format.Text(item, "status");
-            list.Children.Add(new TextBlock
-            {
-                Text = string.IsNullOrEmpty(extra) ? label : $"{label} · {extra}",
-                TextWrapping = TextWrapping.Wrap,
-            });
+            list.Children.Add(Row(item));
         }
         if (list.Children.Count == 0)
         {
@@ -95,5 +87,94 @@ internal sealed class ListPage : Page
             return;
         }
         _root.Children.Add(Chrome.Card(_title, list));
+    }
+
+    /// <summary>
+    /// One row in the Mac folder and session anatomy: a leading accent tile,
+    /// the name, one secondary line, an optional accent line, and a trailing
+    /// chevron. The figure is what the row is for, so the title keeps the
+    /// same left edge on every row and the mark fills the tile in front.
+    /// </summary>
+    private Border Row(JsonNode? item)
+    {
+        var label = Format.Text(item, _itemKey, Format.Text(item, "id", "(item)"));
+        var lines = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        lines.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        var subtitle = Format.Text(item, "subtitle", Format.Text(item, "status"));
+        if (!string.IsNullOrEmpty(subtitle))
+        {
+            lines.Children.Add(new TextBlock
+            {
+                Text = subtitle,
+                FontSize = 11,
+                Opacity = 0.65,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+        }
+        var branch = Format.Text(item, "branch");
+        if (!string.IsNullOrEmpty(branch))
+        {
+            lines.Children.Add(new TextBlock
+            {
+                Text = branch,
+                FontSize = 11,
+                Foreground = Theme.AccentBrush,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+        }
+
+        var glyph = _symbol.Icon();
+        glyph.Foreground = Theme.AccentBrush;
+        var tile = new Border
+        {
+            Width = 26,
+            Height = 26,
+            CornerRadius = new CornerRadius(7),
+            Background = Theme.AccentSoftBrush,
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = new Viewbox
+            {
+                Width = 13,
+                Height = 13,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = glyph,
+            },
+        };
+
+        var grid = new Grid { ColumnSpacing = Theme.SpaceS };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(tile, 0);
+        Grid.SetColumn(lines, 1);
+        grid.Children.Add(tile);
+        grid.Children.Add(lines);
+        var chevron = new FontIcon
+        {
+            Glyph = "\uE972",
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+            FontSize = 12,
+            Opacity = 0.4,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(chevron, 2);
+        grid.Children.Add(chevron);
+
+        return new Border
+        {
+            Background = Theme.PanelBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(Theme.CardRadius),
+            Padding = new Thickness(Theme.SpaceM),
+            Child = grid,
+        };
     }
 }

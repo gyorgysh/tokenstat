@@ -60,7 +60,26 @@ internal static class SignInFlow
             notice.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
         }
         Border? card = null;
+        // Same order as the Mac approval wait: the spinner and the
+        // instruction, the code, then the way back to the page and out.
+        // The card can outlive the browser window, and without this state
+        // the screen would look exactly as it did before the tap.
         var body = new StackPanel { Spacing = Theme.SpaceM };
+        var waiting = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        waiting.Children.Add(new ProgressRing { Width = 18, Height = 18, IsActive = true });
+        waiting.Children.Add(new TextBlock
+        {
+            Text = "Waiting for approval",
+            VerticalAlignment = VerticalAlignment.Center,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        body.Children.Add(waiting);
+        body.Children.Add(new TextBlock
+        {
+            Text = "Approve this device on tokenstat.ai. This screen updates by itself.",
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+        });
         body.Children.Add(new Border
         {
             Background = Theme.AccentSoftBrush,
@@ -79,23 +98,14 @@ internal static class SignInFlow
                 IsTextSelectionEnabled = true,
             },
         });
-        body.Children.Add(new TextBlock
-        {
-            Text = "Check that the page shows this code, then approve it there.",
-            Opacity = 0.7,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        var waiting = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        waiting.Children.Add(new ProgressRing { Width = 18, Height = 18, IsActive = true });
-        waiting.Children.Add(new TextBlock
-        {
-            Text = "Waiting for confirmation…",
-            VerticalAlignment = VerticalAlignment.Center,
-            Opacity = 0.7,
-        });
-        body.Children.Add(waiting);
         body.Children.Add(notice);
-        body.Children.Add(ActionIconGlyph.Button("Cancel", ActionIcon.Dismiss, (_, _) =>
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        if (!string.IsNullOrEmpty(openUrl))
+        {
+            buttons.Children.Add(ActionIconGlyph.Button(
+                "Open the page", ActionIcon.External, (_, _) => Open(openUrl)));
+        }
+        buttons.Children.Add(ActionIconGlyph.Button("Cancel", ActionIcon.Dismiss, (_, _) =>
         {
             cts.Cancel();
             if (card is not null)
@@ -104,8 +114,9 @@ internal static class SignInFlow
             }
             _ = AppServices.Host.CallAsync("account.cancelLogin");
         }));
+        body.Children.Add(buttons);
         card = Chrome.Card(
-            "Confirm in your browser",
+            "Waiting for approval",
             body,
             string.IsNullOrEmpty(verify) ? null : "A page should have opened at " + verify);
         card.Name = "SignInFlowCard";
