@@ -43,6 +43,7 @@ internal static class Program
 public sealed partial class SmokeApp : Application
 {
     private Window? _window;
+    private bool _testsStarted;
     public SmokeApp()
     {
         InitializeComponent();
@@ -58,6 +59,8 @@ public sealed partial class SmokeApp : Application
         _window = new Window { Content = body };
         body.Loaded += async (_, _) =>
         {
+            if (_testsStarted) return;
+            _testsStarted = true;
             Program.Log("Controls loaded");
             H264Streamer? streamer = null;
             try
@@ -156,17 +159,19 @@ public sealed partial class SmokeApp : Application
                 var contentHost = new Border { Child = shellBody };
                 var navigation = new NavigationView { Content = contentHost, Height = 650, Width = 1100 };
                 navigation.Loaded += (_, _) => NativeContentLayout.Stretch(navigation, contentHost);
-                body.Children.Add(navigation);
-                body.UpdateLayout();
+                _window.Content = navigation;
+                navigation.UpdateLayout();
                 await Task.Delay(500);
+                Program.Log($"Shell sizes: nav={navigation.ActualHeight}, content={contentHost.ActualHeight}, body={shellBody.ActualHeight}, inspector={inspectorHost.ActualHeight}, frame={workspaceFrame.ActualHeight}, page={((Page)workspaceFrame.Content).ActualHeight}, tabs={tabView.ActualHeight}, terminalGrid={terminalGrid.ActualHeight}, terminal={terminal.ActualHeight}");
                 if (terminal.ActualHeight < 450 || terminal.Rows < 25)
                     throw new Exception($"Shell terminal collapsed: {terminal.ActualHeight}px / {terminal.Rows} rows");
                 navigation.Height = 450;
-                body.UpdateLayout();
+                navigation.UpdateLayout();
                 await Task.Delay(350);
                 if (terminal.ActualHeight < 250 || terminal.ActualHeight > 400)
                     throw new Exception($"Shell terminal failed resize: {terminal.ActualHeight}px");
-                body.Children.Remove(navigation);
+                _window.Content = body;
+                await Task.Delay(100);
                 Program.Log("PASS: terminal fills NavigationView, Frame, inspector host, page and tab after resize");
                 var actions = new FlowPanel { Width = 248, Spacing = 8 };
                 foreach (var label in new[] { "0 of 8 selected", "Select all", "Clear", "Review and commit", "Review all" })
