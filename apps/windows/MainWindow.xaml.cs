@@ -462,9 +462,7 @@ public sealed partial class MainWindow : Window
     private void RebuildFolderItems()
     {
         var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
-        var expanded = NavItems(_nav.MenuItems)
-            .Where(item => item.Tag is string)
-            .ToDictionary(item => (string)item.Tag, item => item.IsExpanded, StringComparer.Ordinal);
+        var expanded = NavigationExpansion.Capture(NavItems(_nav.MenuItems));
         var keep = new List<object>();
         foreach (var item in _nav.MenuItems)
         {
@@ -515,7 +513,7 @@ public sealed partial class MainWindow : Window
         });
         foreach (var item in NavItems(_nav.MenuItems))
         {
-            if (item.Tag is string tag && expanded.TryGetValue(tag, out var wasExpanded))
+            if (item.MenuItems.Count > 0 && item.Tag is string tag && expanded.TryGetValue(tag, out var wasExpanded))
             {
                 item.IsExpanded = wasExpanded;
             }

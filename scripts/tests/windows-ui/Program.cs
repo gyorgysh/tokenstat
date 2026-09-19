@@ -4,6 +4,7 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Pages;
+using Tokenstat.Navigation;
 using Windows.Media.Core;
 
 namespace NativeUiTests;
@@ -59,6 +60,14 @@ public sealed partial class SmokeApp : Application
             H264Streamer? streamer = null;
             try
             {
+                var hosts = new NavigationViewItem { Tag = "ssh:Hosts" };
+                var ssh = new NavigationViewItem { Tag = "ssh:Hosts", MenuItems = { hosts }, IsExpanded = true };
+                var files = new NavigationViewItem { Tag = "ws:folder:Files" };
+                var folder = new NavigationViewItem { Tag = "ws:folder:Files", MenuItems = { files }, IsExpanded = false };
+                var expansion = NavigationExpansion.Capture(new[] { ssh, hosts, folder, files });
+                if (expansion.Count != 2 || !expansion["ssh:Hosts"] || expansion["ws:folder:Files"])
+                    throw new Exception("Navigation expansion did not preserve the group state for shared landing routes");
+                Program.Log("PASS: navigation groups can share landing routes with their child pages");
                 foreach (var original in new[] { "", "hello", "one\ntwo", "one\ntwo\n", "one\ntwo\n\n", "one\r\ntwo\r\n", "😀 café\n" })
                 {
                     editor.Document.SetText(TextSetOptions.None, original);

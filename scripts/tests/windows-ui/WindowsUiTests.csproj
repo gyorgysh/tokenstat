@@ -24,5 +24,6 @@
     <Compile Include="../../../apps/windows/Pages/EditorText.cs" Link="EditorText.cs" />
     <Compile Include="../../../apps/windows/Pages/H264Streamer.cs" Link="H264Streamer.cs" />
     <Compile Include="../../../apps/windows/Pages/ScreenFrame.cs" Link="ScreenFrame.cs" />
+    <Compile Include="../../../apps/windows/Navigation/NavigationExpansion.cs" Link="NavigationExpansion.cs" />
   </ItemGroup>
 </Project>
