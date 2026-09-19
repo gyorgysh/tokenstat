@@ -43,6 +43,7 @@ internal sealed class PersonaMark : Canvas
         Height = size;
         AutomationProperties.SetAccessibilityView(this, AccessibilityView.Raw);
         _timer.Tick += (_, _) => Tick();
+        PointerPressed += OnPointerPressed;
         Loaded += (_, _) => Start();
         Unloaded += (_, _) => Stop();
     }
@@ -86,9 +87,8 @@ internal sealed class PersonaMark : Canvas
     /// <summary>Whether a click shoves it. Off by default: a face beside a message is not a control.</summary>
     public bool Pokeable { get; set; }
 
-    protected override void OnPointerPressed(PointerRoutedEventArgs e)
+    private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        base.OnPointerPressed(e);
         if (!Pokeable || _size <= 0)
         {
             return;
