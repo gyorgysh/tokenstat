@@ -10,7 +10,6 @@ using System.Text.Json.Nodes;
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 using Tokenstat.Pages;
-using Windows.Storage;
 
 namespace Tokenstat.Notifications;
 
@@ -60,10 +59,10 @@ internal sealed class RunNotifications
     /// <summary>Off until asked for. Persisted locally, never synced.</summary>
     public bool IsOn
     {
-        get => ApplicationData.Current.LocalSettings.Values[OnKey] as bool? ?? false;
+        get => ReadOn();
         set
         {
-            ApplicationData.Current.LocalSettings.Values[OnKey] = value;
+            WriteOn(value);
             if (value)
             {
                 EnsureRegistered();
@@ -77,19 +76,73 @@ internal sealed class RunNotifications
     /// </summary>
     public void EnsureRegistered()
     {
-        if (_registered || !IsOn)
+        if (_registered)
         {
             return;
         }
         try
         {
+            if (!IsOn)
+            {
+                return;
+            }
             AppNotificationManager.Default.Register();
             _registered = true;
         }
         catch
         {
             // A toast that cannot register is quiet, not fatal. The run list
-            // on screen still says what happened.
+            // on screen still says what happened. The switch read is inside
+            // the try on purpose: this runs on the launch path before any
+            // window exists, and nothing here may kill a launch.
+        }
+    }
+
+    /// <summary>
+    /// The switch on disk. A plain file, not LocalSettings: this app is
+    /// unpackaged and has no package identity, so
+    /// <c>ApplicationData.Current</c> throws, and it threw here on every
+    /// launch before any window existed. Never read settings through a
+    /// packaged-identity API from this app.
+    /// </summary>
+    private static string SettingsPath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "tokenstat",
+            "notifications.json");
+
+    private static bool ReadOn()
+    {
+        try
+        {
+            return JsonNode.Parse(File.ReadAllText(SettingsPath))?[OnKey]?.GetValue<bool>() ?? false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void WriteOn(bool value)
+    {
+        try
+        {
+            JsonObject doc;
+            try
+            {
+                doc = JsonNode.Parse(File.ReadAllText(SettingsPath)) as JsonObject ?? new();
+            }
+            catch
+            {
+                doc = new();
+            }
+            doc[OnKey] = value;
+            Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+            File.WriteAllText(SettingsPath, doc.ToJsonString());
+        }
+        catch
+        {
+            // A switch that cannot persist still works for this run.
         }
     }
 

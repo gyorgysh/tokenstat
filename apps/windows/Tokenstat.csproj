@@ -25,7 +25,14 @@
     <AppxPackage>false</AppxPackage>
     <GenerateAppxPackageOnBuild>false</GenerateAppxPackageOnBuild>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
-    <WindowsAppSdkBootstrapInitialize>true</WindowsAppSdkBootstrapInitialize>
+    <!--
+      Self-contained means no bootstrapper. The generated MddBootstrapInitialize
+      call looks for an installed Windows App Runtime and puts up a Yes/No
+      install prompt when it finds none, which is the opposite of this build:
+      the SDK travels in the folder next to the exe. Keep this false as long
+      as WindowsAppSDKSelfContained above is true.
+    -->
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
   </PropertyGroup>
 
   <ItemGroup>

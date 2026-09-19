@@ -162,6 +162,19 @@ jobs:
       - name: Home recent places never contact a machine
         run: bash scripts/check-home-account-plane.sh
 
+  # Its own job again: this one is a packaging mismatch between two MSBuild
+  # properties, not a style rule, and it fails silently at build time and
+  # loudly on somebody else's machine, as a runtime install prompt. A red
+  # check with its own name is the only warning there is.
+  windows-packaging:
+    name: windows packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The Windows zip runs with nothing installed
+        run: bash scripts/check-windows-packaging.sh
+
   installer-tests:
     name: installer rollback
     runs-on: ubuntu-latest
