@@ -23,15 +23,26 @@ namespace Tokenstat.Pages;
 /// was dirty raises a conflict card, and saving stays off until a copy is
 /// chosen.
 /// </summary>
-internal sealed class EditorPage : Page
+internal sealed class EditorPage : Page, IInspectorContent
 {
     private readonly string _workspaceId;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
+    private readonly StackPanel _inspector = new()
+    {
+        Spacing = Theme.SpaceM,
+        Padding = new Thickness(Theme.SpaceM),
+    };
     private readonly StackPanel _tree = new() { Spacing = Theme.SpaceXs };
     private readonly TextBlock _treeCrumb = new() { Opacity = 0.7 };
     private readonly StackPanel _pageStatus = new() { Spacing = Theme.SpaceS };
     private readonly TabView _tabs = new() { IsAddTabButtonVisible = false };
     private readonly List<EditorTab> _open = [];
     private string _directory = "";
+    private string _folderName = "";
 
     public EditorPage(string workspaceId)
     {
@@ -70,7 +81,18 @@ internal sealed class EditorPage : Page
         split.Children.Add(files);
         split.Children.Add(editor);
 
-        Content = split;
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(split, 1);
+        layout.Children.Add(split);
+        Content = layout;
+        RebuildChrome();
+        RenderInspector();
         _tabs.TabCloseRequested += async (_, args) =>
         {
             if (args.Item is TabViewItem item && item.Tag is EditorTab tab)
@@ -78,7 +100,125 @@ internal sealed class EditorPage : Page
                 await CloseTabAsync(tab);
             }
         };
-        Loaded += async (_, _) => await LoadTreeAsync();
+        _tabs.SelectionChanged += (_, _) => RenderInspector();
+        Loaded += async (_, _) =>
+        {
+            _folderName = await FolderNameAsync();
+            RebuildChrome();
+            await LoadTreeAsync();
+        };
+    }
+
+    /// <summary>
+    /// The inspector column content: the open files with their dirty marks,
+    /// and the current file's facts. Tab switches and header changes repaint
+    /// it, so the column stays live without the shell asking again.
+    /// </summary>
+    public UIElement? Inspector => _inspector;
+
+    private void RebuildChrome()
+    {
+        var scope = Chrome.ScopeChip(
+            string.IsNullOrEmpty(_folderName) ? "Files" : _folderName);
+        _barSlot.Content = DetailBar.View(
+            scope: scope,
+            trailing: new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload the file tree",
+                    async (_, _) => await LoadTreeAsync()),
+                Buttons.ToolbarIcon(
+                    ActionIcon.Save,
+                    "Save the current file",
+                    async (_, _) =>
+                    {
+                        if (CurrentTab() is EditorTab tab)
+                        {
+                            await tab.SaveAsync();
+                        }
+                    }),
+            });
+    }
+
+    private void RenderInspector()
+    {
+        _inspector.Children.Clear();
+        if (_open.Count == 0)
+        {
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = "Open files",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = "Pick a file from the tree to open it here.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return;
+        }
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = $"Open files ({_open.Count})",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        foreach (var tab in _open)
+        {
+            var captured = tab;
+            var pick = new Button
+            {
+                Content = new TextBlock
+                {
+                    Text = (tab.IsDirty ? "• " : "") + tab.Name,
+                    FontFamily = Fonts.Mono,
+                    FontSize = 12,
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+            };
+            pick.Click += (_, _) => Select(captured);
+            _inspector.Children.Add(pick);
+        }
+        if (CurrentTab() is EditorTab current)
+        {
+            if (!string.IsNullOrEmpty(current.Language))
+            {
+                _inspector.Children.Add(Chrome.Stat("Language", current.Language));
+            }
+            _inspector.Children.Add(Chrome.Stat("Lines", $"{current.LineTotal:N0}"));
+            _inspector.Children.Add(Chrome.Stat("Indent", $"{current.IndentWidth} spaces"));
+            _inspector.Children.Add(Chrome.Stat(
+                "State", current.IsDirty ? "Unsaved changes" : "Saved"));
+        }
+    }
+
+    private EditorTab? CurrentTab() =>
+        (_tabs.SelectedItem as TabViewItem)?.Tag as EditorTab;
+
+    private async Task<string> FolderNameAsync()
+    {
+        try
+        {
+            var listed = await AppServices.Host.CallAsync("workspace.list");
+            var array = listed as JsonArray ?? listed["workspaces"] as JsonArray;
+            if (array is not null)
+            {
+                foreach (var folder in array)
+                {
+                    if (Format.Text(folder, "id") == _workspaceId)
+                    {
+                        return Format.Text(folder, "name", Format.Text(folder, "path", _workspaceId));
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+        return "";
     }
 
     private async Task LoadTreeAsync()
@@ -188,10 +328,15 @@ internal sealed class EditorPage : Page
             Content = tab.View,
             IsClosable = true,
         };
-        tab.HeaderChanged = () => item.Header = tab.Title;
+        tab.HeaderChanged = () =>
+        {
+            item.Header = tab.Title;
+            RenderInspector();
+        };
         item.Tag = tab;
         _tabs.TabItems.Add(item);
         _tabs.SelectedItem = item;
+        RenderInspector();
         _ = tab.HighlightAsync();
     }
 
@@ -247,6 +392,7 @@ internal sealed class EditorPage : Page
         {
             _tabs.TabItems.Remove(item);
         }
+        RenderInspector();
     }
 
     private void PageBanner(string text)
@@ -313,6 +459,12 @@ internal sealed class EditorPage : Page
 
         public string? ConflictHost { get; private set; }
 
+        public string Language => _language ?? "";
+
+        public int IndentWidth => _indent;
+
+        public int LineTotal => LineCount(Norm(_text));
+
         public UIElement View => _view;
 
         public EditorTab(Page owner, string workspaceId, string path, string content)
@@ -353,6 +505,7 @@ internal sealed class EditorPage : Page
             _box.Document.SetText(TextSetOptions.None, content);
             _applying = false;
             _box.TextChanged += (_, _) => OnEdited();
+            _box.SelectionChanged += (_, _) => RefreshStatus();
             _findQuery.TextChanged += (_, _) => RefreshMatches();
             _box.KeyDown += BoxOnKeyDown;
             RefreshStatus();
@@ -865,6 +1018,9 @@ internal sealed class EditorPage : Page
         private void RefreshStatus()
         {
             var parts = new List<string>();
+            var (line, col) = CaretLineCol();
+            parts.Add($"Line {line}, column {col}");
+            parts.Add($"{LineCount(Norm(_text))} lines");
             if (!string.IsNullOrEmpty(_language))
             {
                 parts.Add(_language);
@@ -882,6 +1038,47 @@ internal sealed class EditorPage : Page
                 parts.Add(_error);
             }
             _status.Text = string.Join(" · ", parts);
+        }
+
+        /// <summary>
+        /// One-based caret position over the buffer. A carriage return only
+        /// breaks the line on its own: inside a CRLF pair the line feed does
+        /// the counting, so Windows endings do not number every line twice.
+        /// </summary>
+        private (int Line, int Col) CaretLineCol()
+        {
+            try
+            {
+                var pos = Math.Clamp(_box.Document.Selection.StartPosition, 0, _text.Length);
+                var line = 1;
+                var col = 1;
+                for (var i = 0; i < pos; i++)
+                {
+                    var ch = _text[i];
+                    if (ch == '\n')
+                    {
+                        line++;
+                        col = 1;
+                    }
+                    else if (ch == '\r')
+                    {
+                        if (i + 1 >= _text.Length || _text[i + 1] != '\n')
+                        {
+                            line++;
+                            col = 1;
+                        }
+                    }
+                    else
+                    {
+                        col++;
+                    }
+                }
+                return (line, col);
+            }
+            catch
+            {
+                return (1, 1);
+            }
         }
     }
 }

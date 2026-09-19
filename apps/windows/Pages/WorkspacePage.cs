@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 using System.Text.Json.Nodes;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -14,36 +15,127 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-internal sealed class WorkspacePage : Page
+internal sealed class WorkspacePage : Page, IInspectorContent
 {
     private const int HugeChars = 200_000;
 
     private readonly string _id;
     private readonly WorkspaceSection _section;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
+    private readonly StackPanel _inspector = new()
+    {
+        Spacing = Theme.SpaceM,
+        Padding = new Thickness(Theme.SpaceM),
+    };
+    private readonly StackPanel _sessionsHost = new() { Spacing = Theme.SpaceS };
     private string _path = "";
+    private string _folderName = "";
+    private string _branch = "";
+    private string _summary = "";
+    private DispatcherQueueTimer? _sessionsPoll;
+    private bool _sessionsLoading;
 
     public WorkspacePage(string id, WorkspaceSection section)
     {
         _id = id;
         _section = section;
-        Content = new ScrollViewer
+        var scroller = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
             Content = _root,
         };
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(scroller, 1);
+        layout.Children.Add(scroller);
+        Content = layout;
+        RebuildChrome();
+        RenderInspector();
         Loaded += async (_, _) => await LoadAsync();
+        Unloaded += (_, _) => StopSessionsPoll();
+    }
+
+    /// <summary>
+    /// The inspector column content: which folder is on screen, its branch,
+    /// and a one line summary of the section. Reloads replace its children,
+    /// so the column stays live without the shell asking again.
+    /// </summary>
+    public UIElement? Inspector => _inspector;
+
+    private void RebuildChrome()
+    {
+        var scope = Chrome.ScopeChip(
+            string.IsNullOrEmpty(_folderName) ? _section.Label() : _folderName);
+        _barSlot.Content = DetailBar.View(
+            scope: scope,
+            trailing: new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload " + _section.Label().ToLowerInvariant(),
+                    async (_, _) => await LoadAsync()),
+            });
+    }
+
+    private void RenderInspector()
+    {
+        _inspector.Children.Clear();
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = _section.Label(),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        if (!string.IsNullOrEmpty(_folderName))
+        {
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = _folderName,
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        if (!string.IsNullOrEmpty(_branch))
+        {
+            _inspector.Children.Add(Chrome.Stat("Branch", WorkspaceGit.ShortBranch(_branch)));
+        }
+        if (!string.IsNullOrEmpty(_summary))
+        {
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = _summary,
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
     }
 
     private async Task LoadAsync()
     {
         _root.Children.Clear();
+        _summary = "";
+        if (_section != WorkspaceSection.Sessions)
+        {
+            StopSessionsPoll();
+        }
         _root.Children.Add(new TextBlock
         {
             Text = _section.Label(),
             FontSize = 18,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
+        _folderName = await FolderNameAsync();
+        RebuildChrome();
+        RenderInspector();
         try
         {
             switch (_section)
@@ -112,6 +204,10 @@ internal sealed class WorkspacePage : Page
             return;
         }
 
+        _summary = _path.Length == 0
+            ? $"{array.Count} {(array.Count == 1 ? "entry" : "entries")} at the workspace root."
+            : $"{array.Count} {(array.Count == 1 ? "entry" : "entries")} in {_path}.";
+        RenderInspector();
         var list = new StackPanel { Spacing = 4 };
         foreach (var entry in array)
         {
@@ -233,7 +329,8 @@ internal sealed class WorkspacePage : Page
         var upstream = Format.Text(git, "upstream", Format.Text(status, "upstream"));
         var ahead = Format.Long(git, "ahead");
         var behind = Format.Long(git, "behind");
-        var folderName = await FolderNameAsync();
+        var folderName = _folderName;
+        _branch = branch;
 
         if (!string.IsNullOrEmpty(branch))
         {
@@ -260,6 +357,11 @@ internal sealed class WorkspacePage : Page
             }
         }
         session.Reconcile(available);
+        _summary = available.Count == 0
+            ? "A clean tree."
+            : $"{available.Count} changed {(available.Count == 1 ? "file" : "files")}, "
+            + $"{session.SelectedCount} selected for the next commit.";
+        RenderInspector();
 
         var selectionRow = new StackPanel
         {
@@ -509,54 +611,163 @@ internal sealed class WorkspacePage : Page
             open(_id, null);
         }));
         _root.Children.Add(chrome);
+        _sessionsHost.Children.Clear();
+        _root.Children.Add(_sessionsHost);
+        await RefreshSessionsAsync();
+        StartSessionsPoll();
+    }
 
-        var listed = await AppServices.Host.CallAsync("pty.list");
-        var array = listed as JsonArray
-            ?? listed["sessions"] as JsonArray
-            ?? listed["items"] as JsonArray;
-        var list = new StackPanel { Spacing = Theme.SpaceS };
-        var n = 0;
-        if (array is not null)
+    /// <summary>
+    /// The live session list, like the Mac session strip: each shell with its
+    /// running state, refreshed on a timer while this section is on screen.
+    /// A quiet pass replaces the rows without rebuilding the page.
+    /// </summary>
+    private async Task RefreshSessionsAsync()
+    {
+        if (_sessionsLoading)
         {
-            foreach (var item in array)
-            {
-                if (Format.Flag(item, "hidden"))
-                {
-                    continue;
-                }
-                var workspace = Format.Text(item, "workspaceId");
-                if (workspace != _id)
-                {
-                    continue;
-                }
-                var id = Format.Text(item, "id");
-                if (string.IsNullOrEmpty(id))
-                {
-                    continue;
-                }
-                n++;
-                var command = Format.Text(item, "command", "shell");
-                var alive = Format.Flag(item, "alive") ? "running" : "exited";
-                var open = new Button
-                {
-                    Content = $"{command} · {alive}",
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Left,
-                };
-                var sessionId = id;
-                open.Click += (_, _) => AppServices.OpenTerminal?.Invoke(_id, sessionId);
-                list.Children.Add(open);
-            }
-        }
-        if (n == 0)
-        {
-            _root.Children.Add(EmptyState.View(
-                "No shells in this folder",
-                "Open a new shell. It runs on this PC through the host.",
-                EmptyArtKind.Sessions));
             return;
         }
-        _root.Children.Add(Chrome.Card("Sessions", list));
+        _sessionsLoading = true;
+        try
+        {
+            var listed = await AppServices.Host.CallAsync("pty.list");
+            var array = listed as JsonArray
+                ?? listed["sessions"] as JsonArray
+                ?? listed["items"] as JsonArray;
+            _sessionsHost.Children.Clear();
+            var list = new StackPanel { Spacing = Theme.SpaceS };
+            var running = 0;
+            var total = 0;
+            if (array is not null)
+            {
+                foreach (var item in array)
+                {
+                    if (Format.Flag(item, "hidden"))
+                    {
+                        continue;
+                    }
+                    var workspace = Format.Text(item, "workspaceId");
+                    if (workspace != _id)
+                    {
+                        continue;
+                    }
+                    var id = Format.Text(item, "id");
+                    if (string.IsNullOrEmpty(id))
+                    {
+                        continue;
+                    }
+                    total++;
+                    var alive = Format.Flag(item, "alive");
+                    if (alive)
+                    {
+                        running++;
+                    }
+                    list.Children.Add(SessionRow(
+                        id,
+                        Format.Text(item, "command", "shell"),
+                        alive,
+                        item?["exitCode"] is null ? null : (int?)Format.Long(item, "exitCode")));
+                }
+            }
+            if (total == 0)
+            {
+                _sessionsHost.Children.Add(EmptyState.View(
+                    "No shells in this folder",
+                    "Open a new shell. It runs on this PC through the host.",
+                    EmptyArtKind.Sessions));
+                _summary = "No shells in this folder.";
+            }
+            else
+            {
+                _sessionsHost.Children.Add(Chrome.Card("Sessions", list));
+                _summary = running == total
+                    ? $"{total} {(total == 1 ? "shell" : "shells")}, all running."
+                    : $"{running} of {total} shells running.";
+            }
+            RenderInspector();
+        }
+        catch (Exception ex)
+        {
+            _sessionsHost.Children.Clear();
+            _sessionsHost.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+        }
+        finally
+        {
+            _sessionsLoading = false;
+        }
+    }
+
+    private UIElement SessionRow(string id, string command, bool alive, int? exitCode)
+    {
+        var state = alive
+            ? "running"
+            : exitCode.HasValue ? $"exited {exitCode}" : "exited";
+        var body = new StackPanel { Spacing = 2 };
+        body.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceS,
+            Children =
+            {
+                new Border
+                {
+                    Width = 8,
+                    Height = 8,
+                    CornerRadius = new CornerRadius(4),
+                    Background = alive ? Theme.Brush(Theme.Success) : Theme.Brush(Theme.StateIdle),
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+                new TextBlock
+                {
+                    Text = command,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextWrapping = TextWrapping.Wrap,
+                },
+            },
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = $"{state} · {(id.Length <= 6 ? id : id[^6..])}",
+            FontSize = 12,
+            Opacity = 0.68,
+        });
+        var card = new Border
+        {
+            Background = Theme.PanelBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(Theme.CardRadius),
+            Padding = new Thickness(Theme.CardPadding),
+            Child = body,
+        };
+        var open = new Button
+        {
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = card,
+        };
+        var sessionId = id;
+        open.Click += (_, _) => AppServices.OpenTerminal?.Invoke(_id, sessionId);
+        return open;
+    }
+
+    private void StartSessionsPoll()
+    {
+        StopSessionsPoll();
+        _sessionsPoll = DispatcherQueue.CreateTimer();
+        _sessionsPoll.Interval = TimeSpan.FromSeconds(2);
+        _sessionsPoll.Tick += (_, _) => _ = RefreshSessionsAsync();
+        _sessionsPoll.Start();
+    }
+
+    private void StopSessionsPoll()
+    {
+        _sessionsPoll?.Stop();
+        _sessionsPoll = null;
     }
 
     private async Task LoadBrowserAsync()
@@ -658,6 +869,10 @@ internal sealed class WorkspacePage : Page
                 list.Children.Add(new TextBlock { Text = Format.Text(card, "title", "(untitled)") });
             }
         }
+        _summary = n == 0
+            ? "No tasks in this folder."
+            : $"{n} {(n == 1 ? "task" : "tasks")} in this folder.";
+        RenderInspector();
         if (n == 0)
         {
             _root.Children.Add(EmptyState.View("No tasks in this folder", "Add one from Tasks.", EmptyArtKind.Tasks));

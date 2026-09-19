@@ -29,10 +29,20 @@ namespace Tokenstat.Pages;
 /// choice ride screen.viewer.input with the same event shapes the Apple
 /// capture side applies. Audio has no pipeline in this cut and is skipped.
 /// </summary>
-internal sealed class ScreenPage : Page
+internal sealed class ScreenPage : Page, IInspectorContent
 {
     private readonly string _peer;
     private readonly string _name;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
+    private readonly StackPanel _inspector = new()
+    {
+        Spacing = Theme.SpaceM,
+        Padding = new Thickness(Theme.SpaceM),
+    };
     private readonly StackPanel _status = new() { Spacing = Theme.SpaceS };
     private readonly TextBlock _caption = new()
     {
@@ -116,10 +126,6 @@ internal sealed class ScreenPage : Page
             Spacing = Theme.SpaceS,
             Padding = new Thickness(Theme.SpaceS),
         };
-        chrome.Children.Add(ActionIconGlyph.Button("Close", ActionIcon.Done, async (_, _) =>
-        {
-            await CloseAsync();
-        }));
         chrome.Children.Add(new TextBlock
         {
             Text = name,
@@ -196,11 +202,91 @@ internal sealed class ScreenPage : Page
         grid.Children.Add(_status);
         grid.Children.Add(_stage);
         grid.Children.Add(keyBar);
-        Content = grid;
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(grid, 1);
+        layout.Children.Add(grid);
+        Content = layout;
+        RebuildChrome();
+        RenderInspector();
 
         Loaded += async (_, _) => await StartAsync();
         Unloaded += (_, _) => _ = CloseAsync();
     }
+
+    /// <summary>
+    /// The inspector column content: the connection behind the picture.
+    /// State changes repaint it, so the column stays live without the shell
+    /// asking again.
+    /// </summary>
+    public UIElement? Inspector => _inspector;
+
+    private void RebuildChrome()
+    {
+        _barSlot.Content = DetailBar.View(
+            scope: Chrome.ScopeChip(_name, Symbol.View),
+            trailing: new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Done,
+                    "Close the viewer",
+                    async (_, _) => await CloseAsync()),
+            });
+    }
+
+    private void RenderInspector()
+    {
+        void show()
+        {
+            _inspector.Children.Clear();
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = _name,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            _inspector.Children.Add(Chrome.Stat(
+                "Picture", _streamingSince.HasValue ? "Streaming" : "Waiting"));
+            _inspector.Children.Add(Chrome.Stat("Route", _transport));
+            _inspector.Children.Add(Chrome.Stat("Quality", QualityLabel(_quality)));
+            _inspector.Children.Add(Chrome.Stat(
+                "Control", _control ? "Controlling" : "Viewing"));
+            if (_displays.Count > 0)
+            {
+                var selected = _displays.FirstOrDefault(d => d.Id == _selectedDisplay)
+                    ?? _displays[0];
+                _inspector.Children.Add(Chrome.Stat(
+                    "Display", $"{selected.Name} {selected.Width}x{selected.Height}"));
+            }
+            if (_dropped > 0)
+            {
+                _inspector.Children.Add(Chrome.Stat("Dropped", $"{_dropped:N0}"));
+            }
+            if (_reconnects > 0)
+            {
+                _inspector.Children.Add(Chrome.Stat("Reconnects", $"{_reconnects}"));
+            }
+        }
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            show();
+            return;
+        }
+        DispatcherQueue.TryEnqueue(show);
+    }
+
+    private static string QualityLabel(string wire) => wire switch
+    {
+        "sharp" => "Sharp",
+        "smooth" => "Smooth",
+        "dataSaver" => "Data saver",
+        _ => "Automatic",
+    };
 
     private async Task StartAsync()
     {
@@ -948,6 +1034,7 @@ internal sealed class ScreenPage : Page
         {
             _controlSlot.Children.Clear();
             _controlSlot.Children.Add(Chrome.ToggleChip("Control", _control, SetControlAsync));
+            RenderInspector();
         }
         if (DispatcherQueue.HasThreadAccess)
         {
@@ -972,6 +1059,7 @@ internal sealed class ScreenPage : Page
                 },
                 _quality,
                 SetQualityAsync));
+            RenderInspector();
         }
         if (DispatcherQueue.HasThreadAccess)
         {
@@ -986,6 +1074,7 @@ internal sealed class ScreenPage : Page
         _displaySlot.Children.Clear();
         if (_displays.Count < 2)
         {
+            RenderInspector();
             return;
         }
         var options = new List<(string Value, string Label)>();
@@ -1003,6 +1092,7 @@ internal sealed class ScreenPage : Page
                     await SendDisplayAsync(id);
                 }
             }));
+        RenderInspector();
     }
 
     private void ResetPictureOnUi()
@@ -1039,9 +1129,14 @@ internal sealed class ScreenPage : Page
         if (DispatcherQueue.HasThreadAccess)
         {
             _caption.Text = text;
+            RenderInspector();
             return;
         }
-        DispatcherQueue.TryEnqueue(() => _caption.Text = text);
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _caption.Text = text;
+            RenderInspector();
+        });
     }
 
     private sealed record ScreenDisplay(uint Id, string Name, int Width, int Height);

@@ -25,12 +25,23 @@ namespace Tokenstat.Pages;
 /// bypass sit as pills beside it. Enter sends, Shift+Enter inserts a
 /// newline, Escape stops a running turn. Approvals sit in the transcript.
 /// </summary>
-internal sealed class ChatPage : Page
+internal sealed class ChatPage : Page, IInspectorContent
 {
     private const int AttachmentCap = 12 * 1024 * 1024;
 
     private readonly string _workspaceId;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
+    private readonly StackPanel _inspector = new()
+    {
+        Spacing = Theme.SpaceM,
+        Padding = new Thickness(Theme.SpaceM),
+    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
+    private string _folderName = "";
     private readonly StackPanel _transcript = new() { Spacing = Theme.SpaceM };
     private ScrollViewer? _scroll;
     private bool _followEnd = true;
@@ -101,9 +112,167 @@ internal sealed class ChatPage : Page
             // Pinned while at the end; a scroll up hands control to the reader.
             _followEnd = _scroll.ScrollableHeight - _scroll.VerticalOffset < 48;
         };
-        Content = _scroll;
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(_scroll, 1);
+        layout.Children.Add(_scroll);
+        Content = layout;
+        RebuildChrome();
+        RenderInspector();
         Loaded += async (_, _) => await ShowListAsync();
         Unloaded += (_, _) => _poll?.Cancel();
+    }
+
+    /// <summary>
+    /// The inspector column content: the open conversation's setup and spend,
+    /// like the Mac chat inspector. Selection and polls replace its children,
+    /// so the column stays live without the shell asking again.
+    /// </summary>
+    public UIElement? Inspector => _inspector;
+
+    private void RebuildChrome()
+    {
+        var scope = Chrome.ScopeChip(
+            string.IsNullOrEmpty(_folderName) ? "Chat" : _folderName);
+        _barSlot.Content = DetailBar.View(
+            scope: scope,
+            trailing: new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload chats",
+                    async (_, _) =>
+                    {
+                        if (_openId is null)
+                        {
+                            await ShowListAsync();
+                        }
+                        else
+                        {
+                            await OpenAsync(_openId);
+                        }
+                    }),
+                Buttons.ToolbarIcon(
+                    ActionIcon.Create,
+                    "Start a chat",
+                    async (_, _) => await CreateAsync()),
+            });
+    }
+
+    private void RenderInspector()
+    {
+        _inspector.Children.Clear();
+        if (_openChat is null)
+        {
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = "Chats",
+                FontWeight = FontWeights.SemiBold,
+            });
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = _chats.Count == 0
+                    ? "No conversations in this folder yet."
+                    : $"{_chats.Count} {(_chats.Count == 1 ? "conversation" : "conversations")} in this folder.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return;
+        }
+        var chat = _openChat;
+        var backend = Backend(Format.Text(chat, "backend"));
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = Format.Text(chat, "title", "New chat"),
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = Format.Flag(chat, "running") ? "Running" : "Idle",
+            Foreground = Format.Flag(chat, "running") ? Theme.AccentBrush : Theme.Brush(Theme.StateIdle),
+        });
+        _inspector.Children.Add(Chrome.Stat(
+            "Agent", Format.Text(backend, "label", Format.Text(chat, "backend", "Agent"))));
+        var model = Format.Text(chat, "model");
+        if (!string.IsNullOrEmpty(model))
+        {
+            _inspector.Children.Add(Chrome.Stat("Model", model));
+        }
+        var effort = Format.Text(chat, "effort");
+        if (!string.IsNullOrEmpty(effort))
+        {
+            _inspector.Children.Add(Chrome.Stat("Effort", effort));
+        }
+        _inspector.Children.Add(Chrome.Stat(
+            "Mode", Format.Text(chat, "mode") == "plan" ? "Plan" : "Execute"));
+        var personaId = Format.Text(chat, "personaId");
+        if (!string.IsNullOrEmpty(personaId))
+        {
+            var persona = FindPersona(personaId);
+            _inspector.Children.Add(Chrome.Stat(
+                "Persona", Format.Text(persona, "name", "Preset")));
+        }
+        if (_approvals.Count > 0)
+        {
+            _inspector.Children.Add(Chrome.Stat(
+                "Approvals", $"{_approvals.Count} waiting",
+                "Answer them in the transcript."));
+        }
+        _inspector.Children.Add(Chrome.Stat("Spend", InspectorSpend()));
+    }
+
+    private string InspectorSpend()
+    {
+        long input = 0, output = 0;
+        double cost = 0;
+        foreach (var row in _events)
+        {
+            var ev = row?["event"];
+            if (Format.Text(ev, "kind") != "usage")
+            {
+                continue;
+            }
+            input += Format.Long(ev, "input");
+            output += Format.Long(ev, "output");
+            cost += Format.Number(ev, "costUsd");
+        }
+        if (input == 0 && output == 0)
+        {
+            return "Nothing counted yet";
+        }
+        var tokens = $"{input:N0} in, {output:N0} out";
+        return cost > 0
+            ? $"{tokens} · {cost.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}"
+            : tokens;
+    }
+
+    private async Task<string> FolderNameAsync()
+    {
+        try
+        {
+            var listed = await AppServices.Host.CallAsync("workspace.list");
+            var array = listed as JsonArray ?? listed["workspaces"] as JsonArray;
+            if (array is not null)
+            {
+                foreach (var folder in array)
+                {
+                    if (Format.Text(folder, "id") == _workspaceId)
+                    {
+                        return Format.Text(folder, "name", Format.Text(folder, "path", _workspaceId));
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+        return "";
     }
 
     private async Task ShowListAsync()
@@ -118,9 +287,13 @@ internal sealed class ChatPage : Page
         _followEnd = true;
         _root.Children.Clear();
         _root.Children.Add(ListHeader());
+        _folderName = await FolderNameAsync();
+        RebuildChrome();
+        RenderInspector();
         try
         {
             await RefreshCatalogAsync();
+            RenderInspector();
             if (_chats.Count == 0)
             {
                 _root.Children.Add(Chrome.Empty(
@@ -1017,6 +1190,7 @@ internal sealed class ChatPage : Page
     {
         _costHost.Children.Clear();
         _costHost.Children.Add(CostMeter());
+        RenderInspector();
     }
 
     private UIElement CostMeter()

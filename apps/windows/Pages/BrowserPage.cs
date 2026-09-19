@@ -23,12 +23,22 @@ namespace Tokenstat.Pages;
 /// confirm before a remote site loads inside the app, and an empty state
 /// until an address is entered.
 /// </summary>
-internal sealed class BrowserPage : Page
+internal sealed class BrowserPage : Page, IInspectorContent
 {
     private readonly TabView _tabs = new()
     {
         IsAddTabButtonVisible = true,
         TabWidthMode = TabViewWidthMode.SizeToContent,
+    };
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
+    private readonly StackPanel _inspector = new()
+    {
+        Spacing = Theme.SpaceM,
+        Padding = new Thickness(Theme.SpaceM),
     };
 
     public BrowserPage(string url, string host, int port, bool unlisten)
@@ -41,7 +51,19 @@ internal sealed class BrowserPage : Page
                 await CloseTabAsync(tab);
             }
         };
-        Content = _tabs;
+        _tabs.SelectionChanged += (_, _) => RenderInspector();
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(_tabs, 1);
+        layout.Children.Add(_tabs);
+        Content = layout;
+        RebuildChrome();
+        RenderInspector();
         Loaded += (_, _) =>
         {
             if (_tabs.TabItems.Count == 0)
@@ -64,6 +86,68 @@ internal sealed class BrowserPage : Page
         };
     }
 
+    /// <summary>
+    /// The inspector column content: the open tabs and the current address.
+    /// Tab switches and navigations repaint it, so the column stays live
+    /// without the shell asking again.
+    /// </summary>
+    public UIElement? Inspector => _inspector;
+
+    private void RebuildChrome()
+    {
+        _barSlot.Content = DetailBar.View(
+            scope: Chrome.ScopeChip("Browser", Symbol.Globe),
+            trailing: new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload the current page",
+                    (_, _) => CurrentTab()?.Reload()),
+                Buttons.ToolbarIcon(
+                    ActionIcon.Create,
+                    "Open a new tab",
+                    (_, _) => AddTab("", "127.0.0.1", 0, false)),
+            });
+    }
+
+    private void RenderInspector()
+    {
+        _inspector.Children.Clear();
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = $"Open tabs ({_tabs.TabItems.Count})",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        foreach (var entry in _tabs.TabItems)
+        {
+            if (entry is not TabViewItem item || item.Tag is not BrowserTab tab)
+            {
+                continue;
+            }
+            var captured = item;
+            var pick = new Button
+            {
+                Content = new TextBlock
+                {
+                    Text = tab.Title,
+                    FontSize = 12,
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+            };
+            pick.Click += (_, _) => _tabs.SelectedItem = captured;
+            _inspector.Children.Add(pick);
+        }
+        if (CurrentTab() is BrowserTab current && !string.IsNullOrWhiteSpace(current.Url))
+        {
+            _inspector.Children.Add(Chrome.Stat("Address", current.Url));
+        }
+    }
+
+    private BrowserTab? CurrentTab() =>
+        (_tabs.SelectedItem as TabViewItem)?.Tag as BrowserTab;
+
     private void AddTab(string url, string host, int port, bool unlisten)
     {
         var tab = new BrowserTab(this, url, host, port, unlisten, CloseRequested);
@@ -73,10 +157,15 @@ internal sealed class BrowserPage : Page
             Content = tab.View,
             IsClosable = true,
         };
-        tab.HeaderChanged = _ => item.Header = tab.Title;
+        tab.HeaderChanged = _ =>
+        {
+            item.Header = tab.Title;
+            RenderInspector();
+        };
         item.Tag = tab;
         _tabs.TabItems.Add(item);
         _tabs.SelectedItem = item;
+        RenderInspector();
     }
 
     private async void CloseRequested(BrowserTab tab)
@@ -104,6 +193,7 @@ internal sealed class BrowserPage : Page
         {
             AddTab("", "127.0.0.1", 0, false);
         }
+        RenderInspector();
     }
 
     /// <summary>
@@ -145,6 +235,20 @@ internal sealed class BrowserPage : Page
         public Action<BrowserTab>? HeaderChanged { get; set; }
 
         public UIElement View => _view;
+
+        public string Url => _loadedUrl;
+
+        public void Reload()
+        {
+            try
+            {
+                _web.Reload();
+            }
+            catch (Exception ex)
+            {
+                Banner(ex.Message);
+            }
+        }
 
         public string Title
         {

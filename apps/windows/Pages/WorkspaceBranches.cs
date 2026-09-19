@@ -80,7 +80,7 @@ internal static class WorkspaceBranches
             var stack = new StackPanel { Spacing = Theme.SpaceS, MinWidth = 440 };
             stack.Children.Add(new TextBlock
             {
-                Text = "Local work first; remote branches create a tracking branch.",
+                Text = "Local work first. Remote branches create a tracking branch.",
                 FontSize = 12,
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,

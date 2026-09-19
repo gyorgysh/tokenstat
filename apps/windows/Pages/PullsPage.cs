@@ -17,13 +17,30 @@ namespace Tokenstat.Pages;
 /// host boundary; this page only asks because it loaded or a labelled control
 /// was pressed.
 /// </summary>
-internal sealed class PullsPage : Page
+internal sealed class PullsPage : Page, IInspectorContent
 {
     private readonly string _workspaceId;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
+    private readonly StackPanel _inspector = new()
+    {
+        Spacing = Theme.SpaceM,
+        Padding = new Thickness(Theme.SpaceM),
+    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly ComboBox _scope = new() { MinWidth = 145 };
     private readonly ComboBox _state = new() { MinWidth = 120 };
     private CancellationTokenSource? _loginPoll;
+    private string _folderName = "";
+    private string _repo = "";
+    private string _login = "";
+    private string _source = "";
+    private int _listCount;
+    private long? _openNumber;
+    private JsonNode? _detail;
 
     public PullsPage(string workspaceId)
     {
@@ -34,7 +51,7 @@ internal sealed class PullsPage : Page
         _state.SelectedIndex = 0;
         _scope.SelectionChanged += async (_, _) => await LoadListAsync();
         _state.SelectionChanged += async (_, _) => await LoadListAsync();
-        Content = new ScrollViewer
+        var scroller = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl, Theme.SpaceXl),
             Content = new Grid
@@ -44,14 +61,138 @@ internal sealed class PullsPage : Page
                 Children = { _root },
             },
         };
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(scroller, 1);
+        layout.Children.Add(scroller);
+        Content = layout;
+        RebuildChrome();
+        RenderInspector();
         Loaded += async (_, _) => await LoadAsync();
         Unloaded += (_, _) => _loginPoll?.Cancel();
+    }
+
+    /// <summary>
+    /// The inspector column content: the repository and connection, and the
+    /// open pull request when one is on screen. List and detail loads repaint
+    /// it, so the column stays live without the shell asking again.
+    /// </summary>
+    public UIElement? Inspector => _inspector;
+
+    private void RebuildChrome()
+    {
+        var scope = Chrome.ScopeChip(
+            string.IsNullOrEmpty(_folderName) ? "Pull requests" : _folderName);
+        _barSlot.Content = DetailBar.View(
+            scope: scope,
+            trailing: new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload pull requests",
+                    async (_, _) =>
+                    {
+                        if (_openNumber.HasValue)
+                        {
+                            await ShowDetailAsync(_openNumber.Value, true);
+                        }
+                        else
+                        {
+                            await LoadAsync(true);
+                        }
+                    }),
+            });
+    }
+
+    private void RenderInspector()
+    {
+        _inspector.Children.Clear();
+        if (_detail is not null && _openNumber.HasValue)
+        {
+            var detail = _detail;
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = $"#{_openNumber} {Format.Text(detail, "title")}",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            _inspector.Children.Add(Chrome.Stat(
+                "State",
+                Format.Flag(detail, "draft")
+                    ? "Draft"
+                    : Format.Text(detail, "state", "open")));
+            _inspector.Children.Add(Chrome.Stat(
+                "Branch",
+                $"{Format.Text(detail, "headRef")} → {Format.Text(detail, "baseRef")}"));
+            _inspector.Children.Add(Chrome.Stat(
+                "Changes",
+                $"+{Format.Long(detail, "additions")} −{Format.Long(detail, "deletions")}"));
+            _inspector.Children.Add(Chrome.Stat(
+                "Files", $"{Format.Long(detail, "changedFiles")}"));
+            var checks = detail["checks"] as JsonArray;
+            _inspector.Children.Add(Chrome.Stat("Checks", $"{checks?.Count ?? 0}"));
+            return;
+        }
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = "Pull requests",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        if (!string.IsNullOrEmpty(_repo))
+        {
+            _inspector.Children.Add(Chrome.Stat("Repository", _repo));
+        }
+        if (!string.IsNullOrEmpty(_login))
+        {
+            _inspector.Children.Add(Chrome.Stat("Connected", "@" + _login, SourceLabel(_source)));
+        }
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = _listCount == 0
+                ? "Nothing listed under these filters."
+                : $"{_listCount} {(_listCount == 1 ? "pull request" : "pull requests")} listed.",
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+        });
+    }
+
+    private async Task<string> FolderNameAsync()
+    {
+        try
+        {
+            var listed = await AppServices.Host.CallAsync("workspace.list");
+            var array = listed as JsonArray ?? listed["workspaces"] as JsonArray;
+            if (array is not null)
+            {
+                foreach (var folder in array)
+                {
+                    if (Format.Text(folder, "id") == _workspaceId)
+                    {
+                        return Format.Text(folder, "name", Format.Text(folder, "path", _workspaceId));
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+        return "";
     }
 
     private async Task LoadAsync(bool refresh = false)
     {
         _root.Children.Clear();
+        _openNumber = null;
+        _detail = null;
         _root.Children.Add(Header("Review the work around this branch", refresh));
+        _folderName = await FolderNameAsync();
+        RebuildChrome();
+        RenderInspector();
         try
         {
             var availability = await AppServices.Host.CallAsync(
@@ -61,6 +202,10 @@ internal sealed class PullsPage : Page
             switch (state)
             {
                 case "ready":
+                    _repo = Format.Text(availability, "repo");
+                    _login = Format.Text(availability, "login");
+                    _source = Format.Text(availability, "source");
+                    RenderInspector();
                     _root.Children[0] = Header(
                         Format.Text(availability, "repo", "Pull requests"), refresh);
                     _root.Children.Add(ConnectionLine(availability));
@@ -220,6 +365,8 @@ internal sealed class PullsPage : Page
             ["refresh"] = refresh,
         });
         var rows = listed as JsonArray;
+        _listCount = rows?.Count ?? 0;
+        RenderInspector();
         if (rows is null || rows.Count == 0)
         {
             _root.Children.Add(Chrome.Empty(
@@ -387,6 +534,8 @@ internal sealed class PullsPage : Page
     private async Task ShowDetailAsync(long number, bool refresh = false)
     {
         _root.Children.Clear();
+        _openNumber = number;
+        _detail = null;
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         chrome.Children.Add(ActionIconGlyph.Button("Pull requests", ActionIcon.Back, async (_, _) => await LoadAsync()));
         chrome.Children.Add(ActionIconGlyph.Button("Refresh", ActionIcon.Refresh, async (_, _) => await ShowDetailAsync(number, true)));
@@ -404,6 +553,8 @@ internal sealed class PullsPage : Page
             await Task.WhenAll(detailTask, timelineTask);
             var detail = detailTask.Result;
             var timeline = timelineTask.Result;
+            _detail = detail;
+            RenderInspector();
             _root.Children.Add(DetailHero(detail));
 
             var tabs = new TabView();

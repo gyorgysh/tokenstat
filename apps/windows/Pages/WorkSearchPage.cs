@@ -21,8 +21,18 @@ namespace Tokenstat.Pages;
 /// recent queries for an empty field. Opening a hit returns to the folder
 /// it lives in: a conversation opens in Chat, anything else in Sessions.
 /// </summary>
-internal sealed class WorkSearchPage : Page
+internal sealed class WorkSearchPage : Page, IInspectorContent
 {
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
+    private readonly StackPanel _inspector = new()
+    {
+        Spacing = Theme.SpaceM,
+        Padding = new Thickness(Theme.SpaceM),
+    };
     private readonly TextBox _query = new()
     {
         PlaceholderText = "Search work",
@@ -43,6 +53,9 @@ internal sealed class WorkSearchPage : Page
     private readonly List<Button> _chips = [];
 
     private string _filter = "All";
+    private string _lastQuery = "";
+    private int _hitCount;
+    private long _unreadable;
     private string? _cursor;
     private CancellationTokenSource? _debounce;
     private CancellationTokenSource? _search;
@@ -115,8 +128,97 @@ internal sealed class WorkSearchPage : Page
                 Children = { body },
             },
         };
-        Content = _scroll;
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(_scroll, 1);
+        layout.Children.Add(_scroll);
+        Content = layout;
+        RebuildChrome();
+        RenderInspector();
         Loaded += (_, _) => ShowRecent();
+    }
+
+    /// <summary>
+    /// The inspector column content: recent searches and what the last query
+    /// found. Searches repaint it, so the column stays live without the shell
+    /// asking again.
+    /// </summary>
+    public UIElement? Inspector => _inspector;
+
+    private void RebuildChrome()
+    {
+        _barSlot.Content = DetailBar.View(
+            trailing: new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Search,
+                    "Focus the search field",
+                    (_, _) => _query.Focus(FocusState.Programmatic)),
+                Buttons.ToolbarIcon(
+                    ActionIcon.Dismiss,
+                    "Clear the search field",
+                    (_, _) => _query.Text = ""),
+            });
+    }
+
+    private void RenderInspector()
+    {
+        _inspector.Children.Clear();
+        if (!string.IsNullOrEmpty(_lastQuery))
+        {
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = "Last search",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = _lastQuery,
+                FontFamily = Fonts.Mono,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            _inspector.Children.Add(Chrome.Stat("Matches", $"{_hitCount:N0}"));
+            if (_unreadable > 0)
+            {
+                _inspector.Children.Add(new TextBlock
+                {
+                    Text = $"{_unreadable} saved items could not be read.",
+                    Opacity = 0.7,
+                    FontSize = 12,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
+        }
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = "Recent searches",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        if (_recent.Count == 0)
+        {
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = "Searches you run land here.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return;
+        }
+        foreach (var query in _recent)
+        {
+            var local = query;
+            var pick = ActionIconGlyph.Button(local, ActionIcon.Search, (_, _) =>
+            {
+                _query.Text = local;
+            });
+            _inspector.Children.Add(pick);
+        }
     }
 
     private string[] EntityKinds() => _filter switch
@@ -141,6 +243,8 @@ internal sealed class WorkSearchPage : Page
         if (!more)
         {
             _cursor = null;
+            _hitCount = 0;
+            _unreadable = 0;
             _results.Children.Clear();
         }
         _busy.Visibility = Visibility.Visible;
@@ -179,7 +283,12 @@ internal sealed class WorkSearchPage : Page
                 RemoveMoreButton();
             }
             Remember(query);
+            _lastQuery = query;
             AppendCoverage(answer);
+            if (!more)
+            {
+                _unreadable = Format.Long(answer["coverage"], "unreadable");
+            }
             var hits = answer["hits"] as JsonArray;
             if ((hits is null || hits.Count == 0) && !more)
             {
@@ -198,8 +307,10 @@ internal sealed class WorkSearchPage : Page
                         continue;
                     }
                     _results.Children.Add(Row(hit));
+                    _hitCount++;
                 }
             }
+            RenderInspector();
             _cursor = Format.Text(answer, "nextCursor");
             if (!string.IsNullOrEmpty(_cursor))
             {
@@ -425,6 +536,7 @@ internal sealed class WorkSearchPage : Page
     private void ShowRecent()
     {
         _results.Children.Clear();
+        RenderInspector();
         if (_recent.Count == 0)
         {
             _results.Children.Add(Chrome.Empty(

@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 using System.Text;
+using System.Text.Json.Nodes;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
@@ -27,14 +28,26 @@ namespace Tokenstat.Pages;
 /// full-screen programs work. The session outlives the page, so navigating
 /// away and back reattaches to the same shell.
 /// </summary>
-internal sealed class TerminalPage : Page
+internal sealed class TerminalPage : Page, IInspectorContent
 {
     internal const int BufferCap = 200_000;
 
     private const double CellWidth = 8.0;
     private const double CellHeight = 17.0;
 
+    private readonly string _workspaceId;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
+    private readonly StackPanel _inspector = new()
+    {
+        Spacing = Theme.SpaceM,
+        Padding = new Thickness(Theme.SpaceM),
+    };
     private readonly TerminalSession _session;
+    private string _folderName = "";
     private readonly StackPanel _status = new() { Spacing = Theme.SpaceS };
     private readonly TextBlock _title = new()
     {
@@ -72,14 +85,15 @@ internal sealed class TerminalPage : Page
 
     public TerminalPage(string workspaceId, string? sessionId)
     {
+        _workspaceId = workspaceId;
         _session = TerminalSession.For(workspaceId, sessionId);
         var dark = Theme.IsDark;
         _view.Foreground = new SolidColorBrush(TerminalPalette.Foreground(dark));
         _scroll.Background = new SolidColorBrush(TerminalPalette.Background(dark));
 
-        _kill = ActionIconGlyph.Button("Kill", ActionIcon.Stop, async (_, _) => await _session.KillAsync());
-        _close = ActionIconGlyph.Button("Close", ActionIcon.Disconnect, async (_, _) => await _session.CloseAsync());
-        _respawn = ActionIconGlyph.Button("Respawn", ActionIcon.Refresh, async (_, _) =>
+        _kill = Buttons.ToolbarIcon(ActionIcon.Stop, "Kill the process", async (_, _) => await _session.KillAsync());
+        _close = Buttons.ToolbarIcon(ActionIcon.Disconnect, "Close this session", async (_, _) => await _session.CloseAsync());
+        _respawn = Buttons.ToolbarIcon(ActionIcon.Refresh, "Start a fresh shell", async (_, _) =>
         {
             await _session.RespawnAsync(CurrentRows(), CurrentCols());
         });
@@ -90,9 +104,6 @@ internal sealed class TerminalPage : Page
             Spacing = Theme.SpaceS,
             Padding = new Thickness(Theme.SpaceS),
         };
-        chrome.Children.Add(_kill);
-        chrome.Children.Add(_close);
-        chrome.Children.Add(_respawn);
         chrome.Children.Add(_title);
         chrome.Children.Add(_size);
 
@@ -109,7 +120,18 @@ internal sealed class TerminalPage : Page
         grid.Children.Add(_status);
         grid.Children.Add(_scroll);
         grid.Children.Add(_input);
-        Content = grid;
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(grid, 1);
+        layout.Children.Add(grid);
+        Content = layout;
+        RebuildChrome();
+        RenderInspector();
 
         _resizeTimer = DispatcherQueue.CreateTimer();
         _resizeTimer.Interval = TimeSpan.FromMilliseconds(400);
@@ -130,8 +152,93 @@ internal sealed class TerminalPage : Page
 
         _input.KeyDown += InputOnKeyDown;
         _input.TextChanged += InputOnTextChanged;
-        Loaded += async (_, _) => await StartAsync();
+        Loaded += async (_, _) =>
+        {
+            _folderName = await FolderNameAsync();
+            RebuildChrome();
+            await StartAsync();
+        };
         Unloaded += (_, _) => Stop();
+    }
+
+    /// <summary>
+    /// The inspector column content: what this shell is and how it is doing.
+    /// Session changes repaint it, so the column stays live without the shell
+    /// asking again.
+    /// </summary>
+    public UIElement? Inspector => _inspector;
+
+    private void RebuildChrome()
+    {
+        var scope = Chrome.ScopeChip(
+            string.IsNullOrEmpty(_folderName) ? "Terminal" : _folderName);
+        _barSlot.Content = DetailBar.View(
+            scope: scope,
+            trailing: new List<UIElement> { _kill, _close, _respawn });
+    }
+
+    private void RenderInspector()
+    {
+        _inspector.Children.Clear();
+        var label = string.IsNullOrEmpty(_session.Command) ? "Shell" : _session.Command;
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        _inspector.Children.Add(new TextBlock
+        {
+            Text = ShortId(_session.Id),
+            FontFamily = Fonts.Mono,
+            FontSize = 12,
+            Opacity = 0.7,
+        });
+        var state = _session.Closed ? "Closed"
+            : !_session.Alive ? "Exited"
+            : "Running";
+        _inspector.Children.Add(Chrome.Stat("State", state));
+        if (_session.ExitCode.HasValue)
+        {
+            _inspector.Children.Add(Chrome.Stat("Exit status", $"{_session.ExitCode}"));
+        }
+        _inspector.Children.Add(Chrome.Stat("Size", $"{_session.Cols}×{_session.Rows}"));
+        if (_session.Paused)
+        {
+            _inspector.Children.Add(new TextBlock
+            {
+                Text = "Output is paused while the handoff window is full. It resumes on its own.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        if (_session.Dropped > 0)
+        {
+            _inspector.Children.Add(Chrome.Stat("Dropped", $"{_session.Dropped:N0}"));
+        }
+    }
+
+    private async Task<string> FolderNameAsync()
+    {
+        try
+        {
+            var listed = await AppServices.Host.CallAsync("workspace.list");
+            var array = listed as JsonArray ?? listed["workspaces"] as JsonArray;
+            if (array is not null)
+            {
+                foreach (var folder in array)
+                {
+                    if (Format.Text(folder, "id") == _workspaceId)
+                    {
+                        return Format.Text(folder, "name", Format.Text(folder, "path", _workspaceId));
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+        return "";
     }
 
     private int CurrentRows()
@@ -220,6 +327,7 @@ internal sealed class TerminalPage : Page
         {
             Banner(_session.LastError);
         }
+        RenderInspector();
     }
 
     private static string ShortId(string id)
