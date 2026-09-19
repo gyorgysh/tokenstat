@@ -44,16 +44,18 @@ unsafe fn as_str<'a>(ptr: *const c_char) -> &'a str {
 /// string constant with the same lifetime as the library.
 #[unsafe(no_mangle)]
 pub extern "C" fn tokenstat_ffi_protocol_version() -> *const c_char {
-    // A C string has to be NUL terminated and the Rust constant is not, so
-    // this is written out once and checked against it at compile time. Bumping
-    // one without the other is a build error rather than a silent disagreement.
-    const VERSION: &str = "22\0";
-    const _: () = {
+    // Build the NUL-terminated representation at compile time from the same
+    // contract used by the daemon. The static keeps the returned pointer valid.
+    static VERSION: [u8; tokenstat_host::PROTOCOL_VERSION.len() + 1] = {
         let spoken = tokenstat_host::PROTOCOL_VERSION.as_bytes();
-        assert!(
-            spoken.len() == 2 && spoken[0] == b'2' && spoken[1] == b'2',
-            "PROTOCOL_VERSION moved: update the C ABI string beside it"
-        );
+        let mut terminated = [0; tokenstat_host::PROTOCOL_VERSION.len() + 1];
+        let mut index = 0;
+        while index < spoken.len() {
+            assert!(spoken[index] != 0, "protocol version contains a NUL");
+            terminated[index] = spoken[index];
+            index += 1;
+        }
+        terminated
     };
     VERSION.as_ptr() as *const c_char
 }
@@ -110,6 +112,16 @@ pub unsafe extern "C" fn tokenstat_ffi_string_free(s: *mut c_char) {
 mod tests {
     use super::*;
     use serde_json::Value;
+
+    #[test]
+    fn protocol_version_matches_the_daemon_through_the_c_boundary() {
+        let raw = tokenstat_ffi_protocol_version();
+        assert!(!raw.is_null());
+        // SAFETY: the entry point promises a static NUL-terminated string.
+        let version = unsafe { CStr::from_ptr(raw) };
+        assert_eq!(version.to_str().unwrap(), tokenstat_host::PROTOCOL_VERSION);
+        assert_eq!(raw, tokenstat_ffi_protocol_version());
+    }
 
     /// Drive the real C entry point the way Swift will.
     fn c_call(method: &str, params: &str) -> String {
