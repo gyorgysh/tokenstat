@@ -955,12 +955,13 @@ fn shell_argv(prompt: &str) -> Vec<&str> {
 ///
 /// `models` are taken from the installed CLI when it can list them
 /// (`grok models`, `cursor-agent models`, `agy models`, `opencode models`).
-/// The arrays below are the fallback when that CLI is missing, errors, or
-/// times out. Claude has no list command: `--help` documents aliases, and
-/// those stay the contract. A backend with an empty list gets no model
-/// picker. Effort values are still the flags each CLI's `--help` names.
-/// `force` is somebody pressing Refresh in the picker: probe the CLIs now and
-/// wait, instead of serving the cache while a background pass catches up.
+/// Otherwise the curated list in `agent_models::fallback_for` applies:
+/// Claude has no list command (`--help` documents aliases, and those stay
+/// the contract) and neither does Muse. A backend with an empty list gets
+/// no model picker. Effort values are still the flags each CLI's `--help`
+/// names. `force` is somebody pressing Refresh in the picker: probe the
+/// CLIs now and wait, instead of serving the cache while a background pass
+/// catches up.
 pub fn backends(force: bool) -> Vec<serde_json::Value> {
     if force {
         crate::agent_models::refresh_now();
@@ -968,16 +969,11 @@ pub fn backends(force: bool) -> Vec<serde_json::Value> {
         crate::agent_models::refresh();
     }
     [
-        ("sh", "Shell", "sh -c \"…\"", &[] as &[&str], serde_json::json!([])),
+        ("sh", "Shell", "sh -c \"…\"", serde_json::json!([])),
         (
             "claude",
             "Claude",
             "claude -p \"…\"",
-            // Claude Code resolves these aliases itself ("fable", "opus", or
-            // "sonnet" per its `--help`); haiku is the long-standing third
-            // tier. Full ids change with every release and need an account to
-            // enumerate, so the aliases are the stable contract.
-            &["fable", "opus", "sonnet", "haiku"],
             // `--effort` per `claude --help`: low, medium, high, xhigh, max.
             serde_json::json!(["low", "medium", "high", "xhigh", "max"]),
         ),
@@ -985,20 +981,6 @@ pub fn backends(force: bool) -> Vec<serde_json::Value> {
             "codex",
             "Codex",
             "codex exec … -- \"…\"",
-            // The live list comes from `codex app-server`'s `model/list`, and
-            // replaces these the moment a probe answers. They are here because
-            // the first request after a daemon starts is served before any
-            // probe has finished, and an empty list means no model picker at
-            // all: a Codex chat could only ever run the model in
-            // `~/.codex/config.toml`, with nothing on screen saying why.
-            &[
-                "gpt-5.6-sol",
-                "gpt-5.6-terra",
-                "gpt-5.6-luna",
-                "gpt-5.5",
-                "gpt-5.4",
-                "gpt-5.4-mini",
-            ],
             // Codex takes an effort through `-c model_reasoning_effort=`.
             serde_json::json!(["low", "medium", "high", "xhigh", "max"]),
         ),
@@ -1006,52 +988,24 @@ pub fn backends(force: bool) -> Vec<serde_json::Value> {
             "muse",
             "Muse",
             "muse exec --json …",
-            // Muse does not expose a list-models command. Its built-in model
-            // picker currently offers this Spark set, so keep the complete
-            // choice visible rather than pinning chat to Contributor.
-            &[
-                "muse-spark-1.3",
-                "muse-spark-1.3-contributor",
-                "muse-spark-1.2",
-                "muse-spark-1.2-contributor",
-            ],
             serde_json::json!(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
         ),
         (
             "grok",
             "Grok",
             "grok -p \"…\"",
-            &["grok-4.6", "grok-4.5"],
             serde_json::json!(["low", "medium", "high"]),
         ),
         (
             "cursor",
             "Cursor",
             "cursor-agent -p …",
-            &[
-                "auto",
-                "gpt-5.4-nano-medium",
-                "gpt-5.1",
-                "gpt-5.1-high",
-                "claude-4.5-sonnet",
-                "claude-4.5-sonnet-thinking",
-                "gemini-3-flash",
-                "gpt-5-mini",
-                "glm-5.2-high",
-            ],
             serde_json::json!([]),
         ),
         (
             "agy",
             "Antigravity",
             "agy --print \"…\"",
-            &[
-                "gemini-3.6-flash-high",
-                "gemini-3.5-flash-high",
-                "gemini-3.1-pro-high",
-                "claude-sonnet-4-6",
-                "gpt-oss-120b-medium",
-            ],
             // High / medium / low are separate model ids, not a second flag.
             serde_json::json!([]),
         ),
@@ -1059,20 +1013,19 @@ pub fn backends(force: bool) -> Vec<serde_json::Value> {
             "opencode",
             "OpenCode",
             "opencode run \"…\"",
-            &[],
             serde_json::json!(["minimal", "medium", "high", "max"]),
         ),
         (
             "opencode2",
             "OpenCode 2",
             "opencode2 run \"…\"",
-            &[],
             serde_json::json!(["minimal", "medium", "high", "max"]),
         ),
     ]
     .into_iter()
-    .map(|(id, label, command, fallback, efforts)| {
-        let models = crate::agent_models::for_backend(id, fallback);
+    .map(|(id, label, command, efforts)| {
+        let models =
+            crate::agent_models::for_backend(id, crate::agent_models::fallback_for(id));
         serde_json::json!({"id": id, "label": label, "command": command, "models": models, "efforts": efforts})
     })
     .collect()

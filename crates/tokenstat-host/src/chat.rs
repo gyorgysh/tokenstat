@@ -3595,14 +3595,15 @@ pub fn backends(force: bool) -> Vec<Value> {
                 );
                 backend["readiness"] = profile["readiness"].clone();
             }
-            // Chat only advertises discovered model IDs. The agent's own
+            // Chat advertises the live list where enumeration works and the
+            // curated list where it cannot (Claude's aliases, Muse's Spark
+            // set): both arrive from `automations::backends` already merged.
+            // Only a missing agent advertises nothing. The agent's own
             // default remains usable when enumeration is unsupported or fails.
             backend["modelListStatus"] = json!(crate::agent_models::list_status(&id));
-            backend["models"] = json!(if backend["installed"] == false {
-                Vec::<String>::new()
-            } else {
-                crate::agent_models::for_backend(&id, &[])
-            });
+            if backend["installed"] == false {
+                backend["models"] = json!(Vec::<String>::new());
+            }
             backend
         })
         .collect()
@@ -6178,6 +6179,30 @@ mod tests {
                 );
             }
             assert!(backend["modelListStatus"].is_string());
+        }
+    }
+
+    #[test]
+    fn chat_advertises_curated_models_where_enumeration_cannot_reach() {
+        // Muse and Claude have no list command. An installed one must offer
+        // its curated set (the Spark models, the haiku/sonnet aliases), not
+        // just the agent default; a missing one advertises nothing.
+        for backend in backends(false) {
+            let id = backend["id"].as_str().unwrap();
+            if !matches!(id, "claude" | "muse") {
+                continue;
+            }
+            if backend["installed"] == false {
+                assert_eq!(backend["models"], json!([]), "{id}");
+            } else {
+                assert_eq!(backend["modelListStatus"], json!("curated"), "{id}");
+                assert!(
+                    backend["models"]
+                        .as_array()
+                        .is_some_and(|models| !models.is_empty()),
+                    "{id} offers no models past Default"
+                );
+            }
         }
     }
 

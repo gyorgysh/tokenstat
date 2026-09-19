@@ -30,6 +30,69 @@ enum Cached {
     Miss,
 }
 
+/// Backends whose CLI can enumerate its own models.
+const LISTABLE: &[&str] = &["grok", "cursor", "agy", "codex", "opencode", "opencode2"];
+
+/// The curated list when no probe answers.
+///
+/// One table for every caller, so a backend cannot advertise models its
+/// status calls default-only, or the reverse. Claude and Muse have no
+/// list command, so these are the whole picker for them rather than a
+/// stopgap: dropping them pins chat to the agent default with nothing
+/// on screen saying why.
+pub(crate) fn fallback_for(id: &str) -> &'static [&'static str] {
+    match id {
+        // Claude Code resolves these aliases itself ("fable", "opus", or
+        // "sonnet" per its `--help`); haiku is the long-standing third
+        // tier. Full ids change with every release and need an account to
+        // enumerate, so the aliases are the stable contract.
+        "claude" => &["fable", "opus", "sonnet", "haiku"],
+        // The live list comes from `codex app-server`'s `model/list`, and
+        // replaces these the moment a probe answers. They are here because
+        // the first request after a daemon starts is served before any
+        // probe has finished, and an empty list means no model picker at
+        // all: a Codex chat could only ever run the model in
+        // `~/.codex/config.toml`, with nothing on screen saying why.
+        "codex" => &[
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+        ],
+        // Muse does not expose a list-models command. Its built-in model
+        // picker currently offers this Spark set, so keep the complete
+        // choice visible rather than pinning chat to Contributor.
+        "muse" => &[
+            "muse-spark-1.3",
+            "muse-spark-1.3-contributor",
+            "muse-spark-1.2",
+            "muse-spark-1.2-contributor",
+        ],
+        "grok" => &["grok-4.6", "grok-4.5"],
+        "cursor" => &[
+            "auto",
+            "gpt-5.4-nano-medium",
+            "gpt-5.1",
+            "gpt-5.1-high",
+            "claude-4.5-sonnet",
+            "claude-4.5-sonnet-thinking",
+            "gemini-3-flash",
+            "gpt-5-mini",
+            "glm-5.2-high",
+        ],
+        "agy" => &[
+            "gemini-3.6-flash-high",
+            "gemini-3.5-flash-high",
+            "gemini-3.1-pro-high",
+            "claude-sonnet-4-6",
+            "gpt-oss-120b-medium",
+        ],
+        _ => &[],
+    }
+}
+
 struct Entry {
     at: Instant,
     refresh_failed: bool,
@@ -89,7 +152,7 @@ pub fn refresh_now() {
 /// Whether any entry is missing or past its TTL. Pure cache read, no probes.
 fn needs_refresh() -> bool {
     let cache = cache_lock();
-    for id in ["grok", "cursor", "agy", "codex", "opencode", "opencode2"] {
+    for &id in LISTABLE {
         let stale = match cache.get(id) {
             None => true,
             Some(entry) => {
@@ -182,11 +245,15 @@ pub fn for_backend(id: &str, fallback: &[&str]) -> Vec<String> {
 
 /// Enumeration is distinct from installation and from account access.
 pub(crate) fn list_status(id: &str) -> &'static str {
-    if !matches!(
-        id,
-        "grok" | "cursor" | "agy" | "codex" | "opencode" | "opencode2"
-    ) {
-        return "defaultOnly";
+    if !LISTABLE.contains(&id) {
+        // No probe, but possibly a curated list. "defaultOnly" is reserved
+        // for backends with neither, so the picker never offers models its
+        // status disowns. Clients ignore unknown values.
+        return if fallback_for(id).is_empty() {
+            "defaultOnly"
+        } else {
+            "curated"
+        };
     }
     match cache_lock().get(id) {
         Some(entry) if entry.refresh_failed => "refreshFailed",
@@ -623,6 +690,21 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn unlistable_backends_report_curated_or_default_only() {
+        // Muse and Claude have no list command, so the curated table is the
+        // whole picker for them. The status must say so: "defaultOnly" while
+        // models are advertised is the picker contradicting itself.
+        assert_eq!(super::list_status("muse"), "curated");
+        assert_eq!(super::list_status("claude"), "curated");
+        assert_eq!(super::list_status("sh"), "defaultOnly");
+        assert_eq!(super::list_status("no-such-backend"), "defaultOnly");
+        assert!(!super::fallback_for("muse").is_empty());
+        assert!(!super::fallback_for("claude").is_empty());
+        assert!(super::fallback_for("sh").is_empty());
+        assert!(super::fallback_for("opencode").is_empty());
+    }
 
     #[test]
     fn cheapest_model_prefers_a_haiku_alias() {
