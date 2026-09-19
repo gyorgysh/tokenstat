@@ -1,0 +1,137 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
+// Source-available for review, NOT open source. See LICENSE: no rights to
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
+// "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
+
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
+
+namespace Tokenstat.Design;
+
+/// <summary>
+/// A capsule selector in the app's own language: equal segments inside a
+/// bordered panel, the selected one filled with the accent's soft tint and
+/// accent text, hover in the same grey the rows use. Mirrors the Mac
+/// SegmentedCapsulePicker, which is the source of truth: this is what the
+/// This device and All devices scope switch is on every client.
+/// </summary>
+internal static class SegmentedCapsule
+{
+    /// <summary>
+    /// Build the picker. A null glyph draws the label alone, for text-only
+    /// options like the period chips. Tapping the selected segment does
+    /// nothing. Segments take equal shares of the strip.
+    /// </summary>
+    public static Border View(
+        IList<(string Value, string Label, ActionIcon? Glyph)> options,
+        string selected,
+        Func<string, Task> onSelect,
+        bool enabled = true)
+    {
+        var row = new Grid { ColumnSpacing = Theme.SpaceXs };
+        foreach (var option in options)
+        {
+            row.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star),
+            });
+        }
+        int column = 0;
+        foreach (var option in options)
+        {
+            var value = option.Value;
+            bool active = value == selected;
+            var segment = Segment(
+                option.Label,
+                option.Glyph,
+                active,
+                () => value == selected ? Task.CompletedTask : onSelect(value));
+            segment.IsEnabled = enabled;
+            Grid.SetColumn(segment, column);
+            row.Children.Add(segment);
+            column++;
+        }
+        return new Border
+        {
+            Background = Theme.PanelBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(3),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Opacity = enabled ? 1 : 0.42,
+            Child = row,
+        };
+    }
+
+    private static Button Segment(string label, ActionIcon? glyph, bool active, Func<Task> onTap)
+    {
+        var content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceXs,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        if (glyph.HasValue)
+        {
+            var mark = glyph.Value.Icon();
+            mark.Foreground = active ? Theme.AccentBrush : Theme.Brush(Theme.ControlGlyph);
+            content.Children.Add(new Viewbox
+            {
+                Width = 11,
+                Height = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = mark,
+            });
+        }
+        content.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontFamily = Fonts.Interface,
+            FontSize = 12,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+            Foreground = active ? Theme.AccentBrush : Theme.Brush(Theme.ControlGlyph),
+            VerticalAlignment = VerticalAlignment.Center,
+            MaxLines = 1,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        var segment = new Button
+        {
+            Content = content,
+            Background = active
+                ? Theme.AccentSoftBrush
+                : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(glyph.HasValue ? 12 : 10, 6, glyph.HasValue ? 12 : 10, 6),
+            CornerRadius = new CornerRadius(8),
+            // The native minimum is 32 high, which would stretch the strip.
+            MinWidth = 0,
+            MinHeight = 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+        };
+        // Hover in the row grey, pressed settling back to the resting fill.
+        // The native grey hover would be a second grey beside the row one.
+        segment.Resources["ButtonBackgroundPointerOver"] = active
+            ? Theme.AccentSoftBrush
+            : Theme.Brush(WithAlpha(Theme.RowHighlight, 0.7));
+        segment.Resources["ButtonBackgroundPressed"] = segment.Background;
+        segment.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        segment.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        segment.Click += async (_, _) => await onTap();
+        ToolTipService.SetToolTip(segment, label);
+        AutomationProperties.SetName(segment, label);
+        return segment;
+    }
+
+    private static Color WithAlpha(Color color, double alpha) =>
+        Color.FromArgb((byte)(255 * alpha), color.R, color.G, color.B);
+}

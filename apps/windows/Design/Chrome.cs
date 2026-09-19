@@ -106,7 +106,9 @@ internal static class Chrome
 
     /// <summary>
     /// An empty state: the mark from the one vocabulary, then the headline
-    /// naming what is missing and the line saying what the thing is for.
+    /// naming what is missing and the line saying what the thing is for. Same
+    /// anatomy as EmptyState.View, which owns the shared sizes: the one with
+    /// the drawn scene and this one with the glyph must not drift apart.
     /// </summary>
     public static StackPanel Empty(string title, string message, ActionIcon icon, UIElement? action = null)
     {
@@ -114,37 +116,43 @@ internal static class Chrome
         {
             Spacing = Theme.SpaceS,
             HorizontalAlignment = HorizontalAlignment.Center,
-            Padding = new Thickness(0, Theme.SpaceXl, 0, Theme.SpaceXl),
+            Padding = new Thickness(Theme.SpaceL, Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl),
         };
-        stack.Children.Add(new SymbolIcon
+        var mark = icon.Icon();
+        mark.Foreground = Theme.Brush(WithAlpha(Theme.Accent, 0.7));
+        stack.Children.Add(new Viewbox
         {
-            Symbol = icon.Symbol(),
-            Width = 28,
-            Height = 28,
-            Foreground = Theme.AccentBrush,
+            Width = EmptyState.EmptyMark,
+            Height = EmptyState.EmptyMark,
             HorizontalAlignment = HorizontalAlignment.Center,
+            Child = mark,
         });
-        stack.Children.Add(new TextBlock
-        {
-            Text = title,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            FontSize = 14,
-            HorizontalAlignment = HorizontalAlignment.Center,
-        });
-        stack.Children.Add(new TextBlock
-        {
-            Text = message,
-            FontSize = 13,
-            Opacity = 0.7,
-            TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 420,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            TextAlignment = TextAlignment.Center,
-        });
+        var headline = Fonts.Text(title, EmptyState.EmptyHeadline, Microsoft.UI.Text.FontWeights.SemiBold);
+        headline.HorizontalAlignment = HorizontalAlignment.Center;
+        headline.TextAlignment = TextAlignment.Center;
+        headline.TextWrapping = TextWrapping.Wrap;
+        stack.Children.Add(headline);
+        var body = Fonts.Text(message, EmptyState.EmptyBody, opacity: 0.7);
+        body.TextWrapping = TextWrapping.Wrap;
+        body.MaxWidth = EmptyState.EmptyBodyWidth;
+        body.HorizontalAlignment = HorizontalAlignment.Center;
+        body.TextAlignment = TextAlignment.Center;
+        stack.Children.Add(body);
         if (action is not null)
         {
+            if (action is FrameworkElement framed)
+            {
+                framed.HorizontalAlignment = HorizontalAlignment.Center;
+                var margin = framed.Margin;
+                if (margin.Top == 0)
+                {
+                    margin.Top = Theme.SpaceXs;
+                    framed.Margin = margin;
+                }
+            }
             stack.Children.Add(action);
         }
+        AutomationProperties.SetName(stack, title);
         return stack;
     }
 

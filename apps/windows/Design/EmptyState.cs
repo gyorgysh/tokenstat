@@ -66,30 +66,33 @@ internal static class EmptyState
         };
         var art = EmptyArt(kind);
         art.HorizontalAlignment = HorizontalAlignment.Center;
+        // The Mac ClientEmptyState holds the art two points off the title, so
+        // the picture and the headline read as one block rather than as two
+        // rows that happen to be adjacent.
+        art.Margin = new Thickness(0, 0, 0, 2);
         stack.Children.Add(art);
-        stack.Children.Add(new TextBlock
-        {
-            Text = title,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            FontSize = 14,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            TextAlignment = TextAlignment.Center,
-        });
-        stack.Children.Add(new TextBlock
-        {
-            Text = message,
-            FontSize = 13,
-            Opacity = 0.7,
-            TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 420,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            TextAlignment = TextAlignment.Center,
-        });
+        var headline = Fonts.Text(title, EmptyHeadline, Microsoft.UI.Text.FontWeights.SemiBold);
+        headline.HorizontalAlignment = HorizontalAlignment.Center;
+        headline.TextAlignment = TextAlignment.Center;
+        headline.TextWrapping = TextWrapping.Wrap;
+        stack.Children.Add(headline);
+        var body = Fonts.Text(message, EmptyBody, opacity: 0.7);
+        body.TextWrapping = TextWrapping.Wrap;
+        body.MaxWidth = EmptyBodyWidth;
+        body.HorizontalAlignment = HorizontalAlignment.Center;
+        body.TextAlignment = TextAlignment.Center;
+        stack.Children.Add(body);
         if (action is not null)
         {
             if (action is FrameworkElement framed)
             {
                 framed.HorizontalAlignment = HorizontalAlignment.Center;
+                var margin = framed.Margin;
+                if (margin.Top == 0)
+                {
+                    margin.Top = Theme.SpaceXs;
+                    framed.Margin = margin;
+                }
             }
             stack.Children.Add(action);
         }
@@ -329,6 +332,21 @@ internal static class EmptyState
         AutomationProperties.SetAccessibilityView(canvas, AccessibilityView.Raw);
         return canvas;
     }
+
+    /// <summary>The empty-state headline both empty-state builders share.</summary>
+    public const double EmptyHeadline = 28;
+
+    /// <summary>The sentence under it, capped at <see cref="EmptyBodyWidth"/>.</summary>
+    public const double EmptyBody = 14;
+
+    /// <summary>
+    /// Wide enough to read, narrow enough that the eye does not have to travel
+    /// back across a full-screen window to find the line. From the Mac rail.
+    /// </summary>
+    public const double EmptyBodyWidth = 420;
+
+    /// <summary>The mark over an icon empty state, from the one vocabulary.</summary>
+    public const double EmptyMark = 32;
 
     private const double InkWidth = 1.7;
 
