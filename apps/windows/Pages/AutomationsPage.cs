@@ -19,13 +19,23 @@ namespace Tokenstat.Pages;
 /// host-level queue settings, live-first run history, and revision-checked
 /// saves with receipts on protocol 21 and later.
 /// </summary>
-internal sealed class AutomationsPage : Page
+internal sealed class AutomationsPage : Page, IInspectorContent
 {
     private readonly string? _scopeWorkspaceId;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _listHost = new() { Spacing = Theme.SpaceL };
-    private readonly StackPanel _detailHost = new() { Spacing = Theme.SpaceL };
+    private readonly StackPanel _detailHost = new()
+    {
+        Spacing = Theme.SpaceL,
+        Padding = new Thickness(Theme.SpaceM),
+    };
+    private readonly TextBox _searchBox;
 
     private JsonArray _jobs = new();
     private JsonArray _runs = new();
@@ -36,6 +46,7 @@ internal sealed class AutomationsPage : Page
     private ulong _queueBudget = 10_800;
     private uint _queueConcurrent = 1;
     private string _queueTimezone = "";
+    private string _query = "";
     private bool _working;
     private string? _selectedId;
     private bool _creating;
@@ -95,59 +106,78 @@ internal sealed class AutomationsPage : Page
     public AutomationsPage(string? workspaceId = null)
     {
         _scopeWorkspaceId = workspaceId;
-        _root.Children.Add(Header());
+        _searchBox = Chrome.SearchField("Search automations", text =>
+        {
+            _query = text ?? "";
+            RenderList();
+        });
+        _searchBox.MaxWidth = 340;
+        _searchBox.HorizontalAlignment = HorizontalAlignment.Left;
         _root.Children.Add(_bannerHost);
+        _root.Children.Add(_searchBox);
         _root.Children.Add(_listHost);
-        _root.Children.Add(_detailHost);
         // A wireframe until the first load lands. RenderList clears the host,
         // so real content replaces it, like Home's skeleton.
         _listHost.Children.Add(Motion.SkeletonCard());
-        Content = new ScrollViewer
+        var scroller = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
             Content = _root,
         };
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(scroller, 1);
+        layout.Children.Add(scroller);
+        Content = layout;
+        RebuildChrome();
+        RenderDetail();
         Loaded += async (_, _) => await LoadAsync();
     }
 
-    private UIElement Header()
+    /// <summary>
+    /// The inspector column content: the selected job's detail, history, and
+    /// run views. Selection and reloads replace its children, so the column
+    /// stays live without the shell asking again.
+    /// </summary>
+    public UIElement? Inspector => _detailHost;
+
+    private void RebuildChrome()
     {
-        var row = new Grid();
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var titles = new StackPanel { Spacing = 2 };
-        titles.Children.Add(new TextBlock
+        UIElement? scope = null;
+        if (_scopeWorkspaceId is not null)
         {
-            Text = "Automations",
-            FontSize = Fonts.PageTitle,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        });
-        titles.Children.Add(new TextBlock
-        {
-            Text = "Scheduled jobs run on this host when Always-on is on.",
-            Opacity = 0.66,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        row.Children.Add(titles);
-        var create = ActionIconGlyph.PrimaryButton(
-            "New automation", ActionIcon.Create, (_, _) =>
+            scope = Chrome.ScopeChip(FolderLabel(_scopeWorkspaceId));
+        }
+        _barSlot.Content = DetailBar.View(
+            scope: scope,
+            trailing: new List<UIElement>
             {
-                _creating = true;
-                _selectedId = null;
-                _draft = DefaultDraft();
-                _detailDirty = false;
-                _conflictId = null;
-                _confirmDelete = false;
-                _runError = null;
-                RenderDetail();
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload automations",
+                    async (_, _) => await LoadAsync()),
+                Buttons.ToolbarIcon(
+                    ActionIcon.Create,
+                    "Schedule a job",
+                    (_, _) => StartCreating()),
             });
-        Grid.SetColumn(create, 1);
-        row.Children.Add(create);
-        var refresh = ActionIconGlyph.Button("Refresh", ActionIcon.Refresh, async (_, _) => await LoadAsync());
-        Grid.SetColumn(refresh, 2);
-        row.Children.Add(refresh);
-        return row;
+    }
+
+    private void StartCreating()
+    {
+        _creating = true;
+        _selectedId = null;
+        _draft = DefaultDraft();
+        _detailDirty = false;
+        _conflictId = null;
+        _confirmDelete = false;
+        _runError = null;
+        RenderDetail();
     }
 
     private static UIElement Labeled(string label, UIElement content)
@@ -194,6 +224,7 @@ internal sealed class AutomationsPage : Page
             try { _queueBudget = queue["defaultBudgetSeconds"]?.GetValue<ulong>() ?? _queueBudget; } catch { /* keep */ }
             try { _queueConcurrent = queue["maxConcurrent"]?.GetValue<uint>() ?? _queueConcurrent; } catch { /* keep */ }
             _queueTimezone = Format.Text(queue, "timezone");
+            RebuildChrome();
             RenderList();
             RenderDetail();
         }
@@ -269,33 +300,83 @@ internal sealed class AutomationsPage : Page
         return _folders.FirstOrDefault(f => f.Id == workspaceId).Name ?? "Folder";
     }
 
+    private bool MatchesQuery(JsonNode? job)
+    {
+        var term = _query.Trim();
+        if (string.IsNullOrEmpty(term))
+        {
+            return true;
+        }
+        return Format.Text(job, "name").Contains(term, StringComparison.OrdinalIgnoreCase)
+            || Format.Text(job, "prompt").Contains(term, StringComparison.OrdinalIgnoreCase);
+    }
+
     private void RenderList()
     {
         _listHost.Children.Clear();
         _listHost.Children.Add(QueueCard());
-        var list = new StackPanel { Spacing = Theme.SpaceS };
+        var visible = new List<JsonNode?>();
         foreach (var job in _jobs)
         {
             if (!Format.InWorkspace(job, _scopeWorkspaceId, includeUnscoped: true))
             {
                 continue;
             }
-            var id = Format.Text(job, "id");
-            if (string.IsNullOrEmpty(id))
+            if (string.IsNullOrEmpty(Format.Text(job, "id")))
             {
                 continue;
             }
-            list.Children.Add(JobRow(job, id));
+            if (MatchesQuery(job))
+            {
+                visible.Add(job);
+            }
         }
-        if (list.Children.Count == 0)
+        if (visible.Count == 0)
         {
-            _listHost.Children.Add(EmptyState.View(
-                "No automations yet",
-                "Scheduled jobs run on this host when Always-on is on.",
-                EmptyArtKind.Automations));
+            if (!string.IsNullOrEmpty(_query.Trim()))
+            {
+                _listHost.Children.Add(Chrome.Empty(
+                    "No matching automations",
+                    $"No job matches \"{_query.Trim()}\".",
+                    ActionIcon.Search,
+                    ActionIconGlyph.Button("Clear search", ActionIcon.Dismiss, (_, _) =>
+                    {
+                        _searchBox.Text = "";
+                    })));
+            }
+            else
+            {
+                _listHost.Children.Add(EmptyState.View(
+                    "No automations yet",
+                    "Scheduled jobs run on this host when Always-on is on.",
+                    EmptyArtKind.Automations,
+                    ActionIconGlyph.Button("New automation", ActionIcon.Create, (_, _) => StartCreating())));
+            }
             return;
         }
-        _listHost.Children.Add(Chrome.Card("Automations", list));
+        RenderSection("Active", visible.Where(job => Format.Flag(job, "enabled")).ToList());
+        RenderSection("Paused", visible.Where(job => !Format.Flag(job, "enabled")).ToList());
+    }
+
+    private void RenderSection(string title, List<JsonNode?> jobs)
+    {
+        if (jobs.Count == 0)
+        {
+            return;
+        }
+        var section = new StackPanel { Spacing = Theme.SpaceS };
+        section.Children.Add(Chrome.SectionLabel(title, jobs.Count));
+        var list = new StackPanel { Spacing = Theme.SpaceS };
+        foreach (var job in jobs)
+        {
+            if (job is null)
+            {
+                continue;
+            }
+            list.Children.Add(JobRow(job, Format.Text(job, "id")));
+        }
+        section.Children.Add(list);
+        _listHost.Children.Add(section);
     }
 
     private UIElement QueueCard()
@@ -639,6 +720,17 @@ internal sealed class AutomationsPage : Page
         var job = SelectedJob();
         if (job is null)
         {
+            _detailHost.Children.Add(new TextBlock
+            {
+                Text = "Select an automation",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            _detailHost.Children.Add(new TextBlock
+            {
+                Text = "Pick a job to edit its schedule, run it, or read its history.",
+                Opacity = 0.66,
+                TextWrapping = TextWrapping.Wrap,
+            });
             return;
         }
         _detailHost.Children.Add(EditorCard(job));

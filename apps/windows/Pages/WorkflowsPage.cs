@@ -20,13 +20,23 @@ namespace Tokenstat.Pages;
 /// saves on protocol 22 and later, complete run history, and unknown-field
 /// preservation on every round trip.
 /// </summary>
-internal sealed class WorkflowsPage : Page
+internal sealed class WorkflowsPage : Page, IInspectorContent
 {
     private readonly string? _scopeWorkspaceId;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _listHost = new() { Spacing = Theme.SpaceL };
-    private readonly StackPanel _detailHost = new() { Spacing = Theme.SpaceL };
+    private readonly StackPanel _detailHost = new()
+    {
+        Spacing = Theme.SpaceL,
+        Padding = new Thickness(Theme.SpaceM),
+    };
+    private readonly TextBox _searchBox;
 
     private JsonArray _graphs = new();
     private JsonArray _runs = new();
@@ -35,6 +45,7 @@ internal sealed class WorkflowsPage : Page
     private long? _protocol;
     private ulong _defaultBudget = 10_800;
     private string _queueTimezone = "";
+    private string _query = "";
     private bool _working;
     private string? _selectedId;
     private bool _creating;
@@ -59,60 +70,79 @@ internal sealed class WorkflowsPage : Page
     public WorkflowsPage(string? workspaceId = null)
     {
         _scopeWorkspaceId = workspaceId;
-        _root.Children.Add(Header());
+        _searchBox = Chrome.SearchField("Search workflows", text =>
+        {
+            _query = text ?? "";
+            RenderList();
+        });
+        _searchBox.MaxWidth = 340;
+        _searchBox.HorizontalAlignment = HorizontalAlignment.Left;
         _root.Children.Add(_bannerHost);
+        _root.Children.Add(_searchBox);
         _root.Children.Add(_listHost);
-        _root.Children.Add(_detailHost);
         // A wireframe until the first load lands. RenderList clears the host,
         // so real content replaces it, like Home's skeleton.
         _listHost.Children.Add(Motion.SkeletonCard());
-        Content = new ScrollViewer
+        var scroller = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
             Content = _root,
         };
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(scroller, 1);
+        layout.Children.Add(scroller);
+        Content = layout;
+        RebuildChrome();
+        RenderDetail();
         Loaded += async (_, _) => await LoadAsync();
     }
 
-    private UIElement Header()
+    /// <summary>
+    /// The inspector column content: the selected graph's detail, steps, run,
+    /// and history views. Selection and reloads replace its children, so the
+    /// column stays live without the shell asking again.
+    /// </summary>
+    public UIElement? Inspector => _detailHost;
+
+    private void RebuildChrome()
     {
-        var row = new Grid();
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var titles = new StackPanel { Spacing = 2 };
-        titles.Children.Add(new TextBlock
+        UIElement? scope = null;
+        if (_scopeWorkspaceId is not null)
         {
-            Text = "Workflows",
-            FontSize = Fonts.PageTitle,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        });
-        titles.Children.Add(new TextBlock
-        {
-            Text = "Graphs of steps that run on this host.",
-            Opacity = 0.66,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        row.Children.Add(titles);
-        var create = ActionIconGlyph.PrimaryButton(
-            "New workflow", ActionIcon.Create, (_, _) =>
+            scope = Chrome.ScopeChip(FolderLabel(_scopeWorkspaceId));
+        }
+        _barSlot.Content = DetailBar.View(
+            scope: scope,
+            trailing: new List<UIElement>
             {
-                _creating = true;
-                _selectedId = null;
-                _graph = BlankGraph("Untitled");
-                _detailRevision = null;
-                _detailDirty = false;
-                _conflictId = null;
-                _confirmDelete = false;
-                _stepId = null;
-                RenderDetail();
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload workflows",
+                    async (_, _) => await LoadAsync()),
+                Buttons.ToolbarIcon(
+                    ActionIcon.Create,
+                    "Start a blank draft",
+                    (_, _) => StartCreating()),
             });
-        Grid.SetColumn(create, 1);
-        row.Children.Add(create);
-        var refresh = ActionIconGlyph.Button("Refresh", ActionIcon.Refresh, async (_, _) => await LoadAsync());
-        Grid.SetColumn(refresh, 2);
-        row.Children.Add(refresh);
-        return row;
+    }
+
+    private void StartCreating()
+    {
+        _creating = true;
+        _selectedId = null;
+        _graph = BlankGraph("Untitled");
+        _detailRevision = null;
+        _DetailDirty = false;
+        _conflictId = null;
+        _confirmDelete = false;
+        _stepId = null;
+        RenderDetail();
     }
 
     private static UIElement Labeled(string label, UIElement content)
@@ -161,6 +191,7 @@ internal sealed class WorkflowsPage : Page
             {
                 RefreshGraphFromHost();
             }
+            RebuildChrome();
             RenderList();
             RenderDetail();
         }
@@ -270,32 +301,132 @@ internal sealed class WorkflowsPage : Page
     private static bool RunLive(JsonNode? run) =>
         WorkbenchOps.IsRunning(run) || Format.Text(run, "status") == "waiting";
 
+    private bool MatchesQuery(JsonNode? graph)
+    {
+        var term = _query.Trim();
+        if (string.IsNullOrEmpty(term))
+        {
+            return true;
+        }
+        if (Format.Text(graph, "name").Contains(term, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (graph?["nodes"] is JsonArray nodes)
+        {
+            foreach (var node in nodes)
+            {
+                if (Format.Text(node, "title").Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || Format.Text(node, "displayTitle").Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || KindLabel(NodeKind(node)).Contains(term, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private void RenderList()
     {
         _listHost.Children.Clear();
-        var list = new StackPanel { Spacing = Theme.SpaceS };
+        var visible = new List<JsonNode?>();
         foreach (var graph in _graphs)
         {
             if (!Format.InWorkspace(graph, _scopeWorkspaceId, includeUnscoped: true))
             {
                 continue;
             }
-            var id = Format.Text(graph, "id");
-            if (string.IsNullOrEmpty(id))
+            if (string.IsNullOrEmpty(Format.Text(graph, "id")))
             {
                 continue;
             }
-            list.Children.Add(GraphRow(graph, id));
+            if (MatchesQuery(graph))
+            {
+                visible.Add(graph);
+            }
         }
-        if (list.Children.Count == 0)
+        if (visible.Count == 0)
         {
-            _listHost.Children.Add(EmptyState.View(
-                "No workflows yet",
-                "Start from a blank graph, a recipe, or a draft from a prompt.",
-                EmptyArtKind.Workflows));
+            if (!string.IsNullOrEmpty(_query.Trim()))
+            {
+                _listHost.Children.Add(Chrome.Empty(
+                    "No matching workflows",
+                    $"No workflow matches \"{_query.Trim()}\".",
+                    ActionIcon.Search,
+                    ActionIconGlyph.Button("Clear search", ActionIcon.Dismiss, (_, _) =>
+                    {
+                        _searchBox.Text = "";
+                    })));
+            }
+            else
+            {
+                _listHost.Children.Add(EmptyState.View(
+                    "No workflows yet",
+                    "Start from a blank graph, a recipe, or a draft from a prompt.",
+                    EmptyArtKind.Workflows,
+                    ActionIconGlyph.Button("New workflow", ActionIcon.Create, (_, _) => StartCreating())));
+            }
             return;
         }
-        _listHost.Children.Add(Chrome.Card("Workflows", list));
+        var global = new List<JsonNode?>();
+        var byFolder = new Dictionary<string, List<JsonNode?>>();
+        foreach (var graph in visible)
+        {
+            var workspaceId = Format.Text(graph, "workspaceId");
+            var folderKnown = _folders.Any(f => f.Id == workspaceId)
+                || (_scopeWorkspaceId is not null && workspaceId == _scopeWorkspaceId);
+            if (Format.Text(graph, "scope") == "workspace" && folderKnown)
+            {
+                if (!byFolder.TryGetValue(workspaceId, out var bucket))
+                {
+                    bucket = new List<JsonNode?>();
+                    byFolder[workspaceId] = bucket;
+                }
+                bucket.Add(graph);
+            }
+            else
+            {
+                global.Add(graph);
+            }
+        }
+        RenderSection("Global", global);
+        if (_scopeWorkspaceId is not null)
+        {
+            if (byFolder.TryGetValue(_scopeWorkspaceId, out var scoped))
+            {
+                RenderSection(FolderLabel(_scopeWorkspaceId), scoped);
+            }
+            return;
+        }
+        foreach (var folder in _folders)
+        {
+            if (byFolder.TryGetValue(folder.Id, out var graphs))
+            {
+                RenderSection(folder.Name, graphs);
+            }
+        }
+    }
+
+    private void RenderSection(string title, List<JsonNode?> graphs)
+    {
+        if (graphs.Count == 0)
+        {
+            return;
+        }
+        var section = new StackPanel { Spacing = Theme.SpaceS };
+        section.Children.Add(Chrome.SectionLabel(title, graphs.Count));
+        var list = new StackPanel { Spacing = Theme.SpaceS };
+        foreach (var graph in graphs)
+        {
+            if (graph is null)
+            {
+                continue;
+            }
+            list.Children.Add(GraphRow(graph, Format.Text(graph, "id")));
+        }
+        section.Children.Add(list);
+        _listHost.Children.Add(section);
     }
 
     private UIElement GraphRow(JsonNode graph, string id)
@@ -514,6 +645,17 @@ internal sealed class WorkflowsPage : Page
         }
         if (_graph is null)
         {
+            _detailHost.Children.Add(new TextBlock
+            {
+                Text = "Select a workflow",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            _detailHost.Children.Add(new TextBlock
+            {
+                Text = "Pick a graph to edit its steps, run it, or read its history.",
+                Opacity = 0.66,
+                TextWrapping = TextWrapping.Wrap,
+            });
             return;
         }
         _detailHost.Children.Add(FormCard());

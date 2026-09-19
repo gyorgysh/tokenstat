@@ -21,13 +21,22 @@ namespace Tokenstat.Pages;
 /// workbench: the same columns, filters, run placement, receipts, and the
 /// rule that a lost answer is checked before anything runs twice.
 /// </summary>
-internal sealed class TodoPage : Page
+internal sealed class TodoPage : Page, IInspectorContent
 {
     private readonly string? _scopeWorkspaceId;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _boardHost = new() { Spacing = Theme.SpaceL };
-    private readonly StackPanel _detailHost = new() { Spacing = Theme.SpaceL };
+    private readonly StackPanel _detailHost = new()
+    {
+        Spacing = Theme.SpaceL,
+        Padding = new Thickness(Theme.SpaceM),
+    };
     private readonly TextBox _quickTitle = new() { PlaceholderText = "New task" };
     private readonly Button _quickAdd;
     private readonly ComboBox _folderFilter = new() { MinWidth = 160 };
@@ -122,20 +131,30 @@ internal sealed class TodoPage : Page
         quick.Children.Add(_quickTitle);
         quick.Children.Add(_quickAdd);
 
-        _root.Children.Add(Header());
         _root.Children.Add(quick);
         _root.Children.Add(FilterBar());
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_boardHost);
-        _root.Children.Add(_detailHost);
         // A wireframe until the first load lands. RenderBoard clears the
         // host, so real content replaces it, like Home's skeleton.
         _boardHost.Children.Add(Motion.SkeletonCard());
-        Content = new ScrollViewer
+        var scroller = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
             Content = _root,
         };
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(scroller, 1);
+        layout.Children.Add(scroller);
+        Content = layout;
+        RebuildChrome();
+        RenderDetail();
         Loaded += async (_, _) =>
         {
             await LoadAsync();
@@ -144,31 +163,33 @@ internal sealed class TodoPage : Page
         Unloaded += (_, _) => StopPolling();
     }
 
-    private UIElement Header()
+    /// <summary>
+    /// The inspector column content: the selected task's detail, history, and
+    /// run views. Selection and reloads replace its children, so the column
+    /// stays live without the shell asking again.
+    /// </summary>
+    public UIElement? Inspector => _detailHost;
+
+    private void RebuildChrome()
     {
-        var row = new Grid();
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var titles = new StackPanel { Spacing = 2 };
-        titles.Children.Add(new TextBlock
+        UIElement? scope = null;
+        if (_scopeWorkspaceId is not null)
         {
-            Text = "Tasks",
-            FontSize = Fonts.PageTitle,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        });
-        titles.Children.Add(new TextBlock
-        {
-            Text = _scopeWorkspaceId is null
-                ? "Work in stages, then hand a task to an agent."
-                : "Tasks in this folder.",
-            Opacity = 0.66,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        row.Children.Add(titles);
-        var refresh = ActionIconGlyph.Button("Refresh", ActionIcon.Refresh, async (_, _) => await LoadAsync());
-        Grid.SetColumn(refresh, 1);
-        row.Children.Add(refresh);
-        return row;
+            scope = Chrome.ScopeChip(FolderLabel(_scopeWorkspaceId));
+        }
+        _barSlot.Content = DetailBar.View(
+            scope: scope,
+            trailing: new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload tasks",
+                    async (_, _) => await LoadAsync()),
+                Buttons.ToolbarIcon(
+                    ActionIcon.Create,
+                    "Add a card to To Do",
+                    (_, _) => _quickTitle.Focus(FocusState.Programmatic)),
+            });
     }
 
     private UIElement FilterBar()
@@ -269,6 +290,7 @@ internal sealed class TodoPage : Page
                 try { _defaultBudgetSeconds = budget.GetValue<ulong>(); } catch { /* keep */ }
             }
             RefreshFilterLists();
+            RebuildChrome();
             RenderBoard();
             RenderDetailSafe(quiet);
         }
@@ -478,6 +500,16 @@ internal sealed class TodoPage : Page
         _boardHost.Children.Clear();
         SetButtonLabel(_archiveToggle, _showArchive ? "Open tasks" : "Archive");
         SetButtonLabel(_sortToggle, _newestFirst ? "Newest first" : "Board order");
+        if (_cards.Count == 0)
+        {
+            _boardHost.Children.Add(EmptyState.View(
+                _showArchive ? "No archived tasks" : "No tasks yet",
+                "Create a task or adjust the filters to see more work.",
+                EmptyArtKind.Tasks,
+                ActionIconGlyph.Button("New task", ActionIcon.Create, (_, _) =>
+                    _quickTitle.Focus(FocusState.Programmatic))));
+            return;
+        }
         if (_showArchive)
         {
             _boardHost.Children.Add(Column("archive", "Archive"));
@@ -816,6 +848,20 @@ internal sealed class TodoPage : Page
         var card = SelectedCard();
         if (card is null)
         {
+            if (_pendingCreateOp is null)
+            {
+                _detailHost.Children.Add(new TextBlock
+                {
+                    Text = "Select a task",
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                });
+                _detailHost.Children.Add(new TextBlock
+                {
+                    Text = "Pick a card on the board to edit it, run it, or read its result.",
+                    Opacity = 0.66,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
             return;
         }
         _detailHost.Children.Add(DetailCard(card));
