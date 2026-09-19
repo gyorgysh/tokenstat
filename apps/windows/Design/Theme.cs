@@ -40,8 +40,16 @@ internal enum SyntaxKind
 /// </summary>
 internal static class Theme
 {
-    public static bool IsDark =>
-        Application.Current?.RequestedTheme == ApplicationTheme.Dark;
+    // RequestedTheme is the app preference; ActualTheme follows system
+    // changes while the window is alive. The shell supplies its current root.
+    public static ElementTheme? WindowTheme { get; set; }
+
+    public static bool IsDark => WindowTheme switch
+    {
+        ElementTheme.Dark => true,
+        ElementTheme.Light => false,
+        _ => Application.Current?.RequestedTheme == ApplicationTheme.Dark,
+    };
 
     public static Color Accent => Hex(IsDark ? 0x8B5CF6u : 0x6A3DFFu);
     public static Color Secondary => Hex(IsDark ? 0xE879F9u : 0xC026D3u);

@@ -54,6 +54,7 @@ internal static class RemoteWorkspaces
     public static event Action? Changed;
 
     private static readonly object Gate = new();
+    private static int _sweeping;
     private static readonly Dictionary<string, List<RemoteFolder>> FoldersByPeer =
         new(StringComparer.Ordinal);
     private static readonly HashSet<string> Suppressed = new(StringComparer.Ordinal);
@@ -294,6 +295,24 @@ internal static class RemoteWorkspaces
     /// </summary>
     public static async Task SweepAsync()
     {
+        // Boot, the sidebar timer and workspace creation can request a sweep
+        // together. One pass owns the retry counters and peer requests.
+        if (Interlocked.Exchange(ref _sweeping, 1) != 0)
+        {
+            return;
+        }
+        try
+        {
+            await SweepCoreAsync();
+        }
+        finally
+        {
+            Volatile.Write(ref _sweeping, 0);
+        }
+    }
+
+    private static async Task SweepCoreAsync()
+    {
         bool tunnelOn;
         List<(string Key, string Label, string? Address)> peers;
         try
@@ -450,7 +469,7 @@ internal static class RemoteWorkspaces
     private static async Task<List<RemoteFolder>> ReadPeerFoldersAsync(string peerKey, string peerLabel)
     {
         var answer = await CallOnPeerAsync(peerKey, "workspace.list");
-        var array = answer as JsonArray ?? answer["workspaces"] as JsonArray;
+        var array = answer as JsonArray ?? answer["folders"] as JsonArray ?? answer["workspaces"] as JsonArray;
         var folders = new List<RemoteFolder>();
         if (array is null)
         {

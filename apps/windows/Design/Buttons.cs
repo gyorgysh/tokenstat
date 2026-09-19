@@ -148,6 +148,7 @@ internal static class Buttons
             button.Foreground = foreground;
         }
         button.Click += click;
+        AutomationProperties.SetName(button, title);
         DimWhenDisabled(button);
         return button;
     }

@@ -129,6 +129,7 @@ internal static class SegmentedCapsule
         segment.Click += async (_, _) => await onTap();
         ToolTipService.SetToolTip(segment, label);
         AutomationProperties.SetName(segment, label);
+        AutomationProperties.SetItemStatus(segment, active ? "Selected" : "Not selected");
         return segment;
     }
 

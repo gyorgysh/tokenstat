@@ -64,15 +64,18 @@ internal static class DetailBar
         {
             foreach (var item in leading)
             {
+                Detach(item);
                 left.Children.Add(item);
             }
         }
         if (scope is not null)
         {
+            Detach(scope);
             left.Children.Add(scope);
         }
         if (accessory is not null)
         {
+            Detach(accessory);
             left.Children.Add(accessory);
         }
         bar.Children.Add(left);
@@ -88,6 +91,7 @@ internal static class DetailBar
         {
             foreach (var item in trailing)
             {
+                Detach(item);
                 right.Children.Add(item);
             }
         }
@@ -110,4 +114,14 @@ internal static class DetailBar
     /// puts adjacent headers on the same optical baseline.
     /// </summary>
     private const double BottomSpacing = 3;
+
+    private static void Detach(UIElement element)
+    {
+        // Stateful actions (for example terminal lifecycle buttons) survive
+        // toolbar rebuilds. Release their previous strip before reusing them.
+        if (VisualTreeHelper.GetParent(element) is Panel parent)
+        {
+            parent.Children.Remove(element);
+        }
+    }
 }

@@ -96,7 +96,7 @@ internal sealed class HeatmapView : StackPanel
     private double _stride;
     private Rectangle? _hoverRing;
     private Rectangle? _selectedRing;
-    private Rectangle? _hitRect;
+    private Button? _hitRect;
     private StackPanel? _footerLeft;
 
     public HeatmapView(
@@ -274,15 +274,25 @@ internal sealed class HeatmapView : StackPanel
 
         // One transparent hit layer over the canvas. It maps a pointer point
         // back to a cell with the same packing math the squares use.
-        _hitRect = new Rectangle
+        _hitRect = new Button
         {
             Width = contentWidth,
             Height = contentHeight,
-            Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0)),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
         };
+        _hitRect.Resources["ButtonBackgroundPointerOver"] = _hitRect.Background;
+        _hitRect.Resources["ButtonBackgroundPressed"] = _hitRect.Background;
+        _hitRect.Resources["ButtonBorderBrushPointerOver"] = _hitRect.Background;
+        _hitRect.Resources["ButtonBorderBrushPressed"] = _hitRect.Background;
+        AutomationProperties.SetName(_hitRect, $"Activity, {_snap.First} to {_snap.Last}");
+        AutomationProperties.SetHelpText(_hitRect, "Use arrow keys to browse days, then Enter to open a day.");
+        _hitRect.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnDayKeyDown), true);
+        _hitRect.GotFocus += (_, _) => SetHovered(FindDate(_selectedDate) ?? AvailableDays().LastOrDefault());
         _hitRect.PointerMoved += OnPointerMoved;
         _hitRect.PointerExited += (_, _) => SetHovered(null);
-        _hitRect.PointerPressed += OnPointerPressed;
+        _hitRect.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnPointerPressed), true);
         canvas.Children.Add(_hitRect);
 
         AutomationProperties.SetName(canvas, $"Activity, {_snap.First} to {_snap.Last}");
@@ -397,9 +407,69 @@ internal sealed class HeatmapView : StackPanel
         {
             return;
         }
+        SetHovered(slot);
         _selectedDate = slot.Day.Date;
         ApplySelection();
         _onSelect?.Invoke(slot.Day);
+    }
+
+    private List<Slot> AvailableDays()
+    {
+        var days = new List<Slot>();
+        for (var column = 0; column < _snap.Weeks; column++)
+        {
+            for (var row = 0; row < _snap.Rows.Count; row++)
+            {
+                if (DayAt(row, column) is HeatDay day && !day.Locked)
+                {
+                    days.Add(new Slot(day, row, column));
+                }
+            }
+        }
+        return days.OrderBy(slot => slot.Day.Date, StringComparer.Ordinal).ToList();
+    }
+
+    private void OnDayKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        var days = AvailableDays();
+        if (days.Count == 0)
+        {
+            return;
+        }
+        var index = _hovered is null ? days.Count - 1 : days.FindIndex(day => day.Day.Date == _hovered.Day.Date);
+        index = Math.Max(index, 0);
+        switch (e.Key)
+        {
+            case Windows.System.VirtualKey.Left:
+                index = Math.Max(index - _snap.Rows.Count, 0);
+                break;
+            case Windows.System.VirtualKey.Up:
+                index = Math.Max(index - 1, 0);
+                break;
+            case Windows.System.VirtualKey.Right:
+                index = Math.Min(index + _snap.Rows.Count, days.Count - 1);
+                break;
+            case Windows.System.VirtualKey.Down:
+                index = Math.Min(index + 1, days.Count - 1);
+                break;
+            case Windows.System.VirtualKey.Home:
+                index = 0;
+                break;
+            case Windows.System.VirtualKey.End:
+                index = days.Count - 1;
+                break;
+            case Windows.System.VirtualKey.Enter:
+            case Windows.System.VirtualKey.Space:
+                _selectedDate = days[index].Day.Date;
+                ApplySelection();
+                _onSelect?.Invoke(days[index].Day);
+                e.Handled = true;
+                return;
+            default:
+                return;
+        }
+        SetHovered(days[index]);
+        e.Handled = true;
     }
 
     private Slot? SlotAt(double x, double y)

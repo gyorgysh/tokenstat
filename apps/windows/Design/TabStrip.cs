@@ -157,6 +157,7 @@ internal static class TabStrip
         tab.Click += async (_, _) => await onTap();
         ToolTipService.SetToolTip(tab, label);
         AutomationProperties.SetName(tab, label);
+        AutomationProperties.SetItemStatus(tab, active ? "Selected" : "Not selected");
         return tab;
     }
 }

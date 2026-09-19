@@ -50,11 +50,9 @@ public sealed partial class MainWindow : Window
     private readonly SolidColorBrush _chromeBackground = new(Theme.Background);
     private readonly SolidColorBrush _chromeSidebar = new(Theme.Sidebar);
     private readonly SolidColorBrush _chromeBorder = new(Theme.Border);
-    private readonly NavigationViewItem _workspacesHeader = new()
+    private readonly NavigationViewItemHeader _workspacesHeader = new()
     {
         Content = "WORKSPACES",
-        SelectsOnInvoked = false,
-        IsEnabled = false,
     };
     private UIElement? _hostSplash;
     /// <summary>
@@ -155,6 +153,8 @@ public sealed partial class MainWindow : Window
             DispatcherQueue.TryEnqueue(() =>
             {
                 SetContent(new TerminalPage(workspaceId, sessionId));
+                RestoreSelection(SidebarLive.SessionPrefix + workspaceId + ":" + sessionId);
+                _lastNavTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
             });
         };
         AppServices.OpenBrowser = (url, host, port, unlisten, peer) =>
@@ -179,7 +179,7 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                SetContent(WorkspaceSectionPage(workspaceId, section));
+                NavigateTo("ws:" + workspaceId + ":" + section);
             });
         };
         AppServices.OpenConversation = (workspaceId, chatId) =>
@@ -391,6 +391,9 @@ public sealed partial class MainWindow : Window
     private void RebuildFolderItems()
     {
         var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
+        var expanded = _nav.MenuItems.OfType<NavigationViewItem>()
+            .Where(item => item.IsExpanded && item.Tag is string)
+            .Select(item => (string)item.Tag).ToHashSet(StringComparer.Ordinal);
         var keep = new List<object>();
         foreach (var item in _nav.MenuItems)
         {
@@ -427,6 +430,13 @@ public sealed partial class MainWindow : Window
             Tag = "workspaces:add",
             Icon = new SymbolIcon { Symbol = Symbol.Add },
         });
+        foreach (var item in _nav.MenuItems.OfType<NavigationViewItem>())
+        {
+            if (item.Tag is string tag && expanded.Contains(tag))
+            {
+                item.IsExpanded = true;
+            }
+        }
         if (selectedTag is not null
             && ((_nav.SelectedItem as NavigationViewItem)?.Tag as string) != selectedTag
             && FindNavItem(selectedTag) is NavigationViewItem back)
@@ -501,22 +511,21 @@ public sealed partial class MainWindow : Window
         {
             OnboardingState.HasOnboarded = true;
         }
-        SetContent(new OnboardingPage(() =>
-        {
-            if (_nav.SelectedItem is NavigationViewItem selected
-                && selected.Tag is string tag)
-            {
-                Show(tag);
-            }
-        }));
+        var returnTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string ?? "global:Home";
+        SetContent(new OnboardingPage(() => NavigateTo(returnTag)));
     }
 
     /// <summary>
     /// Mount a page with the smooth arrival. Every navigation goes through
     /// here so content lands the same way on every screen.
     /// </summary>
-    private void SetContent(Page page)
+    private void SetContent(Page page, bool preserveSelection = false)
     {
+        if (!preserveSelection)
+        {
+            _lastNavTag = null;
+            RestoreSelection(null);
+        }
         // Pages sit transparent over the content host, which carries the
         // Background tone. Only when the page did not choose its own surface:
         // the terminal and the screen own a black one, and a local value wins.
@@ -581,7 +590,8 @@ public sealed partial class MainWindow : Window
             }
         }
         trailing.Add(Buttons.ToolbarIcon(ActionIcon.Search, "Search work", (_, _) => OpenSearch()));
-        if (content is Page and not AccountPage)
+        if (content is IInspectorContent inspector && inspector.Inspector is not null
+            && _inspectorHost.RouteAllowsInspector && _inspectorHost.FitsWidth)
         {
             // Last, nearest the edge it opens, like the Mac: the toggle is the
             // control beside the column it controls.
@@ -639,8 +649,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OpenSearch()
     {
-        Show("global:Search");
-        _nav.SelectedItem = null;
+        NavigateTo("global:Search");
     }
 
     private void ToggleInspector()
@@ -764,7 +773,7 @@ public sealed partial class MainWindow : Window
                     GlobalSection.About => new AboutPage(),
                     _ => new AboutPage(),
                 };
-                SetContent(page);
+                SetContent(page, preserveSelection: true);
             }
             return;
         }
@@ -772,13 +781,13 @@ public sealed partial class MainWindow : Window
         {
             if (Enum.TryParse<SSHSection>(tag["ssh:".Length..], out var section))
             {
-                SetContent(new SshPage(section));
+                SetContent(new SshPage(section), preserveSelection: true);
             }
             return;
         }
         if (tag == "workspaces:all")
         {
-            SetContent(WorkspacesOverviewPage());
+            SetContent(WorkspacesOverviewPage(), preserveSelection: true);
             return;
         }
         if (tag == "workspaces:add")
@@ -794,7 +803,7 @@ public sealed partial class MainWindow : Window
                 && Enum.TryParse<WorkspaceSection>(rest[(i + 1)..], out var section))
             {
                 var id = rest[..i];
-                SetContent(WorkspaceSectionPage(id, section));
+                SetContent(WorkspaceSectionPage(id, section), preserveSelection: true);
             }
         }
     }
@@ -863,11 +872,16 @@ public sealed partial class MainWindow : Window
     private void RestoreSelection(string? tag)
     {
         _suppressNav = true;
-        if (tag is not null && FindNavItem(tag) is NavigationViewItem back)
-        {
-            _nav.SelectedItem = back;
-        }
+        _nav.SelectedItem = tag is null ? null : FindNavItem(tag);
         _suppressNav = false;
+    }
+
+    private void NavigateTo(string tag)
+    {
+        RestoreSelection(tag);
+        _lastNavTag = tag;
+        Show(tag);
+        RefreshUpdateBadge();
     }
 
     /// <summary>
@@ -1014,6 +1028,7 @@ public sealed partial class MainWindow : Window
     private sealed class HistoryPage : Page, IToolbarItems
     {
         private readonly string _id;
+        private int _loadGeneration;
         private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
 
         private async Task ShowDiffAsync(string filePath)
@@ -1034,7 +1049,7 @@ public sealed partial class MainWindow : Window
             await WorkspaceDiff.ShowFileDiffAsync(this, "Diff · " + filePath, diff);
         }
 
-        public event Action? ToolbarChanged;
+        public event Action? ToolbarChanged { add { } remove { } }
 
         public HistoryPage(string id)
         {
@@ -1067,6 +1082,7 @@ public sealed partial class MainWindow : Window
 
         private async Task LoadAsync()
         {
+            var generation = ++_loadGeneration;
             _root.Children.Clear();
             _root.Children.Add(new TextBlock
             {
@@ -1098,6 +1114,10 @@ public sealed partial class MainWindow : Window
                         }
                         await WorkspaceDiff.ShowFileDiffAsync(this, "Diff · " + filePath, diff);
                     });
+            if (generation != _loadGeneration)
+            {
+                return;
+            }
             _root.Children.Remove(skeleton);
             if (card is not null)
             {
@@ -1466,6 +1486,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void ApplyChromeColors()
     {
+        Theme.WindowTheme = RootGrid.ActualTheme;
         _chromeBackground.Color = Theme.Background;
         _chromeSidebar.Color = Theme.Sidebar;
         _chromeBorder.Color = Theme.Border;

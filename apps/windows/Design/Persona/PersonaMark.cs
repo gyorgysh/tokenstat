@@ -31,6 +31,9 @@ internal sealed class PersonaMark : Canvas
     private ulong _seed;
     private double _size;
     private PersonaMood _state;
+    private Windows.UI.ViewManagement.UISettings? _settings;
+    private bool _needsRedraw = true;
+    private bool _wasMoving;
 
     public PersonaMark(ulong seed = 0, double size = 28, PersonaMood state = PersonaMood.Idle, bool pokeable = false)
     {
@@ -46,6 +49,7 @@ internal sealed class PersonaMark : Canvas
         PointerPressed += OnPointerPressed;
         Loaded += (_, _) => Start();
         Unloaded += (_, _) => Stop();
+        ActualThemeChanged += (_, _) => _needsRedraw = true;
     }
 
     /// <summary>Stable per persona. Zero falls back to one settled look rather than an empty frame.</summary>
@@ -60,6 +64,7 @@ internal sealed class PersonaMark : Canvas
             }
             _seed = value;
             _engine.Reseed(value);
+            _needsRedraw = true;
         }
     }
 
@@ -69,6 +74,7 @@ internal sealed class PersonaMark : Canvas
         set
         {
             _size = value;
+            _needsRedraw = true;
             Width = value;
             Height = value;
         }
@@ -79,6 +85,7 @@ internal sealed class PersonaMark : Canvas
         get => _state;
         set
         {
+            _needsRedraw |= _state != value;
             _state = value;
             _timer.Interval = TimeSpan.FromSeconds(1 / value.FrameRate());
         }
@@ -108,19 +115,27 @@ internal sealed class PersonaMark : Canvas
 
     private void Tick()
     {
-        _engine.AdvanceTo(_clock.Elapsed.TotalSeconds, _state, Moving());
+        bool moving = Moving();
+        _timer.Interval = moving ? TimeSpan.FromSeconds(1 / _state.FrameRate()) : TimeSpan.FromMilliseconds(250);
+        if (!moving && !_wasMoving && !_needsRedraw)
+        {
+            return;
+        }
+        _engine.AdvanceTo(_clock.Elapsed.TotalSeconds, _state, moving);
         PersonaRenderer.Draw(_engine, this, _size, _size);
+        _needsRedraw = false;
+        _wasMoving = moving;
     }
 
     /// <summary>
     /// Motion is off when the person asked for it to be. Then the engine
     /// presents the mood's resting pose rather than freezing mid-bounce.
     /// </summary>
-    private static bool Moving()
+    private bool Moving()
     {
         try
         {
-            return new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
+            return (_settings ??= new Windows.UI.ViewManagement.UISettings()).AnimationsEnabled;
         }
         catch (Exception)
         {
