@@ -75,22 +75,26 @@ public sealed partial class SmokeApp : Application
                 if (tree.CanDragItems || tree.CanReorderItems) throw new Exception("File tree permits visual-only file moves");
                 body.Children.Remove(tree);
                 Program.Log("PASS: production file tree renders filename content in native containers");
-                var workspaceTabs = new WorkspaceTabStrip { Height = 160 };
-                body.Children.Add(workspaceTabs);
+                var workspaceTabs = new WorkspaceTabStrip();
+                var tabView = workspaceTabs.View;
+                tabView.Height = 160;
+                if (tabView.GetType() != typeof(TabView)) throw new Exception("Workspace tabs must use the native TabView type for style compatibility");
+                body.Children.Add(tabView);
                 var launch = workspaceTabs.Open("launcher", "Launch", () => new TextBlock { Text = "Launcher" }, false);
                 var draft = new TextBox { Text = "Unsaved document" };
                 var document = workspaceTabs.Open("file:README.md", "README.md", () => draft);
                 workspaceTabs.Open("launcher", "Launch", () => throw new Exception("Existing launcher recreated"));
                 workspaceTabs.Open("file:README.md", "README.md", () => throw new Exception("Existing document recreated"));
-                workspaceTabs.UpdateLayout();
-                await Task.Delay(100);
-                if (workspaceTabs.TabItems.Count != 2 || !ReferenceEquals(workspaceTabs.SelectedItem, document)
+                tabView.ApplyTemplate();
+                tabView.UpdateLayout();
+                await Task.Delay(250);
+                if (tabView.TabItems.Count != 2 || !ReferenceEquals(tabView.SelectedItem, document)
                     || draft.Text != "Unsaved document" || draft.ActualWidth <= 0)
                     throw new Exception("Workspace tabs lost selection, document content, or layout while switching");
                 workspaceTabs.Forget(document);
-                if (workspaceTabs.TabItems.Count != 1 || !ReferenceEquals(workspaceTabs.SelectedItem, launch))
+                if (tabView.TabItems.Count != 1 || !ReferenceEquals(tabView.SelectedItem, launch))
                     throw new Exception("Closing a document did not return to the remaining workspace surface");
-                body.Children.Remove(workspaceTabs);
+                body.Children.Remove(tabView);
                 Program.Log("PASS: workspace tabs retain unsaved documents, deduplicate surfaces, and close cleanly");
                 await terminal.Ready;
                 terminal.Write(System.Text.Encoding.UTF8.GetBytes("\u001b[2J\u001b[H\u001b[31mred\u001b[0m\r\n"));

@@ -9,7 +9,8 @@ namespace Tokenstat.Pages;
 /// <summary>One persistent desktop workbench per local or remote workspace.</summary>
 internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
 {
-    private readonly WorkspaceTabStrip _tabs = new();
+    private readonly WorkspaceTabStrip _tabStrip = new();
+    private TabView _tabs => _tabStrip.View;
     private readonly Func<WorkspaceSection, Page> _create;
     private readonly EditorPage _editor;
     private readonly BrowserPage _browser;
@@ -47,7 +48,7 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
         {
             if (e.Item is not TabViewItem item || _editor.Owns(item) || _browser.Owns(item)) return;
             if (item.Content is TerminalPage terminal) terminal.Release();
-            _tabs.Forget(item);
+            _tabStrip.Forget(item);
         };
         Content = _tabs;
         Open(WorkspaceSection.Launcher);
@@ -84,7 +85,7 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
 
     private void OpenSurface(string key, string label, Func<Page> create, bool closable = true)
     {
-        var tab = _tabs.Open(key, label, () => create(), closable);
+        var tab = _tabStrip.Open(key, label, () => create(), closable);
         if (tab.IconSource is null)
         {
             if (key.StartsWith("terminal:")) tab.IconSource = new FontIconSource { Glyph = "\uE756" };
