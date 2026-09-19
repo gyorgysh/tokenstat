@@ -129,3 +129,11 @@ budget after suspended reads so overlapping picker results cannot exceed it.
 The release script now emits both upload-key-signed APK and AAB files and refuses
 missing signing credentials. Distribution still requires the connected-service
 acceptance checks above; artifact creation does not publish to Google Play.
+
+## Build 116 follow-up
+
+Build 116 retains version name 1.0.6 and explicitly enables `-repackageclasses ''`
+on AGP 9.0.1 to shorten package names for classes eligible for obfuscation. The
+existing `NativeBridge` keep rule preserves the fully qualified class name and
+methods used by Rust JNI exports. The build 115 review and validation below
+remain the baseline; this follow-up changes only the version code and R8 rule.
