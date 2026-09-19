@@ -123,7 +123,7 @@ public sealed partial class SmokeApp : Application
                     opened.TrySetException(new Exception(playbackFailure));
                 };
                 video.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
-                foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10));
+                foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence);
                 player.Play();
                 await opened.Task.WaitAsync(TimeSpan.FromSeconds(15));
                 await Task.Delay(500);
@@ -131,6 +131,14 @@ public sealed partial class SmokeApp : Application
                 if (player.PlaybackSession.NaturalVideoWidth != 320 || player.PlaybackSession.NaturalVideoHeight != 180)
                     throw new Exception("Native Windows decoder did not accept the host encoder's stream");
                 Program.Log("PASS: native host H.264 opens in the production Windows player pipeline");
+                // The relay may skip frames or restart an encoder. Resume on
+                // an independent frame without passing broken references on.
+                foreach (var frame in frames)
+                    streamer.Push(frame.Payload, frame.Keyframe,
+                        TimeSpan.FromSeconds(1) + TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence + 100);
+                await Task.Delay(500);
+                if (playbackFailure is not null) throw new Exception(playbackFailure);
+                Program.Log("PASS: player accepts a stream sequence discontinuity");
                 video.SetMediaPlayer(null);
                 streamer.Close();
                 player.Source = null;
@@ -143,7 +151,7 @@ public sealed partial class SmokeApp : Application
                     next.MediaFailed += (_, error) => ready.TrySetException(new Exception($"{error.Error}: {error.ErrorMessage}"));
                     video.SetMediaPlayer(next);
                     next.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
-                    foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10));
+                    foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence);
                     next.Play();
                     await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
                     await Task.Delay(100);

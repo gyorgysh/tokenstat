@@ -106,7 +106,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     private DateTime _connectedSince;
     private DateTime? _streamingSince;
     private H264Streamer? _streamer;
-    private bool _havePicture;
     private long _dropped;
     private ulong _firstStampUs;
     private long _lastStampTicks;
@@ -579,13 +578,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         {
             return;
         }
-        if (!frame.Keyframe && !_havePicture)
-        {
-            // Deltas before the first keyframe cannot be drawn, and
-            // forwarding them only looks connected while staying black.
-            return;
-        }
-        MarkStreaming();
         DispatcherQueue.TryEnqueue(() => PushH264OnUi(frame, annexB));
     }
 
@@ -611,12 +603,12 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         {
             if (_streamer is null || _streamer.Width != width || _streamer.Height != height)
             {
-                ResetDecoderOnUi();
                 if (!frame.Keyframe)
                 {
                     // A fresh decoder needs its parameter sets first.
                     return;
                 }
+                ResetDecoderOnUi();
                 var streamer = new H264Streamer(width, height);
                 _streamer = streamer;
                 var mediaPlayer = new Windows.Media.Playback.MediaPlayer { AutoPlay = true };
@@ -627,7 +619,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                     var detail = $"{failure.Error}; 0x{failure.ExtendedErrorCode?.HResult ?? 0:X8} {failure.ErrorMessage}";
                     Program.LogStartup("Screen decoder failed: " + detail);
                     ResetDecoderOnUi();
-                    _havePicture = false;
+                    _streamingSince = null;
+                    _connectedSince = DateTime.UtcNow;
                     Caption("Waiting for a fresh video frame");
                     Banner("Screen decoder failed: " + detail);
                 });
@@ -635,6 +628,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 {
                     if (!_closed && ReferenceEquals(_mediaPlayer, mediaPlayer))
                     {
+                        MarkStreaming();
                         _caption.Visibility = Visibility.Collapsed;
                         _status.Children.Clear();
                     }
@@ -654,8 +648,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             var ticks = (long)Math.Min(relativeUs, (ulong)(long.MaxValue / 10)) * 10;
             ticks = Math.Max(ticks, _lastStampTicks + 1);
             _lastStampTicks = ticks;
-            _streamer.Push(annexB, frame.Keyframe, TimeSpan.FromTicks(ticks));
-            _havePicture = true;
+            _streamer.Push(annexB, frame.Keyframe, TimeSpan.FromTicks(ticks), frame.Sequence);
         }
         catch (Exception ex)
         {
@@ -670,7 +663,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     {
         if (_closed || !IsLoaded) return;
         ResetDecoderOnUi();
-        _havePicture = true;
         _player.Visibility = Visibility.Collapsed;
         _picture.Visibility = Visibility.Visible;
         _ = ShowJpegOnUiAsync(bytes);
@@ -706,8 +698,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         {
             if (_closed) return;
             ResetDecoderOnUi();
-            _havePicture = false;
-                _player.Visibility = Visibility.Collapsed;
             _picture.Source = null;
             _picture.Visibility = Visibility.Visible;
         });
@@ -1166,8 +1156,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         {
             if (_closed) return;
             ResetDecoderOnUi();
-            _havePicture = false;
-                _player.Visibility = Visibility.Collapsed;
             _picture.Source = null;
             _picture.Visibility = Visibility.Visible;
         });

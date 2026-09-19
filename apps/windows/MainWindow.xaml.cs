@@ -133,7 +133,7 @@ public sealed partial class MainWindow : Window
         RebuildToolbar();
 
         _nav.IsSettingsVisible = false;
-        _nav.OpenPaneLength = 240;
+        _nav.OpenPaneLength = 280;
         _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Left;
         _nav.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
         _nav.Background = _chromeSidebar;

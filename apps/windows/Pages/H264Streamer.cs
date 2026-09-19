@@ -24,6 +24,7 @@ internal sealed class H264Streamer
     private readonly Queue<Pending> _queue = new();
     private bool _needsKeyframe = true;
     private bool _closed;
+    private ulong? _lastSequence;
     private MediaStreamSourceSampleRequest? _waiting;
     private MediaStreamSourceSampleRequestDeferral? _waitingDeferral;
 
@@ -52,7 +53,7 @@ internal sealed class H264Streamer
         Source.SampleRequested += OnSampleRequested;
     }
 
-    public void Push(byte[] annexB, bool key, TimeSpan stamp)
+    public void Push(byte[] annexB, bool key, TimeSpan stamp, ulong? sequence = null)
     {
         MediaStreamSourceSampleRequest? request = null;
         MediaStreamSourceSampleRequestDeferral? deferral = null;
@@ -60,6 +61,15 @@ internal sealed class H264Streamer
         lock (_gate)
         {
             if (_closed) return;
+            if (sequence is ulong current)
+            {
+                if (_lastSequence is ulong previous && (previous == ulong.MaxValue || current != previous + 1))
+                {
+                    _queue.Clear();
+                    _needsKeyframe = true;
+                }
+                _lastSequence = current;
+            }
             // Dropping a reference picture invalidates every following delta.
             // Bound latency, but resume only at a fresh independently decodable frame.
             if (_queue.Count >= 30)
@@ -106,7 +116,10 @@ internal sealed class H264Streamer
 
     private void OnSampleRequested(MediaStreamSource sender, MediaStreamSourceSampleRequestedEventArgs args)
     {
-        var deferral = args.Request.GetDeferral();
+        MediaStreamSourceSampleRequestDeferral deferral;
+        try { deferral = args.Request.GetDeferral(); }
+        catch (System.Runtime.InteropServices.COMException) { ReportDecodeError(); return; }
+        catch (ObjectDisposedException) { ReportDecodeError(); return; }
         Pending? next = null;
         lock (_gate)
         {
@@ -134,14 +147,19 @@ internal sealed class H264Streamer
                 if (!_closed) request.Sample = ToMediaSample(pending);
             }
         }
-        catch
-        {
-            lock (_gate)
-            {
-                if (!_closed) Source.NotifyError(MediaStreamSourceErrorStatus.DecodeError);
-            }
-        }
+        catch { ReportDecodeError(); }
         finally { CompleteDeferral(deferral); }
+    }
+
+    private void ReportDecodeError()
+    {
+        lock (_gate)
+        {
+            if (_closed) return;
+            try { Source.NotifyError(MediaStreamSourceErrorStatus.DecodeError); }
+            catch (System.Runtime.InteropServices.COMException) { }
+            catch (ObjectDisposedException) { }
+        }
     }
 
     private static void CompleteDeferral(MediaStreamSourceSampleRequestDeferral? deferral)
