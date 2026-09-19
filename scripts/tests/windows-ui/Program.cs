@@ -140,6 +140,60 @@ public sealed partial class SmokeApp : Application
                     throw new Exception($"Terminal tab collapsed to {terminal.ActualHeight}px / {terminal.Rows} rows");
                 body.Children.Remove(tabView);
                 Program.Log("PASS: a terminal page fills the native workspace tab content area");
+                // Exercise the outer production shell too: NavigationView has
+                // a second content presenter, independent of TabView's.
+                tabView.Height = double.NaN;
+                var workspaceFrame = new Frame { Content = new Page { Content = tabView } };
+                var inspectorHost = new InspectorHost { RouteAllowsInspector = true };
+                inspectorHost.SetContent(workspaceFrame);
+                inspectorHost.SetInspector(new TextBlock { Text = "Files" }, true);
+                var shellBody = new Grid();
+                shellBody.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                shellBody.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                shellBody.Children.Add(new TextBlock { Text = "Workspace toolbar" });
+                Grid.SetRow(inspectorHost, 1);
+                shellBody.Children.Add(inspectorHost);
+                var contentHost = new Border { Child = shellBody };
+                var navigation = new NavigationView { Content = contentHost, Height = 650, Width = 1100 };
+                navigation.Loaded += (_, _) => NativeContentLayout.Stretch(navigation, contentHost);
+                body.Children.Add(navigation);
+                body.UpdateLayout();
+                await Task.Delay(500);
+                if (terminal.ActualHeight < 450 || terminal.Rows < 25)
+                    throw new Exception($"Shell terminal collapsed: {terminal.ActualHeight}px / {terminal.Rows} rows");
+                navigation.Height = 450;
+                body.UpdateLayout();
+                await Task.Delay(350);
+                if (terminal.ActualHeight < 250 || terminal.ActualHeight > 400)
+                    throw new Exception($"Shell terminal failed resize: {terminal.ActualHeight}px");
+                body.Children.Remove(navigation);
+                Program.Log("PASS: terminal fills NavigationView, Frame, inspector host, page and tab after resize");
+                var actions = new FlowPanel { Width = 248, Spacing = 8 };
+                foreach (var label in new[] { "0 of 8 selected", "Select all", "Clear", "Review and commit", "Review all" })
+                    actions.Children.Add(new Button { Content = label });
+                body.Children.Add(actions);
+                body.UpdateLayout();
+                if (actions.ActualHeight < 64) throw new Exception("Inspector actions did not wrap");
+                foreach (FrameworkElement action in actions.Children)
+                {
+                    var point = action.TransformToVisual(actions).TransformPoint(new Windows.Foundation.Point());
+                    if (point.X + action.ActualWidth > 248.5) throw new Exception("Inspector action overflowed");
+                }
+                body.Children.Remove(actions);
+                var largeText = string.Concat(Enumerable.Repeat("let value = 123;\r", 5000));
+                editor.Document.SetText(TextSetOptions.None, largeText);
+                editor.Document.Selection.SetRange(5, 5);
+                var beforeFormatting = EditorText.Read(editor.Document);
+                var formattingTime = System.Diagnostics.Stopwatch.StartNew();
+                EditorText.Format(editor.Document, () =>
+                {
+                    for (var offset = 0; offset < largeText.Length; offset += 17)
+                        editor.Document.GetRange(offset, Math.Min(offset + 3, largeText.Length)).CharacterFormat.ForegroundColor = Microsoft.UI.Colors.Purple;
+                });
+                if (formattingTime.Elapsed > TimeSpan.FromSeconds(10)) throw new Exception("Batched syntax formatting stalled the UI");
+                if (EditorText.Read(editor.Document) != beforeFormatting || editor.Document.Selection.StartPosition != 5)
+                    throw new Exception("Syntax formatting changed the document or caret");
+                Program.Log("PASS: narrow inspector actions wrap and large editor formatting preserves text and caret");
                 var cards = new FlowPanel { MinimumItemWidth = 300, Spacing = 10 };
                 var shortCard = new Border { MinHeight = 40 };
                 var tallCard = new Border { MinHeight = 80 };

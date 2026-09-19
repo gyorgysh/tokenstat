@@ -528,7 +528,13 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _box.Document.SetText(TextSetOptions.None, content);
             _applying = false;
             _box.TextChanged += (_, _) => OnEdited();
-            _box.LayoutUpdated += (_, _) => DrawLineNumbers();
+            // Coalesce layout notifications; never mutate the visual tree from
+            // inside a native RichEdit layout pass.
+            var gutterTimer = _box.DispatcherQueue.CreateTimer();
+            gutterTimer.Interval = TimeSpan.FromMilliseconds(50);
+            gutterTimer.Tick += (_, _) => { gutterTimer.Stop(); DrawLineNumbers(); };
+            _box.LayoutUpdated += (_, _) => { if (_box.IsLoaded && !gutterTimer.IsRunning) gutterTimer.Start(); };
+            _box.Unloaded += (_, _) => gutterTimer.Stop();
             RebuildLineStarts();
             _box.ActualThemeChanged += (_, _) =>
                 _box.DispatcherQueue.TryEnqueue(ApplyHighlightColors);
@@ -562,7 +568,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 
         private void DrawLineNumbers()
         {
-            if (_box.ActualHeight <= 0) return;
+            if (_applying || !_box.IsLoaded || _box.ActualHeight <= 0) return;
             try
             {
                 var first = _box.Document.GetRangeFromPoint(new Windows.Foundation.Point(8, 8), PointOptions.ClientCoordinates).StartPosition;
@@ -570,7 +576,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 if (line < 0) line = Math.Max(0, ~line - 1);
                 var firstRange = _box.Document.GetRange(_lineStarts[line], _lineStarts[line]);
                 firstRange.GetRect(PointOptions.ClientCoordinates | PointOptions.AllowOffClient, out var firstRect, out _);
-                var key = $"{_textRevision}:{line}:{firstRect.Y}:{_box.ActualHeight}";
+                var key = $"{_textRevision}:{line}:{Math.Round(firstRect.Y)}:{Math.Round(_box.ActualHeight)}";
                 if (key == _gutterKey) return;
                 _gutterKey = key;
                 _lineNumbers.Children.Clear();
@@ -829,6 +835,13 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         public async Task HighlightAsync()
         {
             var source = _text;
+            if (source.Length > 200_000)
+            {
+                _highlightSpans = null;
+                _highlightNote = "Syntax highlighting paused for this large file.";
+                RefreshStatus();
+                return;
+            }
             JsonNode answer;
             try
             {
@@ -850,6 +863,11 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             var indent = (int)Format.Long(syntax, "indent");
             _indent = indent > 0 ? indent : 4;
             _highlightSpans = answer["spans"] as JsonArray;
+            if (_highlightSpans?.Count > 10_000)
+            {
+                _highlightSpans = null;
+                _highlightNote = "Syntax highlighting paused for this large file.";
+            }
             _highlightedText = source;
             ApplyHighlightColors();
             RefreshStatus();
@@ -858,35 +876,38 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         private void ApplyHighlightColors()
         {
             var spans = _highlightedText == _text ? _highlightSpans : null;
+            var doc = _box.Document;
             try
             {
                 _applying = true;
-                var doc = _box.Document;
-                var current = ReadEditorText();
-                var length = current.Length;
-                var plain = doc.GetRange(0, length);
-                plain.CharacterFormat.ForegroundColor = Theme.DefaultText;
-                if (spans is not null)
+                EditorText.Format(doc, () =>
                 {
-                    foreach (var span in spans)
+                    var current = ReadEditorText();
+                    var length = current.Length;
+                    var plain = doc.GetRange(0, length);
+                    plain.CharacterFormat.ForegroundColor = Theme.DefaultText;
+                    if (spans is not null)
                     {
-                        if (span is null)
+                        foreach (var span in spans)
                         {
-                            continue;
+                            if (span is null)
+                            {
+                                continue;
+                            }
+                            var start = (int)Format.Long(span, "start");
+                            var len = (int)Format.Long(span, "len");
+                            if (start < 0 || len <= 0 || start + len > length)
+                            {
+                                continue;
+                            }
+                            if (!Enum.TryParse<SyntaxKind>(Format.Text(span, "kind"), ignoreCase: true, out var kind))
+                            {
+                                kind = SyntaxKind.Unknown;
+                            }
+                            doc.GetRange(start, start + len).CharacterFormat.ForegroundColor = Theme.Syntax(kind);
                         }
-                        var start = (int)Format.Long(span, "start");
-                        var len = (int)Format.Long(span, "len");
-                        if (start < 0 || len <= 0 || start + len > length)
-                        {
-                            continue;
-                        }
-                        if (!Enum.TryParse<SyntaxKind>(Format.Text(span, "kind"), ignoreCase: true, out var kind))
-                        {
-                            kind = SyntaxKind.Unknown;
-                        }
-                        doc.GetRange(start, start + len).CharacterFormat.ForegroundColor = Theme.Syntax(kind);
                     }
-                }
+                });
             }
             catch
             {
@@ -1111,6 +1132,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 
         private void RefreshStatus()
         {
+            if (_applying) return;
             DrawLineNumbers();
             var parts = new List<string>();
             var (line, col) = CaretLineCol();

@@ -5,6 +5,13 @@ namespace Tokenstat.Pages;
 
 internal static class EditorText
 {
+    public static void Format(RichEditTextDocument document, Action apply)
+    {
+        document.BatchDisplayUpdates();
+        try { apply(); }
+        finally { document.ApplyDisplayUpdates(); }
+    }
+
     public static string ForFile(string text, string original)
     {
         var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');

@@ -138,7 +138,7 @@ internal static class WorkspaceRemoteHistory
                 await ShowDetailAsync(owner, capturedRemote, captured);
             list.Children.Add(row);
         }
-        return Chrome.Card("History", list);
+        return list;
     }
 
     private static async Task ShowDetailAsync(

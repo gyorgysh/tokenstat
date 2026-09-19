@@ -135,7 +135,7 @@ internal static class WorkspaceHistory
                 await ShowDetailAsync(owner, workspaceId, captured);
             list.Children.Add(row);
         }
-        return Chrome.Card("History", list);
+        return list;
     }
 
     private static async Task ShowDetailAsync(

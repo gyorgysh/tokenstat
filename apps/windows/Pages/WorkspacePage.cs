@@ -382,11 +382,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             + $"{session.SelectedCount} selected for the next commit.";
         RenderInspector();
 
-        var selectionRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = Theme.SpaceS,
-        };
+        var selectionRow = new FlowPanel { Spacing = Theme.SpaceS };
         selectionRow.Children.Add(new TextBlock
         {
             Text = $"{session.SelectedCount} of {available.Count} selected",
@@ -431,7 +427,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             }
             await WorkspaceDiff.ShowReviewAllAsync(this, reviewFiles, LoadOneDiffAsync);
         }));
-        _root.Children.Add(selectionRow);
+        if (available.Count > 0) _root.Children.Add(selectionRow);
 
         if (array is null || array.Count == 0)
         {
@@ -577,7 +573,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             label += $" ↓{behind}";
         }
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        var row = new FlowPanel { Spacing = Theme.SpaceS };
         row.Children.Add(new SymbolIcon
         {
             Symbol = ActionIcon.Merge.Symbol(),

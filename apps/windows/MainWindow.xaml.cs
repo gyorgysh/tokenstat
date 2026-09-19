@@ -133,6 +133,11 @@ public sealed partial class MainWindow : Window
         _contentHost.Child = _bodyGrid;
         RebuildToolbar();
 
+        // NavigationView's native ContentPresenter does not template-bind
+        // content alignment. Without this the entire workbench is measured
+        // at its desired height (a WebView has no useful desired height).
+        _nav.Loaded += (_, _) => StretchNavigationContent();
+        _nav.ActualThemeChanged += (_, _) => StretchNavigationContent();
         _nav.IsSettingsVisible = false;
         _nav.OpenPaneLength = 280;
         _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Left;
@@ -633,6 +638,8 @@ public sealed partial class MainWindow : Window
         var returnTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string ?? "global:Home";
         SetContent(new OnboardingPage(() => NavigateTo(returnTag)));
     }
+
+    private void StretchNavigationContent() => NativeContentLayout.Stretch(_nav, _contentHost);
 
     /// <summary>
     /// Mount a page with the smooth arrival. Every navigation goes through
