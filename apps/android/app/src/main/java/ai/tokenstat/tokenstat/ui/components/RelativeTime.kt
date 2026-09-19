@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
 
 /// One clock for every relative time on screen, port of Apple's
 /// `RelativeTimeText.swift`.
@@ -50,9 +51,12 @@ object RelativeTick {
             if (started) return
             started = true
             scope.launch {
-                while (true) {
-                    delay(TICK_MILLIS)
-                    current.value = System.currentTimeMillis()
+                current.subscriptionCount.collectLatest { subscribers ->
+                    if (subscribers == 0) return@collectLatest
+                    while (true) {
+                        current.value = System.currentTimeMillis()
+                        delay(TICK_MILLIS)
+                    }
                 }
             }
         }

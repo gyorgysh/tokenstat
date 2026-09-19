@@ -2,6 +2,9 @@
 package ai.tokenstat.tokenstat.ui.logic
 
 import android.content.Context
+import ai.tokenstat.tokenstat.core.readBounded
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -52,7 +55,7 @@ enum class ChatDelivery {
 
     companion object {
         fun of(wire: String?): ChatDelivery =
-            entries.firstOrNull { it.wire == wire } ?: Waiting
+            if (wire == null) Waiting else entries.firstOrNull { it.wire == wire } ?: NeedsReview
     }
 }
 
@@ -212,14 +215,19 @@ interface ChatOutbox {
 /// access runs on one thread instead, off the main thread and in the order
 /// the calls were made: keystrokes persist per character, and two writes
 /// running in parallel could land out of order and drop one.
-class FileChatOutbox(
-    context: Context,
+class FileChatOutbox internal constructor(
+    private val directory: File,
     private val byteLimit: Int = 8 * 1024 * 1024,
 ) : ChatOutbox {
-    private val directory = File(context.filesDir, "tokenstat-drafts")
+    constructor(context: Context, byteLimit: Int = 8 * 1024 * 1024) :
+        this(File(context.filesDir, "tokenstat-drafts"), byteLimit)
+
+    private companion object {
+        // All instances address the same file; per-instance queues can lose writes.
+        val files = Dispatchers.IO.limitedParallelism(1)
+        val active = mutableSetOf<String>()
+    }
     private val file = File(directory, "outbox.v1.json")
-    private val active = mutableSetOf<String>()
-    private val files = Dispatchers.IO.limitedParallelism(1)
 
     override suspend fun items(key: String): List<QueuedMessage> =
         withContext(files) { read()[key].orEmpty() }
@@ -247,21 +255,29 @@ class FileChatOutbox(
         return@withContext items
     }
 
-    @Synchronized
-    override fun beginDelivery(key: String): Boolean = active.add(key)
+    override fun beginDelivery(key: String): Boolean = synchronized(active) {
+        active.add(file.absolutePath + "\u0000" + key)
+    }
 
-    @Synchronized
     override fun endDelivery(key: String) {
-        active.remove(key)
+        synchronized(active) { active.remove(file.absolutePath + "\u0000" + key) }
     }
 
     /// A file that exists but cannot be read is refused, never treated as
     /// empty: `update` writes back only the one queue it changed, so reading
     /// a corrupt file as empty would delete every other conversation's
     /// pending messages, which are somebody's own writing.
-    private fun read(): Map<String, List<QueuedMessage>> {
+    private fun read(): Map<String, List<QueuedMessage>> = try {
+        readChecked()
+    } catch (error: Exception) {
+        if (error is ChatOutboxFailure) throw error
+        throw ChatOutboxFailure(ChatOutboxFailure.Reason.Unavailable,
+            "Pending messages could not be read on this device.")
+    }
+
+    private fun readChecked(): Map<String, List<QueuedMessage>> {
         if (!file.isFile) return emptyMap()
-        val raw = runCatching { file.readText(Charsets.UTF_8) }.getOrNull()
+        val raw = runCatching { file.inputStream().use { it.readBounded(byteLimit).toString(Charsets.UTF_8) } }.getOrNull()
             ?: throw ChatOutboxFailure(
                 ChatOutboxFailure.Reason.Unavailable,
                 "Pending messages could not be read on this device.",
@@ -290,11 +306,12 @@ class FileChatOutbox(
             )
         val out = mutableMapOf<String, List<QueuedMessage>>()
         for ((key, value) in queues) {
-            val items = (value as? JsonArray)?.mapNotNull { decode(it as? JsonObject ?: return@mapNotNull null) }
-                .orEmpty()
-            // A queue that does not survive its own rules is dropped rather
-            // than half-loaded: a duplicate id would make Remove ambiguous.
-            if (items.isNotEmpty() && ChatOutboxRules.valid(items)) out[key] = items
+            val rows = value as? JsonArray ?: error("Invalid queue")
+            val items = rows.map { decode(it as? JsonObject ?: error("Invalid message"))
+                ?: error("Invalid message") }
+            // Refuse the entire mutation: dropping a damaged sibling queue loses drafts.
+            check(ChatOutboxRules.valid(items)) { "Invalid queue" }
+            if (items.isNotEmpty()) out[key] = items
         }
         return out
     }
@@ -320,11 +337,12 @@ class FileChatOutbox(
             // Written beside and renamed, so a kill in the middle leaves the
             // last good file rather than half of this one.
             val temporary = File(directory, "outbox.v1.json.tmp")
-            temporary.writeText(text, Charsets.UTF_8)
-            if (!temporary.renameTo(file)) {
-                file.writeText(text, Charsets.UTF_8)
-                temporary.delete()
+            temporary.outputStream().use { output ->
+                output.write(text.toByteArray(Charsets.UTF_8))
+                output.fd.sync()
             }
+            Files.move(temporary.toPath(), file.toPath(),
+                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         }.onFailure {
             throw ChatOutboxFailure(
                 ChatOutboxFailure.Reason.Unavailable,
@@ -355,10 +373,10 @@ class FileChatOutbox(
         val id = row["id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() } ?: return null
         return QueuedMessage(
             id = id,
-            text = row["text"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-            attachments = (row["attachments"] as? JsonArray).orEmpty().mapNotNull { element ->
-                val file = element as? JsonObject ?: return@mapNotNull null
-                val fileId = file["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            text = row["text"]?.jsonPrimitive?.contentOrNull ?: return null,
+            attachments = (row["attachments"]?.let { it as? JsonArray ?: return null }).orEmpty().map { element ->
+                val file = element as? JsonObject ?: return null
+                val fileId = file["id"]?.jsonPrimitive?.contentOrNull ?: return null
                 QueuedAttachment(fileId, file["name"]?.jsonPrimitive?.contentOrNull.orEmpty())
             },
             delivery = ChatDelivery.of(row["delivery"]?.jsonPrimitive?.contentOrNull),

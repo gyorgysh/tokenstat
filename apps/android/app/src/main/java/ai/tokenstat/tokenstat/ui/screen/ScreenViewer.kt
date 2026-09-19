@@ -65,6 +65,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
+import kotlinx.coroutines.awaitCancellation
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -189,7 +191,10 @@ fun ScreenViewerScreen(
     // Keyed on the tier too: it can load after the viewer opens, and a
     // Legend user with a slow account fetch must not sit behind a paywall
     // until they press Try again.
-    LaunchedEffect(peer, tier) { session.start(peer, hostLabel, tier, control = false) }
+    ForegroundEffect(peer, tier) {
+        session.start(peer, hostLabel, tier, control = false)
+        try { awaitCancellation() } finally { session.stop() }
+    }
 
     // Rotating a phone onto its side is asking for the picture, so going
     // sideways hides the chrome once. Turning it back shows it again.

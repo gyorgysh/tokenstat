@@ -118,6 +118,7 @@ xcuserdata/
 
 # Android app. Credentials and local SDK selection never enter the repository.
 /apps/android/.gradle/
+/apps/android/.kotlin/
 /apps/android/app/google-services.json
 /apps/android/local.properties
 # Play upload keystore. The real file lives in ~/.tokenstat/android/.

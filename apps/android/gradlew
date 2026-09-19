@@ -2,15 +2,23 @@
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 set -eu
 
-VERSION=8.13
+VERSION=9.1.0
+SHA256=a17ddd85a26b6a7f5ddb71ff8b05fc5104c0202c6e64782429790c933686c806
 DIST="${GRADLE_USER_HOME:-$HOME/.gradle}/tokenstat/gradle-$VERSION"
-if command -v gradle >/dev/null 2>&1; then
-  exec gradle "$@"
-fi
 if [ ! -x "$DIST/bin/gradle" ]; then
   ARCHIVE="$DIST-bin.zip"
   mkdir -p "$(dirname "$DIST")"
   curl -fL "https://services.gradle.org/distributions/gradle-$VERSION-bin.zip" -o "$ARCHIVE"
+  if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL=$(sha256sum "$ARCHIVE" | cut -d ' ' -f 1)
+  else
+    ACTUAL=$(shasum -a 256 "$ARCHIVE" | cut -d ' ' -f 1)
+  fi
+  if [ "$ACTUAL" != "$SHA256" ]; then
+    rm -f "$ARCHIVE"
+    echo "error: Gradle distribution checksum mismatch" >&2
+    exit 1
+  fi
   unzip -q "$ARCHIVE" -d "$(dirname "$DIST")"
   rm -f "$ARCHIVE"
 fi

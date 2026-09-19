@@ -21,6 +21,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -965,7 +966,7 @@ fun TaskRunScreen(
         loading = false
     }
 
-    LaunchedEffect(runID) { load() }
+    ForegroundEffect(peer, runID) { load() }
 
     val route = TaskResultRoute(
         runID = runID,

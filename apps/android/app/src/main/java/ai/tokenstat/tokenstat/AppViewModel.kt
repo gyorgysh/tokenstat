@@ -18,6 +18,10 @@ import ai.tokenstat.tokenstat.ui.logic.tagSignInUrl
 import ai.tokenstat.tokenstat.ui.ssh.SshConnectionState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -126,6 +130,10 @@ private fun signInPollFailure(error: Exception): SignInPollFailure {
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
+    private var refreshJob: Job? = null
+    private var dashboardJob: Job? = null
+    private var signingOut = false
+
     private val mutableState = MutableStateFlow(ClientState())
     val state = mutableState.asStateFlow()
 
@@ -214,7 +222,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun refresh() = viewModelScope.launch {
+    fun refresh(): Job {
+        if (signingOut) return viewModelScope.launch { }
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch { refreshAccount() }
+        return refreshJob!!
+    }
+
+    private suspend fun refreshAccount() {
         mutableState.value = mutableState.value.copy(loading = true, error = null)
         runCatching { CoreClient.call("account.status") }
             .onSuccess { account ->
@@ -244,6 +259,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             .onFailure { err ->
+                if (err is CancellationException) throw err
                 // Not an answer about the account, so `authChecked` is left
                 // where it was. A check that already succeeded once keeps the
                 // app open; a first check that never landed gets the retry
@@ -272,14 +288,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         publishConnection()
     }
 
-    private suspend fun loadDashboard() {
-        val calendar = viewModelScope.async {
+    private suspend fun loadDashboard() = supervisorScope {
+        val calendar = async {
             CoreClient.call("activity.calendar", buildJsonObject {
                 put("weeks", 53); put("scope", "account"); put("force", false)
             })
         }
-        val limits = viewModelScope.async { CoreClient.call("usage.limits") }
-        runCatching { calendar.await() }.onSuccess {
+        val limits = async { CoreClient.call("usage.limits") }
+        runCatching { calendar.await() }.onFailure {
+            if (it is CancellationException) throw it
+        }.onSuccess {
             mutableState.value = mutableState.value.copy(home = (it as? JsonObject))
         }
         runCatching { limits.await() }
@@ -290,6 +308,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             .onFailure {
+                if (it is CancellationException) throw it
                 mutableState.value = mutableState.value.copy(limitsError = it.message)
             }
     }
@@ -322,8 +341,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _pendingLogin.value?.let { openPage(it.url) }
             return
         }
+        if (signingOut) return
         _signInError.value = null
+        val previous = signInJob
         signInJob = viewModelScope.launch {
+            previous?.join() // Old cancellation must finish before starting a new device flow.
             try {
                 val device = CoreClient.call("account.deviceStart").jsonObject
                 val raw = device["openUrl"]?.jsonPrimitive?.content
@@ -376,7 +398,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 cancelLogin()
                 _signInError.value = "The sign-in code expired before it was confirmed."
             } catch (e: CancellationException) {
-                runCatching { CoreClient.call("account.cancelLogin") }
+                withContext(NonCancellable) { cancelLogin() }
+                throw e
             } catch (e: SignInFailed) {
                 _signInError.value = e.message
             } catch (e: Exception) {
@@ -397,7 +420,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelSignIn() {
         signInJob?.cancel()
-        signInJob = null
     }
 
     private suspend fun cancelLogin() {
@@ -405,16 +427,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun signOut() = viewModelScope.launch {
-        runCatching { PushRegistrar.unregister() }
-        runCatching { CoreClient.call("account.logout") }
-        mutableState.value = ClientState(loading = false)
+        if (signingOut) return@launch
+        signingOut = true
+        try {
+            signInJob?.cancelAndJoin()
+            refreshJob?.cancelAndJoin()
+            dashboardJob?.cancelAndJoin()
+            PushRegistrar.unregister { CoreClient.call("account.logout") }
+            workspacesConnection.disconnect()
+            workspacesConnection.setHost(null)
+            ai.tokenstat.tokenstat.notifications.VisibleChat.hidden()
+            mutableState.value = ClientState(loading = false, authChecked = true,
+                connection = mutableState.value.connection)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            mutableState.update { it.copy(loading = false, error = error.message) }
+        } finally {
+            signingOut = false
+        }
     }
 
-    fun applyAccount(element: JsonElement) {
-        val account = element as? JsonObject ?: return
+    fun applyAccount(element: JsonElement) = viewModelScope.launch {
+        if (signingOut || !state.value.signedIn) return@launch
+        val account = element as? JsonObject ?: return@launch
         mutableState.value = mutableState.value.copy(account = account)
         if (account["signedIn"]?.jsonPrimitive?.content == "true") {
-            viewModelScope.launch { loadDashboard() }
+            dashboardJob?.cancel()
+            dashboardJob = viewModelScope.launch { loadDashboard() }
         }
     }
 

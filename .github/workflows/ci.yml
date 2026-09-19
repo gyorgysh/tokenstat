@@ -354,10 +354,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "8.13"
+          gradle-version: "9.1.0"
 
       - name: Unit tests and release bundle
-        run: gradle -p apps/android testDebugUnitTest lintDebug bundleRelease
+        run: gradle -p apps/android testDebugUnitTest lintDebug lintRelease bundleRelease
 
       - name: Keep native debug symbols with the bundle
         uses: actions/upload-artifact@v6
@@ -366,6 +366,7 @@ jobs:
           path: |
             apps/android/app/build/outputs/bundle/release/*.aab
             apps/android/app/build/outputs/native-debug-symbols/release/**
+            apps/android/app/build/outputs/mapping/release/**
 
   audit:
     name: dependency audit

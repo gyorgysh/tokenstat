@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
+import ai.tokenstat.tokenstat.core.readBounded
+import ai.tokenstat.tokenstat.core.InputLimitExceeded
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.activity.compose.BackHandler
@@ -246,10 +249,31 @@ fun ChatSection(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
         if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
+        val conversation = openId
         scope.launch {
-            val read = withContext(Dispatchers.IO) { uris.map { readAttachment(context, it) } }
-            staged = staged + read.filterIsInstance<AttachmentRead.Ok>().map { it.attachment }
-            attachError = read.filterIsInstance<AttachmentRead.Failed>().firstOrNull()?.reason
+            attachError = null
+            for (uri in uris) {
+                val remaining = 24 * 1024 * 1024 - staged.sumOf { it.bytes }
+                if (remaining <= 0) {
+                    attachError = "Send or remove the staged files before adding more (24 MB total)."
+                    break
+                }
+                val read = withContext(Dispatchers.IO) {
+                    readAttachment(context, uri, minOf(ATTACHMENT_CAP, remaining))
+                }
+                if (openId != conversation) return@launch
+                when (read) {
+                    is AttachmentRead.Ok -> {
+                        // Another picker result may have completed while this read suspended.
+                        if (staged.sumOf { it.bytes } + read.attachment.bytes > 24 * 1024 * 1024) {
+                            attachError = "Send or remove the staged files before adding more (24 MB total)."
+                            break
+                        }
+                        staged = staged + read.attachment
+                    }
+                    is AttachmentRead.Failed -> { attachError = read.reason; break }
+                }
+            }
         }
     }
 
@@ -686,14 +710,6 @@ fun ChatSection(
     // What the push service should stay quiet about: a turn finishing in
     // the transcript on screen needs no banner. Cleared on the way out, so
     // a backgrounded app still notifies.
-    LaunchedEffect(openId, machineId) {
-        val id = openId
-        if (id == null) {
-            VisibleChat.hidden()
-        } else {
-            VisibleChat.showing(machineId, id)
-        }
-    }
     DisposableEffect(workspace) {
         onDispose { VisibleChat.hidden() }
     }
@@ -705,13 +721,17 @@ fun ChatSection(
     // phone driving a chat buzzes about the turn on its own screen.
     val watcherId = remember(workspace) { java.util.UUID.randomUUID().toString() }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var foreground by remember { mutableStateOf(true) }
+    var foreground by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             foreground = event.targetState.isAtLeast(Lifecycle.State.RESUMED)
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(openId, machineId, foreground) {
+        if (foreground && openId != null) VisibleChat.showing(machineId, openId)
+        else VisibleChat.hidden()
     }
     LaunchedEffect(openId, peer, foreground) {
         val id = openId ?: return@LaunchedEffect
@@ -758,8 +778,8 @@ fun ChatSection(
             .map { it.id }
             .toSet()
     }
-    LaunchedEffect(openId, peer, workspace) {
-        val id = openId ?: return@LaunchedEffect
+    ForegroundEffect(openId, peer, workspace) {
+        val id = openId ?: return@ForegroundEffect
         onChatOpened(id)
         while (true) {
             loadEvents(id)
@@ -1994,14 +2014,23 @@ private const val ATTACHMENT_CAP = 12 * 1024 * 1024
 ///
 /// Off the main thread: a picked file can be megabytes, and both the read and
 /// the base64 pass are long enough to drop frames.
-internal fun readAttachment(context: android.content.Context, uri: android.net.Uri): AttachmentRead {
+internal fun readAttachment(context: android.content.Context, uri: android.net.Uri, byteLimit: Int = ATTACHMENT_CAP): AttachmentRead {
     val resolver = context.contentResolver
-    val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-        if (cursor.moveToFirst()) cursor.getString(0) else null
-    } ?: uri.lastPathSegment ?: "Attachment"
-    val bytes = runCatching {
-        resolver.openInputStream(uri)?.use { it.readBytes() }
-    }.getOrNull() ?: return AttachmentRead.Failed("$name could not be read.")
+    val name = runCatching {
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment ?: "Attachment"
+    val bytes = try {
+        resolver.openInputStream(uri)?.use { it.readBounded(byteLimit) }
+            ?: return AttachmentRead.Failed("$name could not be read.")
+    } catch (_: InputLimitExceeded) {
+        return AttachmentRead.Failed(if (byteLimit < ATTACHMENT_CAP)
+            "Send or remove the staged files before adding $name (24 MB total)."
+        else "$name is larger than 12 MB, which is the most a chat can carry.")
+    } catch (_: Exception) {
+        return AttachmentRead.Failed("$name could not be read.")
+    }
     if (bytes.isEmpty()) return AttachmentRead.Failed("$name is empty.")
     if (bytes.size > ATTACHMENT_CAP) {
         return AttachmentRead.Failed("$name is larger than 12 MB, which is the most a chat can carry.")
@@ -2010,7 +2039,7 @@ internal fun readAttachment(context: android.content.Context, uri: android.net.U
         StagedAttachment(
             name = name,
             data = Base64.encodeToString(bytes, Base64.NO_WRAP),
-            mediaType = resolver.getType(uri),
+            mediaType = runCatching { resolver.getType(uri) }.getOrNull(),
             bytes = bytes.size,
         ),
     )

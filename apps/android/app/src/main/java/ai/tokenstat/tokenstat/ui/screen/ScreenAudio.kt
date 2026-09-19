@@ -19,6 +19,8 @@ class ScreenAudio {
     private var rate = 0
     private var channels = 0
 
+    @get:Synchronized
+    @set:Synchronized
     var muted: Boolean = false
         set(value) {
             field = value
@@ -26,6 +28,7 @@ class ScreenAudio {
             else runCatching { track?.play() }
         }
 
+    @Synchronized
     fun play(chunk: ScreenFrames.AudioChunk) {
         if (muted) return
         val active = open(chunk) ?: return
@@ -34,6 +37,7 @@ class ScreenAudio {
         }.onFailure { Log.w(TAG, "audio write failed", it) }
     }
 
+    @Synchronized
     fun reset() {
         runCatching { track?.pause() }
         runCatching { track?.flush() }
@@ -85,12 +89,15 @@ class ScreenAudio {
                 .setBufferSizeInBytes(minimum * 2)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
+            track = created // Retain ownership before play(), which may throw.
             created.play()
-            track = created
             rate = chunk.sampleRate
             channels = chunk.channels
             created
-        }.onFailure { Log.w(TAG, "audio track failed", it) }.getOrNull()
+        }.onFailure {
+            Log.w(TAG, "audio track failed", it)
+            reset()
+        }.getOrNull()
     }
 
     private companion object {

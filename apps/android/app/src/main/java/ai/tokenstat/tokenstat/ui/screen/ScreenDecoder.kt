@@ -103,9 +103,9 @@ class ScreenDecoder {
                 format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
             }
             val created = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            codec = created // reset() must release it even if configure/start throws.
             created.configure(format, target, null, 0)
             created.start()
-            codec = created
             configuredSurface = target
             csd0 = spsStream
             csd1 = ppsStream

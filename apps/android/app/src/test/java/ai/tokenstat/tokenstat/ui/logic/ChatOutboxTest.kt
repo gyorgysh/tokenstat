@@ -191,7 +191,7 @@ class ChatOutboxTest {
     fun `delivery states survive their wire names`() {
         ChatDelivery.entries.forEach { assertEquals(it, ChatDelivery.of(it.wire)) }
         assertEquals(ChatDelivery.Waiting, ChatDelivery.of(null))
-        assertEquals(ChatDelivery.Waiting, ChatDelivery.of("nonsense"))
+        assertEquals(ChatDelivery.NeedsReview, ChatDelivery.of("nonsense"))
     }
 
     /// The distinction that decides whether somebody is told to check a

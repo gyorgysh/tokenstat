@@ -70,7 +70,7 @@ object SshSecrets {
         if (raw.isEmpty()) return
         val secure = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
         val edit = secure.edit()
-        var migrated = 0
+        val migrated = mutableSetOf<String>()
         for ((ref, value) in raw) {
             // One bad legacy entry must not poison the whole store: skip it
             // so the remaining keys still migrate and stay usable.
@@ -83,21 +83,17 @@ object SshSecrets {
                 val encrypted = seal(ref, value)
                 check(open(ref, encrypted) == value) { "Could not verify encrypted SSH key" }
                 edit.putString(ref, encrypted)
-                migrated++
+                migrated += ref
             } catch (e: Exception) {
                 Log.w(TAG, "skipping legacy entry $ref that could not be sealed", e)
             }
         }
-        if (migrated == 0) return
+        if (migrated.isEmpty()) return
         check(edit.commit()) { "Could not save encrypted SSH keys" }
         // Only remove the entries that migrated; quarantine the rest for a
         // later retry instead of dropping or blocking on them.
         val cleanup = old.edit()
-        for ((ref, value) in raw) {
-            if (value is String && secure.getString(ref, null) != null) {
-                cleanup.remove(ref)
-            }
-        }
+        for (ref in migrated) cleanup.remove(ref)
         check(cleanup.commit()) { "Could not remove legacy SSH keys" }
     }
 
@@ -116,6 +112,10 @@ object SshSecrets {
         check(open(ref, sealed) == pem) { "Could not verify SSH key" }
         check(context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
             .putString(ref, sealed).commit()) { "Could not save SSH key" }
+        // A legacy copy left by an earlier failed migration must not overwrite
+        // this replacement on the next get(). Only delete after the new save.
+        check(context.getSharedPreferences(LEGACY, Context.MODE_PRIVATE).edit()
+            .remove(ref).commit()) { "Could not retire legacy SSH key" }
     }
 
     @Synchronized
@@ -138,6 +138,10 @@ object SshSecrets {
     // removes its private half; anything else keeps working.
     @Synchronized
     fun delete(context: Context, ref: String) {
-        context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit().remove(ref).apply()
+        // Remove the legacy copy too, or the next migration resurrects the key.
+        check(context.getSharedPreferences(LEGACY, Context.MODE_PRIVATE).edit()
+            .remove(ref).commit()) { "Could not remove legacy SSH key" }
+        check(context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
+            .remove(ref).commit()) { "Could not remove SSH key" }
     }
 }

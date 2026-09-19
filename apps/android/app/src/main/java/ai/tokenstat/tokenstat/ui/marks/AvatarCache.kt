@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
+import android.util.AtomicFile
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
@@ -14,8 +15,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineStart
 
 /// One decoded profile picture per URL, for the life of the process and on
 /// disk across launches. Ported from `AvatarCache` in `Marks.swift`: the
@@ -36,12 +37,11 @@ object AvatarCache {
     private val decoded = object : LruCache<String, Bitmap>(MAX_BYTES) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
-    private val guard = Mutex()
 
     /// In-flight fetches, so two seats for one account share a single request
     /// instead of racing each other.
     private val pending = mutableMapOf<String, Deferred<Bitmap?>>()
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /// Already decoded, or nil. Synchronous so the first frame can paint the
     /// picture instead of the letter when it is a cache hit.
@@ -51,34 +51,60 @@ object AvatarCache {
         val key = url.trim()
         if (key.isEmpty()) return null
         cached(key)?.let { return it }
+        val app = context.applicationContext
+        val job = synchronized(pending) {
+            pending[key] ?: scope.async(start = CoroutineStart.LAZY) {
+                load(app, key)
+            }.also { task ->
+                pending[key] = task
+                task.invokeOnCompletion {
+                    synchronized(pending) { if (pending[key] === task) pending.remove(key) }
+                }
+                task.start()
+            }
+        }
+        return job.await()
+    }
+
+    private fun load(context: Context, key: String): Bitmap? {
+        cached(key)?.let { return it }
         val disk = diskFile(context, key)
-        if (disk != null) {
-            val bitmap = runCatching { BitmapFactory.decodeFile(disk.absolutePath) }.getOrNull()
+        if (disk != null && disk.isFile) {
+            val bitmap = runCatching {
+                if (disk.length() > BYTE_LIMIT) null else decode(disk.readBytes())
+            }.getOrNull()
             if (bitmap != null) {
+                disk.setLastModified(System.currentTimeMillis())
                 store(key, bitmap)
                 return bitmap
             }
             disk.delete()
         }
-        val job = guard.withLock {
-            pending[key] ?: scope.async { download(key) }.also { pending[key] = it }
-        }
-        val bitmap = job.await()
-        guard.withLock {
-            if (pending[key] == job) pending.remove(key)
-        }
-        if (bitmap != null) {
-            store(key, bitmap)
-            if (disk != null) {
-                runCatching {
-                    disk.parentFile?.mkdirs()
-                    disk.outputStream().use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                    }
-                }
+        val bitmap = download(key) ?: return null
+        store(key, bitmap)
+        if (disk != null) runCatching {
+            disk.parentFile?.mkdirs()
+            val atomic = AtomicFile(disk)
+            val output = atomic.startWrite()
+            try {
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                atomic.finishWrite(output)
+            } catch (error: Exception) {
+                atomic.failWrite(output)
+                throw error
             }
+            disk.parentFile?.listFiles()?.filter { it.isFile && !it.name.endsWith(".new") }
+                ?.sortedByDescending { it.lastModified() }?.drop(MAX_COUNT)?.forEach { it.delete() }
         }
         return bitmap
+    }
+
+    private fun decode(bytes: ByteArray): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val sample = AvatarImageLimits.sampleSize(bounds.outWidth, bounds.outHeight) ?: return null
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+            BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
     private fun store(key: String, bitmap: Bitmap) {
@@ -128,7 +154,7 @@ object AvatarCache {
             }
             val bytes = out.toByteArray()
             if (bytes.isEmpty()) return null
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            decode(bytes)
         } catch (_: Exception) {
             null
         } finally {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
-# Build a Play-signed Android App Bundle.
+# Build an upload-key-signed release APK and Android App Bundle.
 #
 # The upload keystore is required. Source ~/.tokenstat/android/play.env, or
 # run `scripts/android-play-keystore.sh init` first. An unsigned minified
@@ -27,17 +27,30 @@ if [ -z "${TOKENSTAT_ANDROID_KEYSTORE:-}" ] || [ ! -f "${TOKENSTAT_ANDROID_KEYST
     exit 1
 fi
 
+for name in TOKENSTAT_ANDROID_STORE_PASSWORD TOKENSTAT_ANDROID_KEY_ALIAS TOKENSTAT_ANDROID_KEY_PASSWORD; do
+    if [ -z "${!name:-}" ]; then
+        echo "error: $name is required for release signing" >&2
+        exit 1
+    fi
+done
+
 command -v cargo-ndk >/dev/null || {
     echo "error: cargo-ndk is required: cargo install cargo-ndk --locked" >&2
     exit 1
 }
 
 cd "$ROOT"
-apps/android/gradlew -p apps/android bundleRelease
+apps/android/gradlew -p apps/android assembleRelease bundleRelease
 
 src="$ROOT/apps/android/app/build/outputs/bundle/release/app-release.aab"
 if [ ! -f "$src" ]; then
     echo "error: gradle did not write $src" >&2
+    exit 1
+fi
+
+apk="$ROOT/apps/android/app/build/outputs/apk/release/app-release.apk"
+if [ ! -f "$apk" ]; then
+    echo "error: gradle did not write a signed release APK" >&2
     exit 1
 fi
 
@@ -48,10 +61,13 @@ version="$(
 mkdir -p "$OUT"
 dest="$OUT/tokenstat-${version}-release.aab"
 cp -f "$src" "$dest"
+apk_dest="$OUT/tokenstat-${version}-release.apk"
+cp -f "$apk" "$apk_dest"
 
 if command -v keytool >/dev/null; then
     echo "signed as:"
     keytool -printcert -jarfile "$dest" | awk '/Owner:|SHA256:/ { print "  " $0 }'
 fi
 
+echo "$apk_dest"
 echo "$dest"

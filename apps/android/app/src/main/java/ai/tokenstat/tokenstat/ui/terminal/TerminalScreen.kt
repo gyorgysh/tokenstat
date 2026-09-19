@@ -54,6 +54,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -108,6 +113,7 @@ fun TerminalScreen(
             it.onCopy = { text -> copyToClipboard(context, text) }
         }
     }
+    bridge.lifecycle = LocalLifecycleOwner.current.lifecycle
     var sessionId by remember { mutableStateOf(existingSessionId) }
     var confirmClose by remember { mutableStateOf(false) }
     // The bar's Ctrl key reads the bridge, which is what spends the flag.
@@ -249,6 +255,9 @@ fun TerminalScreen(
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                     settings.javaScriptEnabled = true
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.blockNetworkLoads = true
                     settings.domStorageEnabled = false
                     // The page is sized to this view and cannot overflow it,
                     // so there is nothing to scroll to and no bar to show.
@@ -278,6 +287,9 @@ fun TerminalScreen(
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
                     webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean =
+                            request.url.toString() != "file:///android_asset/term/term.html"
+
                         override fun onPageFinished(view: WebView, url: String?) {
                             bridge.webView = view
                             bridge.pushTheme(dark)
@@ -437,6 +449,7 @@ fun SshTerminalScreen(
             it.onCopy = { text -> copyToClipboard(context, text) }
         }
     }
+    bridge.lifecycle = LocalLifecycleOwner.current.lifecycle
     var tick by remember { mutableIntStateOf(0) }
     bridge.onProgress = { tick++ }
     var controlArmed by remember { mutableStateOf(false) }
@@ -519,6 +532,9 @@ fun SshTerminalScreen(
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                     settings.javaScriptEnabled = true
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.blockNetworkLoads = true
                     settings.domStorageEnabled = false
                     // The page is sized to this view and cannot overflow it,
                     // so there is nothing to scroll to and no bar to show.
@@ -548,6 +564,9 @@ fun SshTerminalScreen(
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
                     webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean =
+                            request.url.toString() != "file:///android_asset/term/term.html"
+
                         override fun onPageFinished(view: WebView, url: String?) {
                             bridge.webView = view
                             bridge.pushTheme(dark)
@@ -720,6 +739,12 @@ private fun SnippetFillSheet(
 /// The WebView ↔ tunnel plumbing: JS hands us input bytes, we hand JS output
 /// bytes. Everything crosses as base64 so no escaping can corrupt a stream.
 class TerminalBridge {
+    var lifecycle: Lifecycle? = null
+
+    private suspend fun awaitForeground() {
+        currentCoroutineContext().ensureActive()
+        lifecycle?.currentStateFlow?.first { it.isAtLeast(Lifecycle.State.STARTED) }
+    }
     @Volatile var webView: WebView? = null
     @Volatile var alive = true
     @Volatile var sessionBound = false
@@ -745,7 +770,7 @@ class TerminalBridge {
 
     fun writeBase64(base64: String) {
         webView?.post {
-            webView?.evaluateJavascript("termWriteB64(\"$base64\");", null)
+            webView?.evaluateJavascript("termWriteB64(${kotlinx.serialization.json.JsonPrimitive(base64)});", null)
         }
     }
 
@@ -902,6 +927,7 @@ class TerminalBridge {
             var backoffMs = 50L
             var failures = 0
             while (alive) {
+                awaitForeground()
                 val chunk = runCatching {
                     model.workspaceSection(peer, "pty.read", ptyViewerParams(id) {
                         put("offset", offset); put("waitMs", 250)
@@ -1026,6 +1052,7 @@ class TerminalBridge {
             var offset = 0L
             var backoffMs = 50L
             while (alive) {
+                awaitForeground()
                 val chunk = runCatching {
                     model.core("ssh.session.read", buildJsonObject {
                         put("id", id); put("offset", offset); put("waitMs", 250)

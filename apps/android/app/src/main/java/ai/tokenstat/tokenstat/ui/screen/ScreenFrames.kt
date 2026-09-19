@@ -56,7 +56,7 @@ object ScreenFrames {
         val width = u16(data, 24)
         val height = u16(data, 26)
         val count = u32(data, 28)
-        if (data.size != HEADER_LEN + count) return null
+        if (width <= 0 || height <= 0 || count <= 0 || data.size.toLong() != HEADER_LEN.toLong() + count) return null
         return VideoFrame(
             sequence = i64(data, 8),
             timestampUs = i64(data, 16),
@@ -196,9 +196,9 @@ object ScreenFrames {
         val channels = data[5].toInt() and 0xFF
         val rate = u32(data, 8)
         val frames = u32(data, 12)
-        val samples = frames * channels
+        val samples = frames.toLong() * channels
         if (channels !in 1..8 || rate <= 0 || frames <= 0) return null
-        if (data.size != 16 + samples * 2) return null
+        if (data.size.toLong() != 16L + samples * 2) return null
         return AudioChunk(channels, rate, frames, data.copyOfRange(16, data.size))
     }
 

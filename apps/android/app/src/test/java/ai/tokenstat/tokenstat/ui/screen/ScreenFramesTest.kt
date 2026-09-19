@@ -184,4 +184,20 @@ class ScreenFramesTest {
         assertEquals(8, ScreenKey.code('C'))
         assertNull(ScreenKey.code('1'))
     }
+    @Test fun `overflowing audio dimensions cannot masquerade as a short frame`() {
+        val bytes = ByteArray(20)
+        "TAUD".forEachIndexed { i, c -> bytes[i] = c.code.toByte() }
+        bytes[4] = 1
+        bytes[5] = 2
+        bytes[10] = 0xBB.toByte()
+        bytes[11] = 0x80.toByte()
+        bytes[12] = 0x40
+        bytes[15] = 1
+        assertNull(ScreenFrames.audio(bytes))
+    }
+
+    @Test fun `video with zero dimensions is rejected before codec creation`() {
+        assertNull(ScreenFrames.parse(videoFrame(byteArrayOf(0, 0, 0, 1, 0x65), width = 0)))
+    }
+
 }

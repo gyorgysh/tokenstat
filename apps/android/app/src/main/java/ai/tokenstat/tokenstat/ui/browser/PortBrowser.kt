@@ -37,13 +37,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import kotlinx.coroutines.launch
@@ -70,7 +70,6 @@ fun PortBrowserScreen(
     // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
-    val scope = rememberCoroutineScope()
     var progress by remember { mutableFloatStateOf(0f) }
     var address by remember { mutableStateOf(url) }
     var shownHost by remember { mutableStateOf(BrowserPolicy.title(url)) }
@@ -83,7 +82,8 @@ fun PortBrowserScreen(
     BackHandler { if (view?.canGoBack() == true) view?.goBack() else onClose() }
     DisposableEffect(peer, port) {
         onDispose {
-            scope.launch {
+            // Cleanup must outlive the composition that owns this screen.
+            model.viewModelScope.launch {
                 runCatching {
                     model.core(
                         "proxy.unlisten",
@@ -156,6 +156,8 @@ fun PortBrowserScreen(
             factory = { context ->
                 WebView(context).apply {
                     settings.javaScriptEnabled = true
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
                             val target = request?.url?.toString()
@@ -205,7 +207,8 @@ fun PortBrowserScreen(
                         }
                     }
                     view = this
-                    loadUrl(url)
+                    if (BrowserPolicy.allows(url)) loadUrl(url)
+                    else loadError = "That address cannot open here."
                 }
             },
             onRelease = {

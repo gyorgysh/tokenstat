@@ -5,11 +5,13 @@ import android.app.Activity
 import android.content.Context
 import ai.tokenstat.tokenstat.core.CoreClient
 import com.android.billingclient.api.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
@@ -65,7 +67,11 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
         .build()
 
     fun start() = client.startConnection(this)
-    fun close() = client.endConnection()
+    fun close() {
+        onActivated = null
+        scope.cancel()
+        client.endConnection()
+    }
 
     override fun onBillingSetupFinished(result: BillingResult) {
         if (result.responseCode != BillingClient.BillingResponseCode.OK) {
@@ -76,6 +82,10 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
             val purchases = client.queryPurchasesAsync(
                 QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build()
             )
+            if (purchases.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+                mutableState.value = mutableState.value.copy(error = purchases.billingResult.debugMessage)
+                return@launch
+            }
             activate(purchases.purchasesList)
         }
     }
@@ -149,9 +159,18 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
             val fresh = runCatching {
                 client.queryPurchasesAsync(
                     QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build()
-                ).purchasesList
-            }.getOrNull().orEmpty()
-            val oldToken = ourPurchase(fresh)?.purchaseToken
+                )
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                mutableState.value = mutableState.value.copy(error = "Could not check your Play subscription. Please try again.")
+                return@launch
+            }
+            // A failed lookup does not mean there is no subscription to replace.
+            if (fresh.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+                mutableState.value = mutableState.value.copy(error = fresh.billingResult.debugMessage)
+                return@launch
+            }
+            val oldToken = ourPurchase(fresh.purchasesList)?.purchaseToken
             mutableState.value = mutableState.value.copy(hasPlaySubscription = oldToken != null)
             val details = BillingFlowParams.ProductDetailsParams.newBuilder()
                 .setProductDetails(product.details).setOfferToken(product.offerToken).build()
@@ -173,7 +192,10 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                         .build()
                 )
             }
-            withContext(Dispatchers.Main) { client.launchBillingFlow(activity, flow.build()) }
+            val result = withContext(Dispatchers.Main) { client.launchBillingFlow(activity, flow.build()) }
+            if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+                mutableState.value = mutableState.value.copy(error = result.debugMessage)
+            }
         }
     }
 
@@ -202,8 +224,9 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
         val expected = appAccountToken?.trim().orEmpty()
         val current = ourPurchase(purchases)
         mutableState.value = mutableState.value.copy(hasPlaySubscription = current != null)
+        if (expected.isEmpty()) return
         purchases.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }.forEach { purchase ->
-            val product = purchase.products.firstOrNull() ?: return@forEach
+            val product = purchase.products.firstOrNull { it in PRODUCT_IDS } ?: return@forEach
             val offered = purchase.accountIdentifiers?.obfuscatedAccountId
             if (!offered.isNullOrEmpty() && expected.isNotEmpty() && offered != expected) {
                 return@forEach
@@ -214,8 +237,12 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                     put("productId", product)
                     put("purchaseToken", purchase.purchaseToken)
                 })
-            }.onSuccess { account -> onActivated?.invoke(account) }
-                .onFailure { mutableState.value = mutableState.value.copy(error = it.message) }
+            }.onSuccess { account ->
+                if (appAccountToken?.trim() == expected) onActivated?.invoke(account)
+            }.onFailure {
+                if (it is CancellationException) throw it
+                mutableState.value = mutableState.value.copy(error = it.message)
+            }
         }
     }
 

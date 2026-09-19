@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import org.gradle.api.tasks.Exec
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.OutputDirectory
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
@@ -18,7 +19,7 @@ android {
         applicationId = "ai.tokenstat.tokenstat"
         minSdk = 28
         targetSdk = 36
-        versionCode = 114
+        versionCode = 115
         versionName = "1.0.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -40,6 +41,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             ndk.debugSymbolLevel = "FULL"
             val keyStore = System.getenv("TOKENSTAT_ANDROID_KEYSTORE")
@@ -54,30 +56,43 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     packaging { jniLibs.useLegacyPackaging = false }
-    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("rust-jni"))
-    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated-assets"))
-    kotlinOptions { jvmTarget = "17" }
 }
 
-val buildRust by tasks.registering(Exec::class) {
-    workingDir(rootProject.projectDir.resolve("../.."))
-    commandLine("scripts/build-ffi-android.sh", project.layout.buildDirectory.dir("rust-jni").get().asFile)
+// The Variant API marks these directories as generated and wires task dependencies.
+abstract class GenerateAndroidFiles : Exec() {
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    init {
+        // Cargo/scripts own incremental work; their inputs span the Rust workspace.
+        outputs.upToDateWhen { false }
+    }
 }
-tasks.named("preBuild").configure { dependsOn(buildRust) }
-val generatePriceBook by tasks.registering(Exec::class) {
-    val output = layout.buildDirectory.file("generated-assets/PriceBookSeed.json")
-    outputs.file(output)
+
+val buildRust by tasks.registering(GenerateAndroidFiles::class) {
+    outputDirectory.set(layout.buildDirectory.dir("rust-jni"))
     workingDir(rootProject.projectDir.resolve("../.."))
-    commandLine("cargo", "run", "-q", "-p", "xtask", "--", "pricing-seed", output.get().asFile)
+    commandLine("scripts/build-ffi-android.sh", outputDirectory.get().asFile)
 }
-tasks.named("preBuild").configure { dependsOn(generatePriceBook) }
-val generateNotices by tasks.registering(Exec::class) {
-    val output = layout.buildDirectory.file("generated-assets/THIRD_PARTY_NOTICES.md")
-    outputs.file(output)
+val generatePriceBook by tasks.registering(GenerateAndroidFiles::class) {
+    outputDirectory.set(layout.buildDirectory.dir("generated-assets/pricing"))
     workingDir(rootProject.projectDir.resolve("../.."))
-    commandLine("scripts/notices-android.sh", output.get().asFile)
+    commandLine("cargo", "run", "-q", "-p", "xtask", "--", "pricing-seed",
+        outputDirectory.file("PriceBookSeed.json").get().asFile)
 }
-tasks.named("preBuild").configure { dependsOn(generateNotices) }
+val generateNotices by tasks.registering(GenerateAndroidFiles::class) {
+    outputDirectory.set(layout.buildDirectory.dir("generated-assets/notices"))
+    workingDir(rootProject.projectDir.resolve("../.."))
+    commandLine("scripts/notices-android.sh",
+        outputDirectory.file("THIRD_PARTY_NOTICES.md").get().asFile)
+}
+androidComponents {
+    onVariants { variant ->
+        variant.sources.jniLibs?.addGeneratedSourceDirectory(buildRust, GenerateAndroidFiles::outputDirectory)
+        variant.sources.assets?.addGeneratedSourceDirectory(generatePriceBook, GenerateAndroidFiles::outputDirectory)
+        variant.sources.assets?.addGeneratedSourceDirectory(generateNotices, GenerateAndroidFiles::outputDirectory)
+    }
+}
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.00")

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workflows
 
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
 
 import androidx.activity.compose.BackHandler
@@ -321,8 +322,8 @@ fun WorkflowsScreen(
 
     LaunchedEffect(peer) { load() }
     val anyLive = runs.any { it.isLive }
-    LaunchedEffect(anyLive, peer) {
-        if (!anyLive) return@LaunchedEffect
+    ForegroundEffect(anyLive, peer) {
+        if (!anyLive) return@ForegroundEffect
         while (true) {
             delay(3_000)
             if (!working && !loading) load()
@@ -1127,14 +1128,27 @@ private fun WorkflowStepTranscript(
     modifier: Modifier = Modifier,
 ) {
     var text by remember(runID, nodeID) { mutableStateOf<String?>(null) }
-    LaunchedEffect(runID, nodeID) {
-        text = runCatching {
-            model.workspaceSection(peer, "workflow.transcript", buildJsonObject {
-                put("id", runID)
-                put("nodeId", nodeID)
-                put("offset", 0)
-            }) as JsonObject
-        }.getOrNull()?.optStr("text") ?: ""
+    ForegroundEffect(peer, runID, nodeID, live) {
+        var offset = 0L
+        val buffer = StringBuilder()
+        do {
+            val chunk = runCatching {
+                model.workspaceSection(peer, "workflow.transcript", buildJsonObject {
+                    put("id", runID)
+                    put("nodeId", nodeID)
+                    put("offset", offset)
+                }) as JsonObject
+            }.getOrElse { failure ->
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+                text = buffer.toString().ifEmpty { "Output is unavailable right now." }
+                return@ForegroundEffect
+            }
+            buffer.append(chunk.optStr("text").orEmpty())
+            if (buffer.length > 256 * 1024) buffer.delete(0, buffer.length - 256 * 1024)
+            text = buffer.toString()
+            offset = chunk.optLong("nextOffset") ?: break
+            if (live) delay(1_000)
+        } while (live)
     }
     Text(
         text ?: "Loading…",

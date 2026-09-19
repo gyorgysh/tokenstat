@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui
 
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.components.TsDangerButton
 
 import androidx.compose.ui.draw.shadow
@@ -3024,12 +3025,12 @@ private fun WorkspacesScreen(
     // Somebody who walks over, approves and comes back is not looking at the
     // same refusal with no sign that anything changed: while refused, ask
     // again every few seconds and load when the answer lands.
-    LaunchedEffect(connectedPeer, allowed, host) {
-        if (connectedPeer != null || allowed != false) return@LaunchedEffect
-        val machine = host ?: return@LaunchedEffect
+    ForegroundEffect(connectedPeer, allowed, host) {
+        if (connectedPeer != null || allowed != false) return@ForegroundEffect
+        val machine = host ?: return@ForegroundEffect
         while (true) {
             delay(4000)
-            val peer = machine.string("publicIdentity") ?: return@LaunchedEffect
+            val peer = machine.string("publicIdentity") ?: return@ForegroundEffect
             val now = runCatching {
                 (model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject)?.bool("allowed")
             }.getOrNull()
@@ -3037,7 +3038,7 @@ private fun WorkspacesScreen(
                 // Same reason as the automatic dial above: `connect` clears
                 // `allowed` on its way in, and `allowed` is a key here.
                 scope.launch { connect(machine, automatic = true) }
-                return@LaunchedEffect
+                return@ForegroundEffect
             }
         }
     }

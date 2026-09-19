@@ -8,6 +8,10 @@ import ai.tokenstat.tokenstat.core.CoreClient
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -24,6 +28,10 @@ import kotlinx.serialization.json.put
  *  plus a server that accepts the android platform and holds an FCM key.
  *  Without both, registration fails and the settings row says so. */
 object PushRegistrar {
+    private val operation = Mutex()
+    @VisibleForTesting
+    internal var call: suspend (String, kotlinx.serialization.json.JsonObject) -> kotlinx.serialization.json.JsonElement =
+        { method, params -> CoreClient.call(method, params) }
     private const val PREF = "ai.tokenstat.push"
     private const val KEY_ON = "enabled"
     private const val KEY_TOKEN = "token"
@@ -46,10 +54,10 @@ object PushRegistrar {
      *  removal, and register. A removal that never landed is moot now: this
      *  device is asking to be sent to again, and retrying it later would
      *  take it back off. */
-    suspend fun enable() {
+    suspend fun enable() = operation.withLock {
         val prefs = prefs() ?: return
         prefs.edit().putBoolean(KEY_ON, true).remove(KEY_PENDING).apply()
-        refresh()
+        refreshLocked()
     }
 
     /** Stop notifications at the account rather than only on this device, so
@@ -57,7 +65,7 @@ object PushRegistrar {
      *  from the stored one when FCM has not handed one over yet this launch,
      *  and a removal that does not reach the account is remembered rather
      *  than dropped. */
-    suspend fun disable() {
+    suspend fun disable() = operation.withLock {
         val prefs = prefs() ?: return
         prefs.edit().putBoolean(KEY_ON, false).apply()
         dropServerRow(prefs)
@@ -68,7 +76,9 @@ object PushRegistrar {
      *  that never reached the account, before registering, or a device that
      *  was switched off offline and switched back on would race its own
      *  removal. Does nothing while switched off. */
-    suspend fun refresh() {
+    suspend fun refresh() = operation.withLock { refreshLocked() }
+
+    private suspend fun refreshLocked() {
         val prefs = prefs() ?: return
         runCatching {
             val pending = prefs.getString(KEY_PENDING, null)
@@ -77,14 +87,14 @@ object PushRegistrar {
                 prefs.edit().remove(KEY_PENDING).apply()
             }
             if (!isOn()) return
-            val token = currentToken() ?: prefs.getString(KEY_TOKEN, null) ?: return
+            val token = withTimeoutOrNull(10_000) { currentToken() } ?: prefs.getString(KEY_TOKEN, null) ?: return
             persist(token)
-            CoreClient.call("push.register", buildJsonObject {
+            call("push.register", buildJsonObject {
                 put("token", token)
                 put("platform", "android")
                 put("environment", "production")
             })
-        }
+        }.onFailure { if (it is CancellationException) throw it }
     }
 
     /** Sign-out: drop this device's server row but keep the switch, so
@@ -94,8 +104,11 @@ object PushRegistrar {
      *  preference across sign-out too, and a switch that silently turns
      *  itself off on sign-out is one nobody turns back on: the toggle
      *  would read off for somebody who asked for on. */
-    suspend fun unregister() {
+    suspend fun unregister(afterRemoval: suspend () -> Unit = {}) = operation.withLock {
         prefs()?.let { dropServerRow(it) }
+        // Logout runs under the same lock: a token refresh cannot re-register
+        // between unregistering the device and clearing account credentials.
+        afterRemoval()
     }
 
     /** Remove the stored token from the account, remembering a removal that
@@ -104,14 +117,17 @@ object PushRegistrar {
         val token = prefs.getString(KEY_TOKEN, null) ?: return
         runCatching { unregisterToken(token) }
             .onSuccess { prefs.edit().remove(KEY_PENDING).apply() }
-            .onFailure { prefs.edit().putString(KEY_PENDING, token).apply() }
+            .onFailure {
+                prefs.edit().putString(KEY_PENDING, token).apply()
+                if (it is CancellationException) throw it
+            }
     }
 
     /** Ask the account to send one, so somebody can tell "on" from "on but
      *  nothing has happened yet". Returns the settings sentence, or null
      *  when the test landed. Throws when the request itself failed. */
     suspend fun test(): String? {
-        val answer = CoreClient.call("push.test").jsonObject
+        val answer = call("push.test", buildJsonObject {}).jsonObject
         val signedIn = answer["signedIn"]?.jsonPrimitive?.booleanOrNull ?: true
         val enabled = answer["enabled"]?.jsonPrimitive?.booleanOrNull ?: true
         val sent = answer["sent"]?.jsonPrimitive?.longOrNull ?: 1
@@ -124,7 +140,7 @@ object PushRegistrar {
     fun registered(): Boolean = prefs()?.getString(KEY_TOKEN, null) != null
 
     private suspend fun unregisterToken(token: String) {
-        CoreClient.call("push.unregister", buildJsonObject {
+        call("push.unregister", buildJsonObject {
             put("token", token)
             put("platform", "android")
         })

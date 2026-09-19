@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.tasks
 
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
 import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 
@@ -263,8 +264,8 @@ fun TaskBoardScreen(
 
     LaunchedEffect(peer) { load() }
     val anyRunning = cards.any { it.delegate?.isRunning == true }
-    LaunchedEffect(anyRunning, peer) {
-        if (!anyRunning) return@LaunchedEffect
+    ForegroundEffect(anyRunning, peer) {
+        if (!anyRunning) return@ForegroundEffect
         while (true) {
             delay(3_000)
             if (!working && !loading) load(includeOptions = false)

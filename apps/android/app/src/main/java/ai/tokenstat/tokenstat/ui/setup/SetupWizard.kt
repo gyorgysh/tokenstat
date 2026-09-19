@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -145,7 +146,7 @@ private fun SetupStepBody(
     val onByHand: () -> Unit = { onPush(SetupStep.BY_HAND) }
         when (step) {
             null -> SetupDoors(state = state, onDoor = onDoor, onClose = onClose)
-            SetupStep.MAC -> SetupMacDoor(state = state)
+            SetupStep.MAC -> SetupMacDoor(model = model, state = state)
             SetupStep.CLOUD -> SetupCloudDoor(
                 model = model,
                 onPickServer = { onDoor(SetupStep.SERVER) },
@@ -765,7 +766,7 @@ private fun SetupDoorCard(
 /// checkable rather than instructive. It watches the account, and each step
 /// ticks itself off as it happens.
 @Composable
-private fun SetupMacDoor(state: ai.tokenstat.tokenstat.ClientState) {
+private fun SetupMacDoor(model: AppViewModel, state: ai.tokenstat.tokenstat.ClientState) {
     val context = LocalContext.current
     val colors = LocalTsColors.current
     val machines = state.account?.get("machines") as? JsonArray ?: JsonArray(emptyList())
@@ -791,9 +792,10 @@ private fun SetupMacDoor(state: ai.tokenstat.tokenstat.ClientState) {
     }
     // Nothing is written and nothing is installed: this is a screen
     // watching, which is the only thing a phone can honestly do here.
-    LaunchedEffect(Unit) {
+    ForegroundEffect(model) {
         val deadline = System.currentTimeMillis() + 600_000
         while (arrived == null && System.currentTimeMillis() < deadline) {
+            model.refresh().join()
             delay(5_000)
         }
     }

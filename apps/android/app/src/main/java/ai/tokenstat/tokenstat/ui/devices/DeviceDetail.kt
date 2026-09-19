@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.devices
 
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
 
 import ai.tokenstat.tokenstat.AppViewModel
@@ -755,7 +756,7 @@ private fun rememberHostStats(model: AppViewModel, peer: String): Triple<JsonObj
     var stats by remember(peer) { mutableStateOf<JsonObject?>(null) }
     var failed by remember(peer) { mutableStateOf(false) }
     var route by remember(peer) { mutableStateOf<String?>(null) }
-    LaunchedEffect(peer) {
+    ForegroundEffect(peer) {
         runCatching { model.prepareHost(peer, "Host") }
         while (true) {
             runCatching { model.hostStats(peer) }

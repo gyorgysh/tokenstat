@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.automations
 
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
 
 import androidx.activity.compose.BackHandler
@@ -364,8 +365,8 @@ fun AutomationsScreen(
 
     LaunchedEffect(peer) { load() }
     val anyLive = runs.any { it.isRunning }
-    LaunchedEffect(anyLive, peer) {
-        if (!anyLive) return@LaunchedEffect
+    ForegroundEffect(anyLive, peer) {
+        if (!anyLive) return@ForegroundEffect
         while (true) {
             delay(3_000)
             if (!working && !loading) load()
@@ -1311,7 +1312,7 @@ data class QueueDraft(val budgetMinutes: String, val noLimit: Boolean, val maxCo
 fun RunTranscript(model: AppViewModel, peer: String, runID: String, live: Boolean, modifier: Modifier = Modifier) {
     var text by remember(runID) { mutableStateOf("") }
     var error by remember(runID) { mutableStateOf<String?>(null) }
-    LaunchedEffect(runID) {
+    ForegroundEffect(peer, runID, live) {
         var offset = 0L
         val builder = StringBuilder()
         var alive = true

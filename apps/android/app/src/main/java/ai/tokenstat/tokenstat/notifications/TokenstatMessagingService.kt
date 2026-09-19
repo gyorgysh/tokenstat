@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 
 /// Delivers pushes the server addressed to this device.
 ///
@@ -29,13 +30,20 @@ class TokenstatMessagingService : FirebaseMessagingService() {
         serviceScope.launch { PushRegistrar.refresh() }
     }
 
+    override fun onDestroy() {
+        serviceScope.cancel()
+        super.onDestroy()
+    }
+
     override fun onMessageReceived(message: com.google.firebase.messaging.RemoteMessage) {
         // The data map is the whole payload. A server-composed notification
         // body or title would be free text riding somebody else's server, so
         // both are ignored on purpose: only reason plus machine are read.
+        if (!PushRegistrar.isOn()) return
         val delivery = PushPayload.parse(message.data) ?: return
         if (VisibleChat.suppresses(delivery.reason, delivery.machine)) return
         val manager = getSystemService(NotificationManager::class.java)
+        if (!manager.areNotificationsEnabled()) return
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Agent updates", NotificationManager.IMPORTANCE_DEFAULT),
         )

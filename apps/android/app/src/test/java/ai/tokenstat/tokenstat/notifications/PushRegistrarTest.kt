@@ -3,6 +3,11 @@ package ai.tokenstat.tokenstat.notifications
 
 import android.content.SharedPreferences
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
+import ai.tokenstat.tokenstat.core.CoreClient
+import kotlinx.serialization.json.buildJsonObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -65,6 +70,7 @@ class PushRegistrarTest {
     @After
     fun tearDown() {
         PushRegistrar.prefsOverride = null
+        PushRegistrar.call = { method, params -> CoreClient.call(method, params) }
     }
 
     @Test
@@ -103,4 +109,30 @@ class PushRegistrarTest {
         assertEquals("fcm-token", prefs.map["pendingRemoval"])
         assertTrue(PushRegistrar.isOn())
     }
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun `disable waits for in flight registration then removes it`() = runTest {
+        PushRegistrar.prefsOverride = prefs
+        prefs.map["enabled"] = true
+        prefs.map["token"] = "fcm-token"
+        val registered = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val calls = mutableListOf<String>()
+        PushRegistrar.call = { method, _ ->
+            calls += method
+            if (method == "push.register") { registered.complete(Unit); finish.await() }
+            buildJsonObject {}
+        }
+        val refresh = launch { PushRegistrar.refresh() }
+        registered.await()
+        val disable = launch { PushRegistrar.disable() }
+        runCurrent()
+        assertEquals(listOf("push.register"), calls)
+        finish.complete(Unit)
+        refresh.join()
+        disable.join()
+        assertEquals(listOf("push.register", "push.unregister"), calls)
+        assertFalse(PushRegistrar.isOn())
+        assertFalse(prefs.map.containsKey("pendingRemoval"))
+    }
+
 }
