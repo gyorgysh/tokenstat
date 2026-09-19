@@ -60,7 +60,14 @@ mod tests {
             std::fs::read_to_string(logs.join("hostd.log")).unwrap(),
             "first start\nsecond start\n"
         );
-        open_log(&logs).unwrap().set_len(5 * 1024 * 1024).unwrap();
+        // Windows append-only handles cannot resize a file. Use a separate
+        // writable fixture handle; the daemon needs only append access.
+        OpenOptions::new()
+            .write(true)
+            .open(logs.join("hostd.log"))
+            .unwrap()
+            .set_len(5 * 1024 * 1024)
+            .unwrap();
         writeln!(open_log(&logs).unwrap(), "new start").unwrap();
         assert_eq!(
             std::fs::read_to_string(logs.join("hostd.log")).unwrap(),
