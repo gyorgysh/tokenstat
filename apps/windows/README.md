@@ -127,7 +127,14 @@ python3 scripts/generate-windows-icon.py
 Devices puts Remote access beside Always-on host, before the machine list.
 Connected machines group their folders in the sidebar. Folder rows include the
 branch and working-tree additions/removals. Sessions offers the target machine's
-shells and agents, including explicit Install and Sign in actions.
+shells and agents, including explicit Install and Sign in actions. Clicking a
+folder opens its launcher, with shortcuts to workspace sections and the Mac
+client's bundled agent artwork. Remote conversations appear under Chat.
+
+Local PTY, remote PTY and SSH sessions use the same bundled xterm surface in
+WebView2. The terminal renders VT control sequences, colors and full-screen
+programs, preserves UTF-8 across reads, and forwards keyboard and mouse input
+directly. Copy/paste uses the Windows clipboard and terminal bracketed paste.
 
 Files and Browser retain their tabs while changing workspace sections. Remote
 files use the same editor as local files. Remote loopback addresses in the
@@ -146,7 +153,8 @@ and are sent to the viewer.
 
 The Windows CI job runs the encoder with synthetic pixels, then opens its frames
 through the production Windows player pipeline. It also tests actual RichEdit
-text round trips, including trailing newlines. To run those checks on Windows:
+text round trips, including trailing newlines, terminal VT/UTF-8/input, responsive
+card geometry, and repeated player detach/dispose/reopen. To run those checks on Windows:
 
 ```powershell
 $env:TOKENSTAT_SCREEN_FIXTURE = Join-Path $env:TEMP 'tokenstat-screen-fixture'

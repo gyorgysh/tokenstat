@@ -21,10 +21,10 @@ internal static class WorkspaceHistory
 {
     /// <summary>
     /// The history card, or null when this folder has no git history to
-    /// show. OpenDiff shows one file's working-tree diff.
+    /// show. File details come from the selected commit.
     /// </summary>
     public static async Task<UIElement?> LoadCardAsync(
-        UIElement owner, string workspaceId, Func<string, Task> openDiff)
+        UIElement owner, string workspaceId)
     {
         JsonNode listed;
         try
@@ -131,14 +131,14 @@ internal static class WorkspaceHistory
                 Content = content,
             };
             row.Click += async (_, _) =>
-                await ShowDetailAsync(owner, workspaceId, captured, openDiff);
+                await ShowDetailAsync(owner, workspaceId, captured);
             list.Children.Add(row);
         }
         return Chrome.Card("History", list);
     }
 
     private static async Task ShowDetailAsync(
-        UIElement owner, string workspaceId, string commitId, Func<string, Task> openDiff)
+        UIElement owner, string workspaceId, string commitId)
     {
         JsonNode detail;
         try
@@ -234,6 +234,8 @@ internal static class WorkspaceHistory
             Opacity = 0.7,
         });
         stack.Children.Add(counts);
+        ContentDialog? dialog = null;
+        string? selectedPath = null;
         if (files is not null)
         {
             foreach (var file in files)
@@ -278,19 +280,28 @@ internal static class WorkspaceHistory
                 });
                 row.Children.Add(label);
                 var diffButton = ActionIconGlyph.Button(
-                    "Diff", ActionIcon.Compare, async (_, _) => await openDiff(captured));
+                    "Diff", ActionIcon.Compare, (_, _) => { selectedPath = captured; dialog?.Hide(); });
                 Grid.SetColumn(diffButton, 1);
                 row.Children.Add(diffButton);
                 stack.Children.Add(row);
             }
         }
-        var dialog = new ContentDialog
+        dialog = new ContentDialog
         {
             Title = WorkspaceGit.ShortId(commitId),
             Content = new ScrollViewer { MaxHeight = 560, Content = stack },
             CloseButtonText = "Close",
         };
         await Chrome.ShowDialog(owner, dialog);
+        if (selectedPath is not null)
+        {
+            // The commit owns this diff. Do not read the current working tree,
+            // and wait for the detail dialog to close before showing another.
+            var diff = (detail?["diffs"] as JsonArray)?.FirstOrDefault(
+                item => Format.Text(item, "path") == selectedPath);
+            await WorkspaceDiff.ShowFileDiffAsync(owner,
+                WorkspaceGit.ShortId(commitId) + " · " + selectedPath, diff);
+        }
     }
 
     private static string RelativeTime(long unixSeconds)

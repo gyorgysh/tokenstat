@@ -32,19 +32,18 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         Spacing = Theme.SpaceM,
         Padding = new Thickness(Theme.SpaceM),
     };
-    private readonly StackPanel _tree = new() { Spacing = Theme.SpaceXs };
+    private readonly TreeView _tree = new() { SelectionMode = TreeViewSelectionMode.Single };
     private readonly TextBlock _treeCrumb = new() { Opacity = 0.7 };
     private readonly StackPanel _pageStatus = new() { Spacing = Theme.SpaceS };
-    private readonly TabView _tabs = new() { IsAddTabButtonVisible = false };
+    private readonly TabView _tabs = new() { IsAddTabButtonVisible = false, TabWidthMode = TabViewWidthMode.SizeToContent };
     private readonly List<EditorTab> _open = [];
-    private string _directory = "";
     private string _folderName = "";
 
     public EditorPage(string workspaceId)
     {
         _workspaceId = workspaceId;
 
-        var files = new Grid { MinWidth = 240, MaxWidth = 320 };
+        var files = new Grid { Width = 240, Margin = new Thickness(0, 0, Theme.SpaceS, 0) };
         files.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         files.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         files.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -53,7 +52,20 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             Text = "Files",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         };
-        var treeList = new ScrollViewer { Content = _tree };
+        var treeList = _tree;
+        _tree.Expanding += async (_, args) =>
+        {
+            if (args.Node.HasUnrealizedChildren && args.Node.Content is FrameworkElement element && element.Tag is FileEntry file)
+                await ExpandAsync(args.Node, file.Path);
+        };
+        _tree.ItemInvoked += async (_, args) =>
+        {
+            if (args.InvokedItem is TreeViewNode node && node.Content is FrameworkElement element && element.Tag is FileEntry file)
+            {
+                if (file.IsDirectory) node.IsExpanded = !node.IsExpanded;
+                else await OpenAsync(file.Path);
+            }
+        };
         Grid.SetRow(filesTitle, 0);
         Grid.SetRow(_treeCrumb, 1);
         Grid.SetRow(treeList, 2);
@@ -218,83 +230,46 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         return "";
     }
 
+    private sealed record FileEntry(string Path, bool IsDirectory);
+
     private async Task LoadTreeAsync()
     {
-        _tree.Children.Clear();
+        _tree.RootNodes.Clear();
         _pageStatus.Children.Clear();
-        var skeleton = Motion.SkeletonCard();
-        _tree.Children.Add(skeleton);
+        _treeCrumb.Text = string.IsNullOrEmpty(_folderName) ? "Root" : _folderName;
+        await ExpandAsync(null, "");
+    }
+
+    private async Task ExpandAsync(TreeViewNode? parent, string path)
+    {
         try
         {
-            var request = new JsonObject { ["id"] = _workspaceId };
-            if (!string.IsNullOrEmpty(_directory))
+            var listed = await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId, "workspace.tree",
+                new JsonObject { ["id"] = _workspaceId, ["path"] = path });
+            var nodes = parent is null ? _tree.RootNodes : parent.Children;
+            nodes.Clear();
+            foreach (var entry in listed as JsonArray ?? new JsonArray())
             {
-                request["path"] = _directory;
-            }
-            var listed = await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId, "workspace.tree", request);
-            _treeCrumb.Text = string.IsNullOrEmpty(_directory) ? "Root" : _directory;
-            if (!string.IsNullOrEmpty(_directory))
-            {
-                var up = ActionIconGlyph.Button("Up", ActionIcon.Back, async (_, _) =>
+                if (entry is null) continue;
+                var isDirectory = Format.Flag(entry, "isDir");
+                var label = new Grid { ColumnSpacing = 7, Tag = new FileEntry(Format.Text(entry, "path"), isDirectory), Opacity = Format.Flag(entry, "ignored") ? 0.45 : 1 };
+                label.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                label.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                label.Children.Add(new SymbolIcon
                 {
-                    var slash = _directory.TrimEnd('/').LastIndexOf('/');
-                    _directory = slash < 0 ? "" : _directory.TrimEnd('/')[..slash];
-                    await LoadTreeAsync();
+                    Symbol = isDirectory ? Symbol.Folder : Symbol.Document,
+                    Width = 16, Height = 16, Foreground = isDirectory ? Theme.AccentBrush : Theme.Brush(static () => Theme.DefaultText),
                 });
-                _tree.Children.Add(up);
+                var name = new TextBlock { Text = Format.Text(entry, "name"), FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(name, 1);
+                label.Children.Add(name);
+                ToolTipService.SetToolTip(label, Format.Text(entry, "path"));
+                nodes.Add(new TreeViewNode { Content = label, HasUnrealizedChildren = isDirectory });
             }
-            var entries = listed as JsonArray;
-            if (entries is not null)
-            {
-                foreach (var entry in entries)
-                {
-                    if (entry is null)
-                    {
-                        continue;
-                    }
-                    var name = Format.Text(entry, "name");
-                    var path = Format.Text(entry, "path");
-                    var isDir = Format.Flag(entry, "isDir");
-                    var label = new TextBlock
-                    {
-                        Text = isDir ? name + "/" : name,
-                        FontSize = 12,
-                        Opacity = Format.Flag(entry, "ignored") ? 0.5 : 1,
-                    };
-                    if (!isDir)
-                    {
-                        label.FontFamily = Fonts.Mono;
-                    }
-                    var pick = new Button
-                    {
-                        HorizontalAlignment = HorizontalAlignment.Stretch,
-                        HorizontalContentAlignment = HorizontalAlignment.Left,
-                        Content = label,
-                    };
-                    if (isDir)
-                    {
-                        pick.Click += async (_, _) =>
-                        {
-                            _directory = path;
-                            await LoadTreeAsync();
-                        };
-                    }
-                    else
-                    {
-                        pick.Click += async (_, _) => await OpenAsync(path);
-                    }
-                    _tree.Children.Add(pick);
-                }
-            }
-            _tree.Children.Remove(skeleton);
-            if (_tree.Children.Count == 0)
-            {
-                _tree.Children.Add(new TextBlock { Text = "This folder is empty.", Opacity = 0.7 });
-            }
+            if (parent is not null) parent.HasUnrealizedChildren = false;
         }
         catch (Exception ex)
         {
-            _tree.Children.Remove(skeleton);
             _pageStatus.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
         }
     }

@@ -1468,6 +1468,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         var title = DeviceTitle(machine);
         var body = new StackPanel { Spacing = Theme.SpaceS };
         var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        head.Children.Add(Marks.Device(Format.Text(machine, "platform"), Format.Text(machine, "kind") == "client"));
         head.Children.Add(PresenceDot(
             MachineOnline(machine), isSelf, _status?["tunnelOnline"]?.GetValue<bool>() ?? false));
         head.Children.Add(new TextBlock

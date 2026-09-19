@@ -28,7 +28,7 @@ internal sealed class TerminalSession
 {
     private static readonly ConcurrentDictionary<string, TerminalSession> ByWorkspace = new();
 
-    public event Action<string>? Output;
+    public event Action<byte[]>? Output;
 
     public event Action? Changed;
 
@@ -150,6 +150,9 @@ internal sealed class TerminalSession
         {
             return;
         }
+        // A new terminal surface must replay retained output, including VT
+        // state, instead of starting blank at the previous view's offset.
+        Offset = 0;
         _poll = new CancellationTokenSource();
         _ = PollAsync(_poll.Token);
     }
@@ -528,7 +531,7 @@ internal sealed class TerminalSession
                 {
                     var bytes = Convert.FromBase64String(encoded);
                     HasOutput = true;
-                    Output?.Invoke(Encoding.UTF8.GetString(bytes));
+                    Output?.Invoke(bytes);
                 }
                 catch
                 {

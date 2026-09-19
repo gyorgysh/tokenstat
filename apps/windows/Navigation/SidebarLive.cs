@@ -28,6 +28,8 @@ namespace Tokenstat.Navigation;
 /// </summary>
 internal static class SidebarLive
 {
+    private static readonly Dictionary<string, JsonArray> RemoteChats = new(StringComparer.Ordinal);
+
     public const string SessionPrefix = "wsterm:";
     public const string ChatPrefix = "wschat:";
     public const string ChatMorePrefix = "wschatmore:";
@@ -76,6 +78,34 @@ internal static class SidebarLive
         catch
         {
             // Same: nothing new is not the same as nothing there.
+        }
+        var peers = RemoteWorkspaces.CachedFolders().Select(folder => folder.PeerKey).Distinct().ToArray();
+        foreach (var gone in RemoteChats.Keys.Except(peers).ToArray()) RemoteChats.Remove(gone);
+        foreach (var peer in peers)
+        {
+            try
+            {
+                var recent = Format.Items(await RemoteWorkspaces.CallOnPeerAsync(peer,
+                    "chat.recent", new JsonObject { ["limit"] = 100 }, TimeSpan.FromSeconds(5)));
+                if (recent is null) continue;
+                var mapped = new JsonArray();
+                foreach (var item in recent)
+                {
+                    if (item?.DeepClone() is not JsonObject chat) continue;
+                    var folder = Format.Text(chat, "workspaceId");
+                    if (string.IsNullOrEmpty(folder)) continue;
+                    chat["workspaceId"] = RemoteWorkspaces.Join(peer, folder);
+                    mapped.Add(chat);
+                }
+                RemoteChats[peer] = mapped;
+            }
+            catch { /* Keep that peer's last known chats on a missed poll. */ }
+        }
+        if (chats is not null)
+        {
+            chats = (JsonArray)chats.DeepClone();
+            foreach (var remote in RemoteChats.Values)
+                foreach (var chat in remote) chats.Add(chat?.DeepClone());
         }
         return (sessions, chats);
     }
@@ -175,7 +205,7 @@ internal static class SidebarLive
             }
         }
 
-        var panel = new StackPanel { Spacing = 2, Margin = new Thickness(8, 4, 0, 4) };
+        var panel = new StackPanel { Spacing = 3, Margin = new Thickness(0, 4, 0, 4) };
         panel.Children.Add(new TextBlock
         {
             Text = title,
@@ -184,6 +214,13 @@ internal static class SidebarLive
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 1,
         });
+        if (Format.Number(item, "contextWindow") > 0)
+            panel.Children.Add(new ProgressBar
+            {
+                Minimum = 0, Maximum = 100,
+                Value = Math.Clamp(100 * Format.Number(item, "contextUsed") / Format.Number(item, "contextWindow"), 0, 100),
+                Height = 3, Foreground = Theme.AccentBrush, Background = Theme.BorderBrush,
+            });
         panel.Children.Add(new TextBlock
         {
             Text = stats,
@@ -216,7 +253,7 @@ internal static class SidebarLive
 
         var row = new NavigationViewItem
         {
-            Content = panel,
+            Content = AgentMark.Row(command, panel),
             Tag = LiveRoute.Join(SessionPrefix, folderId, id),
         };
         AutomationProperties.SetName(row, title + ". " + stats + ". " + state);
@@ -253,7 +290,7 @@ internal static class SidebarLive
             detail += " · " + RelativeShort(ms.Value);
         }
 
-        var panel = new StackPanel { Spacing = 2, Margin = new Thickness(8, 4, 0, 4) };
+        var panel = new StackPanel { Spacing = 3, Margin = new Thickness(0, 4, 0, 4) };
         var heading = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -289,7 +326,7 @@ internal static class SidebarLive
 
         var row = new NavigationViewItem
         {
-            Content = panel,
+            Content = AgentMark.Row(Format.Text(chat, "backend"), panel),
             Tag = LiveRoute.Join(ChatPrefix, folderId, id),
         };
         AutomationProperties.SetName(row, title + ". " + detail);

@@ -25,24 +25,7 @@ internal sealed class SshPage : Page, IToolbarItems
     private readonly ScrollViewer _listView;
     private readonly Grid _sessionGrid = new();
     private readonly StackPanel _status = new() { Spacing = Theme.SpaceS };
-    private readonly TextBlock _view = new()
-    {
-        FontFamily = Fonts.Mono,
-        FontSize = 13,
-        Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255)),
-        TextWrapping = TextWrapping.Wrap,
-        IsTextSelectionEnabled = true,
-    };
-    private readonly ScrollViewer _scroll = new()
-    {
-        Background = new SolidColorBrush(Color.FromArgb(255, 0, 0, 0)),
-        Padding = new Thickness(Theme.SpaceS),
-    };
-    private readonly TextBox _input = new()
-    {
-        PlaceholderText = "Type, then Enter",
-        FontFamily = Fonts.Mono,
-    };
+    private readonly TerminalSurface _terminal = new();
     private readonly StackPanel _suggestRoot = new() { Spacing = Theme.SpaceS };
 
     private string? _sessionId;
@@ -65,7 +48,6 @@ internal sealed class SshPage : Page, IToolbarItems
         };
         _bodyHost.Child = _listView;
 
-        _scroll.Content = _view;
         _sessionGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _sessionGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _sessionGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -88,13 +70,21 @@ internal sealed class SshPage : Page, IToolbarItems
         }));
         sessionChrome.Children.Add(_status);
         Grid.SetRow(_suggestRoot, 1);
-        Grid.SetRow(_scroll, 2);
-        Grid.SetRow(_input, 3);
+        Grid.SetRow(_terminal, 2);
         _sessionGrid.Children.Add(sessionChrome);
         _sessionGrid.Children.Add(_suggestRoot);
-        _sessionGrid.Children.Add(_scroll);
-        _sessionGrid.Children.Add(_input);
-        _input.KeyDown += InputOnKeyDown;
+        _sessionGrid.Children.Add(_terminal);
+        _terminal.Input = async bytes =>
+        {
+            if (_sessionId is string id)
+                await AppServices.Host.CallAsync("ssh.session.write", new JsonObject { ["id"] = id, ["data"] = Format.ByteArray(bytes) });
+        };
+        _terminal.Resized = async (rows, cols) =>
+        {
+            if (_sessionId is string id)
+                await AppServices.Host.CallAsync("ssh.session.resize", new JsonObject { ["id"] = id, ["rows"] = rows, ["cols"] = cols });
+        };
+        _terminal.Failed += SessionBanner;
 
         RefreshStrip();
         var root = new Grid();
@@ -106,7 +96,7 @@ internal sealed class SshPage : Page, IToolbarItems
         root.Children.Add(_bodyHost);
         Content = root;
         Loaded += async (_, _) => await LoadAsync();
-        Unloaded += (_, _) => _ = CloseSessionAsync();
+        Unloaded += (_, _) => { _ = CloseSessionAsync(); _terminal.Close(); };
     }
 
     public event Action? ToolbarChanged { add { } remove { } }
@@ -746,7 +736,7 @@ internal sealed class SshPage : Page, IToolbarItems
             return;
         }
         _offset = 0;
-        _view.Text = "";
+        _terminal.Reset();
         _status.Children.Clear();
         ShowSession();
         _poll?.Cancel();
@@ -1000,7 +990,7 @@ internal sealed class SshPage : Page, IToolbarItems
         _sessionId = id;
         _sessionHostId = null;
         _offset = 0;
-        _view.Text = "";
+        _terminal.Reset();
         _status.Children.Clear();
         _suggestRoot.Children.Clear();
         ShowSession();
@@ -1031,7 +1021,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 new JsonObject
                 {
                     ["id"] = id,
-                    ["fragment"] = _input.Text ?? "",
+                    ["fragment"] = "",
                 });
         }
         catch (Exception ex)
@@ -1103,9 +1093,7 @@ internal sealed class SshPage : Page, IToolbarItems
         {
             return;
         }
-        var replace = (int)Math.Min(Format.Long(row, "replace"), (_input.Text ?? "").Length);
-        var fragment = _input.Text ?? "";
-        _input.Text = fragment[..(fragment.Length - replace)] + insert;
+        _terminal.Paste(insert);
         _suggestRoot.Children.Clear();
     }
 
@@ -1711,6 +1699,18 @@ internal sealed class SshPage : Page, IToolbarItems
         {
             return;
         }
+        try
+        {
+            await _terminal.Ready;
+            if (token.IsCancellationRequested) return;
+            await _terminal.Resized!(_terminal.Rows, _terminal.Cols);
+            _terminal.FocusTerminal();
+        }
+        catch (Exception ex)
+        {
+            if (!token.IsCancellationRequested) SessionBanner("Terminal could not open: " + ex.Message);
+            return;
+        }
         while (!token.IsCancellationRequested)
         {
             JsonNode chunk;
@@ -1741,8 +1741,7 @@ internal sealed class SshPage : Page, IToolbarItems
             {
                 _offset = next;
             }
-            var text = Encoding.UTF8.GetString(Format.Bytes(chunk["data"]));
-            Append(text);
+            _terminal.Write(Format.Bytes(chunk["data"]));
             if (Format.Flag(chunk, "closed"))
             {
                 var error = Format.Text(chunk, "error");
@@ -1757,37 +1756,6 @@ internal sealed class SshPage : Page, IToolbarItems
             {
                 return;
             }
-        }
-    }
-
-    private async void InputOnKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key != VirtualKey.Enter)
-        {
-            return;
-        }
-        e.Handled = true;
-        var id = _sessionId;
-        if (string.IsNullOrEmpty(id))
-        {
-            return;
-        }
-        var line = _input.Text ?? "";
-        _input.Text = "";
-        var payload = Encoding.UTF8.GetBytes(line + "\r\n");
-        try
-        {
-            await AppServices.Host.CallAsync(
-                "ssh.session.write",
-                new JsonObject
-                {
-                    ["id"] = id,
-                    ["data"] = Format.ByteArray(payload),
-                });
-        }
-        catch (Exception ex)
-        {
-            SessionBanner(ex.Message);
         }
     }
 
@@ -1808,22 +1776,6 @@ internal sealed class SshPage : Page, IToolbarItems
         {
             // Leaving the page must not throw.
         }
-    }
-
-    private void Append(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-        {
-            return;
-        }
-        var combined = _view.Text + text;
-        if (combined.Length > TerminalPage.BufferCap)
-        {
-            combined = combined[(combined.Length - (TerminalPage.BufferCap - 20_000))..];
-        }
-        _view.Text = combined;
-        _scroll.UpdateLayout();
-        _scroll.ChangeView(null, _scroll.ExtentHeight, null);
     }
 
     private void SessionBanner(string text)

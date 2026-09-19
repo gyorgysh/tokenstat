@@ -25,5 +25,11 @@
     <Compile Include="../../../apps/windows/Pages/H264Streamer.cs" Link="H264Streamer.cs" />
     <Compile Include="../../../apps/windows/Pages/ScreenFrame.cs" Link="ScreenFrame.cs" />
     <Compile Include="../../../apps/windows/Navigation/NavigationExpansion.cs" Link="NavigationExpansion.cs" />
+    <Compile Include="../../../apps/windows/Pages/TerminalSurface.cs" Link="TerminalSurface.cs" />
+    <Compile Include="../../../apps/windows/Pages/TerminalPalette.cs" Link="TerminalPalette.cs" />
+    <Compile Include="../../../apps/windows/Design/FlowPanel.cs" Link="FlowPanel.cs" />
+    <Compile Include="../../../apps/windows/Design/Theme.cs" Link="Theme.cs" />
+    <Content Include="../../../apps/windows/Assets/Terminal/*" Link="Assets/Terminal/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../apps/windows/Assets/Fonts/JetBrainsMono-Variable.ttf" Link="Assets/Fonts/JetBrainsMono-Variable.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

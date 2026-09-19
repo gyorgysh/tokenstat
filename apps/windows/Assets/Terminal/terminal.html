@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'none'; img-src 'none'">
+<link rel="stylesheet" href="xterm.css">
+<style>
+@font-face{font-family:JetBrains;src:url('../Fonts/JetBrainsMono-Variable.ttf')}
+html,body,#terminal{height:100%;margin:0;overflow:hidden;background:#0a0a0b}
+#terminal{box-sizing:border-box;padding:8px}
+</style></head><body><div id="terminal"></div>
+<script src="xterm.js"></script><script src="xterm-fit.js"></script>
+<script>
+const terminal = new Terminal({fontFamily:'JetBrains, monospace',fontSize:13,scrollback:4000,cursorBlink:true,
+  theme:{background:'#0a0a0b',foreground:'#dcdce0',cursor:'#8b5cf6',selectionBackground:'#3b2a6b'}});
+const fit = new FitAddon.FitAddon(); terminal.loadAddon(fit); terminal.open(document.getElementById('terminal'));
+const send = value => window.chrome.webview.postMessage(value);
+terminal.attachCustomKeyEventHandler(event => {
+  if(event.type!=='keydown') return true;
+  if(event.ctrlKey && event.key.toLowerCase()==='c' && terminal.hasSelection()) {
+    event.preventDefault(); send({type:'copy',data:terminal.getSelection()}); return false;
+  }
+  if((event.ctrlKey && event.key.toLowerCase()==='v') || (event.shiftKey && event.key==='Insert')) {
+    event.preventDefault(); send({type:'pasteRequest'}); return false;
+  }
+  return true;
+});
+terminal.onData(data => send({type:'input',data}));
+terminal.onBinary(data => send({type:'binary',data}));
+terminal.onResize(size => send({type:'resize',...size}));
+window.chrome.webview.addEventListener('message', event => {
+  const m=event.data;
+  if(m.type==='output') terminal.write(Uint8Array.from(atob(m.data),c=>c.charCodeAt(0)));
+  if(m.type==='paste') { terminal.paste(m.data); terminal.focus(); }
+  if(m.type==='reset') terminal.reset();
+  if(m.type==='focus') terminal.focus();
+  if(m.type==='theme') {
+    terminal.options.theme=m.theme;
+    document.body.style.background=terminal.options.theme.background;
+    document.getElementById('terminal').style.background=terminal.options.theme.background;
+  }
+});
+let resizeTimer;
+new ResizeObserver(()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>fit.fit(),100)}).observe(document.getElementById('terminal'));
+document.fonts.ready.then(()=>{fit.fit();send({type:'ready',cols:terminal.cols,rows:terminal.rows});terminal.focus()});
+</script></body></html>

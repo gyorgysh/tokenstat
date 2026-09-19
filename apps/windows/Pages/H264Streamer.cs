@@ -33,7 +33,7 @@ internal sealed class H264Streamer
 
     public uint Height { get; }
 
-    private sealed record Pending(byte[] AnnexB, bool Key, TimeSpan Stamp);
+    private sealed record Pending(byte[] AnnexB, bool Key, TimeSpan Stamp, bool Discontinuous);
 
     public H264Streamer(uint width, uint height)
     {
@@ -56,6 +56,7 @@ internal sealed class H264Streamer
     {
         MediaStreamSourceSampleRequest? request = null;
         MediaStreamSourceSampleRequestDeferral? deferral = null;
+        Pending pending;
         lock (_gate)
         {
             if (_closed) return;
@@ -67,6 +68,7 @@ internal sealed class H264Streamer
                 _needsKeyframe = true;
             }
             if (_needsKeyframe && !key) return;
+            pending = new Pending(annexB, key, stamp, _needsKeyframe);
             _needsKeyframe = false;
             if (_waiting is not null)
             {
@@ -77,13 +79,13 @@ internal sealed class H264Streamer
             }
             else
             {
-                _queue.Enqueue(new Pending(annexB, key, stamp));
+                _queue.Enqueue(pending);
                 return;
             }
         }
         if (request is not null)
         {
-            Complete(request, deferral, new Pending(annexB, key, stamp));
+            Complete(request, deferral, pending);
         }
     }
 
@@ -99,7 +101,7 @@ internal sealed class H264Streamer
             _waiting = null;
             _waitingDeferral = null;
         }
-        deferral?.Complete();
+        CompleteDeferral(deferral);
     }
 
     private void OnSampleRequested(MediaStreamSource sender, MediaStreamSourceSampleRequestedEventArgs args)
@@ -108,7 +110,7 @@ internal sealed class H264Streamer
         Pending? next = null;
         lock (_gate)
         {
-            if (_closed) { deferral.Complete(); return; }
+            if (_closed) { CompleteDeferral(deferral); return; }
             if (_queue.Count > 0)
             {
                 next = _queue.Dequeue();
@@ -139,13 +141,22 @@ internal sealed class H264Streamer
                 if (!_closed) Source.NotifyError(MediaStreamSourceErrorStatus.DecodeError);
             }
         }
-        finally { deferral?.Complete(); }
+        finally { CompleteDeferral(deferral); }
+    }
+
+    private static void CompleteDeferral(MediaStreamSourceSampleRequestDeferral? deferral)
+    {
+        // MediaPlayer can cancel the request while a page is detaching.
+        try { deferral?.Complete(); }
+        catch (System.Runtime.InteropServices.COMException) { }
+        catch (ObjectDisposedException) { }
     }
 
     private static MediaStreamSample ToMediaSample(Pending pending)
     {
         var sample = MediaStreamSample.CreateFromBuffer(pending.AnnexB.AsBuffer(), pending.Stamp);
         sample.KeyFrame = pending.Key;
+        sample.Discontinuous = pending.Discontinuous;
         // Timestamps come from capture; do not pretend every quality preset is 30 fps.
         return sample;
     }

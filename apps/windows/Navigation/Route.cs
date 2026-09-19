@@ -37,6 +37,7 @@ internal enum WorkspaceSection
     Automations,
     Files,
     Browser,
+    Launcher,
 }
 
 /// <summary>
@@ -101,6 +102,7 @@ internal static class Sections
 
     public static string Label(this WorkspaceSection section) => section switch
     {
+        WorkspaceSection.Launcher => "Launcher",
         WorkspaceSection.Sessions => "Sessions",
         WorkspaceSection.Chat => "Chat",
         WorkspaceSection.Changes => "Changes",
@@ -113,6 +115,22 @@ internal static class Sections
         WorkspaceSection.Files => "Files",
         WorkspaceSection.Browser => "Browser",
         _ => section.ToString(),
+    };
+
+    public static Tokenstat.Design.ActionIcon Action(this WorkspaceSection section) => section switch
+    {
+        WorkspaceSection.Sessions => Tokenstat.Design.ActionIcon.Run,
+        WorkspaceSection.Chat => Tokenstat.Design.ActionIcon.Comment,
+        WorkspaceSection.Changes => Tokenstat.Design.ActionIcon.Compare,
+        WorkspaceSection.History => Tokenstat.Design.ActionIcon.History,
+        WorkspaceSection.Pulls => Tokenstat.Design.ActionIcon.Merge,
+        WorkspaceSection.Todo => Tokenstat.Design.ActionIcon.Plan,
+        WorkspaceSection.Notes => Tokenstat.Design.ActionIcon.Docs,
+        WorkspaceSection.Workflows => Tokenstat.Design.ActionIcon.Move,
+        WorkspaceSection.Automations => Tokenstat.Design.ActionIcon.Scheduled,
+        WorkspaceSection.Files => Tokenstat.Design.ActionIcon.Reveal,
+        WorkspaceSection.Browser => Tokenstat.Design.ActionIcon.Browser,
+        _ => Tokenstat.Design.ActionIcon.Home,
     };
 
     public static string Label(this SSHSection section) => section switch

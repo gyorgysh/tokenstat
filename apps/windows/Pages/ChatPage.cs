@@ -117,12 +117,10 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         _scroll = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL, Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl),
-            Content = new Grid
-            {
-                MaxWidth = 1040,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Children = { _root },
-            },
+            HorizontalScrollMode = ScrollMode.Disabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = _root,
         };
         _scroll.ViewChanged += (_, args) =>
         {
@@ -1466,21 +1464,25 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
     private UIElement Composer()
     {
         var well = new StackPanel { Spacing = Theme.SpaceS };
-        well.Children.Add(_setupExpanded ? SetupCard() : CompactSetup());
+        if (_setupExpanded) well.Children.Add(SetupCard());
+        _draft.Background = Theme.PanelBrush;
+        _draft.BorderThickness = new Thickness(0);
+        _draft.MinHeight = 76;
+        well.Children.Add(_draft);
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
-        var row = new Grid();
+        var row = new Grid { ColumnSpacing = Theme.SpaceS };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var attach = ActionIconGlyph.Button("Attach", ActionIcon.Attach, async (_, _) => await AttachAsync());
+        var attach = Buttons.ToolbarIcon(ActionIcon.Attach, "Attach a file", async (_, _) => await AttachAsync());
         attach.IsEnabled = !Busy();
-        Grid.SetColumn(attach, 0);
-        Grid.SetColumn(_draft, 1);
+        var options = CompactSetup();
+        Grid.SetColumn((FrameworkElement)options, 1);
         RebuildComposerActions();
         Grid.SetColumn(_composerActions, 2);
         row.Children.Add(attach);
-        row.Children.Add(_draft);
+        row.Children.Add(options);
         row.Children.Add(_composerActions);
         well.Children.Add(row);
         return new Border
@@ -1553,85 +1555,62 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         label += string.IsNullOrEmpty(model) ? " · Default" : " · " + model;
         if (!string.IsNullOrEmpty(effort)) label += " · " + effort;
 
-        var flyout = new MenuFlyout();
-        var agentMenu = new MenuFlyoutSubItem { Text = "Agent" };
-        foreach (var item in _backends)
+        var flyout = new Flyout();
+        var panel = new StackPanel { Spacing = Theme.SpaceS, Width = 360 };
+        panel.Children.Add(new TextBlock { Text = "Agent, model and effort", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        var search = new TextBox { PlaceholderText = "Filter agents, models and efforts" };
+        panel.Children.Add(search);
+        var choices = new StackPanel { Spacing = 4 };
+        panel.Children.Add(new ScrollViewer { MaxHeight = 360, Content = choices, HorizontalScrollMode = ScrollMode.Disabled });
+        void RenderChoices()
         {
-            if (item is null) continue;
-            var id = Format.Text(item, "id");
-            if (id == "sh" && id != backendId) continue;
-            var pick = new MenuFlyoutItem
+            choices.Children.Clear();
+            void Group(string heading, IEnumerable<(string Value, string Label)> values, string field, string current)
             {
-                Text = Format.Text(item, "label", id),
-                Tag = id,
-            };
-            pick.Click += async (_, _) =>
-            {
-                if (_suppress) return;
-                var next = pick.Tag as string ?? "";
-                var patch = new JsonObject { ["backend"] = next };
-                if (Format.Text(Backend(next), "gateTier") == "bypassOnly")
+                var matches = values.Where(item => string.IsNullOrWhiteSpace(search.Text) || item.Label.Contains(search.Text, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (matches.Count == 0) return;
+                choices.Children.Add(new TextBlock { Text = heading, Foreground = Theme.AccentBrush, Margin = new Thickness(0, 10, 0, 4), FontSize = 11 });
+                foreach (var item in matches)
                 {
-                    patch["autonomy"] = "bypass";
+                    var text = new TextBlock { Text = item.Label, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+                    var pick = new Button
+                    {
+                        Content = field == "backend" ? AgentMark.Row(item.Value, text) : text,
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                        Background = item.Value == current ? Theme.AccentSoftBrush : Theme.PanelBrush,
+                        BorderThickness = new Thickness(0), Padding = new Thickness(8),
+                    };
+                    pick.Click += async (_, _) =>
+                    {
+                        if (_suppress) return;
+                        flyout.Hide();
+                        var patch = new JsonObject { [field] = item.Value };
+                        if (field == "backend" && Format.Text(Backend(item.Value), "gateTier") == "bypassOnly") patch["autonomy"] = "bypass";
+                        await UpdateAsync(patch);
+                        PaintConversation();
+                    };
+                    choices.Children.Add(pick);
                 }
-                await UpdateAsync(patch);
-                PaintConversation();
-            };
-            agentMenu.Items.Add(pick);
-        }
-        flyout.Items.Add(agentMenu);
-
-        var models = backend?["models"] as JsonArray;
-        if (models is { Count: > 0 })
-        {
-            var modelMenu = new MenuFlyoutSubItem { Text = "Model" };
-            var def = new MenuFlyoutItem { Text = "Default", Tag = "" };
-            def.Click += async (_, _) =>
-            {
-                await UpdateAsync(new JsonObject { ["model"] = "" });
-                PaintConversation();
-            };
-            modelMenu.Items.Add(def);
-            foreach (var option in models)
-            {
-                var value = option is JsonValue v && v.TryGetValue<string>(out var text) ? text : option?.ToString() ?? "";
-                if (string.IsNullOrEmpty(value)) continue;
-                var pick = new MenuFlyoutItem { Text = value, Tag = value };
-                pick.Click += async (_, _) =>
-                {
-                    await UpdateAsync(new JsonObject { ["model"] = value });
-                    PaintConversation();
-                };
-                modelMenu.Items.Add(pick);
             }
-            flyout.Items.Add(modelMenu);
-        }
-
-        var efforts = backend?["efforts"] as JsonArray;
-        if (efforts is { Count: > 0 })
-        {
-            var effortMenu = new MenuFlyoutSubItem { Text = "Effort" };
-            var def = new MenuFlyoutItem { Text = "Default", Tag = "" };
-            def.Click += async (_, _) =>
+            Group("AGENT", _backends.Where(item => item is not null && (Format.Text(item, "id") != "sh" || backendId == "sh"))
+                .Select(item => (Format.Text(item, "id"), Format.Text(item, "label", Format.Text(item, "id")))), "backend", backendId);
+            foreach (var field in new[] { "model", "effort" })
             {
-                await UpdateAsync(new JsonObject { ["effort"] = "" });
-                PaintConversation();
-            };
-            effortMenu.Items.Add(def);
-            foreach (var option in efforts)
-            {
-                var value = option is JsonValue v && v.TryGetValue<string>(out var text) ? text : option?.ToString() ?? "";
-                if (string.IsNullOrEmpty(value)) continue;
-                var pick = new MenuFlyoutItem { Text = value, Tag = value };
-                pick.Click += async (_, _) =>
+                if (backend?[field + "s"] is not JsonArray values || values.Count == 0) continue;
+                var options = new List<(string, string)> { ("", "Default") };
+                foreach (var value in values)
                 {
-                    await UpdateAsync(new JsonObject { ["effort"] = value });
-                    PaintConversation();
-                };
-                effortMenu.Items.Add(pick);
+                    var text = value?.ToString() ?? "";
+                    if (text.Length > 0) options.Add((text, text));
+                }
+                Group(field.ToUpperInvariant(), options, field, field == "model" ? model : effort);
             }
-            flyout.Items.Add(effortMenu);
         }
+        search.TextChanged += (_, _) => RenderChoices();
+        RenderChoices();
+        flyout.Content = new Border { Background = Theme.PanelBrush, Child = panel };
+        flyout.Opened += (_, _) => search.Focus(FocusState.Programmatic);
 
         return new Button
         {

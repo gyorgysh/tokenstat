@@ -23,6 +23,7 @@ namespace Tokenstat;
 public sealed partial class MainWindow : Window
 {
     private readonly NavigationView _nav = new();
+    private readonly Dictionary<string, bool> _chatGroupExpansion = new();
     private readonly Frame _frame = new();
     /// <summary>
     /// The content area behind the frame. Opaque Background tone, so the
@@ -463,6 +464,8 @@ public sealed partial class MainWindow : Window
     {
         var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
         var expanded = NavigationExpansion.Capture(NavItems(_nav.MenuItems));
+        foreach (var pair in expanded.Where(pair => pair.Key.StartsWith("ws:") && pair.Key.EndsWith(":Chat")))
+            _chatGroupExpansion[pair.Key] = pair.Value;
         var keep = new List<object>();
         foreach (var item in _nav.MenuItems)
         {
@@ -533,18 +536,19 @@ public sealed partial class MainWindow : Window
         var parent = new NavigationViewItem
         {
             Content = FolderLabel(name, git),
-            Tag = "ws:" + id + ":Files",
+            Tag = "ws:" + id + ":Launcher",
             Icon = new SymbolIcon { Symbol = remote ? Symbol.Globe : Symbol.Folder },
         };
         if (!string.IsNullOrEmpty(path))
         {
             ToolTipService.SetToolTip(parent, path);
         }
-        foreach (var section in Enum.GetValues<WorkspaceSection>())
+        foreach (var section in Enum.GetValues<WorkspaceSection>().Where(section => section != WorkspaceSection.Launcher))
         {
             parent.MenuItems.Add(new NavigationViewItem
             {
                 Content = section.Label(),
+                Icon = section.Action().Icon(),
                 Tag = "ws:" + id + ":" + section,
             });
         }
@@ -1201,26 +1205,8 @@ public sealed partial class MainWindow : Window
             _root.Children.Add(skeleton);
             var remote = RemoteWorkspaces.IsRemote(_id);
             var card = remote
-                ? await WorkspaceRemoteHistory.LoadCardAsync(this, _id, ShowDiffAsync)
-                : await WorkspaceHistory.LoadCardAsync(
-                    this,
-                    _id,
-                    async filePath =>
-                    {
-                        JsonNode? diff;
-                        try
-                        {
-                            diff = await AppServices.Host.CallAsync(
-                                "workspace.diff",
-                                new JsonObject { ["id"] = _id, ["path"] = filePath });
-                        }
-                        catch (Exception ex)
-                        {
-                            _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
-                            return;
-                        }
-                        await WorkspaceDiff.ShowFileDiffAsync(this, "Diff · " + filePath, diff);
-                    });
+                ? await WorkspaceRemoteHistory.LoadCardAsync(this, _id)
+                : await WorkspaceHistory.LoadCardAsync(this, _id);
             if (generation != _loadGeneration)
             {
                 return;
@@ -1357,7 +1343,7 @@ public sealed partial class MainWindow : Window
             list.Add(chat);
         }
 
-        foreach (var item in NavItems(_nav.MenuItems).Where(row => row.MenuItems.Count > 0 && (row.Tag as string)?.StartsWith("ws:") == true).ToList())
+        foreach (var item in NavItems(_nav.MenuItems).Where(row => row.MenuItems.Count > 0 && (row.Tag as string)?.StartsWith("ws:") == true && (row.Tag as string)?.EndsWith(":Launcher") == true).ToList())
         {
             if (item is not NavigationViewItem parent)
             {
@@ -1399,7 +1385,14 @@ public sealed partial class MainWindow : Window
                 {
                     continue;
                 }
-                SidebarLive.ApplyCount(section, SidebarLive.SectionCount(sectionKind, summary));
+                var count = SidebarLive.SectionCount(sectionKind, summary);
+                if (sectionKind == WorkspaceSection.Chat)
+                {
+                    if (section.MenuItems.Count > 0) _chatGroupExpansion[sectionTag] = section.IsExpanded;
+                    section.MenuItems.Clear();
+                    if (chatsByFolder.TryGetValue(folderId, out var recent)) count = Math.Max(count, recent.Count);
+                }
+                SidebarLive.ApplyCount(section, count);
             }
             if (sessionsByFolder.TryGetValue(folderId, out var sessions) && sessions.Count > 0)
             {
@@ -1429,24 +1422,28 @@ public sealed partial class MainWindow : Window
                 var shown = expanded
                     ? Math.Min(chats.Count, SidebarLive.InlineChats)
                     : Math.Min(chats.Count, SidebarLive.CollapsedChats);
-                var at = ChildIndex(parent, "ws:" + folderId + ":Chat");
+                var chatSection = (NavigationViewItem)parent.MenuItems[ChildIndex(parent, "ws:" + folderId + ":Chat")];
+                var at = -1;
                 for (var i = 0; i < shown; i++)
                 {
-                    parent.MenuItems.Insert(++at, SidebarLive.ChatItem(folderId, chats[i]));
+                    chatSection.MenuItems.Insert(++at, SidebarLive.ChatItem(folderId, chats[i]));
                 }
                 if (chats.Count > SidebarLive.CollapsedChats)
                 {
                     var label = expanded
                         ? "Show less"
                         : "Show " + (Math.Min(chats.Count, SidebarLive.InlineChats) - shown) + " more";
-                    parent.MenuItems.Insert(++at, SidebarLive.ActionItem(
+                    chatSection.MenuItems.Insert(++at, SidebarLive.ActionItem(
                         SidebarLive.ChatMorePrefix + folderId, label));
                 }
                 if (chats.Count > SidebarLive.InlineChats)
                 {
-                    parent.MenuItems.Insert(++at, SidebarLive.ActionItem(
+                    chatSection.MenuItems.Insert(++at, SidebarLive.ActionItem(
                         SidebarLive.ChatAllPrefix + folderId, "See all chats"));
                 }
+                var chatTag = "ws:" + folderId + ":Chat";
+                chatSection.IsExpanded = _chatGroupExpansion.GetValueOrDefault(chatTag)
+                    || (selectedTag is not null && LiveRoute.TrySplit(selectedTag, SidebarLive.ChatPrefix, out var selectedFolderId, out _) && selectedFolderId == folderId);
             }
         }
 

@@ -22,19 +22,11 @@ using Windows.UI.Core;
 namespace Tokenstat.Pages;
 
 /// <summary>
-/// A ConPTY-backed terminal over the full pty host set. The input box is a
-/// key forwarder, not a line editor: printable text goes out as typed and
-/// control and navigation keys are translated to VT sequences, so
-/// full-screen programs work. The session outlives the page, so navigating
-/// away and back reattaches to the same shell.
+/// A VT terminal shared by local and remote PTY sessions. The session outlives
+/// the page, so navigating back reattaches to the running shell.
 /// </summary>
 internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
 {
-    internal const int BufferCap = 200_000;
-
-    private const double CellWidth = 8.0;
-    private const double CellHeight = 17.0;
-
     private readonly string _workspaceId;
     private readonly StackPanel _inspector = new()
     {
@@ -57,17 +49,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     private readonly Button _kill;
     private readonly Button _close;
     private readonly Button _respawn;
-    private readonly TextBlock _view = new()
-    {
-        FontFamily = Fonts.Mono,
-        FontSize = 13,
-        TextWrapping = TextWrapping.Wrap,
-        IsTextSelectionEnabled = true,
-    };
-    private readonly ScrollViewer _scroll = new()
-    {
-        Padding = new Thickness(Theme.SpaceS),
-    };
+    private readonly TerminalSurface _terminal = new();
     /// <summary>
     /// The spawn-to-first-paint cover over the scroll area: the session is
     /// up while the program has not drawn yet. Its shade is the pane
@@ -76,14 +58,6 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     private readonly Grid _startOverlay = new();
     private readonly TextBlock _startTitle = new();
-    private readonly TextBox _input = new()
-    {
-        PlaceholderText = "Type here. Keys go straight to the shell.",
-        FontFamily = Fonts.Mono,
-    };
-
-    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _resizeTimer;
-    private bool _muted;
     private bool _loaded;
 
     public TerminalPage(string workspaceId, string? sessionId)
@@ -91,8 +65,6 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         _workspaceId = workspaceId;
         _session = TerminalSession.For(workspaceId, sessionId);
         var dark = Theme.IsDark;
-        _view.Foreground = new SolidColorBrush(TerminalPalette.Foreground(dark));
-        _scroll.Background = new SolidColorBrush(TerminalPalette.Background(dark));
         _startTitle.FontSize = 20;
         _startTitle.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
         _startTitle.Foreground = new SolidColorBrush(TerminalPalette.Foreground(dark));
@@ -150,44 +122,25 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetRow(_status, 1);
         var termHost = new Grid();
-        termHost.Children.Add(_scroll);
+        termHost.Children.Add(_terminal);
         termHost.Children.Add(_startOverlay);
         Grid.SetRow(termHost, 2);
-        Grid.SetRow(_input, 3);
-        _scroll.Content = _view;
         grid.Children.Add(chrome);
         grid.Children.Add(_status);
         grid.Children.Add(termHost);
-        grid.Children.Add(_input);
         Content = grid;
         RenderInspector();
 
-        _resizeTimer = DispatcherQueue.CreateTimer();
-        _resizeTimer.Interval = TimeSpan.FromMilliseconds(400);
-        _resizeTimer.Tick += (_, _) =>
-        {
-            _resizeTimer.Stop();
-            _ = _session.ResizeAsync(CurrentRows(), CurrentCols());
-        };
-        _scroll.SizeChanged += (_, _) =>
-        {
-            if (!_loaded)
-            {
-                return;
-            }
-            _resizeTimer.Stop();
-            _resizeTimer.Start();
-        };
-
-        _input.KeyDown += InputOnKeyDown;
-        _input.TextChanged += InputOnTextChanged;
+        _terminal.Input = bytes => _session.WriteAsync(bytes);
+        _terminal.Resized = (rows, cols) => _loaded ? _session.ResizeAsync(rows, cols) : Task.CompletedTask;
+        _terminal.Failed += Banner;
         Loaded += async (_, _) =>
         {
             _folderName = await FolderNameAsync();
             RaiseToolbarChanged();
             await StartAsync();
         };
-        Unloaded += (_, _) => Stop();
+        Unloaded += (_, _) => { Stop(); _terminal.Close(); };
     }
 
     public event Action? ToolbarChanged;
@@ -277,55 +230,38 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         return "";
     }
 
-    private int CurrentRows()
-    {
-        var height = _scroll.ActualHeight - Theme.SpaceS * 2;
-        return (int)Math.Floor(height / CellHeight);
-    }
-
-    private int CurrentCols()
-    {
-        var width = _scroll.ActualWidth - Theme.SpaceS * 2;
-        return (int)Math.Floor(width / CellWidth);
-    }
+    private int CurrentRows() => _terminal.Rows;
+    private int CurrentCols() => _terminal.Cols;
 
     private async Task StartAsync()
     {
+        try { await _terminal.Ready; }
+        catch (Exception ex) { Banner("Terminal could not open: " + ex.Message); return; }
+        if (!IsLoaded) return;
         _session.Output += Append;
         _session.Changed += Refresh;
-        await _session.AttachAsync(CurrentRows(), CurrentCols());
+        try { await _session.AttachAsync(CurrentRows(), CurrentCols()); }
+        catch (Exception ex) { if (IsLoaded) Banner(ex.Message); return; }
+        if (!IsLoaded) { await _session.DetachAsync(); return; }
         _loaded = true;
         RefreshOnUi();
-        _input.Focus(FocusState.Programmatic);
+        _terminal.FocusTerminal();
     }
 
     private void Stop()
     {
         _loaded = false;
-        _resizeTimer.Stop();
         _session.Output -= Append;
         _session.Changed -= Refresh;
         _ = _session.DetachAsync();
     }
 
-    private void Append(string text)
+    private void Append(byte[] bytes)
     {
-        if (string.IsNullOrEmpty(text))
-        {
-            return;
-        }
         DispatcherQueue.TryEnqueue(() =>
         {
-            var combined = _view.Text + text;
-            if (combined.Length > BufferCap)
-            {
-                combined = combined[(combined.Length - (BufferCap - 20_000))..];
-            }
-            _view.Text = combined;
-            _scroll.UpdateLayout();
-            _scroll.ChangeView(null, _scroll.ExtentHeight, null);
-            // First paint lifts the cover at once rather than waiting for
-            // the next session change to repaint.
+            if (!IsLoaded) return;
+            _terminal.Write(bytes);
             _startOverlay.Visibility = Visibility.Collapsed;
         });
     }
@@ -407,138 +343,6 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
             return $"{peer}:{tail}";
         }
         return id.Length <= 6 ? id : id[^6..];
-    }
-
-    private async void InputOnKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (await TryPasteAsync(e))
-        {
-            e.Handled = true;
-            return;
-        }
-        var bytes = TranslateKey(e);
-        if (bytes is null)
-        {
-            return;
-        }
-        e.Handled = true;
-        await _session.WriteAsync(bytes);
-    }
-
-    private async void InputOnTextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_muted)
-        {
-            return;
-        }
-        var text = _input.Text ?? "";
-        if (text.Length == 0)
-        {
-            return;
-        }
-        _muted = true;
-        _input.Text = "";
-        _muted = false;
-        await _session.WriteAsync(Encoding.UTF8.GetBytes(text));
-    }
-
-    private static bool ControlDown() =>
-        (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control) & CoreVirtualKeyStates.Down)
-        == CoreVirtualKeyStates.Down;
-
-    private static bool ShiftDown() =>
-        (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift) & CoreVirtualKeyStates.Down)
-        == CoreVirtualKeyStates.Down;
-
-    private static bool AltDown() =>
-        (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu) & CoreVirtualKeyStates.Down)
-        == CoreVirtualKeyStates.Down;
-
-    private async Task<bool> TryPasteAsync(KeyRoutedEventArgs e)
-    {
-        var paste = (ControlDown() && e.Key == VirtualKey.V)
-            || (ShiftDown() && e.Key == VirtualKey.Insert);
-        if (!paste)
-        {
-            return false;
-        }
-        try
-        {
-            var content = Clipboard.GetContent();
-            if (content.Contains(StandardDataFormats.Text))
-            {
-                var text = await content.GetTextAsync();
-                await _session.WriteAsync(Encoding.UTF8.GetBytes(text));
-            }
-        }
-        catch
-        {
-            // A denied clipboard must not kill the session.
-        }
-        return true;
-    }
-
-    /// <summary>
-    /// Control and navigation keys as VT sequences. Printable text returns
-    /// null and goes out through the text change path as typed.
-    /// </summary>
-    private static byte[]? TranslateKey(KeyRoutedEventArgs e)
-    {
-        if (e.Key is VirtualKey.Control or VirtualKey.Shift or VirtualKey.Menu
-            or VirtualKey.LeftWindows or VirtualKey.RightWindows)
-        {
-            return null;
-        }
-        var ctrl = ControlDown();
-        var alt = AltDown();
-        if (ctrl && e.Key >= VirtualKey.A && e.Key <= VirtualKey.Z)
-        {
-            return [(byte)((int)e.Key - (int)VirtualKey.A + 1)];
-        }
-        byte[]? special = e.Key switch
-        {
-            VirtualKey.Enter => [(byte)'\r'],
-            VirtualKey.Escape => [(byte)'\x1b'],
-            VirtualKey.Tab => [(byte)'\t'],
-            VirtualKey.Back => [(byte)'\x7f'],
-            VirtualKey.Up => "\x1b[A"u8.ToArray(),
-            VirtualKey.Down => "\x1b[B"u8.ToArray(),
-            VirtualKey.Right => "\x1b[C"u8.ToArray(),
-            VirtualKey.Left => "\x1b[D"u8.ToArray(),
-            VirtualKey.Home => "\x1b[H"u8.ToArray(),
-            VirtualKey.End => "\x1b[F"u8.ToArray(),
-            VirtualKey.PageUp => "\x1b[5~"u8.ToArray(),
-            VirtualKey.PageDown => "\x1b[6~"u8.ToArray(),
-            VirtualKey.Insert => "\x1b[2~"u8.ToArray(),
-            VirtualKey.Delete => "\x1b[3~"u8.ToArray(),
-            VirtualKey.F1 => "\x1bOP"u8.ToArray(),
-            VirtualKey.F2 => "\x1bOQ"u8.ToArray(),
-            VirtualKey.F3 => "\x1bOR"u8.ToArray(),
-            VirtualKey.F4 => "\x1bOS"u8.ToArray(),
-            VirtualKey.F5 => "\x1b[15~"u8.ToArray(),
-            VirtualKey.F6 => "\x1b[17~"u8.ToArray(),
-            VirtualKey.F7 => "\x1b[18~"u8.ToArray(),
-            VirtualKey.F8 => "\x1b[19~"u8.ToArray(),
-            VirtualKey.F9 => "\x1b[20~"u8.ToArray(),
-            VirtualKey.F10 => "\x1b[21~"u8.ToArray(),
-            VirtualKey.F11 => "\x1b[23~"u8.ToArray(),
-            VirtualKey.F12 => "\x1b[24~"u8.ToArray(),
-            _ => null,
-        };
-        if (special is not null)
-        {
-            return special;
-        }
-        if (alt && e.Key >= VirtualKey.A && e.Key <= VirtualKey.Z)
-        {
-            var letter = (char)('a' + ((int)e.Key - (int)VirtualKey.A));
-            if (ShiftDown())
-            {
-                letter = char.ToUpperInvariant(letter);
-            }
-            return Encoding.UTF8.GetBytes("\x1b" + letter);
-        }
-        return null;
     }
 
     private void Banner(string text)

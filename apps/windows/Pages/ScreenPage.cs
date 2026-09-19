@@ -52,6 +52,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         HorizontalAlignment = HorizontalAlignment.Stretch,
         VerticalAlignment = VerticalAlignment.Stretch,
     };
+    private Windows.Media.Playback.MediaPlayer? _mediaPlayer;
     private readonly MediaPlayerElement _player = new()
     {
         Stretch = Stretch.Uniform,
@@ -120,19 +121,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     {
         _peer = peer;
         _name = name;
-        var mediaPlayer = new Windows.Media.Playback.MediaPlayer { AutoPlay = true };
-        mediaPlayer.MediaFailed += (_, failure) => DispatcherQueue.TryEnqueue(() =>
-        {
-            if (_closed) return;
-            Caption("Screen decoder failed: " + failure.ErrorMessage);
-            Banner("Screen decoder failed: " + failure.ErrorMessage);
-        });
-        mediaPlayer.MediaOpened += (_, _) => DispatcherQueue.TryEnqueue(() =>
-        {
-            if (!_closed) _caption.Visibility = Visibility.Collapsed;
-        });
-        _player.SetMediaPlayer(mediaPlayer);
-
         var chrome = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -224,6 +212,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(controls, 1);
         Grid.SetRow(_status, 2);
         Grid.SetRow(_screenInput, 3);
         Grid.SetRow(keyBar, 4);
@@ -612,7 +601,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
 
     private void PushH264OnUi(ScreenFrame frame, byte[] annexB)
     {
-        if (frame.Width <= 0 || frame.Height <= 0)
+        if (_closed || !IsLoaded || frame.Width <= 0 || frame.Height <= 0)
         {
             return;
         }
@@ -622,16 +611,36 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         {
             if (_streamer is null || _streamer.Width != width || _streamer.Height != height)
             {
-                _streamer?.Close();
-                _streamer = null;
+                ResetDecoderOnUi();
                 if (!frame.Keyframe)
                 {
                     // A fresh decoder needs its parameter sets first.
                     return;
                 }
                 var streamer = new H264Streamer(width, height);
-                _player.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
                 _streamer = streamer;
+                var mediaPlayer = new Windows.Media.Playback.MediaPlayer { AutoPlay = true };
+                _mediaPlayer = mediaPlayer;
+                mediaPlayer.MediaFailed += (_, failure) => DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (_closed || !ReferenceEquals(_mediaPlayer, mediaPlayer)) return;
+                    var detail = $"{failure.Error}; 0x{failure.ExtendedErrorCode?.HResult ?? 0:X8} {failure.ErrorMessage}";
+                    Program.LogStartup("Screen decoder failed: " + detail);
+                    ResetDecoderOnUi();
+                    _havePicture = false;
+                    Caption("Waiting for a fresh video frame");
+                    Banner("Screen decoder failed: " + detail);
+                });
+                mediaPlayer.MediaOpened += (_, _) => DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!_closed && ReferenceEquals(_mediaPlayer, mediaPlayer))
+                    {
+                        _caption.Visibility = Visibility.Collapsed;
+                        _status.Children.Clear();
+                    }
+                });
+                _player.SetMediaPlayer(mediaPlayer);
+                mediaPlayer.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
                 _firstStampUs = frame.TimestampMicroseconds;
                 _lastStampTicks = -1;
                 _player.MediaPlayer?.Play();
@@ -650,9 +659,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         catch (Exception ex)
         {
-            _streamer = null;
-            _player.Source = null;
-            _player.Visibility = Visibility.Collapsed;
+            ResetDecoderOnUi();
             _picture.Visibility = Visibility.Visible;
             Caption("This stream is H.264, but the decoder could not start: " + ex.Message);
             Banner("The H.264 decoder could not start: " + ex.Message);
@@ -661,10 +668,9 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
 
     private void ShowStillOnUi(byte[] bytes)
     {
-        _streamer?.Close();
-        _streamer = null;
+        if (_closed || !IsLoaded) return;
+        ResetDecoderOnUi();
         _havePicture = true;
-        _player.Source = null;
         _player.Visibility = Visibility.Collapsed;
         _picture.Visibility = Visibility.Visible;
         _ = ShowJpegOnUiAsync(bytes);
@@ -680,6 +686,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             stream.Seek(0);
             var bitmap = new BitmapImage();
             await bitmap.SetSourceAsync(stream);
+            if (_closed || !IsLoaded) return;
             _picture.Source = bitmap;
         }
         catch
@@ -697,11 +704,10 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         await CloseViewerAsync();
         DispatcherQueue.TryEnqueue(() =>
         {
-            _streamer?.Close();
-            _streamer = null;
+            if (_closed) return;
+            ResetDecoderOnUi();
             _havePicture = false;
-            _player.Source = null;
-            _player.Visibility = Visibility.Collapsed;
+                _player.Visibility = Visibility.Collapsed;
             _picture.Source = null;
             _picture.Visibility = Visibility.Visible;
         });
@@ -772,23 +778,26 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
+    private void ResetDecoderOnUi()
+    {
+        var previous = _mediaPlayer;
+        _mediaPlayer = null;
+        // Detach the player before disposal so XAML cannot call a closed COM object.
+        _player.SetMediaPlayer(null);
+        _streamer?.Close();
+        _streamer = null;
+        if (previous is not null) { previous.Source = null; previous.Dispose(); }
+        _player.Visibility = Visibility.Collapsed;
+    }
+
     private async Task CloseAsync()
     {
-        if (_closed)
-        {
-            return;
-        }
+        if (_closed) return;
         _closed = true;
         _heartbeat?.Stop();
         _heartbeat = null;
+        ResetDecoderOnUi();
         await CloseViewerAsync();
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            _streamer?.Close();
-            _streamer = null;
-            _player.Source = null;
-            _player.MediaPlayer?.Dispose();
-        });
     }
 
     private void StageOnPointerPressed(object sender, PointerRoutedEventArgs e)
@@ -1155,11 +1164,10 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            _streamer?.Close();
-            _streamer = null;
+            if (_closed) return;
+            ResetDecoderOnUi();
             _havePicture = false;
-            _player.Source = null;
-            _player.Visibility = Visibility.Collapsed;
+                _player.Visibility = Visibility.Collapsed;
             _picture.Source = null;
             _picture.Visibility = Visibility.Visible;
         });

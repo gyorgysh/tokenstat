@@ -41,6 +41,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Assets\Brands\*.svg" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Terminal\**\*" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\tokenstat.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

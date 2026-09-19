@@ -50,14 +50,17 @@ internal static class Theme
         var resources = Application.Current.Resources;
         foreach (var key in new[] { "ButtonBackground", "TextControlBackground", "TextControlBackgroundFocused",
             "TabViewItemHeaderBackgroundSelected", "TabViewItemHeaderDragBackground",
+            "FlyoutPresenterBackground", "FlyoutBackgroundThemeBrush", "MenuFlyoutPresenterBackground",
             "ComboBoxBackground", "ComboBoxBackgroundUnfocused", "ComboBoxDropDownBackground" })
             resources[key] = PanelBrush;
         foreach (var key in new[] { "ButtonBackgroundPointerOver", "TextControlBackgroundPointerOver",
             "ListViewItemBackgroundPointerOver", "TabViewItemHeaderBackgroundPointerOver",
+            "NavigationViewItemBackgroundPointerOver", "NavigationViewItemBackgroundSelectedPointerOver",
             "ComboBoxBackgroundPointerOver", "ComboBoxItemBackgroundPointerOver" })
             resources[key] = Brush(static () => RowHighlight);
         foreach (var key in new[] { "ButtonBackgroundPressed", "ListViewItemBackgroundSelected",
             "ListViewItemBackgroundSelectedPointerOver", "ListViewItemBackgroundSelectedPressed",
+            "NavigationViewItemBackgroundSelected", "NavigationViewItemBackgroundSelectedPressed", "NavigationViewItemBackgroundPressed",
             "ComboBoxBackgroundPressed", "ComboBoxItemBackgroundSelected", "TabViewItemHeaderBackgroundPressed" })
             resources[key] = Brush(static () => RowSelected);
         foreach (var key in new[] { "ButtonBorderBrush", "ButtonBorderBrushPointerOver", "TextControlBorderBrush",

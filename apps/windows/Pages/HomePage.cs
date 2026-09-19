@@ -380,10 +380,9 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         {
             _root.Children.Add(Chrome.Banner(_planError, Theme.Danger, Symbol.Important));
         }
-        foreach (var panel in PlanPanels(_planLimits, _planBySource))
-        {
-            _root.Children.Add(panel);
-        }
+        var planPanels = new FlowPanel { MinimumItemWidth = 320, Spacing = Theme.SpaceM };
+        foreach (var panel in PlanPanels(_planLimits, _planBySource)) planPanels.Children.Add(panel);
+        if (planPanels.Children.Count > 0) _root.Children.Add(planPanels);
         if (signedIn)
         {
             _root.Children.Add(MachinesCard(account));
@@ -613,7 +612,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
                 list.Children.Add(texts);
                 continue;
             }
-            var mark = ActionIcon.History.Icon();
+            var mark = AgentMark.View(Format.Text(item, "backend"), 34);
             mark.VerticalAlignment = VerticalAlignment.Center;
             var chevron = ActionIcon.Next.Icon();
             chevron.VerticalAlignment = VerticalAlignment.Center;
@@ -981,7 +980,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
                 TextWrapping = TextWrapping.Wrap,
             });
         }
-        return Chrome.Card(HarnessName(source), body, ProviderSubtitle(provider));
+        return Chrome.Card(HarnessName(source), body, ProviderSubtitle(provider), AgentMark.View(source, 32));
     }
 
     /// <summary>
@@ -1187,6 +1186,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
                 var mine = id == thisId;
                 var row = new StackPanel { Spacing = 2 };
                 var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+                title.Children.Add(Marks.Device(Format.Text(machine, "platform"), Format.Text(machine, "kind") == "client"));
                 title.Children.Add(new TextBlock
                 {
                     Text = name,

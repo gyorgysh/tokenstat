@@ -35,16 +35,29 @@ internal sealed class FlowPanel : Panel
     private Size Layout(double width, double itemWidth, bool arrange)
     {
         double x = 0, y = 0, rowHeight = 0;
+        var row = new List<(UIElement Child, double X, double Width)>();
+        void FinishRow()
+        {
+            if (arrange)
+                foreach (var cell in row)
+                    cell.Child.Arrange(new Rect(cell.X, y, cell.Width,
+                        MinimumItemWidth > 0 ? rowHeight : cell.Child.DesiredSize.Height));
+            row.Clear();
+        }
         foreach (var child in Children)
         {
             if (child.Visibility == Visibility.Collapsed) continue;
             var size = child.DesiredSize;
             var w = MinimumItemWidth > 0 ? itemWidth : Math.Min(width, size.Width);
-            if (x > 0 && x + w > width + 0.5) { x = 0; y += rowHeight + Spacing; rowHeight = 0; }
-            if (arrange) child.Arrange(new Rect(x, y, w, size.Height));
+            if (x > 0 && x + w > width + 0.5)
+            {
+                FinishRow(); x = 0; y += rowHeight + Spacing; rowHeight = 0;
+            }
+            row.Add((child, x, w));
             x += w + Spacing;
             rowHeight = Math.Max(rowHeight, size.Height);
         }
+        FinishRow();
         return new Size(width, y + rowHeight);
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Pages;
+using Tokenstat.Design;
 using Tokenstat.Navigation;
 using Windows.Media.Core;
 
@@ -52,7 +53,8 @@ public sealed partial class SmokeApp : Application
         Program.Log("Creating editor and player controls");
         var editor = new RichEditBox { AcceptsReturn = true, Height = 160 };
         var video = new MediaPlayerElement { AutoPlay = true, Width = 320, Height = 180 };
-        var body = new StackPanel { Children = { editor, video } };
+        var terminal = new TerminalSurface { Height = 200, Width = 640 };
+        var body = new StackPanel { Children = { editor, video, terminal } };
         _window = new Window { Content = body };
         body.Loaded += async (_, _) =>
         {
@@ -60,6 +62,33 @@ public sealed partial class SmokeApp : Application
             H264Streamer? streamer = null;
             try
             {
+                await terminal.Ready;
+                terminal.Write(System.Text.Encoding.UTF8.GetBytes("\u001b[2J\u001b[H\u001b[31mred\u001b[0m\r\n"));
+                // A UTF-8 scalar split across host reads must remain intact.
+                terminal.Write(new byte[] { 0xf0, 0x9f });
+                terminal.Write(new byte[] { 0x98, 0x80 });
+                var web = (WebView2)terminal.Children[0];
+                await Task.Delay(200);
+                var screen = await web.ExecuteScriptAsync("JSON.stringify([terminal.buffer.active.getLine(0).translateToString(true),terminal.buffer.active.getLine(1).translateToString(true),terminal.buffer.active.getLine(0).getCell(0).getFgColor()])");
+                var decoded = System.Text.Json.JsonSerializer.Deserialize<string>(screen);
+                if (decoded != "[\"red\",\"😀\",1]") throw new Exception("Terminal did not render VT colors and split UTF-8: " + decoded);
+                var typed = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+                terminal.Input = bytes => { typed.TrySetResult(bytes); return Task.CompletedTask; };
+                await web.ExecuteScriptAsync("terminal.input('hello\\r', true)");
+                if (System.Text.Encoding.UTF8.GetString(await typed.Task.WaitAsync(TimeSpan.FromSeconds(5))) != "hello\r")
+                    throw new Exception("Terminal keyboard input did not reach the host bridge");
+                Program.Log("PASS: production terminal renders VT colors, split UTF-8 and direct input");
+                var cards = new FlowPanel { MinimumItemWidth = 300, Spacing = 10 };
+                var shortCard = new Border { MinHeight = 40 };
+                var tallCard = new Border { MinHeight = 80 };
+                cards.Children.Add(shortCard); cards.Children.Add(tallCard);
+                cards.Measure(new Windows.Foundation.Size(640, double.PositiveInfinity));
+                cards.Arrange(new Windows.Foundation.Rect(0, 0, 640, cards.DesiredSize.Height));
+                if (shortCard.ActualHeight != 80 || tallCard.ActualHeight != 80)
+                    throw new Exception("Responsive cards did not share their row height");
+                cards.Measure(new Windows.Foundation.Size(300, double.PositiveInfinity));
+                if (cards.DesiredSize.Height != 130) throw new Exception("Responsive cards did not wrap to fit a narrow viewport");
+                Program.Log("PASS: responsive device cards align and wrap");
                 var hosts = new NavigationViewItem { Tag = "ssh:Hosts" };
                 var ssh = new NavigationViewItem { Tag = "ssh:Hosts", MenuItems = { hosts }, IsExpanded = true };
                 var files = new NavigationViewItem { Tag = "ws:folder:Files" };
@@ -102,10 +131,33 @@ public sealed partial class SmokeApp : Application
                 if (player.PlaybackSession.NaturalVideoWidth != 320 || player.PlaybackSession.NaturalVideoHeight != 180)
                     throw new Exception("Native Windows decoder did not accept the host encoder's stream");
                 Program.Log("PASS: native host H.264 opens in the production Windows player pipeline");
+                video.SetMediaPlayer(null);
+                streamer.Close();
+                player.Source = null;
+                for (var iteration = 0; iteration < 3; iteration++)
+                {
+                    streamer = new H264Streamer((uint)frames[0].Width, (uint)frames[0].Height);
+                    using var next = new Windows.Media.Playback.MediaPlayer();
+                    var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    next.MediaOpened += (_, _) => ready.TrySetResult();
+                    next.MediaFailed += (_, error) => ready.TrySetException(new Exception($"{error.Error}: {error.ErrorMessage}"));
+                    video.SetMediaPlayer(next);
+                    next.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
+                    foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10));
+                    next.Play();
+                    await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                    await Task.Delay(100);
+                    // Reconfigure/navigate while the live stream is waiting for more data.
+                    video.SetMediaPlayer(null);
+                    streamer.Close();
+                    next.Source = null;
+                }
+                await Task.Delay(200);
+                Program.Log("PASS: repeated screen detach, decoder disposal and reopen");
                 Program.Result = 0;
             }
             catch (Exception ex) { Program.Log(ex.ToString()); }
-            finally { streamer?.Close(); _window.Close(); Exit(); }
+            finally { terminal.Close(); video.SetMediaPlayer(null); streamer?.Close(); _window.Close(); Exit(); }
         };
         _window.Activate();
     }

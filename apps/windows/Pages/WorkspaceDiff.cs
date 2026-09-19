@@ -82,8 +82,11 @@ internal static class WorkspaceDiff
                     Content = new TextBlock { Text = $"Show all {total} lines" },
                     HorizontalAlignment = HorizontalAlignment.Left,
                 };
-                show.Click += async (_, _) =>
-                    await ShowFileDiffAsync(owner, title, diffNode, showAll: true);
+                show.Click += (_, _) =>
+                {
+                    stack.Children.Clear();
+                    stack.Children.Add(RenderFile(file, total));
+                };
                 stack.Children.Add(show);
             }
             else
@@ -257,8 +260,12 @@ internal static class WorkspaceDiff
             Content = new TextBlock { Text = "Full diff" },
             HorizontalAlignment = HorizontalAlignment.Left,
         };
-        full.Click += async (_, _) =>
-            await ShowFileDiffAsync(owner, file.Path, diffNode);
+        full.Click += (_, _) =>
+        {
+            card.Children.Clear();
+            var parsed = Parse(diffNode);
+            card.Children.Add(RenderFile(parsed, Math.Min(parsed.TotalLines(), FullRenderLimit)));
+        };
         card.Children.Add(full);
         return Chrome.Card(file.Path, card);
     }

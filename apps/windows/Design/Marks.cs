@@ -43,6 +43,23 @@ internal static class LogoRefresh
 /// </summary>
 internal static class Marks
 {
+    public static FrameworkElement Device(string platform, bool client = false, double size = 30)
+    {
+        var phone = client || platform.Contains("ios", StringComparison.OrdinalIgnoreCase)
+            || platform.Contains("android", StringComparison.OrdinalIgnoreCase);
+        IconElement icon = phone ? new SymbolIcon(Symbol.CellPhone) : new FontIcon
+        {
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+            Glyph = char.ToString((char)0xE770), FontSize = 18,
+        };
+        icon.Foreground = Theme.AccentBrush;
+        return new Border
+        {
+            Width = size, Height = size, Background = Theme.AccentSoftBrush,
+            CornerRadius = new CornerRadius(8), Child = icon,
+        };
+    }
+
     /// <summary>
     /// The tokenstat mark: three ascending bars on a shared baseline.
     /// Bars 12 wide on a 15 pitch, sharing a baseline, from the website's

@@ -145,6 +145,10 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 case WorkspaceSection.Todo:
                     await LoadTodoAsync();
                     break;
+                case WorkspaceSection.Launcher:
+                    LoadQuickActions();
+                    await LoadSessionsAsync();
+                    break;
                 case WorkspaceSection.Sessions:
                     await LoadSessionsAsync();
                     break;
@@ -527,8 +531,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             });
         }
         var history = remote
-            ? await WorkspaceRemoteHistory.LoadCardAsync(this, _id, ShowDiffAsync)
-            : await WorkspaceHistory.LoadCardAsync(this, _id, ShowDiffAsync);
+            ? await WorkspaceRemoteHistory.LoadCardAsync(this, _id)
+            : await WorkspaceHistory.LoadCardAsync(this, _id);
         if (history is not null)
         {
             _root.Children.Add(history);
@@ -624,6 +628,37 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         await LoadAsync();
     }
 
+    private void LoadQuickActions()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM, MaxWidth = 960, HorizontalAlignment = HorizontalAlignment.Left };
+        body.Children.Add(new TextBlock
+        {
+            Text = "What do you want to do in " + _folderName + "?",
+            FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var links = new FlowPanel { MinimumItemWidth = 180, Spacing = Theme.SpaceM };
+        foreach (var section in new[] { WorkspaceSection.Chat, WorkspaceSection.Files, WorkspaceSection.Browser, WorkspaceSection.Changes, WorkspaceSection.Pulls, WorkspaceSection.Todo })
+        {
+            var content = new StackPanel { Spacing = Theme.SpaceS, HorizontalAlignment = HorizontalAlignment.Center };
+            var icon = section.Action().Icon();
+            icon.Foreground = Theme.AccentBrush;
+            content.Children.Add(icon);
+            content.Children.Add(new TextBlock { Text = section.Label(), HorizontalAlignment = HorizontalAlignment.Center });
+            var button = new Button
+            {
+                Content = content, HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
+                CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(Theme.SpaceL),
+            };
+            button.Click += (_, _) => AppServices.OpenWorkspace?.Invoke(_id, section);
+            links.Children.Add(button);
+        }
+        body.Children.Add(links);
+        _root.Children.Add(body);
+    }
+
     private async Task LoadSessionsAsync()
     {
         var launchers = new StackPanel { Spacing = Theme.SpaceS };
@@ -660,6 +695,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 var id = Format.Text(profile, "id");
                 var installed = Format.Flag(profile, "installed");
                 var body = new StackPanel { Spacing = Theme.SpaceS };
+                body.Children.Add(AgentMark.View(Format.Text(profile, "harnessId", id), 42));
                 body.Children.Add(new TextBlock
                 {
                     Text = Format.Text(profile, "name", id),
