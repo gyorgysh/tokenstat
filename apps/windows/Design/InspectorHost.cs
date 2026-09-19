@@ -7,6 +7,7 @@
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace Tokenstat.Design;
 
@@ -119,12 +120,27 @@ internal sealed class InspectorHost : Grid
         Refresh();
     }
 
-    /// <summary>Mount the content element in the star column. Called once, by the shell.</summary>
+    /// <summary>
+    /// Mount the content element in the star column. Called once, by the
+    /// shell; a second call replaces the old child rather than stacking a
+    /// new one over it.
+    /// </summary>
     public void SetContent(UIElement content)
     {
         if (content is FrameworkElement already && already.Parent == this)
         {
             return;
+        }
+        for (int i = Children.Count - 1; i >= 0; i--)
+        {
+            if (Children[i] is FrameworkElement child && Grid.GetColumn(child) == 0)
+            {
+                Children.RemoveAt(i);
+            }
+        }
+        if (VisualTreeHelper.GetParent(content) is Panel panel)
+        {
+            panel.Children.Remove(content);
         }
         Grid.SetColumn(content, 0);
         Children.Add(content);

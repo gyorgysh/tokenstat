@@ -73,6 +73,14 @@ internal sealed class TerminalPage : Page, IInspectorContent
     {
         Padding = new Thickness(Theme.SpaceS),
     };
+    /// <summary>
+    /// The spawn-to-first-paint cover over the scroll area: the session is
+    /// up while the program has not drawn yet. Its shade is the pane
+    /// surface, the same number the cells use, so no seam shows while it is
+    /// up or when it lifts.
+    /// </summary>
+    private readonly Grid _startOverlay = new();
+    private readonly TextBlock _startTitle = new();
     private readonly TextBox _input = new()
     {
         PlaceholderText = "Type here. Keys go straight to the shell.",
@@ -90,6 +98,39 @@ internal sealed class TerminalPage : Page, IInspectorContent
         var dark = Theme.IsDark;
         _view.Foreground = new SolidColorBrush(TerminalPalette.Foreground(dark));
         _scroll.Background = new SolidColorBrush(TerminalPalette.Background(dark));
+        _startTitle.FontSize = 20;
+        _startTitle.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+        _startTitle.Foreground = new SolidColorBrush(TerminalPalette.Foreground(dark));
+        _startTitle.HorizontalAlignment = HorizontalAlignment.Center;
+        _startTitle.TextAlignment = TextAlignment.Center;
+        _startTitle.TextWrapping = TextWrapping.Wrap;
+        var startBody = new StackPanel
+        {
+            Spacing = Theme.SpaceM,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        startBody.Children.Add(new ProgressRing
+        {
+            IsActive = true,
+            Width = 32,
+            Height = 32,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        startBody.Children.Add(_startTitle);
+        startBody.Children.Add(new TextBlock
+        {
+            Text = "The session is up. Waiting for the program to draw.",
+            FontSize = 13,
+            Opacity = 0.7,
+            MaxWidth = 360,
+            Foreground = new SolidColorBrush(TerminalPalette.Foreground(dark)),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        _startOverlay.Background = new SolidColorBrush(TerminalPalette.Surface(dark));
+        _startOverlay.Children.Add(startBody);
 
         _kill = Buttons.ToolbarIcon(ActionIcon.Stop, "Kill the process", async (_, _) => await _session.KillAsync());
         _close = Buttons.ToolbarIcon(ActionIcon.Disconnect, "Close this session", async (_, _) => await _session.CloseAsync());
@@ -113,12 +154,15 @@ internal sealed class TerminalPage : Page, IInspectorContent
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetRow(_status, 1);
-        Grid.SetRow(_scroll, 2);
+        var termHost = new Grid();
+        termHost.Children.Add(_scroll);
+        termHost.Children.Add(_startOverlay);
+        Grid.SetRow(termHost, 2);
         Grid.SetRow(_input, 3);
         _scroll.Content = _view;
         grid.Children.Add(chrome);
         grid.Children.Add(_status);
-        grid.Children.Add(_scroll);
+        grid.Children.Add(termHost);
         grid.Children.Add(_input);
         var layout = new Grid();
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -288,6 +332,9 @@ internal sealed class TerminalPage : Page, IInspectorContent
             _view.Text = combined;
             _scroll.UpdateLayout();
             _scroll.ChangeView(null, _scroll.ExtentHeight, null);
+            // First paint lifts the cover at once rather than waiting for
+            // the next session change to repaint.
+            _startOverlay.Visibility = Visibility.Collapsed;
         });
     }
 
@@ -296,6 +343,13 @@ internal sealed class TerminalPage : Page, IInspectorContent
     private void RefreshOnUi()
     {
         var label = string.IsNullOrEmpty(_session.Command) ? "Shell" : _session.Command;
+        _startTitle.Text = "Starting " + StartingLabel();
+        // Up but not painted yet: agent CLIs spend seconds in that gap. A
+        // failed spawn or an exited process shows its banner instead.
+        _startOverlay.Visibility = !_session.HasOutput && _session.Alive && !_session.Closed
+            && string.IsNullOrEmpty(_session.LastError)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         _title.Text = $"{label} · {ShortId(_session.Id)}";
         _size.Text = $"{_session.Cols}×{_session.Rows}";
         _kill.IsEnabled = _session.Alive && !_session.Closed;
@@ -328,6 +382,25 @@ internal sealed class TerminalPage : Page, IInspectorContent
             Banner(_session.LastError);
         }
         RenderInspector();
+    }
+
+    /// <summary>
+    /// What the starting cover names: the program's own file name without
+    /// its extension, or a shell when the host has not said yet.
+    /// </summary>
+    private string StartingLabel()
+    {
+        var command = (_session.Command ?? "").Replace('\\', '/');
+        var cut = command.LastIndexOf('/');
+        if (cut >= 0)
+        {
+            command = command[(cut + 1)..];
+        }
+        if (command.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            command = command[..^4];
+        }
+        return string.IsNullOrEmpty(command) ? "Shell" : command;
     }
 
     private static string ShortId(string id)

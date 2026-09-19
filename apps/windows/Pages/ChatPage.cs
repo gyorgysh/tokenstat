@@ -72,6 +72,14 @@ internal sealed class ChatPage : Page, IInspectorContent
 
     private CancellationTokenSource? _poll;
     private string? _openId;
+    /// <summary>
+    /// One conversation to open once the list loads, like the Mac pending
+    /// reveal. A notification tap names a thread this page may not have read
+    /// yet, so the id waits here rather than deciding on an empty list.
+    /// </summary>
+    private string? _pendingReveal;
+    /// <summary>Whether the list load finished, so a reveal knows whether to wait for it or re-read it.</summary>
+    private bool _listReady;
     private ulong _offset;
     private bool _started;
     private bool _running;
@@ -85,9 +93,16 @@ internal sealed class ChatPage : Page, IInspectorContent
     private readonly List<StagedFile> _attachments = [];
     private JsonNode? _openChat;
 
-    public ChatPage(string workspaceId)
+    /// <param name="chatId">One conversation to reveal on load, from a deep
+    /// link. The list loads first and the thread opens on top of it, like
+    /// the Mac opening the named conversation in its folder chat.</param>
+    public ChatPage(string workspaceId, string? chatId = null)
     {
         _workspaceId = workspaceId;
+        if (!string.IsNullOrEmpty(chatId))
+        {
+            _pendingReveal = chatId;
+        }
         _draft.PlaceholderText = "Ask about this folder";
         _draft.PreviewKeyDown += DraftOnPreviewKeyDown;
         PreviewKeyDown += PageOnPreviewKeyDown;
@@ -280,6 +295,7 @@ internal sealed class ChatPage : Page, IInspectorContent
     {
         _poll?.Cancel();
         _openId = null;
+        _listReady = false;
         _openChat = null;
         _attachments.Clear();
         _events = new JsonArray();
@@ -295,6 +311,23 @@ internal sealed class ChatPage : Page, IInspectorContent
         {
             await RefreshCatalogAsync();
             RenderInspector();
+            _listReady = true;
+            if (!string.IsNullOrEmpty(_pendingReveal))
+            {
+                var reveal = _pendingReveal;
+                _pendingReveal = null;
+                if (HasChat(reveal))
+                {
+                    await OpenAsync(reveal);
+                    return;
+                }
+                // The host just answered with the whole list and the named
+                // conversation is not in it, so it was deleted. An explicit
+                // destination must never fall back to a different thread.
+                _root.Children.Add(Chrome.Banner(
+                    "This conversation is no longer available in this folder. Choose another conversation from the list.",
+                    Theme.Danger, Symbol.Important));
+            }
             if (_chats.Count == 0)
             {
                 _root.Children.Add(Chrome.Empty(
@@ -440,6 +473,37 @@ internal sealed class ChatPage : Page, IInspectorContent
         {
             Banner(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Open one conversation by id, from a notification or a pin. When the
+    /// list already holds it the thread opens at once; otherwise the id
+    /// waits for the list load, like the Mac pending reveal. A second tap
+    /// while the list is up re-reads it rather than waiting on a load that
+    /// already ran.
+    /// </summary>
+    public async Task RevealAsync(string chatId)
+    {
+        if (string.IsNullOrEmpty(chatId)) return;
+        if (HasChat(chatId))
+        {
+            await OpenAsync(chatId);
+            return;
+        }
+        _pendingReveal = chatId;
+        if (_listReady)
+        {
+            await ShowListAsync();
+        }
+    }
+
+    private bool HasChat(string id)
+    {
+        foreach (var chat in _chats)
+        {
+            if (Format.Text(chat, "id") == id) return true;
+        }
+        return false;
     }
 
     private async Task OpenAsync(string id)
@@ -881,15 +945,15 @@ internal sealed class ChatPage : Page, IInspectorContent
         if (Busy())
         {
             var workingIdx = items.Count;
-            const string workingKey = "__working__";
+            // The mood is part of the key, so thinking turning into replying
+            // rebuilds the row instead of leaving a stale face behind.
+            var workingKey = "__working__:" + LiveMood(items);
             if (workingIdx < _transcript.Children.Count)
             {
                 var existing = _transcript.Children[workingIdx] as FrameworkElement;
                 if (existing?.Tag as string != workingKey)
                 {
-                    // It breathes while the turn runs, so a long wait does not
-                    // read as frozen.
-                    var workingBlock = Motion.WorkingLabel();
+                    var workingBlock = WorkingRow(items);
                     workingBlock.Tag = workingKey;
                     _transcript.Children.RemoveAt(workingIdx);
                     _transcript.Children.Insert(workingIdx, workingBlock);
@@ -897,7 +961,7 @@ internal sealed class ChatPage : Page, IInspectorContent
             }
             else
             {
-                var working = Motion.WorkingLabel();
+                var working = WorkingRow(items);
                 working.Tag = workingKey;
                 _transcript.Children.Add(working);
             }
@@ -921,14 +985,112 @@ internal sealed class ChatPage : Page, IInspectorContent
         ItemKind.Approval => ApprovalCard(item),
         ItemKind.Attachment => AttachmentRow(item),
         ItemKind.Usage => UsageLine(item),
-        ItemKind.Failed => new TextBlock
+        ItemKind.Failed => FailedRow(item),
+        _ => new Border(),
+    };
+
+    /// <summary>
+    /// A failed turn: the same character that was thinking is the one that
+    /// droops, like the Mac failed row.
+    /// </summary>
+    private UIElement FailedRow(DisplayItem item)
+    {
+        var grid = new Grid { ColumnSpacing = Theme.SpaceS };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = new GridLength(1, GridUnitType.Star),
+        });
+        var face = new PersonaMark(FaceSeed(), 26, PersonaMood.Failed);
+        face.VerticalAlignment = VerticalAlignment.Top;
+        grid.Children.Add(face);
+        var text = new TextBlock
         {
             Text = item.Text,
             Foreground = Theme.Brush(Theme.Danger),
             TextWrapping = TextWrapping.Wrap,
-        },
-        _ => new Border(),
-    };
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+        return grid;
+    }
+
+    /// <summary>
+    /// The turn still being written: the conversation's own face beside what
+    /// it is doing, like the Mac working indicator. Thinking pastimes rather
+    /// than holding a pose, because one loop held for a minute reads as a
+    /// hang. The face is the motion, so the label beside it stays still.
+    /// </summary>
+    private FrameworkElement WorkingRow(List<DisplayItem> items)
+    {
+        var mood = LiveMood(items);
+        UIElement face = mood == PersonaMood.Thinking
+            ? new PersonaPastime(FaceSeed(), 26, PersonaPastime.Repertoire.Thought)
+            : new PersonaMark(FaceSeed(), 26, mood);
+        var grid = new Grid { ColumnSpacing = Theme.SpaceS };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = new GridLength(1, GridUnitType.Star),
+        });
+        grid.Children.Add(face);
+        var label = new TextBlock
+        {
+            Text = mood.Label(),
+            FontSize = 12,
+            Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(label, 1);
+        grid.Children.Add(label);
+        return grid;
+    }
+
+    /// <summary>
+    /// What the working row says it is doing. An approval waiting on the
+    /// person wins over everything, then a running tool, then growing
+    /// prose, like the Mac live mood.
+    /// </summary>
+    private PersonaMood LiveMood(List<DisplayItem> items)
+    {
+        if (HasPendingApproval()) return PersonaMood.Waiting;
+        foreach (var item in items)
+        {
+            if (item.Kind == ItemKind.Tool && item.Running) return PersonaMood.Working;
+        }
+        if (items.Count > 0)
+        {
+            var last = items[^1];
+            if (last.Kind == ItemKind.Assistant && !string.IsNullOrEmpty(last.Text))
+            {
+                return PersonaMood.Speaking;
+            }
+        }
+        return PersonaMood.Thinking;
+    }
+
+    private bool HasPendingApproval()
+    {
+        foreach (var live in _approvals)
+        {
+            if (string.IsNullOrEmpty(Format.Text(live, "decision"))) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The face of the conversation on screen. Its persona's, when it has
+    /// one, so the same character follows a persona between chats. Otherwise
+    /// the chat's own, derived from its id, like the Mac face seed.
+    /// </summary>
+    private ulong FaceSeed()
+    {
+        var personaId = Format.Text(_openChat, "personaId");
+        if (!string.IsNullOrEmpty(personaId)) return PersonaSeed.For(personaId);
+        if (!string.IsNullOrEmpty(_openId)) return PersonaSeed.For(_openId);
+        return PersonaSeed.For("chat");
+    }
 
     private static UIElement UserBubble(string text)
     {

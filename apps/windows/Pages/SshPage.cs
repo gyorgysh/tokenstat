@@ -50,6 +50,11 @@ internal sealed class SshPage : Page
     private long _offset;
     private CancellationTokenSource? _poll;
     private SSHSection _section;
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly Border _stripHost = new();
     private readonly Border _bodyHost = new();
 
@@ -95,16 +100,36 @@ internal sealed class SshPage : Page
         _input.KeyDown += InputOnKeyDown;
 
         RefreshStrip();
+        RebuildChrome();
         var root = new Grid();
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        Grid.SetRow(_stripHost, 0);
-        Grid.SetRow(_bodyHost, 1);
+        Grid.SetRow(_barSlot, 0);
+        Grid.SetRow(_stripHost, 1);
+        Grid.SetRow(_bodyHost, 2);
+        root.Children.Add(_barSlot);
         root.Children.Add(_stripHost);
         root.Children.Add(_bodyHost);
         Content = root;
         Loaded += async (_, _) => await LoadAsync();
         Unloaded += (_, _) => _ = CloseSessionAsync();
+    }
+
+    /// <summary>
+    /// The screen's own actions in the DetailBar, above the tab strip: the
+    /// library re-read, which stays reachable while a session runs below.
+    /// A reload rebuilds the hidden list and leaves the session alone.
+    /// </summary>
+    private void RebuildChrome()
+    {
+        _barSlot.Content = DetailBar.View(trailing: new List<UIElement>
+        {
+            Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Reload the library",
+                async (_, _) => await LoadAsync()),
+        });
     }
 
     /// <summary>
@@ -153,8 +178,6 @@ internal sealed class SshPage : Page
             FontSize = 18,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
-        _listRoot.Children.Add(ActionIconGlyph.Button(
-            "Refresh", ActionIcon.Refresh, async (_, _) => await LoadAsync()));
 
         switch (_section)
         {

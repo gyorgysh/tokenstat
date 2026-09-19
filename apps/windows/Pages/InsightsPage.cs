@@ -49,6 +49,13 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
 
     private string _scope = "account";
     private string _period = "all";
+    /// <summary>
+    /// A single day, pinned from Home's heatmap. Overrides the period rather
+    /// than being another period, like the Mac focused day: it is not a
+    /// length of time chosen from a control, and clearing it goes back to
+    /// whatever the period was. Only the local scope reads it.
+    /// </summary>
+    private string? _focusDay;
     private string _tab = "overview";
     private string _cut = "model";
     private string? _selectedKey;
@@ -102,8 +109,15 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             ("all", "All", null),
         };
 
-    public InsightsPage()
+    /// <param name="focusDay">One day to pin from a deep link, in archive
+    /// YYYY-MM-DD text. Every figure on the screen is about that day until
+    /// the period picker or Clear dismisses it.</param>
+    public InsightsPage(string? focusDay = null)
     {
+        if (!string.IsNullOrEmpty(focusDay))
+        {
+            _focusDay = focusDay;
+        }
         var scroller = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
@@ -143,8 +157,40 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
     public UIElement? Inspector => _inspectorRoot;
 
     /// <summary>
+    /// Pin one day from Home's heatmap, like the Mac focused day. Safe
+    /// before first load: the day is set first and the load reads it. The
+    /// shell moves the scope to local alongside, because the account cuts
+    /// cannot show one day.
+    /// </summary>
+    public Task FocusDayAsync(string day)
+    {
+        if (string.IsNullOrEmpty(day))
+        {
+            return Task.CompletedTask;
+        }
+        if (_focusDay == day && _hasContent)
+        {
+            return Task.CompletedTask;
+        }
+        _focusDay = day;
+        _selectedKey = null;
+        _visible = FirstPage;
+        return LoadAsync();
+    }
+
+    private Task ClearFocusDayAsync()
+    {
+        _focusDay = null;
+        _selectedKey = null;
+        _visible = FirstPage;
+        return LoadAsync();
+    }
+
+    /// <summary>
     /// The toolbar scope picker pushes here, on navigation and on every
-    /// change. The page never reads the toolbar directly.
+    /// change. The page never reads the toolbar directly. A pinned day
+    /// survives a scope trip: the account side ignores it and the local
+    /// side shows it again on return.
     /// </summary>
     public void ApplyScope(DeviceScope scope)
     {
@@ -203,6 +249,8 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         var picker = SegmentedCapsule.View(Periods, _period, value =>
         {
             _period = value;
+            // Choosing a period is choosing to stop looking at one day.
+            _focusDay = null;
             _selectedKey = null;
             _visible = FirstPage;
             return LoadAsync();
@@ -517,6 +565,17 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
     /// </summary>
     private JsonObject PeriodQuery()
     {
+        // A pinned day is a range whose ends are the same string: the
+        // archive stores local dates as plain text. It overrides the
+        // period, like the Mac focused day.
+        if (!string.IsNullOrEmpty(_focusDay))
+        {
+            return new JsonObject
+            {
+                ["since"] = _focusDay,
+                ["until"] = _focusDay,
+            };
+        }
         int? days = _period switch
         {
             "7d" => 7,
@@ -588,6 +647,13 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         {
             return;
         }
+        // A day arrived from Home's heatmap. It has to be visible and
+        // dismissable, or every figure on the screen is quietly about one
+        // day and the period control says otherwise.
+        if (!string.IsNullOrEmpty(_focusDay))
+        {
+            _root.Children.Add(FocusChip());
+        }
         if (_tab == "overview")
         {
             RenderOverview();
@@ -604,6 +670,56 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             _ => "Sessions",
         };
         _root.Children.Add(BreakdownTable(title, TabRows(_tab), showsValue, monospaced, isHarness));
+    }
+
+    /// <summary>
+    /// The pinned day as a chip: the date, what it means, and the way out.
+    /// </summary>
+    private UIElement FocusChip()
+    {
+        var row = new Grid { ColumnSpacing = Theme.SpaceS };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = new GridLength(1, GridUnitType.Star),
+        });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var glyph = new SymbolIcon(Symbol.Calendar)
+        {
+            Foreground = Theme.AccentBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(glyph);
+        var day = new TextBlock
+        {
+            Text = _focusDay ?? "",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(day, 1);
+        row.Children.Add(day);
+        var note = new TextBlock
+        {
+            Text = "Every figure below is about this one day.",
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(note, 2);
+        row.Children.Add(note);
+        var clear = ActionIconGlyph.Button(
+            "Clear", ActionIcon.Dismiss, async (_, _) => await ClearFocusDayAsync());
+        clear.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(clear, 3);
+        row.Children.Add(clear);
+        return new Border
+        {
+            Background = Theme.AccentSoftBrush,
+            CornerRadius = new CornerRadius(Theme.CardRadius),
+            Padding = new Thickness(Theme.SpaceM),
+            Child = row,
+        };
     }
 
     private void RenderOverview()
@@ -1394,7 +1510,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
                 "Nothing scanned yet",
                 "tokenstat reads the session logs the tools on this PC already write. Run a scan and this fills in.",
                 ActionIcon.Search));
-            return Chrome.Card("This period", body);
+            return Chrome.Card(_focusDay is null ? "This period" : "This day", body);
         }
         body.Children.Add(Chrome.Stat(
             "Value at list rates", MoneyTotal(SnapshotRows("byModel", "by_model")), "not billed"));
@@ -1438,7 +1554,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
             });
             body.Children.Add(open);
         }
-        return Chrome.Card("This period", body);
+        return Chrome.Card(_focusDay is null ? "This period" : "This day", body);
     }
 
     private UIElement SelectionCard()

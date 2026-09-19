@@ -156,6 +156,10 @@ internal sealed class WorkSearchPage : Page, IInspectorContent
             trailing: new List<UIElement>
             {
                 Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Run the search again",
+                    async (_, _) => await SearchAsync(false)),
+                Buttons.ToolbarIcon(
                     ActionIcon.Search,
                     "Focus the search field",
                     (_, _) => _query.Focus(FocusState.Programmatic)),

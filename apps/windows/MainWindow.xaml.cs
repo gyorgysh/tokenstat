@@ -174,17 +174,23 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                // Through the sidebar row, so the pane and the content agree.
-                // The chat id travels for the reveal; the folder's chat opens
-                // either way.
+                // Through the sidebar row, so the pane and the content agree,
+                // then the named conversation reveals onto the mounted page.
+                // The page holds the id until its list loads, like the Mac
+                // pending reveal, and falls back to the list when the thread
+                // is gone.
                 var tag = "ws:" + workspaceId + ":Chat";
                 if (FindNavItem(tag) is NavigationViewItem row)
                 {
                     _nav.SelectedItem = row;
+                    if (_frame.Content is ChatPage page)
+                    {
+                        _ = page.RevealAsync(chatId);
+                    }
                 }
                 else
                 {
-                    SetContent(new ChatPage(workspaceId));
+                    SetContent(new ChatPage(workspaceId, chatId));
                 }
             });
         };
@@ -192,16 +198,24 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                // Through the sidebar row, like the search opener. The day
-                // travels for the focus; Insights opens either way.
+                // A day is a local-archive query, so the scope goes to This
+                // device first: the account cuts cannot show one day. Then
+                // through the sidebar row, so the pane and the content agree,
+                // and the day pins onto the mounted page like the Mac
+                // heatmap tap.
+                SetScope("local");
                 const string tag = "global:Insights";
                 if (FindNavItem(tag) is NavigationViewItem row)
                 {
                     _nav.SelectedItem = row;
+                    if (_frame.Content is InsightsPage page)
+                    {
+                        _ = page.FocusDayAsync(date);
+                    }
                 }
                 else
                 {
-                    Show(tag);
+                    SetContent(new InsightsPage(date));
                 }
             });
         };
@@ -693,15 +707,13 @@ public sealed partial class MainWindow : Window
     private static Page WorkspaceHistoryPage(string id)
     {
         var root = new StackPanel { Spacing = Theme.SpaceL };
-        var page = new Page
+        var barSlot = new ContentControl
         {
-            Content = new ScrollViewer
-            {
-                Padding = new Thickness(Theme.SpaceL),
-                Content = root,
-            },
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
-        page.Loaded += async (_, _) =>
+        var page = new Page();
+        async Task LoadAsync()
         {
             root.Children.Clear();
             root.Children.Add(new TextBlock
@@ -733,7 +745,32 @@ public sealed partial class MainWindow : Window
             {
                 root.Children.Add(card);
             }
+        }
+        barSlot.Content = DetailBar.View(
+            scope: Chrome.ScopeChip(WorkspaceSection.History.Label()),
+            trailing: new List<UIElement>
+            {
+                Buttons.ToolbarIcon(
+                    ActionIcon.Refresh,
+                    "Reload history",
+                    async (_, _) => await LoadAsync()),
+            });
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(barSlot);
+        var scroller = new ScrollViewer
+        {
+            Padding = new Thickness(Theme.SpaceL),
+            Content = root,
         };
+        Grid.SetRow(scroller, 1);
+        layout.Children.Add(scroller);
+        page.Content = layout;
+        page.Loaded += async (_, _) => await LoadAsync();
         return page;
     }
 
@@ -754,6 +791,13 @@ public sealed partial class MainWindow : Window
                         return sub;
                     }
                 }
+            }
+        }
+        foreach (var item in _nav.FooterMenuItems)
+        {
+            if (item is NavigationViewItem row && (row.Tag as string) == tag)
+            {
+                return row;
             }
         }
         return null;
