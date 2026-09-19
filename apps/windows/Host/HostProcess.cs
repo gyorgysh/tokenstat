@@ -119,8 +119,17 @@ internal static class HostProcess
             {
                 return false;
             }
-            var xml = query.StandardOutput.ReadToEnd();
-            query.WaitForExit(8000);
+            var output = query.StandardOutput.ReadToEndAsync();
+            if (!query.WaitForExit(8000))
+            {
+                try { query.Kill(entireProcessTree: true); } catch { /* Already exited. */ }
+                return false;
+            }
+            if (query.ExitCode != 0)
+            {
+                return false;
+            }
+            var xml = output.GetAwaiter().GetResult();
             var open = xml.IndexOf("<Command>", StringComparison.OrdinalIgnoreCase);
             var close = xml.IndexOf("</Command>", StringComparison.OrdinalIgnoreCase);
             if (open < 0 || close <= open)
@@ -128,7 +137,11 @@ internal static class HostProcess
                 return false;
             }
             var command = xml.Substring(open + "<Command>".Length, close - open - "<Command>".Length);
-            return command.Trim().EndsWith("tokenstat-hostd.exe", StringComparison.OrdinalIgnoreCase);
+            // Repair both old direct actions and hidden wrappers that exit
+            // before hostd, which prevents restart-on-failure from working.
+            return command.Trim().EndsWith("tokenstat-hostd.exe", StringComparison.OrdinalIgnoreCase)
+                || (command.Trim().EndsWith("powershell.exe", StringComparison.OrdinalIgnoreCase)
+                    && !xml.Contains("-PassThru -Wait", StringComparison.OrdinalIgnoreCase));
         }
         catch
         {
@@ -145,6 +158,11 @@ internal static class HostProcess
         {
             try
             {
+                var path = process.MainModule?.FileName;
+                if (path is null || !IsManagedHelper(path))
+                {
+                    continue;
+                }
                 process.Kill(entireProcessTree: true);
                 process.WaitForExit(4000);
             }
@@ -158,6 +176,16 @@ internal static class HostProcess
                 process.Dispose();
             }
         }
+    }
+
+    private static bool IsManagedHelper(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var legacy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "tokenstat", "bin", "tokenstat-hostd.exe");
+        return new[] { FindHostd(), Path.Combine(SelfInstall.InstallDirectory, "tokenstat-hostd.exe"), legacy }
+            .Any(candidate => candidate is not null
+                && string.Equals(full, Path.GetFullPath(candidate), StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

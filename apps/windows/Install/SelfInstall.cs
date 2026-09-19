@@ -18,6 +18,9 @@ namespace Tokenstat.Install;
 /// </summary>
 internal static class SelfInstall
 {
+    private static int _hostPolicyGeneration;
+    private static readonly object HostPolicyGate = new();
+
     public const string UninstallKeyName = "ai.tokenstat.tokenstat";
 
     /// <summary>
@@ -111,12 +114,56 @@ internal static class SelfInstall
     {
         var source = Path.GetFullPath(AppContext.BaseDirectory);
         var dest = Path.GetFullPath(InstallDirectory);
-        StopRelatedProcesses();
-        Directory.CreateDirectory(dest);
-        CopyTree(source, dest);
+        if (string.Equals(source.TrimEnd('\\', '/'), dest.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+        {
+            RefreshUninstallKey();
+            WriteStartMenuShortcut();
+            return;
+        }
+        InstallTree(source, dest, StopRelatedProcesses);
         WriteUninstallKey();
         WriteStartMenuShortcut();
         TryRegisterHostTask();
+    }
+
+    /// <summary>Copy completely before touching a working install, then swap with rollback.</summary>
+    internal static void InstallTree(string source, string dest, Action stopProcesses)
+    {
+        var staging = dest.TrimEnd('\\', '/') + ".install-" + Guid.NewGuid().ToString("N");
+        var previous = dest.TrimEnd('\\', '/') + ".previous-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            Directory.CreateDirectory(staging);
+            CopyTree(source, staging);
+            if (!File.Exists(Path.Combine(staging, "Tokenstat.exe"))
+                || !File.Exists(Path.Combine(staging, "tokenstat-hostd.exe")))
+            {
+                throw new IOException("The download is incomplete. Extract the entire tokenstat zip and try again.");
+            }
+            stopProcesses();
+            if (Directory.Exists(dest))
+            {
+                Directory.Move(dest, previous);
+            }
+            try
+            {
+                Directory.Move(staging, dest);
+            }
+            catch
+            {
+                if (Directory.Exists(previous) && !Directory.Exists(dest))
+                {
+                    Directory.Move(previous, dest);
+                }
+                throw;
+            }
+        }
+        finally
+        {
+            try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); } catch { /* Best effort. */ }
+            // Keep the recoverable old tree if rollback itself failed.
+            try { if (Directory.Exists(dest) && Directory.Exists(previous)) Directory.Delete(previous, recursive: true); } catch { /* Best effort. */ }
+        }
     }
 
     public static void Uninstall()
@@ -189,36 +236,46 @@ internal static class SelfInstall
     /// </summary>
     public static void ApplyAlwaysOn(bool alwaysOn)
     {
-        if (alwaysOn)
+        lock (HostPolicyGate)
         {
-            var hostd = Path.Combine(InstallDirectory, "tokenstat-hostd.exe");
-            if (!File.Exists(hostd))
+            var generation = Interlocked.Increment(ref _hostPolicyGeneration);
+            if (alwaysOn)
             {
-                hostd = Path.Combine(AppContext.BaseDirectory, "tokenstat-hostd.exe");
+                var hostd = Path.Combine(InstallDirectory, "tokenstat-hostd.exe");
+                if (!File.Exists(hostd))
+                {
+                    hostd = Path.Combine(AppContext.BaseDirectory, "tokenstat-hostd.exe");
+                }
+                if (File.Exists(hostd))
+                {
+                    RegisterHostTask(hostd, allowLogonFallback: true);
+                }
+                return;
             }
-            if (File.Exists(hostd))
+            UnregisterHostTask();
+            // hostd re-registers the task itself on `host.setPolicy`, in a
+            // powershell it does not wait for, so its registration can land after
+            // this delete. Sweep again once it has had time to arrive. A task
+            // with no logon trigger would do nothing, but disabled means gone.
+            _ = Task.Run(async () =>
             {
-                RegisterHostTask(hostd);
-            }
-            return;
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5));
+                    lock (HostPolicyGate)
+                    {
+                        if (_hostPolicyGeneration == generation)
+                        {
+                            UnregisterHostTask();
+                        }
+                    }
+                }
+                catch
+                {
+                    // Best effort.
+                }
+            });
         }
-        UnregisterHostTask();
-        // hostd re-registers the task itself on `host.setPolicy`, in a
-        // powershell it does not wait for, so its registration can land after
-        // this delete. Sweep again once it has had time to arrive. A task
-        // with no logon trigger would do nothing, but disabled means gone.
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(5));
-                UnregisterHostTask();
-            }
-            catch
-            {
-                // Best effort.
-            }
-        });
     }
 
     /// <summary>
@@ -227,26 +284,40 @@ internal static class SelfInstall
     /// task shape (settings, principal, when the trigger applies); this only
     /// falls back to schtasks when the script is not on disk.
     /// </summary>
-    public static void RegisterHostTask(string hostdExe)
+    public static void RegisterHostTask(string hostdExe, bool allowLogonFallback = false)
     {
         var script = BundledHostScript();
         if (script is not null)
         {
             try
             {
-                Process.Start(new ProcessStartInfo
+                using var registration = Process.Start(new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
                     Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Bin \"{hostdExe}\"",
                     UseShellExecute = false,
                     CreateNoWindow = true,
-                })?.WaitForExit(15000);
-                return;
+                });
+                if (registration is not null && registration.WaitForExit(15000) && registration.ExitCode == 0)
+                {
+                    return;
+                }
+                if (registration is not null && !registration.HasExited)
+                {
+                    registration.Kill(entireProcessTree: true);
+                }
             }
             catch
             {
                 // Fall through to schtasks.
             }
+        }
+        // Without the policy-aware script, never invent a logon trigger on
+        // a laptop/default-off install. Only the explicit always-on action
+        // authorizes this degraded fallback; otherwise launch on demand.
+        if (!allowLogonFallback)
+        {
+            return;
         }
         // Same hidden shape as the script: hostd is a console binary, and a
         // task action that runs it directly opens a visible console window.
@@ -254,7 +325,7 @@ internal static class SelfInstall
         // degraded next to the script; it only runs when the script is gone.
         var quoted = hostdExe.Replace("'", "''");
         var work = (Path.GetDirectoryName(hostdExe) ?? InstallDirectory).Replace("'", "''");
-        var launch = $"powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command \\\"Start-Process -FilePath '{quoted}' -WorkingDirectory '{work}' -WindowStyle Hidden\\\"";
+        var launch = $"powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command \\\"$child = Start-Process -FilePath '{quoted}' -WorkingDirectory '{work}' -WindowStyle Hidden -PassThru -Wait; exit $child.ExitCode\\\"";
         RunSchTasks($"/Create /TN \"{HostTaskName}\" /TR \"{launch}\" /SC ONLOGON /RL LIMITED /F");
         RunSchTasks($"/Run /TN \"{HostTaskName}\"");
     }
@@ -300,11 +371,16 @@ internal static class SelfInstall
     {
         try
         {
-            var helper = Path.Combine(Path.GetTempPath(), "tokenstat-uninstall.ps1");
+            var helper = Path.Combine(Path.GetTempPath(), $"tokenstat-uninstall-{Guid.NewGuid():N}.ps1");
             var script = string.Join(Environment.NewLine, new[]
             {
                 "$ErrorActionPreference = 'SilentlyContinue'",
-                "Start-Sleep -Seconds 2",
+                $"$waitPid = {Environment.ProcessId}",
+                "$deadline = (Get-Date).AddSeconds(30)",
+                "while (Get-Process -Id $waitPid -ErrorAction SilentlyContinue) {",
+                "  if ((Get-Date) -gt $deadline) { exit 1 }",
+                "  Start-Sleep -Milliseconds 200",
+                "}",
                 $"Remove-Item -LiteralPath '{EscapePs(dest)}' -Recurse -Force",
                 "Remove-Item -LiteralPath $PSCommandPath -Force",
             });
@@ -459,7 +535,8 @@ internal static class SelfInstall
             Process.Start(new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = "-NoProfile -ExecutionPolicy Bypass -Command " + cmd,
+                Arguments = "-NoProfile -NonInteractive -EncodedCommand "
+                    + Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(cmd)),
                 UseShellExecute = false,
                 CreateNoWindow = true,
             })?.WaitForExit(8000);

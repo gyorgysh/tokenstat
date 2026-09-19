@@ -14,6 +14,8 @@ namespace Tokenstat;
 
 internal static class AppServices
 {
+    private static readonly SemaphoreSlim HostPolicyGate = new(1, 1);
+
     public static HostClient Host { get; } = new();
     public static AppUpdateModel Update { get; } = new();
 
@@ -70,9 +72,17 @@ internal static class AppServices
     /// </summary>
     public static async Task ApplyHostPolicyAsync(bool alwaysOn)
     {
-        await Host.CallAsync(
-            "host.setPolicy",
-            new JsonObject { ["alwaysOn"] = alwaysOn });
-        await Task.Run(() => SelfInstall.ApplyAlwaysOn(alwaysOn));
+        await HostPolicyGate.WaitAsync();
+        try
+        {
+            await Host.CallAsync(
+                "host.setPolicy",
+                new JsonObject { ["alwaysOn"] = alwaysOn });
+            await Task.Run(() => SelfInstall.ApplyAlwaysOn(alwaysOn));
+        }
+        finally
+        {
+            HostPolicyGate.Release();
+        }
     }
 }

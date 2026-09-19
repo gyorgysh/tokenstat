@@ -108,11 +108,12 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 # interactive logon principal opens a visible console window on every logon
 # and every task start. Both layers stay hidden: -WindowStyle Hidden on the
 # powershell the task starts, and again on the Start-Process that starts the
-# helper. The C# schtasks fallback in SelfInstall mirrors this shape.
+# helper. Wait and forward its exit code so the scheduler can detect a crash.
+# The C# schtasks fallback in SelfInstall mirrors this shape.
 $BinQuoted = $Bin -replace "'", "''"
 $WorkDirQuoted = (Split-Path -Parent $Bin) -replace "'", "''"
 $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument `
-    "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"Start-Process -FilePath '$BinQuoted' -WorkingDirectory '$WorkDirQuoted' -WindowStyle Hidden`""
+    "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"`$child = Start-Process -FilePath '$BinQuoted' -WorkingDirectory '$WorkDirQuoted' -WindowStyle Hidden -PassThru -Wait; exit `$child.ExitCode`""
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 # Restart on failure applies always, not only when always-on: hostd exits 0
 # on intentional stops (owner lock gone, self update), and the scheduler only

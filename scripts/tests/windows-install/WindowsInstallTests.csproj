@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NoWarn>CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../apps/windows/Install/AppInstaller.cs" Link="AppInstaller.cs" />
+    <Compile Include="../../../apps/windows/Install/SelfInstall.cs" Link="SelfInstall.cs" />
+    <Compile Include="../../../apps/windows/Host/HostProcess.cs" Link="HostProcess.cs" />
+    <Compile Include="../../../apps/windows/AppServices.cs" Link="AppServices.cs" />
+    <Compile Include="../../../apps/windows/Install/AppUpdateModel.cs" Link="AppUpdateModel.cs" />
+  </ItemGroup>
+</Project>

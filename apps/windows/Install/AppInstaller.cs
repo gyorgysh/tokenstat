@@ -7,7 +7,8 @@
 
 using System.Diagnostics;
 using System.IO.Compression;
-using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Text.Json.Nodes;
 
 namespace Tokenstat.Install;
 
@@ -32,8 +33,8 @@ namespace Tokenstat.Install;
 ///    from the running app rather than written down here, so the rule is
 ///    "never replace this with something signed by somebody else".
 ///
-/// A checksum alone would trust whoever wrote the release. A signature alone
-/// would trust a binary tampered with after signing. If any check fails,
+/// A checksum alone trusts whoever wrote the release. Extracting a signing
+/// certificate alone does not validate the executable's bytes. If any check fails,
 /// nothing is moved and the caller falls back to the download page.
 ///
 /// Preview builds are unsigned, so they skip the publisher check the way a
@@ -75,16 +76,25 @@ internal static class AppInstaller
         // way through has not touched the application the user is running.
         // Only when a whole folder is verified is anything swapped, and that
         // swap happens after this process has exited.
-        ZipFile.ExtractToDirectory(zipPath, staging, overwriteFiles: true);
-        FlattenExtractedTree(staging);
-
-        var stagedExe = Path.Combine(staging, "Tokenstat.exe");
-        if (!File.Exists(stagedExe))
+        try
         {
-            throw new Failure("The download did not contain tokenstat.");
+            ZipFile.ExtractToDirectory(zipPath, staging, overwriteFiles: true);
+            FlattenExtractedTree(staging);
+            // An archive must not supply its own successful-verification marker.
+            File.Delete(Path.Combine(staging, "PENDING-UPDATE.txt"));
+            var stagedExe = Path.Combine(staging, "Tokenstat.exe");
+            if (!File.Exists(stagedExe) || !File.Exists(Path.Combine(staging, "tokenstat-hostd.exe")))
+            {
+                throw new Failure("The download did not contain the complete tokenstat app.");
+            }
+            VerifyPublisher(CurrentExe(), stagedExe);
+            WritePending(dest, staging);
         }
-        VerifyPublisher(CurrentExe(), stagedExe);
-        WritePending(dest, staging);
+        catch
+        {
+            try { Directory.Delete(staging, recursive: true); } catch { /* Preserve the original failure. */ }
+            throw;
+        }
     }
 
     public static string StagingDirectory
@@ -98,7 +108,12 @@ internal static class AppInstaller
         }
     }
 
-    public static bool StagingReady => File.Exists(Path.Combine(StagingDirectory, "Tokenstat.exe"));
+    public static bool StagingReady => IsStagingReady(StagingDirectory);
+
+    private static bool IsStagingReady(string staging) =>
+        File.Exists(Path.Combine(staging, "Tokenstat.exe"))
+        && File.Exists(Path.Combine(staging, "tokenstat-hostd.exe"))
+        && File.Exists(Path.Combine(staging, "PENDING-UPDATE.txt"));
 
     /// <summary>
     /// Swap the staged folder into place and start the fresh copy.
@@ -115,13 +130,12 @@ internal static class AppInstaller
             ? SelfInstall.InstallDirectory
             : Path.GetDirectoryName(CurrentExe()) ?? AppContext.BaseDirectory;
         var staging = dest.TrimEnd('\\') + ".next";
-        if (!Directory.Exists(staging))
+        if (!IsStagingReady(staging))
         {
             RestartCurrent();
             return;
         }
-        SelfInstall.StopRelatedProcesses();
-        var helper = Path.Combine(Path.GetTempPath(), "tokenstat-apply-update.ps1");
+        var helper = Path.Combine(Path.GetTempPath(), $"tokenstat-apply-update-{Guid.NewGuid():N}.ps1");
         var exe = Path.Combine(dest, "Tokenstat.exe");
         var script = string.Join(Environment.NewLine, new[]
         {
@@ -146,6 +160,7 @@ internal static class AppInstaller
             "  if ((Test-Path -LiteralPath $prev) -and -not (Test-Path -LiteralPath $dest)) {",
             "    Rename-Item -LiteralPath $prev -NewName (Split-Path $dest -Leaf)",
             "  }",
+            "  if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -WorkingDirectory $dest }",
             "  exit 1",
             "}",
             "Start-Process -FilePath $exe -WorkingDirectory $dest",
@@ -153,13 +168,14 @@ internal static class AppInstaller
             "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue",
         });
         File.WriteAllText(helper, script);
-        Process.Start(new ProcessStartInfo
+        SelfInstall.StopRelatedProcesses();
+        using var helperProcess = Process.Start(new ProcessStartInfo
         {
             FileName = "powershell.exe",
             Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{helper}\"",
             UseShellExecute = false,
             CreateNoWindow = true,
-        });
+        }) ?? throw new Failure("Could not start the update helper. Please try relaunching again.");
         Environment.Exit(0);
     }
 
@@ -171,10 +187,11 @@ internal static class AppInstaller
     public static void ApplyStaged(string staging)
     {
         var dest = SelfInstall.InstallDirectory;
-        if (!Directory.Exists(staging))
+        if (!IsStagingReady(staging))
         {
             return;
         }
+        VerifyPublisher(CurrentExe(), Path.Combine(staging, "Tokenstat.exe"));
         var prev = dest.TrimEnd('\\') + ".prev";
         if (Directory.Exists(prev))
         {
@@ -302,22 +319,55 @@ internal static class AppInstaller
     }
 
     /// <summary>
-    /// Who signed this binary, when it is signed at all. Null covers both
-    /// unsigned and tampered: a binary whose bytes no longer match its
-    /// signature fails to load as signed, so it must not pass either.
+    /// Validate Authenticode before trusting its publisher. Reading a signing
+    /// certificate alone does not verify the executable's digest. Only a truly
+    /// unsigned local build may skip the publisher check; invalid signatures
+    /// and verification failures must fail closed.
     /// </summary>
     public static string? AuthenticodePublisher(string path)
     {
-        try
+        var command = "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+            + "$s = Get-AuthenticodeSignature -LiteralPath '" + Escape(path) + "'; "
+            + "@{ status = [string]$s.Status; subject = $s.SignerCertificate.Subject } | ConvertTo-Json -Compress";
+        using var process = Process.Start(new ProcessStartInfo
         {
-            using var cert = X509Certificate.CreateFromSignedFile(path);
-            var subject = cert.Subject;
-            return string.IsNullOrWhiteSpace(subject) ? null : subject;
+            FileName = "powershell.exe",
+            Arguments = "-NoProfile -NonInteractive -EncodedCommand "
+                + Convert.ToBase64String(Encoding.Unicode.GetBytes(command)),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            RedirectStandardError = true,
+        }) ?? throw new Failure("Could not verify the update signature.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(30000))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* Already exited. */ }
+            throw new Failure("Signature verification timed out. Please try again.");
         }
-        catch
+        if (process.ExitCode != 0)
+        {
+            throw new Failure("Could not verify the update signature. Please try again.");
+        }
+        return ReadVerifiedPublisher(output.GetAwaiter().GetResult());
+    }
+
+    internal static string? ReadVerifiedPublisher(string json)
+    {
+        var result = JsonNode.Parse(json);
+        var status = result?["status"]?.GetValue<string>();
+        if (status == "NotSigned")
         {
             return null;
         }
+        var subject = result?["subject"]?.GetValue<string>();
+        if (status != "Valid" || string.IsNullOrWhiteSpace(subject))
+        {
+            throw new Failure("The app signature could not be verified. Download a fresh copy of tokenstat.");
+        }
+        return subject;
     }
 
     private static string CurrentExe()

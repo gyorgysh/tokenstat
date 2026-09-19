@@ -66,6 +66,7 @@ internal sealed class AppUpdateModel
     public event Action? Changed;
 
     private int _noticeGeneration;
+    private int _checkInProgress;
 
     /// <summary>
     /// Check because a person asked. Separate from the quiet check only in
@@ -88,9 +89,11 @@ internal sealed class AppUpdateModel
         var generation = _noticeGeneration;
         CheckNotice = null;
         var before = Latest;
-        Current = Stage.Idle;
         ClearSkipped();
-        await CheckAndInstallAsync();
+        if (!await TryCheckAndInstallAsync())
+        {
+            return;
+        }
 
         if (IsReady)
         {
@@ -118,7 +121,26 @@ internal sealed class AppUpdateModel
     /// download instead, so an update that cannot be automated still reaches
     /// the user.
     /// </summary>
-    public async Task CheckAndInstallAsync()
+    public async Task CheckAndInstallAsync() => await TryCheckAndInstallAsync();
+
+    private async Task<bool> TryCheckAndInstallAsync()
+    {
+        if (Interlocked.CompareExchange(ref _checkInProgress, 1, 0) != 0)
+        {
+            return false;
+        }
+        try
+        {
+            await CheckAndInstallCoreAsync();
+            return true;
+        }
+        finally
+        {
+            Volatile.Write(ref _checkInProgress, 0);
+        }
+    }
+
+    private async Task CheckAndInstallCoreAsync()
     {
         if (Current is not Stage.Idle && Current is not Stage.Failed)
         {
@@ -213,7 +235,6 @@ internal sealed class AppUpdateModel
         Changed?.Invoke();
         try
         {
-            Current = Stage.Idle;
             await CheckAndInstallAsync();
         }
         finally
