@@ -322,6 +322,8 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         _open.Add(tab);
         var item = new TabViewItem
         {
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
             Header = tab.Title,
             IconSource = new FontIconSource { Glyph = "\uE8A5" },
             Content = tab.View,
@@ -492,9 +494,10 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 Spacing = Theme.SpaceS,
                 Padding = new Thickness(0, 0, 0, Theme.SpaceS),
             };
-            chrome.Children.Add(ActionIconGlyph.Button("Save", ActionIcon.Save, async (_, _) => await SaveAsync()));
-            chrome.Children.Add(ActionIconGlyph.Button("Find", ActionIcon.Search, (_, _) => ToggleFind()));
-            chrome.Children.Add(_status);
+            chrome.Children.Add(Buttons.ToolbarIcon(ActionIcon.Save, "Save file (Ctrl+S)", async (_, _) => await SaveAsync()));
+            chrome.Children.Add(Buttons.ToolbarIcon(ActionIcon.Search, "Find in file (Ctrl+F)", (_, _) => ToggleFind()));
+            _status.TextTrimming = TextTrimming.CharacterEllipsis;
+            _status.Margin = new Thickness(8, 4, 8, 4);
 
             BuildFindBar();
             BuildConflictCard();
@@ -503,6 +506,9 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _view.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             _view.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             _view.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            _view.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(_status, 4);
+            _view.Children.Add(_status);
             Grid.SetRow(chrome, 0);
             Grid.SetRow(_conflict, 1);
             Grid.SetRow(_find, 2);

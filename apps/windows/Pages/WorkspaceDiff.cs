@@ -96,6 +96,16 @@ internal static class WorkspaceDiff
                     + "The rest is on the computer."));
             }
         }
+        if (WorkspaceTabsPage.Find(owner) is { } workbench)
+        {
+            stack.MinWidth = 0;
+            workbench.OpenReview(title, new ScrollViewer
+            {
+                Content = stack, Padding = new Thickness(Theme.SpaceM),
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            });
+            return;
+        }
         var dialog = new ContentDialog
         {
             Title = title,
@@ -132,7 +142,19 @@ internal static class WorkspaceDiff
         };
         var closed = false;
         dialog.Closed += (_, _) => closed = true;
-        var pending = Chrome.ShowDialog(owner, dialog);
+        Task pending;
+        if (WorkspaceTabsPage.Find(owner) is { } workbench)
+        {
+            ((ScrollViewer)dialog.Content).Content = null;
+            stack.MinWidth = 0;
+            workbench.OpenReview("Review all", new ScrollViewer
+            {
+                Content = stack, Padding = new Thickness(Theme.SpaceM),
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            });
+            pending = Task.CompletedTask;
+        }
+        else pending = Chrome.ShowDialog(owner, dialog);
         var failures = 0;
         var cards = new List<UIElement>();
         foreach (var file in shown)

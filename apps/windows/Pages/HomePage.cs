@@ -23,6 +23,12 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarItems
 {
+    private readonly StackPanel _sections = new() { Spacing = Theme.SpaceS };
+    private readonly Dictionary<string, UIElement> _sectionViews = new();
+    private readonly List<string> _sectionOrder = ["Continue", "Activity", "Plan limits", "Machines", "Today and this week"];
+    private readonly HashSet<string> _hiddenSections = ["Today and this week"];
+    private static string LayoutPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "home-layout.json");
+
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _signSlot = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _inspectorRoot = new()
@@ -67,6 +73,25 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
 
     public HomePage()
     {
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(LayoutPath)) is JsonObject layout)
+            {
+                var known = _sectionOrder.ToArray();
+                if (layout["order"] is JsonArray order)
+                {
+                    var names = order.Select(x => x?.GetValue<string>() ?? "").Where(known.Contains).Distinct().ToList();
+                    _sectionOrder.Clear();
+                    _sectionOrder.AddRange(names.Concat(known.Except(names)));
+                }
+                if (layout["hidden"] is JsonArray hidden)
+                {
+                    _hiddenSections.Clear();
+                    foreach (var name in hidden.Select(x => x?.GetValue<string>() ?? "").Where(known.Contains)) _hiddenSections.Add(name);
+                }
+            }
+        }
+        catch { /* Missing or older preferences use the desktop default. */ }
         _root.Children.Add(_status);
         _status.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) =>
             _status.Visibility = string.IsNullOrEmpty(_status.Text) ? Visibility.Collapsed : Visibility.Visible);
@@ -97,11 +122,64 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
     {
         return new List<UIElement>
         {
+            Buttons.ToolbarIcon(ActionIcon.Layout, "Customize Home", async (_, _) => await CustomizeHomeAsync()),
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
                 "Re-read the archive for this device's activity and plan usage",
                 async (_, _) => await RefreshAsync()),
         };
+    }
+
+    private void ArrangeSections()
+    {
+        _sections.Children.Clear();
+        foreach (var name in _sectionOrder)
+            if (!_hiddenSections.Contains(name) && _sectionViews.TryGetValue(name, out var view)) _sections.Children.Add(view);
+        if (_sections.Children.Count == 0)
+            _sections.Children.Add(new TextBlock { Text = "Your Home is clear. Use Customize Home to choose what appears here.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) });
+    }
+
+    private async Task CustomizeHomeAsync()
+    {
+        var rows = new StackPanel { Spacing = 8 };
+        void Render()
+        {
+            rows.Children.Clear();
+            foreach (var name in _sectionOrder.ToArray())
+            {
+                var row = new Grid { ColumnSpacing = 8 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var enabled = new CheckBox { Content = name, IsChecked = !_hiddenSections.Contains(name) };
+                enabled.Click += (_, _) => { if (enabled.IsChecked == true) _hiddenSections.Remove(name); else _hiddenSections.Add(name); ArrangeSections(); };
+                row.Children.Add(enabled);
+                foreach (var delta in new[] { -1, 1 })
+                {
+                    var index = _sectionOrder.IndexOf(name);
+                    var move = new Button { Content = delta < 0 ? "↑" : "↓", IsEnabled = index + delta >= 0 && index + delta < _sectionOrder.Count };
+                    ToolTipService.SetToolTip(move, delta < 0 ? "Move up" : "Move down");
+                    move.Click += (_, _) => { _sectionOrder.RemoveAt(index); _sectionOrder.Insert(index + delta, name); ArrangeSections(); Render(); };
+                    Grid.SetColumn(move, delta < 0 ? 1 : 2);
+                    row.Children.Add(move);
+                }
+                rows.Children.Add(row);
+            }
+        }
+        Render();
+        await Chrome.ShowDialog(this, new ContentDialog { Title = "Customize Home", Content = rows, CloseButtonText = "Done" });
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(LayoutPath)!);
+            var json = new JsonObject
+            {
+                ["order"] = new JsonArray(_sectionOrder.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()),
+                ["hidden"] = new JsonArray(_hiddenSections.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()),
+            };
+            File.WriteAllText(LayoutPath + ".tmp", json.ToJsonString());
+            File.Move(LayoutPath + ".tmp", LayoutPath, true);
+        }
+        catch (Exception ex) { _status.Text = "Could not save Home layout: " + FriendlyError.Display(ex.Message); }
     }
 
     /// <summary>
@@ -370,23 +448,24 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             _root.Children.Add(SignInPrompt(signedIn));
         }
         _root.Children.Add(ProfileCard(account, calendar));
-        if (_recent.Count > 0)
-        {
-            _root.Children.Add(ContinueCard(_recent));
-        }
-        _root.Children.Add(UsageSummary(calendar, calendarError));
-        _root.Children.Add(ActivityCard(calendar, calendarError, signedIn));
+        _sections.Children.Clear();
+        _sectionViews.Clear();
+        if (_recent.Count > 0) _sectionViews["Continue"] = ContinueCard(_recent);
+        _sectionViews["Today and this week"] = UsageSummary(calendar, calendarError);
+        _sectionViews["Activity"] = ActivityCard(calendar, calendarError, signedIn);
         if (_planError is not null)
         {
             _root.Children.Add(Chrome.Banner(_planError, Theme.Danger, Symbol.Important));
         }
         var planPanels = new FlowPanel { MinimumItemWidth = 320, Spacing = Theme.SpaceM };
         foreach (var panel in PlanPanels(_planLimits, _planBySource)) planPanels.Children.Add(panel);
-        if (planPanels.Children.Count > 0) _root.Children.Add(planPanels);
+        if (planPanels.Children.Count > 0) _sectionViews["Plan limits"] = planPanels;
         if (signedIn)
         {
-            _root.Children.Add(MachinesCard(account));
+            _sectionViews["Machines"] = MachinesCard(account);
         }
+        ArrangeSections();
+        _root.Children.Add(_sections);
         if (signedIn
             && VisibleLimits(_planLimits).Count > 0
             && !(limitsSync?["enabled"]?.GetValue<bool>() ?? false))
@@ -1184,27 +1263,36 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
                 }
                 var name = Format.Text(machine, "label", id);
                 var mine = id == thisId;
-                var row = new StackPanel { Spacing = 2 };
-                var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-                title.Children.Add(Marks.Device(Format.Text(machine, "platform"), Format.Text(machine, "kind") == "client"));
-                title.Children.Add(new TextBlock
+                var row = new Grid { MinHeight = 48, ColumnSpacing = Theme.SpaceS };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.Children.Add(Marks.Device(Format.Text(machine, "platform"), Format.Text(machine, "kind") == "client"));
+                var title = new TextBlock
                 {
-                    Text = name,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    TextWrapping = TextWrapping.Wrap,
-                });
-                if (mine)
-                {
-                    title.Children.Add(new TextBlock { Text = "THIS PC", Opacity = 0.6, FontSize = 11 });
-                }
+                    Text = name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2,
+                    TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(title, 1);
                 row.Children.Add(title);
-                row.Children.Add(new TextBlock
+                var status = new TextBlock
                 {
-                    Text = StatusLine(machine, mine),
-                    Opacity = 0.7,
-                    FontSize = 12,
-                });
-                list.Children.Add(row);
+                    Text = machine?["online"] is JsonValue online && online.TryGetValue<bool>(out var awake)
+                        ? awake ? "Awake" : "Asleep" : "Status unknown",
+                    Opacity = 0.7, FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(status, 2);
+                row.Children.Add(status);
+                var open = new Button
+                {
+                    Content = row, HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Theme.PanelBrush,
+                };
+                ToolTipService.SetToolTip(open, "Open this device in Devices");
+                open.Click += (_, _) => AppServices.OpenMachine?.Invoke(id);
+                list.Children.Add(open);
             }
         }
         if (list.Children.Count == 0)

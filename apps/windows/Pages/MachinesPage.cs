@@ -61,8 +61,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
     private string? _selectedPeer;
     private bool _selectThis;
 
-    public MachinesPage()
+    public MachinesPage(string? selectedId = null)
     {
+        _selectedId = selectedId;
         _scroll = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceM),

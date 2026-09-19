@@ -147,8 +147,12 @@ internal sealed class InspectorHost : Grid
     }
 
     /// <summary>Show this in the inspector column, or hide the column when null.</summary>
-    public void SetInspector(UIElement? inspector)
+    public void SetInspector(UIElement? inspector, bool ownsScrolling = false)
     {
+        _scroller.VerticalScrollBarVisibility = ownsScrolling ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
+        _scroller.VerticalScrollMode = ownsScrolling ? ScrollMode.Disabled : ScrollMode.Enabled;
+        _scroller.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        _scroller.VerticalContentAlignment = VerticalAlignment.Stretch;
         _scroller.Content = inspector;
         Refresh();
     }

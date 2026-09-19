@@ -255,6 +255,11 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() => ShowOnboarding(firstRun: false));
         };
+        AppServices.OpenMachine = id => DispatcherQueue.TryEnqueue(() =>
+        {
+            NavigateTo("global:Machines");
+            SetContent(new MachinesPage(id));
+        });
         AppServices.OpenWorkspace = (workspaceId, section) =>
         {
             DispatcherQueue.TryEnqueue(() =>
@@ -327,7 +332,7 @@ public sealed partial class MainWindow : Window
 
     private static IconElement GlobalIcon(GlobalSection section) => section switch
     {
-        GlobalSection.Home => new SymbolIcon(Symbol.AllApps),
+        GlobalSection.Home => new FontIcon { Glyph = "\uE80A" },
         GlobalSection.Machines => new FontIcon { Glyph = char.ToString((char)0xE770), FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") },
         GlobalSection.Notes => new SymbolIcon(Symbol.Document),
         GlobalSection.Automations => new FontIcon { Glyph = char.ToString((char)0xE945), FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") },
@@ -658,7 +663,7 @@ public sealed partial class MainWindow : Window
         }
         _frame.Content = page;
         _inspectorHost.RouteAllowsInspector = page is not AccountPage;
-        _inspectorHost.SetInspector((page as IInspectorContent)?.Inspector);
+        _inspectorHost.SetInspector((page as IInspectorContent)?.Inspector, page is WorkspaceTabsPage);
         if (page is IScopeAware aware)
         {
             aware.ApplyScope(_scope);
@@ -673,7 +678,7 @@ public sealed partial class MainWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector);
+            _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector, _frame.Content is WorkspaceTabsPage);
             RebuildToolbar();
         });
     }

@@ -7,7 +7,7 @@
 
 import Foundation
 
-/// Output on its way from a program to the emulator, with one sequence removed.
+/// Output on its way from a program to the emulator, with unsupported protocol commands removed.
 ///
 /// **`CSI = 1 ; 1 u` is the kitty keyboard protocol, not a cursor restore.**
 /// SwiftTerm 1.11.2 dispatches every CSI ending in `u` to `cmdRestoreCursor`
@@ -24,8 +24,9 @@ import Foundation
 /// Dropping the announcement is right rather than merely convenient. We do not
 /// implement the protocol, a program that sets it without asking gets the
 /// terminal it was given, and the same programs read ordinary keys perfectly
-/// well. Every other byte passes through untouched, including a plain `CSI u`,
-/// which really is a cursor restore.
+/// well. Plain `CSI u`, which really is a cursor restore, stays intact.
+/// Window resize requests are also removed to avoid SwiftTerm's overloaded
+/// enum-case trap; the app controls the geometry of embedded terminal panes.
 ///
 /// Stateful because a sequence can be cut in half by a read boundary: a
 /// partial escape is held back and completed by the next chunk, which is what
@@ -92,7 +93,7 @@ struct TerminalOutputFilter {
                     pending = []
                     state = .text
                 } else if (0x40...0x7E).contains(byte) {
-                    if !isKittyKeyboard(pending) {
+                    if !isKittyKeyboard(pending) && !isWindowResize(pending) {
                         out.append(contentsOf: pending)
                     }
                     pending = []
@@ -105,6 +106,19 @@ struct TerminalOutputFilter {
             }
         }
         return out
+    }
+
+    /// SwiftTerm 1.11.2's macOS window-command switch handles only the
+    /// single-argument overload of resizeTo. CSI 8;rows;cols t reaches the
+    /// other enum case and traps. Embedded terminals follow their pane's
+    /// geometry, so applications must not resize the containing window.
+    /// Keep size queries (14/16/18 t) intact.
+    private func isWindowResize(_ sequence: [UInt8]) -> Bool {
+        guard sequence.last == UInt8(ascii: "t"), sequence.count >= 7 else { return false }
+        let body = sequence.dropFirst(2).dropLast()
+        guard body.allSatisfy({ (0x30...0x39).contains($0) || $0 == 0x3B }) else { return false }
+        let parts = String(decoding: body, as: UTF8.self).split(separator: ";", omittingEmptySubsequences: false)
+        return parts.count == 3 && Int(parts[0]) == 8
     }
 
     /// `CSI` + a private prefix + parameters + `u`.

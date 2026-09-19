@@ -12,6 +12,7 @@ import UIKit
 @MainActor
 @Observable
 final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
+    private var outputFilter = TerminalOutputFilter()
     /// The host's session id. Also this object's identity, because the two are
     /// the same thing: a session is the handle, and a second id would be a
     /// second answer to "which session is this" for the list to disagree with.
@@ -216,7 +217,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                     // twice. Both happen inside one turn on the main actor, so
                     // there is no frame in which the line is missing.
                     let rest = reconcilePredictions(with: chunk.data)
-                    if !rest.isEmpty { view.feed(byteArray: rest) }
+                    if !rest.isEmpty { view.feed(byteArray: outputFilter.filter(rest)[...]) }
                     // The prompt may have moved down a line, or the shell may
                     // have redrawn it. The palette belongs beside the cursor,
                     // so it follows rather than being left where it was.

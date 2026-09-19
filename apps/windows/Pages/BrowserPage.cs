@@ -150,6 +150,8 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         var tab = new BrowserTab(this, url, host, port, unlisten, peer, CloseRequested);
         var item = new TabViewItem
         {
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
             Header = tab.Title,
             IconSource = new FontIconSource { Glyph = "\uE774" },
             Content = tab.View,

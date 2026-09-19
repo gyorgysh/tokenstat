@@ -16,7 +16,9 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
     private readonly BrowserPage _browser;
     private readonly Grid _inspector = new();
     private readonly ContentControl _details = new();
-    private bool _showDetails;
+    private string _inspectorTab = "Files";
+    private readonly Dictionary<string, Button> _inspectorButtons = new();
+    private readonly Dictionary<string, Page> _inspectorPages = new();
     private IToolbarItems? _toolbar;
     public string WorkspaceId { get; }
     public Page? ActivePage => (_tabs.SelectedItem as TabViewItem)?.Content as Page;
@@ -24,19 +26,30 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
     public WorkspaceTabsPage(string workspaceId, Func<WorkspaceSection, Page> create)
     {
         WorkspaceId = workspaceId;
-        _create = create;
+        _create = section => { var page = create(section); page.Tag = this; return page; };
         _editor = new EditorPage(workspaceId, _tabs);
         _browser = new BrowserPage("", "127.0.0.1", 0, false,
             RemoteWorkspaces.TrySplit(workspaceId, out var peer, out _) ? peer : null, _tabs);
         _inspector.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _inspector.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var inspectorTabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(8) };
-        foreach (var label in new[] { "Files", "Details" })
+        var inspectorTabs = new Grid { Margin = new Thickness(8) };
+        foreach (var label in new[] { "Files", "Changes", "History", "Details" })
         {
-            var button = Buttons.Secondary(label, label == "Files" ? ActionIcon.Source : ActionIcon.Preview,
-                (_, _) => { _showDetails = label == "Details"; RefreshChrome(); }, small: true);
+            inspectorTabs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var button = new Button
+            {
+                Content = label, Padding = new Thickness(3, 6, 3, 6), FontSize = 11,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(6),
+            };
+            button.Click += (_, _) => { _inspectorTab = label; RefreshChrome(); };
+            Grid.SetColumn(button, _inspectorButtons.Count);
+            _inspectorButtons.Add(label, button);
             inspectorTabs.Children.Add(button);
         }
+        _details.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        _details.VerticalContentAlignment = VerticalAlignment.Stretch;
         _inspector.Children.Add(inspectorTabs);
         Grid.SetRow(_editor.FileTree, 1);
         Grid.SetRow(_details, 1);
@@ -62,7 +75,7 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
                 RemoteWorkspaces.TrySplit(WorkspaceId, out var peer, out _) ? peer : null);
             return;
         }
-        if (section == WorkspaceSection.Files) _showDetails = false;
+        if (section == WorkspaceSection.Files) _inspectorTab = "Files";
         if (section == WorkspaceSection.Sessions) section = WorkspaceSection.Launcher;
         var label = section switch
         {
@@ -82,6 +95,24 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
 
     public void OpenBrowser(string url, string host, int port, bool unlisten, string? peer) =>
         _browser.AddTab(url, host, port, unlisten, peer);
+
+    public void OpenReview(string title, UIElement content)
+    {
+        var tab = _tabStrip.Open("review:" + title, title, () => content);
+        tab.Content = content;
+        tab.IconSource = new FontIconSource { Glyph = "\uE8A5" };
+        RefreshChrome();
+    }
+
+    internal static WorkspaceTabsPage? Find(UIElement owner)
+    {
+        for (DependencyObject? node = owner; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is WorkspaceTabsPage workbench) return workbench;
+            if (node is FrameworkElement { Tag: WorkspaceTabsPage tagged }) return tagged;
+        }
+        return null;
+    }
 
     private void OpenSurface(string key, string label, Func<Page> create, bool closable = true)
     {
@@ -112,7 +143,17 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
     private void Changed()
     {
         if (_tabs.SelectedItem is TabViewItem tab && tab.Content is TerminalPage terminal)
-            tab.Header = terminal.TabTitle;
+        {
+            if (tab.Header is not StackPanel { Tag: string title } || title != terminal.TabTitle)
+            {
+                var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Tag = terminal.TabTitle };
+                header.Children.Add(AgentMark.View(terminal.TabTitle, 22));
+                header.Children.Add(new TextBlock { Text = terminal.TabTitle, MaxWidth = 150,
+                    TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
+                tab.IconSource = null;
+                tab.Header = header;
+            }
+        }
         ToolbarChanged?.Invoke();
     }
     private void RefreshChrome()
@@ -120,9 +161,27 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
         if (_toolbar is not null) _toolbar.ToolbarChanged -= Changed;
         _toolbar = ActiveSource as IToolbarItems;
         if (_toolbar is not null) _toolbar.ToolbarChanged += Changed;
-        _details.Content = (ActiveSource as IInspectorContent)?.Inspector;
-        _details.Visibility = _showDetails ? Visibility.Visible : Visibility.Collapsed;
-        _editor.FileTree.Visibility = _showDetails ? Visibility.Collapsed : Visibility.Visible;
+        if (_details.Content is ScrollViewer previous) previous.Content = null;
+        if (_inspectorTab is "Changes" or "History")
+        {
+            if (!_inspectorPages.TryGetValue(_inspectorTab, out var page))
+            {
+                page = _create(_inspectorTab == "Changes" ? WorkspaceSection.Changes : WorkspaceSection.History);
+                _inspectorPages.Add(_inspectorTab, page);
+            }
+            _details.Content = page;
+        }
+        else
+        {
+            _details.Content = _inspectorTab == "Details"
+                ? new ScrollViewer { Content = (ActiveSource as IInspectorContent)?.Inspector } : null;
+        }
+        _details.Visibility = _inspectorTab == "Files" ? Visibility.Collapsed : Visibility.Visible;
+        _editor.FileTree.Visibility = _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var (label, button) in _inspectorButtons)
+        {
+            button.Background = label == _inspectorTab ? Theme.Brush(static () => Theme.RowSelected) : Theme.PanelBrush;
+        }
         Changed();
     }
 }

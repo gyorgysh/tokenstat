@@ -14,6 +14,8 @@ internal sealed class WorkspaceTabStrip
     private readonly Dictionary<string, TabViewItem> _surfaces = new();
     public WorkspaceTabStrip()
     {
+        View.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        View.VerticalContentAlignment = VerticalAlignment.Stretch;
         View.IsAddTabButtonVisible = false;
         View.TabWidthMode = TabViewWidthMode.SizeToContent;
         View.Resources["TabViewBackground"] = Theme.TabStripBrush;
@@ -28,7 +30,8 @@ internal sealed class WorkspaceTabStrip
     {
         if (!_surfaces.TryGetValue(key, out var tab))
         {
-            tab = new TabViewItem { Header = label, Content = create(), IsClosable = closable };
+            tab = new TabViewItem { Header = label, Content = create(), IsClosable = closable,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
             _surfaces.Add(key, tab);
             View.TabItems.Add(tab);
         }

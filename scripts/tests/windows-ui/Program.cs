@@ -89,7 +89,7 @@ public sealed partial class SmokeApp : Application
                 tabView.UpdateLayout();
                 await Task.Delay(250);
                 if (tabView.TabItems.Count != 2 || !ReferenceEquals(tabView.SelectedItem, document)
-                    || draft.Text != "Unsaved document" || draft.ActualWidth <= 0)
+                    || draft.Text != "Unsaved document" || draft.ActualWidth <= 0 || draft.ActualHeight < 90)
                     throw new Exception("Workspace tabs lost selection, document content, or layout while switching");
                 workspaceTabs.Forget(document);
                 if (tabView.TabItems.Count != 1 || !ReferenceEquals(tabView.SelectedItem, launch))
