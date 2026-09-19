@@ -111,21 +111,21 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap,
             });
-            _inspector.Children.Add(Chrome.Stat(
+            _inspector.Children.Add(Chrome.InspectorField(
                 "State",
                 Format.Flag(detail, "draft")
                     ? "Draft"
                     : Format.Text(detail, "state", "open")));
-            _inspector.Children.Add(Chrome.Stat(
+            _inspector.Children.Add(Chrome.InspectorField(
                 "Branch",
                 $"{Format.Text(detail, "headRef")} → {Format.Text(detail, "baseRef")}"));
-            _inspector.Children.Add(Chrome.Stat(
+            _inspector.Children.Add(Chrome.InspectorField(
                 "Changes",
                 $"+{Format.Long(detail, "additions")} −{Format.Long(detail, "deletions")}"));
-            _inspector.Children.Add(Chrome.Stat(
+            _inspector.Children.Add(Chrome.InspectorField(
                 "Files", $"{Format.Long(detail, "changedFiles")}"));
             var checks = detail["checks"] as JsonArray;
-            _inspector.Children.Add(Chrome.Stat("Checks", $"{checks?.Count ?? 0}"));
+            _inspector.Children.Add(Chrome.InspectorField("Checks", $"{checks?.Count ?? 0}"));
             return;
         }
         _inspector.Children.Add(new TextBlock
@@ -135,11 +135,11 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         });
         if (!string.IsNullOrEmpty(_repo))
         {
-            _inspector.Children.Add(Chrome.Stat("Repository", _repo));
+            _inspector.Children.Add(Chrome.InspectorField("Repository", _repo));
         }
         if (!string.IsNullOrEmpty(_login))
         {
-            _inspector.Children.Add(Chrome.Stat("Connected", "@" + _login, SourceLabel(_source)));
+            _inspector.Children.Add(Chrome.InspectorField("Connected", "@" + _login, SourceLabel(_source)));
         }
         _inspector.Children.Add(new TextBlock
         {

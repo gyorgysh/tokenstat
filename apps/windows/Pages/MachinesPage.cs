@@ -66,6 +66,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         _scroll = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceM),
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollMode = ScrollMode.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Content = _root,
         };
         Content = _scroll;
@@ -360,7 +363,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         // across the rebuild so the list does not jump back to the top.
         var offsetX = _scroll?.HorizontalOffset ?? 0;
         var offsetY = _scroll?.VerticalOffset ?? 0;
-        void Restore() => _scroll?.ChangeView(offsetX, offsetY, null, true);
+        void Restore() => DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low,
+            () => _scroll?.ChangeView(offsetX, offsetY, null, true));
         _root.Children.Clear();
         if (!string.IsNullOrEmpty(_notice))
         {
@@ -397,6 +401,10 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             {
                 _root.Children.Add(ApprovalCard(pending));
             }
+            var reach = new FlowPanel { MinimumItemWidth = 340, Spacing = Theme.SpaceS };
+            reach.Children.Add(ThisMachineCard(account, allowed, TunnelOn()));
+            reach.Children.Add(AlwaysOnHostCard());
+            _root.Children.Add(reach);
             var machines = account["machines"] as JsonArray;
             if (machines is not null && machines.Count > 0)
             {
@@ -414,13 +422,11 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             {
                 _root.Children.Add(OtherApprovedCard(unlisted));
             }
-            _root.Children.Add(AlwaysOnHostCard());
             var approved = ApprovedPeers();
             if (approved.Count > 0)
             {
                 _root.Children.Add(DevicePermissionsCard(approved));
             }
-            _root.Children.Add(ThisMachineCard(account, allowed, TunnelOn()));
             // Pairing is only needed for a machine that is not on the account
             // yet, so the paste card stays off the first screenful once a list
             // exists. The toolbar plus opens the same dialog.
@@ -790,7 +796,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         {
             var alwaysOn = Format.Flag(_hostPolicy, "alwaysOn");
             var battery = Format.Flag(_hostPolicy, "hasInternalBattery");
-            body.Children.Add(Chrome.ToggleChip("Keep this PC reachable", alwaysOn, async on =>
+            body.Children.Add(Chrome.SettingSwitch("Keep this PC reachable", alwaysOn, async on =>
             {
                 try
                 {
@@ -798,6 +804,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 }
                 catch (Exception ex)
                 {
+                    await LoadAsync();
                     _root.Children.Insert(0, Chrome.Banner(
                         FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
                     return;
@@ -1030,7 +1037,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
     private UIElement AccountDevicesCard(JsonNode account, JsonArray machines)
     {
         var tier = Format.Text(account, "tier");
-        var list = new StackPanel { Spacing = Theme.SpaceM };
+        var list = new FlowPanel { Spacing = Theme.SpaceM, MinimumItemWidth = 280 };
         var viewable = 0;
         foreach (var machine in machines.OfType<JsonNode>())
         {
@@ -1153,7 +1160,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             });
             body.Children.Add(knownRow);
         }
-        body.Children.Add(Chrome.ToggleChip("Reach devices from anywhere", allowed && tunnel, async on =>
+        body.Children.Add(Chrome.SettingSwitch("Enable remote access", allowed && tunnel, async on =>
         {
             if (!allowed)
             {
@@ -1168,6 +1175,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             catch (Exception ex)
             {
                 _notice = null;
+                await LoadAsync();
                 _root.Children.Insert(0, Chrome.Banner(
                     FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
                 return;
@@ -1512,9 +1520,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(AutoConnectRow(linked, machine));
         }
-        var actions = new StackPanel
+        var actions = new FlowPanel
         {
-            Orientation = Orientation.Horizontal,
             Spacing = Theme.SpaceS,
         };
         if (isHost && !isSelf)
@@ -1544,8 +1551,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 }
                 open(peerKey, deviceName);
             }));
-            actions.Children.Add(new TextBlock
+            body.Children.Add(new TextBlock
             {
+                TextWrapping = TextWrapping.Wrap,
                 Text = Format.IsLegend(tier)
                     ? "End-to-end encrypted from this device."
                     : "Requires Legend",
@@ -1576,7 +1584,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         body.Children.Add(actions);
 
         var selected = !_selectThis && _selectedPeer is null && _selectedId == id;
-        return new Border
+        var card = new Border
         {
             Child = body,
             Padding = new Thickness(Theme.SpaceS),
@@ -1585,6 +1593,18 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             BorderBrush = selected ? Theme.AccentBrush : Theme.BorderBrush,
             BorderThickness = new Thickness(1),
         };
+        card.Tapped += (_, e) =>
+        {
+            for (var source = e.OriginalSource as DependencyObject; source is not null && source != card;
+                 source = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(source))
+                if (source is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase or ToggleSwitch) return;
+            _selectThis = false;
+            _selectedPeer = null;
+            _selectedId = id;
+            Render();
+            RefreshInspector();
+        };
+        return card;
     }
 
     /// <summary>
@@ -1592,7 +1612,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
     /// shown but never dialled: a client reaches a host, not the reverse.
     /// </summary>
     private void AddConnectionActions(
-        StackPanel actions, JsonNode? machine, JsonNode? peer, string title)
+        Panel actions, JsonNode? machine, JsonNode? peer, string title)
     {
         var key = Format.Text(machine, "publicIdentity");
         if (peer is not null)
@@ -1833,10 +1853,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         var machine = FindMachine(_selectedId);
         if (machine is null)
         {
-            _inspectorRoot.Children.Add(Chrome.Empty(
-                "Pick a device",
-                "Reachability and pairing actions open here.",
-                ActionIcon.Device));
+            _inspectorRoot.Children.Add(Chrome.InspectorField(
+                "Device", "Pick a device", "Connection details and actions appear here."));
             return;
         }
         AccountMachineInspector(machine);
@@ -2109,18 +2127,18 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         row.Children.Clear();
         if (stats is null)
         {
-            row.Children.Add(Chrome.Stat("Power", "n/a"));
-            row.Children.Add(Chrome.Stat("CPU", "n/a"));
+            row.Children.Add(Chrome.InspectorField("Power", "n/a"));
+            row.Children.Add(Chrome.InspectorField("CPU", "n/a"));
             return;
         }
-        row.Children.Add(Chrome.Stat("Power", PowerLabel(stats)));
+        row.Children.Add(Chrome.InspectorField("Power", PowerLabel(stats)));
         if (stats["cpu"] is not null)
         {
-            row.Children.Add(Chrome.Stat("CPU", CpuLabel(Format.Number(stats, "cpu"))));
+            row.Children.Add(Chrome.InspectorField("CPU", CpuLabel(Format.Number(stats, "cpu"))));
         }
         if (stats["ramTotalBytes"] is not null)
         {
-            row.Children.Add(Chrome.Stat(
+            row.Children.Add(Chrome.InspectorField(
                 "Memory",
                 RamLabel(Format.Long(stats, "ramUsedBytes"), Format.Long(stats, "ramTotalBytes"))));
         }

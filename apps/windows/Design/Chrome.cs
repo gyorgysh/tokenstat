@@ -30,6 +30,7 @@ internal static class Chrome
             header.Children.Add(new TextBlock
             {
                 Text = subtitle,
+                TextWrapping = TextWrapping.Wrap,
                 FontSize = 12,
                 Opacity = 0.7,
             });
@@ -97,23 +98,31 @@ internal static class Chrome
         return row;
     }
 
+    public static StackPanel InspectorField(string label, string value, string? note = null)
+    {
+        var field = new StackPanel { Spacing = 4 };
+        field.Children.Add(new TextBlock { Text = label, FontSize = 11, Opacity = 0.6 });
+        field.Children.Add(new TextBlock
+        {
+            Text = value,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        if (!string.IsNullOrEmpty(note))
+            field.Children.Add(new TextBlock { Text = note, FontSize = 11, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+        return field;
+    }
+
     public static Border Banner(string text, Color tint, Symbol symbol)
     {
-        var label = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            Children =
-            {
-                new SymbolIcon { Symbol = symbol, Foreground = Theme.Brush(tint) },
-                new TextBlock
-                {
-                    Text = text,
-                    TextWrapping = TextWrapping.Wrap,
-                    Foreground = Theme.Brush(tint),
-                },
-            },
-        };
+        var label = new Grid { ColumnSpacing = 8 };
+        label.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        label.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        label.Children.Add(new SymbolIcon { Symbol = symbol, Foreground = Theme.Brush(tint), VerticalAlignment = VerticalAlignment.Top });
+        var message = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = Theme.Brush(tint), FontSize = 13 };
+        Grid.SetColumn(message, 1);
+        label.Children.Add(message);
         return new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(30, tint.R, tint.G, tint.B)),
@@ -420,6 +429,27 @@ internal static class Chrome
     /// </summary>
     public static Button ToggleChip(string title, bool isOn, Func<bool, Task> onFlip) =>
         ChoiceChip(title, isOn, () => onFlip(!isOn));
+
+    public static Grid SettingSwitch(string title, bool isOn, Func<bool, Task> onFlip)
+    {
+        var row = new Grid { ColumnSpacing = Theme.SpaceM };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(new TextBlock { Text = title, FontSize = 14, TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center });
+        var toggle = new ToggleSwitch { IsOn = isOn, OnContent = "", OffContent = "", MinWidth = 0 };
+        AutomationProperties.SetName(toggle, title);
+        toggle.Toggled += async (_, _) =>
+        {
+            if (!toggle.IsEnabled) return;
+            toggle.IsEnabled = false;
+            try { await onFlip(toggle.IsOn); }
+            finally { toggle.IsEnabled = true; }
+        };
+        Grid.SetColumn(toggle, 1);
+        row.Children.Add(toggle);
+        return row;
+    }
 
     /// <summary>
     /// A mutually exclusive set in one capsule. Mirrors the Apple

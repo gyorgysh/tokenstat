@@ -19,12 +19,13 @@ namespace Tokenstat.Pages;
 /// Tabbed in-app browser over the proxy.* lifecycle. Each tab owns one
 /// loopback page: opening through proxy.listen gives a tab whose close calls
 /// proxy.unlisten, and a tab opened on a plain port closes without a call.
-/// Matches the Mac browser: an address bar for committed navigations only, a
-/// confirm before a remote site loads inside the app, and an empty state
+/// Matches the Mac browser: an address bar for committed navigations only, an
+/// address bar for local previews and external sites, and an empty state
 /// until an address is entered.
 /// </summary>
 internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 {
+    private readonly string? _peer;
     private readonly TabView _tabs = new()
     {
         IsAddTabButtonVisible = true,
@@ -38,7 +39,8 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 
     public BrowserPage(string url, string host, int port, bool unlisten, string? peer = null)
     {
-        _tabs.AddTabButtonClick += (_, _) => AddTab("", "127.0.0.1", 0, false);
+        _peer = peer;
+        _tabs.AddTabButtonClick += (_, _) => AddTab("", "127.0.0.1", 0, false, peer);
         _tabs.TabCloseRequested += async (_, args) =>
         {
             if (args.Item is TabViewItem item && item.Tag is BrowserTab tab)
@@ -56,10 +58,9 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 AddTab(url, host, port, unlisten, peer);
             }
         };
-        // One close for every tab when the page itself goes away. Per-tab
-        // Unloaded would also fire on a tab switch, which must not stop a
-        // listener the tab still needs.
-        Unloaded += (_, _) =>
+        // Keep tabs alive while switching workspace sections. Release native
+        // WebViews and listeners when the window closes, or a tab is closed.
+        void CloseAll()
         {
             foreach (var entry in _tabs.TabItems)
             {
@@ -68,7 +69,8 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     _ = tab.CloseAsync();
                 }
             }
-        };
+        }
+        if (App.CurrentWindow is { } window) window.Closed += (_, _) => CloseAll();
     }
 
     /// <summary>
@@ -96,7 +98,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             Buttons.ToolbarIcon(
                 ActionIcon.Create,
                 "Open a new tab",
-                (_, _) => AddTab("", "127.0.0.1", 0, false)),
+                (_, _) => AddTab("", "127.0.0.1", 0, false, _peer)),
         };
     }
 
@@ -131,7 +133,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         }
         if (CurrentTab() is BrowserTab current && !string.IsNullOrWhiteSpace(current.Url))
         {
-            _inspector.Children.Add(Chrome.Stat("Address", current.Url));
+            _inspector.Children.Add(Chrome.InspectorField("Address", current.Url));
         }
     }
 
@@ -181,7 +183,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         await tab.CloseAsync();
         if (_tabs.TabItems.Count == 0)
         {
-            AddTab("", "127.0.0.1", 0, false);
+            AddTab("", "127.0.0.1", 0, false, _peer);
         }
         RenderInspector();
     }
@@ -220,6 +222,8 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         private int _port;
         private readonly string _peer;
         private readonly bool _unlisten;
+        private readonly Dictionary<(string Host, int Port), string> _bridges = new();
+        private readonly SemaphoreSlim _navigationGate = new(1, 1);
         private bool _closed;
         private bool _started;
 
@@ -227,7 +231,19 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 
         public UIElement View => _view;
 
-        public string Url => _loadedUrl;
+        public string Url => DisplayUrl(_loadedUrl);
+
+        private string DisplayUrl(string actual)
+        {
+            if (!Uri.TryCreate(actual, UriKind.Absolute, out var uri)) return actual;
+            foreach (var bridge in _bridges)
+            {
+                var local = new Uri(bridge.Value);
+                if (uri.Host == local.Host && uri.Port == local.Port)
+                    return new UriBuilder(uri) { Host = bridge.Key.Host, Port = bridge.Key.Port }.Uri.AbsoluteUri;
+            }
+            return actual;
+        }
 
         public void Reload()
         {
@@ -257,7 +273,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 }
                 try
                 {
-                    var uri = new Uri(_loadedUrl);
+                    var uri = new Uri(Url);
                     var port = uri.IsDefaultPort ? "" : ":" + uri.Port;
                     return uri.Host + port;
                 }
@@ -332,13 +348,26 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 }
             };
 
-            var chrome = new StackPanel
+            var chrome = new Grid
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = Theme.SpaceS,
+                ColumnSpacing = Theme.SpaceS,
                 Padding = new Thickness(Theme.SpaceS),
                 VerticalAlignment = VerticalAlignment.Center,
             };
+            foreach (var control in new FrameworkElement[] { _back, _forward, _reload, _spinner, _address, go, external, shut })
+            {
+                chrome.ColumnDefinitions.Add(new ColumnDefinition { Width = control == _address ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
+                Grid.SetColumn(control, chrome.ColumnDefinitions.Count - 1);
+                if (control is Button button)
+                {
+                    if (button.Content is StackPanel label && label.Children.LastOrDefault() is TextBlock text)
+                    {
+                        ToolTipService.SetToolTip(button, text.Text);
+                        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, text.Text);
+                        label.Children.Remove(text);
+                    }
+                }
+            }
             chrome.Children.Add(_back);
             chrome.Children.Add(_forward);
             chrome.Children.Add(_reload);
@@ -386,7 +415,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     if (!string.IsNullOrEmpty(shown))
                     {
                         _loadedUrl = shown;
-                        _address.Text = shown;
+                        _address.Text = DisplayUrl(shown);
                         HeaderChanged?.Invoke(this);
                     }
                 }
@@ -439,10 +468,17 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         /// <summary>
         /// Commit a typed address. Local dev servers are plain HTTP; anything
         /// else defaults to HTTPS so a mistyped or remote site is never sent
-        /// in the clear. A remote site needs an explicit go-ahead before it
-        /// loads inside the app.
+        /// in the clear. Remote loopback addresses keep their original port
+        /// in the address bar while the WebView uses a local bridge.
         /// </summary>
         private async Task CommitAsync(string raw)
+        {
+            await _navigationGate.WaitAsync();
+            try { if (!_closed) await CommitCoreAsync(raw); }
+            finally { _navigationGate.Release(); }
+        }
+
+        private async Task CommitCoreAsync(string raw)
         {
             var candidate = (raw ?? "").Trim();
             if (candidate.Length == 0)
@@ -484,20 +520,26 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 }
                 return;
             }
-            if (!IsLoopback(url))
+            if (!string.IsNullOrEmpty(_peer) && IsLoopback(url))
             {
-                var dialog = new ContentDialog
+                try
                 {
-                    Title = "Open an external site?",
-                    Content = $"{url.Host} is not a local development server. It will load inside the app's browser.",
-                    PrimaryButtonText = "Open",
-                    CloseButtonText = "Cancel",
-                    DefaultButton = ContentDialogButton.Primary,
-                };
-                if (await Chrome.ShowDialog(_owner, dialog) != ContentDialogResult.Primary)
-                {
-                    return;
+                    var target = (Host: url.Host, Port: url.Port);
+                    if (!_bridges.TryGetValue(target, out var local))
+                    {
+                        local = await BrowserBridges.AcquireAsync(_peer, target.Host, target.Port);
+                        if (_closed)
+                        {
+                            await BrowserBridges.ReleaseAsync(_peer, target.Host, target.Port);
+                            return;
+                        }
+                        _bridges[target] = local;
+                    }
+                    var destination = new UriBuilder(new Uri(new Uri(local), url.PathAndQuery + url.Fragment)) { Scheme = url.Scheme };
+                    await NavigateAsync(destination.Uri.AbsoluteUri);
                 }
+                catch (Exception ex) { Banner(ex.Message); }
+                return;
             }
             await NavigateAsync(url.AbsoluteUri);
         }
@@ -506,7 +548,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         {
             if (_closed || string.IsNullOrWhiteSpace(url)) return;
             _loadedUrl = url;
-            _address.Text = url;
+            _address.Text = DisplayUrl(url);
             _status.Children.Clear();
             _empty.Visibility = Visibility.Collapsed;
             HeaderChanged?.Invoke(this);
@@ -560,11 +602,11 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         }
 
         /// <summary>
-        /// Whether a URL points at this machine. Missing or odd hosts fail
-        /// closed so they get a confirm.
+        /// Whether an address names a loopback development server.
         /// </summary>
         private static bool IsLoopback(Uri url)
         {
+            if (url.IsLoopback) return true;
             var host = (url.Host ?? "").ToLowerInvariant();
             if (string.IsNullOrEmpty(host))
             {
@@ -592,10 +634,17 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             try
             {
                 _web.CoreWebView2?.Stop();
+                _web.Close();
             }
             catch
             {
             }
+            foreach (var target in _bridges.Keys.ToArray())
+            {
+                try { await BrowserBridges.ReleaseAsync(_peer ?? "", target.Host, target.Port); }
+                catch { /* Closing a tab must not throw. */ }
+            }
+            _bridges.Clear();
             if (_unlisten)
             {
                 try

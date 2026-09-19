@@ -611,93 +611,72 @@ internal sealed class SshPage : Page, IToolbarItems
         }
 
         var keyId = HostKeyId(record);
-        JsonNode? keyRecord = null;
-        var pemReady = false;
-        if (!string.IsNullOrEmpty(keyId))
+        var keys = new ComboBox { Header = "Saved key", HorizontalAlignment = HorizontalAlignment.Stretch };
+        try
         {
-            try
-            {
-                var listed = await AppServices.Host.CallAsync("ssh.key.list");
-                var keys = Format.Items(listed);
-                if (keys is not null)
+            var listed = Format.Items(await AppServices.Host.CallAsync("ssh.key.list"));
+            if (listed is not null)
+                foreach (var key in listed.OfType<JsonNode>())
                 {
-                    foreach (var key in keys)
+                    var available = SshSecrets.Has(Format.Text(key, "secretRef"));
+                    var item = new ComboBoxItem
                     {
-                        if (Format.Text(key, "id") == keyId)
-                        {
-                            keyRecord = key;
-                            pemReady = SshSecrets.Has(Format.Text(key, "secretRef"));
-                            break;
-                        }
-                    }
+                        Content = Format.Text(key, "label", Format.Text(key, "fingerprint", Format.Text(key, "id"))) + (available ? "" : " · unavailable on this PC"),
+                        Tag = key,
+                        IsEnabled = available,
+                    };
+                    keys.Items.Add(item);
+                    if (available && (keys.SelectedItem is null || Format.Text(key, "id") == keyId)) keys.SelectedItem = item;
                 }
-            }
-            catch (Exception ex)
-            {
-                _listRoot.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
-            }
         }
-
-        var password = new PasswordBox { PlaceholderText = "Password" };
-        var pemBox = new TextBox
+        catch (Exception ex)
         {
-            PlaceholderText = "Paste PEM to use a key",
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap,
-            Height = 100,
-        };
-        var passphrase = new PasswordBox { PlaceholderText = "Key passphrase, if any" };
-        var form = new StackPanel { Spacing = Theme.SpaceS, MinWidth = 360 };
+            _listRoot.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+        }
+        var method = new ComboBox { Header = "Sign in with", HorizontalAlignment = HorizontalAlignment.Stretch };
+        method.Items.Add("Saved key");
+        method.Items.Add("Password");
+        method.Items.Add("Paste private key");
+        method.SelectedIndex = keys.SelectedItem is null ? 1 : 0;
+        var password = new PasswordBox { Header = "Password", PlaceholderText = "Password" };
+        var pemBox = new TextBox { Header = "Private key", PlaceholderText = "Paste PEM or OpenSSH private key",
+            AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 120, FontFamily = Fonts.Mono };
+        var passphrase = new PasswordBox { Header = "Key passphrase", PlaceholderText = "Only for an encrypted private key" };
+        var validation = new TextBlock { Foreground = Theme.Brush(static () => Theme.Danger), TextWrapping = TextWrapping.Wrap };
+        var form = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 360 };
         form.Children.Add(new TextBlock { Text = $"{username}@{hostname}:{port}", Opacity = 0.8 });
-        if (!string.IsNullOrEmpty(keyId) && !pemReady)
-        {
-            form.Children.Add(new TextBlock
-            {
-                Text = "This host uses a key. The private material is not on this PC. Connect with a password, or paste a PEM.",
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.8,
-            });
-        }
-        if (pemReady)
-        {
-            form.Children.Add(new TextBlock
-            {
-                Text = "A key from the credential vault will be used. Leave the password blank, or fill it to use a password instead.",
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.8,
-            });
-        }
+        form.Children.Add(method);
+        form.Children.Add(keys);
         form.Children.Add(password);
-        if (!string.IsNullOrEmpty(keyId) || pemReady)
+        form.Children.Add(pemBox);
+        form.Children.Add(passphrase);
+        form.Children.Add(validation);
+        void ShowMethod()
         {
-            form.Children.Add(pemBox);
-            form.Children.Add(passphrase);
+            keys.Visibility = method.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+            password.Visibility = method.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+            pemBox.Visibility = method.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
+            passphrase.Visibility = method.SelectedIndex != 1 ? Visibility.Visible : Visibility.Collapsed;
+            validation.Text = "";
         }
-        var dialog = new ContentDialog
+        method.SelectionChanged += (_, _) => ShowMethod();
+        ShowMethod();
+        string SelectedPem() => method.SelectedIndex == 2 ? pemBox.Text.Trim()
+            : method.SelectedIndex == 0 && keys.SelectedItem is ComboBoxItem item && item.Tag is JsonNode key
+                ? SshSecrets.Get(Format.Text(key, "secretRef")) ?? "" : "";
+        var dialog = new ContentDialog { Title = "Connect to " + hostname, Content = form,
+            PrimaryButtonText = "Connect", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
+        dialog.PrimaryButtonClick += (_, e) =>
         {
-            Title = "Connect",
-            Content = form,
-            PrimaryButtonText = "Connect",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
+            if (method.SelectedIndex == 1 ? password.Password.Length == 0 : SelectedPem().Length == 0)
+            {
+                validation.Text = method.SelectedIndex == 1 ? "Enter the password." : "Choose an available key or paste its private material.";
+                e.Cancel = true;
+            }
         };
-        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        var pasted = pemBox.Text?.Trim() ?? "";
-        var storedPem = pemReady ? SshSecrets.Get(Format.Text(keyRecord, "secretRef")) : null;
-        var pem = pasted.Length > 0 ? pasted : (storedPem ?? "");
-        var useKey = pem.Length > 0;
-        if (!useKey && string.IsNullOrEmpty(password.Password))
-        {
-            _listRoot.Children.Insert(1, Chrome.Banner(
-                "A password or a private key is required.",
-                Theme.Danger,
-                Symbol.Important));
-            return;
-        }
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
+        var pem = SelectedPem();
+        var useKey = method.SelectedIndex != 1;
 
         JsonArray hostKeys;
         try

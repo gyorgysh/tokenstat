@@ -11,6 +11,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Windows.System;
 
 namespace Tokenstat.Pages;
@@ -181,11 +182,11 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         {
             if (!string.IsNullOrEmpty(current.Language))
             {
-                _inspector.Children.Add(Chrome.Stat("Language", current.Language));
+                _inspector.Children.Add(Chrome.InspectorField("Language", current.Language));
             }
-            _inspector.Children.Add(Chrome.Stat("Lines", $"{current.LineTotal:N0}"));
-            _inspector.Children.Add(Chrome.Stat("Indent", $"{current.IndentWidth} spaces"));
-            _inspector.Children.Add(Chrome.Stat(
+            _inspector.Children.Add(Chrome.InspectorField("Lines", $"{current.LineTotal:N0}"));
+            _inspector.Children.Add(Chrome.InspectorField("Indent", $"{current.IndentWidth} spaces"));
+            _inspector.Children.Add(Chrome.InspectorField(
                 "State", current.IsDirty ? "Unsaved changes" : "Saved"));
         }
     }
@@ -195,6 +196,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 
     private async Task<string> FolderNameAsync()
     {
+        if (RemoteWorkspaces.CachedFolder(_workspaceId) is { } remote) return remote.Name;
         try
         {
             var listed = await AppServices.Host.CallAsync("workspace.list");
@@ -229,7 +231,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             {
                 request["path"] = _directory;
             }
-            var listed = await AppServices.Host.CallAsync("workspace.tree", request);
+            var listed = await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId, "workspace.tree", request);
             _treeCrumb.Text = string.IsNullOrEmpty(_directory) ? "Root" : _directory;
             if (!string.IsNullOrEmpty(_directory))
             {
@@ -308,7 +310,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         string content;
         try
         {
-            var read = await AppServices.Host.CallAsync(
+            var read = await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId,
                 "workspace.read",
                 new JsonObject { ["id"] = _workspaceId, ["path"] = path });
             content = Format.Text(read, "content");
@@ -414,6 +416,9 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             FontFamily = Fonts.Mono,
             FontSize = 13,
             AcceptsReturn = true,
+            TextWrapping = TextWrapping.NoWrap,
+            Background = Theme.PanelBrush,
+            BorderThickness = new Thickness(0),
         };
         private readonly StackPanel _conflict = new()
         {
@@ -426,6 +431,11 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         private readonly TextBlock _findCount = new() { Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center };
         private readonly TextBlock _status = new() { Opacity = 0.7, FontSize = 12 };
         private readonly Grid _view = new();
+        private readonly Canvas _lineNumbers = new() { Width = 52, IsHitTestVisible = false };
+        private string _gutterKey = "";
+        private int _textRevision;
+        private int[] _lineStarts = [0];
+
         private readonly List<(int Start, int Length)> _matches = [];
 
         private string _text;
@@ -472,6 +482,8 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         {
             _owner = owner;
             _workspaceId = workspaceId;
+            ScrollViewer.SetHorizontalScrollMode(_box, ScrollMode.Enabled);
+            ScrollViewer.SetHorizontalScrollBarVisibility(_box, ScrollBarVisibility.Auto);
             Path = path;
             _text = content;
             _savedText = content;
@@ -496,22 +508,86 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             Grid.SetRow(chrome, 0);
             Grid.SetRow(_conflict, 1);
             Grid.SetRow(_find, 2);
-            Grid.SetRow(_box, 3);
+            var editing = new Grid();
+            editing.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            editing.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            editing.Children.Add(_lineNumbers);
+            Grid.SetColumn(_box, 1);
+            editing.Children.Add(_box);
+            Grid.SetRow(editing, 3);
             _view.Children.Add(chrome);
             _view.Children.Add(_conflict);
             _view.Children.Add(_find);
-            _view.Children.Add(_box);
+            _view.Children.Add(editing);
 
             _applying = true;
             _box.Document.SetText(TextSetOptions.None, content);
             _applying = false;
             _box.TextChanged += (_, _) => OnEdited();
+            _box.LayoutUpdated += (_, _) => DrawLineNumbers();
+            RebuildLineStarts();
             _box.ActualThemeChanged += (_, _) =>
                 _box.DispatcherQueue.TryEnqueue(ApplyHighlightColors);
             _box.SelectionChanged += (_, _) => RefreshStatus();
             _findQuery.TextChanged += (_, _) => RefreshMatches();
             _box.KeyDown += BoxOnKeyDown;
             RefreshStatus();
+        }
+
+        // RichEdit owns a final paragraph marker which is not part of the file.
+        // Read a range excluding that marker; preserve all real trailing newlines.
+        private string ReadEditorText() => EditorText.Read(_box.Document);
+
+        private void RebuildLineStarts()
+        {
+            var text = ReadEditorText();
+            var starts = new List<int> { 0 };
+            for (var i = 0; i < text.Length; i++)
+            {
+                if (text[i] == '\r')
+                {
+                    if (i + 1 < text.Length && text[i + 1] == '\n') i++;
+                    starts.Add(i + 1);
+                }
+                else if (text[i] == '\n') starts.Add(i + 1);
+            }
+            _lineStarts = starts.ToArray();
+            _textRevision++;
+            DrawLineNumbers();
+        }
+
+        private void DrawLineNumbers()
+        {
+            if (_box.ActualHeight <= 0) return;
+            try
+            {
+                var first = _box.Document.GetRangeFromPoint(new Windows.Foundation.Point(8, 8), PointOptions.ClientCoordinates).StartPosition;
+                var line = Array.BinarySearch(_lineStarts, first);
+                if (line < 0) line = Math.Max(0, ~line - 1);
+                var firstRange = _box.Document.GetRange(_lineStarts[line], _lineStarts[line]);
+                firstRange.GetRect(PointOptions.ClientCoordinates | PointOptions.AllowOffClient, out var firstRect, out _);
+                var key = $"{_textRevision}:{line}:{firstRect.Y}:{_box.ActualHeight}";
+                if (key == _gutterKey) return;
+                _gutterKey = key;
+                _lineNumbers.Children.Clear();
+                _lineNumbers.Clip = new Microsoft.UI.Xaml.Media.RectangleGeometry
+                { Rect = new Windows.Foundation.Rect(0, 0, 52, _box.ActualHeight) };
+                for (var i = line; i < _lineStarts.Length && i < line + 250; i++)
+                {
+                    var range = _box.Document.GetRange(_lineStarts[i], _lineStarts[i]);
+                    range.GetRect(PointOptions.ClientCoordinates | PointOptions.AllowOffClient, out var rect, out _);
+                    if (rect.Y > _box.ActualHeight) break;
+                    var label = new TextBlock
+                    {
+                        Text = (i + 1).ToString(), FontFamily = Fonts.Mono, FontSize = 13,
+                        Foreground = Theme.Brush(static () => Theme.DefaultText), Opacity = 0.4,
+                        Width = 42, TextAlignment = TextAlignment.Right,
+                    };
+                    Canvas.SetTop(label, rect.Y);
+                    _lineNumbers.Children.Add(label);
+                }
+            }
+            catch { /* The native text layout is unavailable until the control is loaded. */ }
         }
 
         private void BoxOnKeyDown(object sender, KeyRoutedEventArgs e)
@@ -553,12 +629,13 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             {
                 return;
             }
-            _box.Document.GetText(TextGetOptions.None, out var current);
+            var current = ReadEditorText();
             if (current == _text)
             {
                 return;
             }
             _text = current;
+            RebuildLineStarts();
             HeaderChanged?.Invoke();
             RefreshStatus();
             RefreshMatches();
@@ -733,6 +810,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             {
                 _applying = false;
             }
+            RebuildLineStarts();
             HeaderChanged?.Invoke();
             RefreshStatus();
             _ = HighlightAsync();
@@ -780,7 +858,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             {
                 _applying = true;
                 var doc = _box.Document;
-                doc.GetText(TextGetOptions.None, out var current);
+                var current = ReadEditorText();
                 var length = current.Length;
                 var plain = doc.GetRange(0, length);
                 plain.CharacterFormat.ForegroundColor = Theme.DefaultText;
@@ -833,7 +911,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 string host;
                 try
                 {
-                    var read = await AppServices.Host.CallAsync(
+                    var read = await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId,
                         "workspace.read",
                         new JsonObject { ["id"] = _workspaceId, ["path"] = Path });
                     host = Format.Text(read, "content");
@@ -861,7 +939,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 var sent = draft;
                 try
                 {
-                    await AppServices.Host.CallAsync(
+                    await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId,
                         "workspace.write",
                         new JsonObject { ["id"] = _workspaceId, ["path"] = Path, ["content"] = sent });
                     MarkSaved(sent);
@@ -903,8 +981,8 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             IsSaving = true;
             try
             {
-                await AppServices.Host.CallAsync(
-                    "workspace.write",
+                await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId,
+                "workspace.write",
                     new JsonObject { ["id"] = _workspaceId, ["path"] = Path, ["content"] = sent });
                 MarkSaved(sent);
             }
@@ -944,6 +1022,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             {
                 _applying = false;
             }
+            RebuildLineStarts();
             HeaderChanged?.Invoke();
             RefreshStatus();
             _ = HighlightAsync();
@@ -1027,6 +1106,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 
         private void RefreshStatus()
         {
+            DrawLineNumbers();
             var parts = new List<string>();
             var (line, col) = CaretLineCol();
             parts.Add($"Line {line}, column {col}");

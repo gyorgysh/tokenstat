@@ -4,6 +4,8 @@
     <NoWarn>CA1416</NoWarn><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Pages/ScreenFrame.cs" Link="ScreenFrame.cs" />
+    <Compile Include="../../../apps/windows/Navigation/LiveRoute.cs" Link="LiveRoute.cs" />
     <Compile Include="../../../apps/windows/Host/HostOwnerLock.cs" Link="HostOwnerLock.cs" />
     <Compile Include="../../../apps/windows/Host/HostClient.cs" Link="HostClient.cs" />
     <Compile Include="../../../apps/windows/Pages/SshVaultSync.cs" Link="SshVaultSync.cs" />

@@ -79,9 +79,8 @@ fn same_path(left: &Path, right: &Path) -> bool {
     }
     #[cfg(windows)]
     {
-        return left
-            .to_string_lossy()
-            .eq_ignore_ascii_case(&right.to_string_lossy());
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
     }
     #[cfg(not(windows))]
     match (left.canonicalize(), right.canonicalize()) {

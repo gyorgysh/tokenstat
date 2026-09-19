@@ -301,7 +301,7 @@ fn candidate_probe_ports(candidate: &ProcessCandidate, mut ports: Vec<u16>) -> V
 fn detect_process_candidates() -> anyhow::Result<Vec<ProcessCandidate>> {
     #[cfg(target_os = "windows")]
     {
-        return detect_windows_process_candidates();
+        detect_windows_process_candidates()
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -436,7 +436,7 @@ fn extract_flag_value(command: &str, flag: &str) -> Option<String> {
 fn find_listening_ports(pid: u32) -> anyhow::Result<Vec<u16>> {
     #[cfg(target_os = "windows")]
     {
-        return find_windows_listening_ports(pid);
+        find_windows_listening_ports(pid)
     }
     #[cfg(not(target_os = "windows"))]
     {

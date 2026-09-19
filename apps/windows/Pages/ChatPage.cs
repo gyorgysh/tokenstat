@@ -38,6 +38,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         Spacing = Theme.SpaceM,
         Padding = new Thickness(Theme.SpaceM),
     };
+    private readonly Border _composerDock = new() { Padding = new Thickness(Theme.SpaceL, Theme.SpaceS, Theme.SpaceL, Theme.SpaceL) };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private string _folderName = "";
     private readonly StackPanel _transcript = new() { Spacing = Theme.SpaceM };
@@ -53,7 +54,8 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         AcceptsReturn = true,
         TextWrapping = TextWrapping.Wrap,
         PlaceholderText = "Ask about this folder",
-        MinHeight = 44,
+        MinHeight = 72,
+        MaxHeight = 220,
     };
     private readonly StackPanel _composerActions = new()
     {
@@ -118,7 +120,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
             Content = new Grid
             {
                 MaxWidth = 1040,
-                HorizontalAlignment = HorizontalAlignment.Left,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
                 Children = { _root },
             },
         };
@@ -128,7 +130,13 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
             // Pinned while at the end; a scroll up hands control to the reader.
             _followEnd = _scroll.ScrollableHeight - _scroll.VerticalOffset < 48;
         };
-        Content = _scroll;
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(_composerDock, 1);
+        layout.Children.Add(_scroll);
+        layout.Children.Add(_composerDock);
+        Content = layout;
         RenderInspector();
         Loaded += async (_, _) => await ShowListAsync();
         Unloaded += (_, _) => _poll?.Cancel();
@@ -208,34 +216,34 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
             Text = Format.Flag(chat, "running") ? "Running" : "Idle",
             Foreground = Format.Flag(chat, "running") ? Theme.AccentBrush : Theme.Brush(static () => Theme.StateIdle),
         });
-        _inspector.Children.Add(Chrome.Stat(
+        _inspector.Children.Add(Chrome.InspectorField(
             "Agent", Format.Text(backend, "label", Format.Text(chat, "backend", "Agent"))));
         var model = Format.Text(chat, "model");
         if (!string.IsNullOrEmpty(model))
         {
-            _inspector.Children.Add(Chrome.Stat("Model", model));
+            _inspector.Children.Add(Chrome.InspectorField("Model", model));
         }
         var effort = Format.Text(chat, "effort");
         if (!string.IsNullOrEmpty(effort))
         {
-            _inspector.Children.Add(Chrome.Stat("Effort", effort));
+            _inspector.Children.Add(Chrome.InspectorField("Effort", effort));
         }
-        _inspector.Children.Add(Chrome.Stat(
+        _inspector.Children.Add(Chrome.InspectorField(
             "Mode", Format.Text(chat, "mode") == "plan" ? "Plan" : "Execute"));
         var personaId = Format.Text(chat, "personaId");
         if (!string.IsNullOrEmpty(personaId))
         {
             var persona = FindPersona(personaId);
-            _inspector.Children.Add(Chrome.Stat(
+            _inspector.Children.Add(Chrome.InspectorField(
                 "Persona", Format.Text(persona, "name", "Preset")));
         }
         if (_approvals.Count > 0)
         {
-            _inspector.Children.Add(Chrome.Stat(
+            _inspector.Children.Add(Chrome.InspectorField(
                 "Approvals", $"{_approvals.Count} waiting",
                 "Answer them in the transcript."));
         }
-        _inspector.Children.Add(Chrome.Stat("Spend", InspectorSpend()));
+        _inspector.Children.Add(Chrome.InspectorField("Spend", InspectorSpend()));
     }
 
     private string InspectorSpend()
@@ -323,6 +331,8 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         _offset = 0;
         _transcript.Children.Clear();
         _followEnd = true;
+        _composerDock.Child = null;
+        _composerDock.Visibility = Visibility.Collapsed;
         _root.Children.Clear();
         _root.Children.Add(ListHeader());
         var skeleton = Motion.SkeletonCard();
@@ -595,7 +605,8 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Add(_transcript);
         RefreshCost();
         _root.Children.Add(_costHost);
-        _root.Children.Add(Composer());
+        _composerDock.Visibility = Visibility.Visible;
+        _composerDock.Child = Composer();
     }
 
     private UIElement SetupCard()
@@ -1510,7 +1521,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var chat = _openChat ?? new JsonObject();
         var locked = Busy();
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        var row = new FlowPanel { Spacing = Theme.SpaceS };
         row.Children.Add(CompactAgentMenu(locked));
         row.Children.Add(ModePills(Format.Text(chat, "mode", "plan"), !locked));
         var gate = Format.Text(Backend(Format.Text(chat, "backend")), "gateTier", "full");

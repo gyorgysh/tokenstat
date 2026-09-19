@@ -699,6 +699,7 @@ impl Manager {
     /// manager keeps exactly the pool the test put there, so tests never spawn
     /// login shells they did not ask for.
     fn replenish_pool(&self) {
+        #[cfg(unix)]
         if !std::ptr::eq(self as *const Manager, manager() as *const Manager) {
             return;
         }

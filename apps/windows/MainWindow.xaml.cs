@@ -73,6 +73,40 @@ public sealed partial class MainWindow : Window
     private JsonNode? _liveAccount;
     private string _liveFooterKey = "";
 
+    private bool _hoverExpanded;
+    private bool _changingPanePreview;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _paneHoverTimer;
+    private readonly HashSet<string> _compactExpanded = new(StringComparer.Ordinal);
+
+    private void PreviewPane(bool open)
+    {
+        _changingPanePreview = true;
+        _hoverExpanded = open;
+        _nav.IsPaneOpen = open;
+        _changingPanePreview = false;
+    }
+
+    private void PaneStateChanged()
+    {
+        if (!_changingPanePreview) _hoverExpanded = false;
+        _paneHoverTimer?.Stop();
+        if (!_nav.IsPaneOpen)
+        {
+            foreach (var row in NavItems(_nav.MenuItems))
+            {
+                if (row.IsExpanded && row.Tag is string tag) _compactExpanded.Add(tag);
+                row.IsExpanded = false;
+            }
+        }
+        else
+        {
+            foreach (var row in NavItems(_nav.MenuItems))
+                if (row.Tag is string tag && _compactExpanded.Contains(tag)) row.IsExpanded = true;
+            _compactExpanded.Clear();
+        }
+        SyncPaneChrome();
+    }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -138,6 +172,31 @@ public sealed partial class MainWindow : Window
 
         _nav.Content = _contentHost;
         _nav.SelectionChanged += NavOnSelectionChanged;
+        _paneHoverTimer = DispatcherQueue.CreateTimer();
+        _paneHoverTimer.Interval = TimeSpan.FromMilliseconds(350);
+        _paneHoverTimer.IsRepeating = false;
+        _paneHoverTimer.Tick += (_, _) => { if (!_nav.IsPaneOpen) PreviewPane(true); };
+        _nav.PointerMoved += (_, args) =>
+        {
+            var point = args.GetCurrentPoint(_nav).Position;
+            if (!_nav.IsPaneOpen && point.X < _nav.CompactPaneLength && point.Y > 48)
+            {
+                if (!_paneHoverTimer.IsRunning) _paneHoverTimer.Start();
+            }
+            else
+            {
+                _paneHoverTimer.Stop();
+                if (_hoverExpanded && point.X > _nav.OpenPaneLength) PreviewPane(false);
+            }
+        };
+        _nav.PointerExited += (_, args) =>
+        {
+            var point = args.GetCurrentPoint(_nav).Position;
+            if (point.X >= 0 && point.Y >= 0 && point.X <= _nav.ActualWidth && point.Y <= _nav.ActualHeight) return;
+            _paneHoverTimer.Stop();
+            if (_hoverExpanded) PreviewPane(false);
+        };
+
         Grid.SetRow(_nav, 1);
         RootGrid.Children.Add(_nav);
         ApplyChromeColors();
@@ -147,14 +206,15 @@ public sealed partial class MainWindow : Window
         // its compact width. The display mode itself is fixed at Left.
         _nav.RegisterPropertyChangedCallback(
             NavigationView.IsPaneOpenProperty,
-            (_, _) => SyncPaneChrome());
+            (_, _) => PaneStateChanged());
 
         AppServices.OpenTerminal = (workspaceId, sessionId) =>
         {
             DispatcherQueue.TryEnqueue(() =>
             {
                 SetContent(new TerminalPage(workspaceId, sessionId));
-                RestoreSelection(SidebarLive.SessionPrefix + workspaceId + ":" + sessionId);
+                if (sessionId is not null)
+                    RestoreSelection(LiveRoute.Join(SidebarLive.SessionPrefix, workspaceId, sessionId));
                 _lastNavTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
             });
         };
@@ -346,6 +406,8 @@ public sealed partial class MainWindow : Window
         await TryLoadFoldersAsync();
     }
 
+    private readonly Dictionary<(string Id, WorkspaceSection Section), Page> _workspacePages = new();
+    private readonly SemaphoreSlim _folderLoadGate = new(1, 1);
     private bool _foldersLoaded;
     private JsonArray _localFolders = new();
 
@@ -354,36 +416,43 @@ public sealed partial class MainWindow : Window
     /// then again on every slow sidebar poll until it lands, so a helper that
     /// answers late still fills the sidebar in. A miss keeps the old rows.
     /// </summary>
-    private async Task TryLoadFoldersAsync()
+    private async Task TryLoadFoldersAsync(bool refresh = false)
     {
-        if (_foldersLoaded)
-        {
-            return;
-        }
-        JsonNode listed;
+        await _folderLoadGate.WaitAsync();
         try
         {
-            listed = await AppServices.Host.CallAsync("workspace.list");
+            if (_foldersLoaded && !refresh)
+            {
+                return;
+            }
+            JsonNode listed;
+            try
+            {
+                listed = await AppServices.Host.CallAsync("workspace.list");
+            }
+            catch
+            {
+                return;
+            }
+            var array = listed as JsonArray
+                ?? listed["folders"] as JsonArray
+                ?? listed["workspaces"] as JsonArray;
+            if (array is null)
+            {
+                return;
+            }
+            var unchanged = _foldersLoaded && JsonNode.DeepEquals(_localFolders, array);
+            _foldersLoaded = true;
+            if (unchanged) return;
+            _localFolders = array;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                RebuildFolderItems();
+                RebuildSidebarLive();
+            });
+            _ = RemoteWorkspaces.SweepAsync();
         }
-        catch
-        {
-            return;
-        }
-        var array = listed as JsonArray
-            ?? listed["folders"] as JsonArray
-            ?? listed["workspaces"] as JsonArray;
-        if (array is null)
-        {
-            return;
-        }
-        _foldersLoaded = true;
-        _localFolders = array;
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            RebuildFolderItems();
-            RebuildSidebarLive();
-        });
-        _ = RemoteWorkspaces.SweepAsync();
+        finally { _folderLoadGate.Release(); }
     }
 
     /// <summary>
@@ -393,14 +462,15 @@ public sealed partial class MainWindow : Window
     private void RebuildFolderItems()
     {
         var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
-        var expanded = _nav.MenuItems.OfType<NavigationViewItem>()
-            .Where(item => item.IsExpanded && item.Tag is string)
-            .Select(item => (string)item.Tag).ToHashSet(StringComparer.Ordinal);
+        var expanded = NavItems(_nav.MenuItems)
+            .Where(item => item.Tag is string)
+            .ToDictionary(item => (string)item.Tag, item => item.IsExpanded, StringComparer.Ordinal);
         var keep = new List<object>();
         foreach (var item in _nav.MenuItems)
         {
             if (item is NavigationViewItem nav
                 && ((nav.Tag as string)?.StartsWith("ws:") == true
+                    || (nav.Tag as string)?.StartsWith("machine:") == true
                     || (nav.Tag as string) == "workspaces:add"))
             {
                 continue;
@@ -420,11 +490,22 @@ public sealed partial class MainWindow : Window
             {
                 continue;
             }
-            _nav.MenuItems.Add(FolderParent(id, name, remote: false, Format.Text(folder, "path")));
+            _nav.MenuItems.Add(FolderParent(id, name, remote: false, Format.Text(folder, "path"), folder?["git"]));
         }
-        foreach (var folder in RemoteWorkspaces.CachedFolders())
+        foreach (var peer in RemoteWorkspaces.CachedFolders().GroupBy(folder => folder.PeerKey))
         {
-            _nav.MenuItems.Add(FolderParent(folder.Id, folder.DisplayName, remote: true, folder.Path));
+            var machine = new NavigationViewItem
+            {
+                Content = peer.First().MachineLabel,
+                Tag = "machine:" + peer.Key,
+                Icon = new SymbolIcon { Symbol = Symbol.Globe },
+                SelectsOnInvoked = false,
+                IsExpanded = _nav.IsPaneOpen,
+            };
+            ToolTipService.SetToolTip(machine, peer.First().MachineLabel);
+            foreach (var folder in peer)
+                machine.MenuItems.Add(FolderParent(folder.Id, folder.Name, remote: false, folder.Path, folder.Git));
+            _nav.MenuItems.Add(machine);
         }
         _nav.MenuItems.Add(new NavigationViewItem
         {
@@ -432,11 +513,11 @@ public sealed partial class MainWindow : Window
             Tag = "workspaces:add",
             Icon = new SymbolIcon { Symbol = Symbol.Add },
         });
-        foreach (var item in _nav.MenuItems.OfType<NavigationViewItem>())
+        foreach (var item in NavItems(_nav.MenuItems))
         {
-            if (item.Tag is string tag && expanded.Contains(tag))
+            if (item.Tag is string tag && expanded.TryGetValue(tag, out var wasExpanded))
             {
-                item.IsExpanded = true;
+                item.IsExpanded = wasExpanded;
             }
         }
         if (selectedTag is not null
@@ -449,11 +530,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static NavigationViewItem FolderParent(string id, string name, bool remote, string path)
+    private static NavigationViewItem FolderParent(string id, string name, bool remote, string path, JsonNode? git = null)
     {
         var parent = new NavigationViewItem
         {
-            Content = name,
+            Content = FolderLabel(name, git),
             Tag = "ws:" + id + ":Files",
             Icon = new SymbolIcon { Symbol = remote ? Symbol.Globe : Symbol.Folder },
         };
@@ -470,6 +551,23 @@ public sealed partial class MainWindow : Window
             });
         }
         return parent;
+    }
+
+    private static UIElement FolderLabel(string name, JsonNode? git)
+    {
+        var label = new StackPanel { Spacing = 3 };
+        label.Children.Add(new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (git is not null && Format.Flag(git, "isRepo"))
+        {
+            var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            line.Children.Add(new TextBlock { Text = "⑂ " + Format.Text(git, "branch", "Detached"), FontSize = 11, Opacity = 0.65 });
+            var added = Format.Long(git, "added");
+            var removed = Format.Long(git, "removed");
+            if (added > 0) line.Children.Add(new TextBlock { Text = "+" + added, FontSize = 11, Foreground = Theme.Brush(static () => Theme.DiffAdded) });
+            if (removed > 0) line.Children.Add(new TextBlock { Text = "−" + removed, FontSize = 11, Foreground = Theme.Brush(static () => Theme.DiffRemoved) });
+            label.Children.Add(line);
+        }
+        return label;
     }
 
     private TaskCompletionSource? _hostWake;
@@ -818,10 +916,26 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private Page WorkspaceSectionPage(string id, WorkspaceSection section)
     {
+        if (section is WorkspaceSection.Files or WorkspaceSection.Browser)
+        {
+            var key = (id, section);
+            if (!_workspacePages.TryGetValue(key, out var cached))
+            {
+                cached = section == WorkspaceSection.Files ? new EditorPage(id)
+                    : new BrowserPage("", "127.0.0.1", 0, false,
+                        RemoteWorkspaces.TrySplit(id, out var peer, out _) ? peer : null);
+                _workspacePages[key] = cached;
+            }
+            return cached;
+        }
+
         if (RemoteWorkspaces.IsRemote(id))
         {
             return section switch
             {
+                WorkspaceSection.Browser => new BrowserPage("", "127.0.0.1", 0, false,
+                    RemoteWorkspaces.TrySplit(id, out var browserPeer, out _) ? browserPeer : null),
+                WorkspaceSection.Files => new EditorPage(id),
                 WorkspaceSection.History => WorkspaceHistoryPage(id),
                 WorkspaceSection.Chat => new ChatPage(id),
                 WorkspaceSection.Todo => new TodoPage(id),
@@ -833,6 +947,7 @@ public sealed partial class MainWindow : Window
         }
         return section switch
         {
+            WorkspaceSection.Browser => new BrowserPage("", "127.0.0.1", 0, false),
             WorkspaceSection.Files => new EditorPage(id),
             WorkspaceSection.Notes => new NotesPage(id),
             WorkspaceSection.Workflows => new WorkflowsPage(id),
@@ -1120,34 +1235,18 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private NavigationViewItem? FindNavItem(string tag)
+    private static IEnumerable<NavigationViewItem> NavItems(IEnumerable<object> items)
     {
-        foreach (var item in _nav.MenuItems)
+        foreach (var row in items.OfType<NavigationViewItem>())
         {
-            if (item is NavigationViewItem row)
-            {
-                if ((row.Tag as string) == tag)
-                {
-                    return row;
-                }
-                foreach (var child in row.MenuItems)
-                {
-                    if (child is NavigationViewItem sub && (sub.Tag as string) == tag)
-                    {
-                        return sub;
-                    }
-                }
-            }
+            yield return row;
+            foreach (var child in NavItems(row.MenuItems)) yield return child;
         }
-        foreach (var item in _nav.FooterMenuItems)
-        {
-            if (item is NavigationViewItem row && (row.Tag as string) == tag)
-            {
-                return row;
-            }
-        }
-        return null;
     }
+
+    private NavigationViewItem? FindNavItem(string tag) =>
+        NavItems(_nav.MenuItems).Concat(NavItems(_nav.FooterMenuItems))
+            .FirstOrDefault(row => (row.Tag as string) == tag);
 
     private void RefreshUpdateBadge()
     {
@@ -1173,10 +1272,7 @@ public sealed partial class MainWindow : Window
             var (sessions, chats) = await SidebarLive.FetchFastAsync();
             if (slow)
             {
-                if (!_foldersLoaded)
-                {
-                    _ = TryLoadFoldersAsync();
-                }
+                await TryLoadFoldersAsync(refresh: true);
                 _ = RemoteWorkspaces.SweepAsync();
                 var (summaries, account) = await SidebarLive.FetchSlowAsync();
                 if (summaries is not null)
@@ -1263,7 +1359,7 @@ public sealed partial class MainWindow : Window
             list.Add(chat);
         }
 
-        foreach (var item in _nav.MenuItems)
+        foreach (var item in NavItems(_nav.MenuItems).Where(row => row.MenuItems.Count > 0 && (row.Tag as string)?.StartsWith("ws:") == true).ToList())
         {
             if (item is not NavigationViewItem parent)
             {
@@ -1318,14 +1414,13 @@ public sealed partial class MainWindow : Window
             if (chatsByFolder.TryGetValue(folderId, out var chats) && chats.Count > 0)
             {
                 var expanded = _liveChatExpanded.Contains(folderId);
-                var chatPrefix = SidebarLive.ChatPrefix + folderId + ":";
                 if (!expanded
                     && selectedTag is not null
-                    && selectedTag.StartsWith(chatPrefix, StringComparison.Ordinal))
+                    && LiveRoute.TrySplit(selectedTag, SidebarLive.ChatPrefix, out var selectedFolder, out var selectedId)
+                    && selectedFolder == folderId)
                 {
                     // The lit row must stay drawn: a selection past the first
                     // five opens the list, like the Mac auto-expansion.
-                    var selectedId = selectedTag[chatPrefix.Length..];
                     var selectedIndex = chats.FindIndex(c => Format.Text(c, "id") == selectedId);
                     if (selectedIndex >= SidebarLive.CollapsedChats)
                     {
@@ -1499,6 +1594,7 @@ public sealed partial class MainWindow : Window
     private void ApplyChromeColors()
     {
         Theme.WindowTheme = RootGrid.ActualTheme;
+        Theme.InstallControlResources();
         _chromeBackground.Color = Theme.Background;
         _chromeSidebar.Color = Theme.Sidebar;
         _chromeBorder.Color = Theme.Border;

@@ -56,10 +56,15 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     {
         Stretch = Stretch.Uniform,
         AreTransportControlsEnabled = false,
+        AutoPlay = true,
         Visibility = Visibility.Collapsed,
         HorizontalAlignment = HorizontalAlignment.Stretch,
         VerticalAlignment = VerticalAlignment.Stretch,
     };
+    private readonly ContentControl _screenInput = new() { IsTabStop = true, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+    private int? _pressedButton;
+    private readonly HashSet<int> _pressedKeys = new();
+    private readonly SemaphoreSlim _inputGate = new(1, 1);
     private readonly Grid _stage = new()
     {
         Background = new SolidColorBrush(Color.FromArgb(255, 0, 0, 0)),
@@ -102,7 +107,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     private H264Streamer? _streamer;
     private bool _havePicture;
     private long _dropped;
-    private long _stampMs;
+    private ulong _firstStampUs;
+    private long _lastStampTicks;
     private double _cursorX = 0.5;
     private double _cursorY = 0.5;
     private DateTime _lastMove = DateTime.MinValue;
@@ -114,6 +120,18 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     {
         _peer = peer;
         _name = name;
+        var mediaPlayer = new Windows.Media.Playback.MediaPlayer { AutoPlay = true };
+        mediaPlayer.MediaFailed += (_, failure) => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_closed) return;
+            Caption("Screen decoder failed: " + failure.ErrorMessage);
+            Banner("Screen decoder failed: " + failure.ErrorMessage);
+        });
+        mediaPlayer.MediaOpened += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_closed) _caption.Visibility = Visibility.Collapsed;
+        });
+        _player.SetMediaPlayer(mediaPlayer);
 
         var chrome = new StackPanel
         {
@@ -128,11 +146,10 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
 
-        var controls = new StackPanel
+        var controls = new FlowPanel
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = Theme.SpaceL,
-            Padding = new Thickness(Theme.SpaceS, 0, Theme.SpaceS, Theme.SpaceS),
+            Spacing = Theme.SpaceS,
+            Margin = new Thickness(Theme.SpaceS, 0, Theme.SpaceS, Theme.SpaceS),
         };
         RefreshControlChip();
         RefreshQualityPicker();
@@ -144,7 +161,20 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _stage.Children.Add(_picture);
         _stage.Children.Add(_player);
         _stage.Children.Add(_caption);
+        _screenInput.Content = _stage;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_screenInput, "Remote screen. Click to send keyboard and mouse input when control is enabled.");
+        _screenInput.KeyDown += (_, e) => ForwardKey(e, true);
+        _screenInput.KeyUp += (_, e) => ForwardKey(e, false);
+        _screenInput.LostFocus += (_, _) =>
+        {
+            ReleasePointer();
+            foreach (var code in _pressedKeys.ToArray())
+                _ = SendEventAsync(new JsonObject { ["type"] = "key", ["keyCode"] = code, ["down"] = false, ["flags"] = 0 });
+            _pressedKeys.Clear();
+        };
         _stage.PointerPressed += StageOnPointerPressed;
+        _stage.PointerReleased += (_, e) => { ReleasePointer(); _stage.ReleasePointerCapture(e.Pointer); };
+        _stage.PointerCaptureLost += (_, _) => ReleasePointer();
         _stage.PointerMoved += StageOnPointerMoved;
         _stage.PointerWheelChanged += StageOnPointerWheel;
 
@@ -190,12 +220,12 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetRow(_status, 2);
-        Grid.SetRow(_stage, 3);
+        Grid.SetRow(_screenInput, 3);
         Grid.SetRow(keyBar, 4);
         grid.Children.Add(chrome);
         grid.Children.Add(controls);
         grid.Children.Add(_status);
-        grid.Children.Add(_stage);
+        grid.Children.Add(_screenInput);
         grid.Children.Add(keyBar);
         Content = grid;
         RenderInspector();
@@ -240,26 +270,26 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap,
             });
-            _inspector.Children.Add(Chrome.Stat(
+            _inspector.Children.Add(Chrome.InspectorField(
                 "Picture", _streamingSince.HasValue ? "Streaming" : "Waiting"));
-            _inspector.Children.Add(Chrome.Stat("Route", _transport));
-            _inspector.Children.Add(Chrome.Stat("Quality", QualityLabel(_quality)));
-            _inspector.Children.Add(Chrome.Stat(
+            _inspector.Children.Add(Chrome.InspectorField("Route", _transport));
+            _inspector.Children.Add(Chrome.InspectorField("Quality", QualityLabel(_quality)));
+            _inspector.Children.Add(Chrome.InspectorField(
                 "Control", _control ? "Controlling" : "Viewing"));
             if (_displays.Count > 0)
             {
                 var selected = _displays.FirstOrDefault(d => d.Id == _selectedDisplay)
                     ?? _displays[0];
-                _inspector.Children.Add(Chrome.Stat(
+                _inspector.Children.Add(Chrome.InspectorField(
                     "Display", $"{selected.Name} {selected.Width}x{selected.Height}"));
             }
             if (_dropped > 0)
             {
-                _inspector.Children.Add(Chrome.Stat("Dropped", $"{_dropped:N0}"));
+                _inspector.Children.Add(Chrome.InspectorField("Dropped", $"{_dropped:N0}"));
             }
             if (_reconnects > 0)
             {
-                _inspector.Children.Add(Chrome.Stat("Reconnects", $"{_reconnects}"));
+                _inspector.Children.Add(Chrome.InspectorField("Reconnects", $"{_reconnects}"));
             }
         }
         if (DispatcherQueue.HasThreadAccess)
@@ -446,7 +476,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 }
                 return;
             }
-            _dropped += Format.Long(chunk, "dropped");
+            _dropped = Format.Long(chunk, "dropped");
             HandleMetadata(Format.Text(chunk, "metadata"));
             var encoded = Format.Text(chunk, "frame");
             if (!string.IsNullOrEmpty(encoded))
@@ -550,8 +580,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             MarkStreaming();
             return;
         }
-        var avcc = frame.ToAvcc();
-        if (avcc.Length == 0)
+        var annexB = frame.Payload;
+        if (annexB.Length == 0)
         {
             return;
         }
@@ -562,7 +592,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             return;
         }
         MarkStreaming();
-        DispatcherQueue.TryEnqueue(() => PushH264OnUi(frame, avcc));
+        DispatcherQueue.TryEnqueue(() => PushH264OnUi(frame, annexB));
     }
 
     private void MarkStreaming()
@@ -575,7 +605,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         Caption(_name);
     }
 
-    private void PushH264OnUi(ScreenFrame frame, byte[] avcc)
+    private void PushH264OnUi(ScreenFrame frame, byte[] annexB)
     {
         if (frame.Width <= 0 || frame.Height <= 0)
         {
@@ -597,15 +627,20 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 var streamer = new H264Streamer(width, height);
                 _player.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
                 _streamer = streamer;
-                _stampMs = 0;
+                _firstStampUs = frame.TimestampMicroseconds;
+                _lastStampTicks = -1;
+                _player.MediaPlayer?.Play();
                 _player.Visibility = Visibility.Visible;
                 _picture.Visibility = Visibility.Collapsed;
                 Caption(_dropped > 0
                     ? $"Decoding H.264 · {_transport} · {_dropped} frames dropped"
                     : "Decoding H.264 · " + _transport);
             }
-            _stampMs += 33;
-            _streamer.Push(avcc, frame.Keyframe, TimeSpan.FromMilliseconds(_stampMs));
+            var relativeUs = frame.TimestampMicroseconds >= _firstStampUs ? frame.TimestampMicroseconds - _firstStampUs : 0;
+            var ticks = (long)Math.Min(relativeUs, (ulong)(long.MaxValue / 10)) * 10;
+            ticks = Math.Max(ticks, _lastStampTicks + 1);
+            _lastStampTicks = ticks;
+            _streamer.Push(annexB, frame.Keyframe, TimeSpan.FromTicks(ticks));
             _havePicture = true;
         }
         catch (Exception ex)
@@ -747,6 +782,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             _streamer?.Close();
             _streamer = null;
             _player.Source = null;
+            _player.MediaPlayer?.Dispose();
         });
     }
 
@@ -769,16 +805,43 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         var count = (now - _lastClick).TotalMilliseconds < 400 ? 2 : 1;
         _lastClick = now;
         var properties = e.GetCurrentPoint(_stage).Properties;
-        var button = properties.IsRightButtonPressed ? 2
-            : properties.IsMiddleButtonPressed ? 1 : 0;
+        var button = properties.IsRightButtonPressed ? 1
+            : properties.IsMiddleButtonPressed ? 2 : 0;
+        _screenInput.Focus(FocusState.Pointer);
+        _stage.CapturePointer(e.Pointer);
+        _pressedButton = button;
         _ = SendEventAsync(new JsonObject
         {
-            ["type"] = "click",
+            ["type"] = "mouse",
+            ["down"] = true,
             ["x"] = x,
             ["y"] = y,
             ["button"] = button,
             ["clickCount"] = count,
         });
+    }
+
+    private void ReleasePointer()
+    {
+        if (_pressedButton is not int button) return;
+        _pressedButton = null;
+        _ = SendEventAsync(new JsonObject { ["type"] = "mouse", ["button"] = button,
+            ["down"] = false, ["x"] = _cursorX, ["y"] = _cursorY });
+    }
+
+    private void ForwardKey(KeyRoutedEventArgs e, bool down)
+    {
+        if (!_control || ScreenKeys.MacCode((int)e.Key) is not int code) return;
+        e.Handled = true;
+        if (down) _pressedKeys.Add(code); else _pressedKeys.Remove(code);
+        ulong flags = 0;
+        bool Held(Windows.System.VirtualKey key) => Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        if (Held(Windows.System.VirtualKey.Shift)) flags |= 1UL << 17;
+        if (Held(Windows.System.VirtualKey.Control)) flags |= 1UL << 18;
+        if (Held(Windows.System.VirtualKey.Menu)) flags |= 1UL << 19;
+        if (Held(Windows.System.VirtualKey.LeftWindows) || Held(Windows.System.VirtualKey.RightWindows)) flags |= 1UL << 20;
+        _ = SendEventAsync(new JsonObject { ["type"] = "key", ["keyCode"] = code, ["down"] = down, ["flags"] = flags });
     }
 
     private void StageOnPointerMoved(object sender, PointerRoutedEventArgs e)
@@ -877,21 +940,22 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         });
     }
 
-    private Task SendEventAsync(JsonObject evt)
+    private async Task SendEventAsync(JsonObject evt)
     {
         var id = _sessionId;
-        if (!_control || string.IsNullOrEmpty(id))
-        {
-            return Task.CompletedTask;
-        }
+        var kind = Format.Text(evt, "type");
+        if (_closed || string.IsNullOrEmpty(id) || (!_control && kind != "display")) return;
         var data = Convert.ToBase64String(Encoding.UTF8.GetBytes(evt.ToJsonString()));
-        return AppServices.Host.CallAsync(
-            "screen.viewer.input",
-            new JsonObject
-            {
-                ["id"] = id,
-                ["data"] = data,
-            });
+        // Preserve press/release order even when the transport yields between writes.
+        await _inputGate.WaitAsync();
+        try
+        {
+            if (_closed || id != _sessionId) return;
+            await AppServices.Host.CallAsync("screen.viewer.input", new JsonObject
+            { ["id"] = id, ["data"] = data });
+        }
+        catch (Exception ex) { if (!_closed) Banner(FriendlyError.Display(ex.Message)); }
+        finally { _inputGate.Release(); }
     }
 
     /// <summary>
@@ -1119,12 +1183,14 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         if (DispatcherQueue.HasThreadAccess)
         {
             _caption.Text = text;
+            _caption.Visibility = Visibility.Visible;
             RenderInspector();
             return;
         }
         DispatcherQueue.TryEnqueue(() =>
         {
             _caption.Text = text;
+            _caption.Visibility = Visibility.Visible;
             RenderInspector();
         });
     }

@@ -10,6 +10,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
@@ -89,7 +90,7 @@ internal sealed class TerminalSession
         {
             foreach (var existing in ByWorkspace.Values)
             {
-                if (existing.Id == sessionId)
+                if (existing.Id == sessionId && existing.WorkspaceId == workspaceId)
                 {
                     return existing;
                 }
@@ -320,19 +321,26 @@ internal sealed class TerminalSession
     {
         try
         {
+            var catalog = RemoteWorkspaces.TrySplit(WorkspaceId, out var peer, out _)
+                ? await RemoteWorkspaces.CallOnPeerAsync(peer, "launcher.catalog")
+                : await AppServices.Host.CallAsync("launcher.catalog");
+            var shell = Format.Items(catalog)?.FirstOrDefault(item => Format.Text(item, "id") == "shell")
+                ?? throw new InvalidOperationException("The host did not advertise an available shell.");
+            var command = Format.Text(shell, "command");
+            if (string.IsNullOrEmpty(command)) throw new InvalidOperationException("The host shell has no command.");
             var spawned = await AppServices.Host.CallAsync(
                 "pty.spawn",
                 new JsonObject
                 {
                     ["workspaceId"] = WorkspaceId,
-                    ["command"] = "cmd.exe",
-                    ["args"] = new JsonArray(),
+                    ["command"] = command,
+                    ["args"] = shell?["args"]?.DeepClone() ?? new JsonArray(),
                     ["rows"] = Math.Clamp(rows, 5, 200),
                     ["cols"] = Math.Clamp(cols, 20, 400),
                     ["dark"] = Theme.IsDark,
                 });
             Id = Format.Text(spawned, "id");
-            Command = Format.Text(spawned, "command", "cmd.exe");
+            Command = Format.Text(spawned, "command", command);
             var rowsNow = Format.Long(spawned, "rows");
             var colsNow = Format.Long(spawned, "cols");
             if (rowsNow > 0)

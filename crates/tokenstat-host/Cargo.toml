@@ -79,3 +79,6 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[build-dependencies]
+cc = "1.2"

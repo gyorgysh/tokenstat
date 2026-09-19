@@ -47,6 +47,17 @@ internal static class WorkspaceRemoteHistory
                 "Make your first commit and it will appear here.",
                 EmptyArtKind.Changes);
         }
+        var hasUpstream = false;
+        try
+        {
+            var status = await Tokenstat.Navigation.RemoteWorkspaces.CallWorkspaceAsync(
+                remoteId, "workspace.status", new JsonObject { ["id"] = remoteId });
+            hasUpstream = !string.IsNullOrEmpty(Format.Text(status["git"], "upstream", Format.Text(status, "upstream")));
+        }
+        catch { /* Do not claim that a commit was pushed without an upstream. */ }
+        string? ownAvatar = null;
+        try { ownAvatar = Format.Text(await AppServices.Host.CallAsync("account.status"), "avatar"); }
+        catch { /* History remains usable while account status is unavailable. */ }
         var list = new StackPanel { Spacing = 4 };
         foreach (var commit in array)
         {
@@ -89,34 +100,38 @@ internal static class WorkspaceRemoteHistory
                     second += $" · {joined}";
                 }
             }
-            if (Format.Flag(commit, "unpushed"))
+            var unpushed = Format.Flag(commit, "unpushed");
+            var body = new StackPanel { Spacing = 4 };
+            body.Children.Add(new TextBlock
             {
-                second += " · Not pushed yet";
-            }
+                Text = subject, FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap,
+            });
+            body.Children.Add(new TextBlock { Text = second, FontSize = 11, Opacity = 0.65, TextWrapping = TextWrapping.Wrap });
+            body.Children.Add(new TextBlock
+            {
+                Text = unpushed ? "↑ Not pushed" : hasUpstream ? "✓ On upstream" : "Local history",
+                FontSize = 11,
+                Foreground = unpushed ? Theme.AccentBrush : Theme.Brush(static () => Theme.DefaultText),
+                Opacity = unpushed ? 1 : 0.65,
+            });
+            var content = new Grid { ColumnSpacing = Theme.SpaceS };
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var avatar = Marks.Avatar(url: Format.Flag(commit, "mine") ? ownAvatar : null, name: author, size: 30);
+            avatar.VerticalAlignment = VerticalAlignment.Top;
+            content.Children.Add(avatar);
+            Grid.SetColumn(body, 1);
+            content.Children.Add(body);
             var row = new Button
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Content = new StackPanel
-                {
-                    Spacing = 2,
-                    Children =
-                    {
-                        new TextBlock
-                        {
-                            Text = subject,
-                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                            TextWrapping = TextWrapping.Wrap,
-                        },
-                        new TextBlock
-                        {
-                            Text = second,
-                            FontSize = 12,
-                            Opacity = 0.7,
-                            TextWrapping = TextWrapping.Wrap,
-                        },
-                    },
-                },
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Background = Theme.PanelBrush,
+                BorderBrush = Theme.BorderBrush,
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(Theme.SpaceS),
+                Content = content,
             };
             row.Click += async (_, _) =>
                 await ShowDetailAsync(owner, capturedRemote, captured, openDiff);

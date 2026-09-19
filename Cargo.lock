@@ -3653,6 +3653,7 @@ name = "tokenstat-host"
 version = "1.0.6"
 dependencies = [
  "argon2",
+ "cc",
  "chacha20poly1305 0.11.0",
  "directories",
  "getrandom 0.4.3",

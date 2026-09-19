@@ -103,7 +103,7 @@ pub(crate) fn sanitize_pipe_component(raw: &str) -> String {
 pub fn default_socket_path() -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
-        return Ok(PathBuf::from(pipe_server::default_pipe_name()));
+        Ok(PathBuf::from(pipe_server::default_pipe_name()))
     }
     #[cfg(not(windows))]
     Ok(tokenstat_paths::data_dir()

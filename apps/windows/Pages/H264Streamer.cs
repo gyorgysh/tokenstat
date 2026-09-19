@@ -12,16 +12,18 @@ using Windows.Media.MediaProperties;
 namespace Tokenstat.Pages;
 
 /// <summary>
-/// Feeds length-prefixed H.264 samples into a MediaStreamSource the player
-/// element shows. The queue holds at most two pictures: latency matters
-/// more than preserving obsolete frames in an interactive screen session,
-/// matching the host queue rule. Created per resolution, because the
+/// Feeds Annex-B H.264 samples into a MediaStreamSource the player
+/// element shows. A bounded queue preserves reference pictures; after overflow
+/// it waits for a keyframe rather than feeding undecodable deltas.
+/// Created per resolution, because the
 /// descriptor is fixed when the source is built.
 /// </summary>
 internal sealed class H264Streamer
 {
     private readonly object _gate = new();
     private readonly Queue<Pending> _queue = new();
+    private bool _needsKeyframe = true;
+    private bool _closed;
     private MediaStreamSourceSampleRequest? _waiting;
     private MediaStreamSourceSampleRequestDeferral? _waitingDeferral;
 
@@ -31,7 +33,7 @@ internal sealed class H264Streamer
 
     public uint Height { get; }
 
-    private sealed record Pending(byte[] Avcc, bool Key, TimeSpan Stamp);
+    private sealed record Pending(byte[] AnnexB, bool Key, TimeSpan Stamp);
 
     public H264Streamer(uint width, uint height)
     {
@@ -40,16 +42,32 @@ internal sealed class H264Streamer
         var properties = VideoEncodingProperties.CreateH264();
         properties.Width = width;
         properties.Height = height;
-        Source = new MediaStreamSource(new VideoStreamDescriptor(properties));
+        properties.FrameRate.Numerator = 30;
+        properties.FrameRate.Denominator = 1;
+        Source = new MediaStreamSource(new VideoStreamDescriptor(properties))
+        {
+            CanSeek = false,
+            BufferTime = TimeSpan.Zero,
+        };
         Source.SampleRequested += OnSampleRequested;
     }
 
-    public void Push(byte[] avcc, bool key, TimeSpan stamp)
+    public void Push(byte[] annexB, bool key, TimeSpan stamp)
     {
         MediaStreamSourceSampleRequest? request = null;
         MediaStreamSourceSampleRequestDeferral? deferral = null;
         lock (_gate)
         {
+            if (_closed) return;
+            // Dropping a reference picture invalidates every following delta.
+            // Bound latency, but resume only at a fresh independently decodable frame.
+            if (_queue.Count >= 30)
+            {
+                _queue.Clear();
+                _needsKeyframe = true;
+            }
+            if (_needsKeyframe && !key) return;
+            _needsKeyframe = false;
             if (_waiting is not null)
             {
                 request = _waiting;
@@ -59,18 +77,13 @@ internal sealed class H264Streamer
             }
             else
             {
-                while (_queue.Count >= 2)
-                {
-                    _queue.Dequeue();
-                }
-                _queue.Enqueue(new Pending(avcc, key, stamp));
+                _queue.Enqueue(new Pending(annexB, key, stamp));
                 return;
             }
         }
         if (request is not null)
         {
-            request.Sample = ToMediaSample(new Pending(avcc, key, stamp));
-            deferral?.Complete();
+            Complete(request, deferral, new Pending(annexB, key, stamp));
         }
     }
 
@@ -79,6 +92,7 @@ internal sealed class H264Streamer
         MediaStreamSourceSampleRequestDeferral? deferral = null;
         lock (_gate)
         {
+            _closed = true;
             Source.SampleRequested -= OnSampleRequested;
             _queue.Clear();
             deferral = _waitingDeferral;
@@ -94,6 +108,7 @@ internal sealed class H264Streamer
         Pending? next = null;
         lock (_gate)
         {
+            if (_closed) { deferral.Complete(); return; }
             if (_queue.Count > 0)
             {
                 next = _queue.Dequeue();
@@ -105,15 +120,33 @@ internal sealed class H264Streamer
                 return;
             }
         }
-        args.Request.Sample = ToMediaSample(next);
-        deferral.Complete();
+        Complete(args.Request, deferral, next);
+    }
+
+    private void Complete(MediaStreamSourceSampleRequest request, MediaStreamSourceSampleRequestDeferral? deferral, Pending pending)
+    {
+        try
+        {
+            lock (_gate)
+            {
+                if (!_closed) request.Sample = ToMediaSample(pending);
+            }
+        }
+        catch
+        {
+            lock (_gate)
+            {
+                if (!_closed) Source.NotifyError(MediaStreamSourceErrorStatus.DecodeError);
+            }
+        }
+        finally { deferral?.Complete(); }
     }
 
     private static MediaStreamSample ToMediaSample(Pending pending)
     {
-        var sample = MediaStreamSample.CreateFromBuffer(pending.Avcc.AsBuffer(), pending.Stamp);
+        var sample = MediaStreamSample.CreateFromBuffer(pending.AnnexB.AsBuffer(), pending.Stamp);
         sample.KeyFrame = pending.Key;
-        sample.Duration = TimeSpan.FromMilliseconds(33);
+        // Timestamps come from capture; do not pretend every quality preset is 30 fps.
         return sample;
     }
 }

@@ -119,6 +119,8 @@ pub(crate) mod ssh_suggest;
 mod sync_scheduler;
 #[cfg(test)]
 pub(crate) mod test_identity;
+#[cfg(all(windows, feature = "local-host"))]
+mod windows_screen;
 #[cfg(feature = "local-host")]
 pub(crate) mod workspace_clone;
 pub mod workspace_policy;

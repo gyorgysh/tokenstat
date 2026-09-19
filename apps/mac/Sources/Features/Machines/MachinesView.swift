@@ -185,43 +185,30 @@ struct MachinesView: View {
         if !model.pending.isEmpty {
             waitingForApproval
         }
-        if !model.accountMachines.isEmpty {
-            accountDevices
-        }
+        // Connection and lifetime are one setup flow, visible before the
+        // device list grows long: enable access, then choose whether it survives quit.
         WidthReader { width in
             #if os(macOS)
-            if !unlistedKnown.isEmpty, width >= 820 {
+            if width >= 820 {
                 HStack(alignment: .top, spacing: Theme.Space.m) {
-                    knownMachines.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    thisMachine(fillsHeight: true).frame(maxWidth: .infinity)
                     alwaysOnHost.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
                 .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(spacing: Theme.Space.m) {
-                    if !unlistedKnown.isEmpty { knownMachines }
+                    thisMachine()
                     alwaysOnHost
                 }
             }
             #else
-            if !unlistedKnown.isEmpty { knownMachines }
+            thisMachine()
             #endif
         }
+        if !model.accountMachines.isEmpty { accountDevices }
+        if !unlistedKnown.isEmpty { knownMachines }
         DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
-        WidthReader { width in
-            if width >= 820 {
-                HStack(alignment: .top, spacing: Theme.Space.m) {
-                    thisMachine(fillsHeight: true).frame(maxWidth: .infinity)
-                    DevicePermissionCard(peers: [], localOnly: true, fillsHeight: true)
-                        .frame(maxWidth: .infinity)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-            } else {
-                VStack(spacing: Theme.Space.m) {
-                    thisMachine()
-                    DevicePermissionCard(peers: [], localOnly: true)
-                }
-            }
-        }
+        DevicePermissionCard(peers: [], localOnly: true)
         // Account-linked machines already appear above. Pairing is only
         // needed for a machine that is not on the account yet, so the
         // paste card stays off the first screenful once a list exists.

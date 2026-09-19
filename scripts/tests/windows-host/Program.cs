@@ -9,6 +9,33 @@ using Tokenstat.Pages;
 // Isolate from any actual helper, including on Windows.
 Environment.SetEnvironmentVariable("USERNAME", "t-" + Guid.NewGuid().ToString("N")[..8]);
 static void Check(bool pass, string message) { if (!pass) throw new Exception(message); }
+foreach (var (folder, session) in new[] {
+    ("folder-one", "pty-57"),
+    ("remote:peer-a:folder-one", "remote:peer-a:pty-57"),
+    ("remote:peer-b:folder:with:colons", "remote:peer-b:pty%3A57") })
+{
+    var tag = Tokenstat.Navigation.LiveRoute.Join("wsterm:", folder, session);
+    Check(Tokenstat.Navigation.LiveRoute.TrySplit(tag, "wsterm:", out var actualFolder, out var actualSession)
+        && actualFolder == folder && actualSession == session, "Sidebar selection lost the remote namespace");
+}
+Console.WriteLine("PASS: local and remote sidebar routes preserve both resource ids");
+// A TSCR sample from the shared wire, including a three-byte Annex-B NAL.
+var encoded = new byte[40];
+Encoding.ASCII.GetBytes("TSCR").CopyTo(encoded, 0);
+encoded[4] = 1; encoded[5] = 1; encoded[6] = 1;
+System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(encoded.AsSpan(8), 57);
+System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(encoded.AsSpan(16), 1234567);
+System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(encoded.AsSpan(24), 1920);
+System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(encoded.AsSpan(26), 1080);
+System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(encoded.AsSpan(28), 8);
+new byte[] { 0, 0, 1, 0x65, 1, 2, 3, 4 }.CopyTo(encoded, 32);
+var frame = ScreenFrame.Parse(encoded);
+Check(frame is { Keyframe: true, Sequence: 57, TimestampMicroseconds: 1234567, Width: 1920, Height: 1080 }
+    && frame.Payload.SequenceEqual(encoded[32..]), "Screen envelope must preserve Annex-B bytes and timestamps");
+Check(ScreenFrame.Parse(encoded[..^1]) is null, "Truncated video must be rejected");
+System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(encoded.AsSpan(28), uint.MaxValue);
+Check(ScreenFrame.Parse(encoded) is null, "Oversized video length must be rejected without overflow");
+Console.WriteLine("PASS: screen wire preserves codec input and rejects invalid lengths");
 static NamedPipeServerStream Server() => new(HostClient.PipeName, PipeDirection.InOut, 20,
     PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
 static async Task Reply(NamedPipeServerStream pipe, string result)

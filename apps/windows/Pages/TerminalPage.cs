@@ -233,12 +233,12 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         var state = _session.Closed ? "Closed"
             : !_session.Alive ? "Exited"
             : "Running";
-        _inspector.Children.Add(Chrome.Stat("State", state));
+        _inspector.Children.Add(Chrome.InspectorField("State", state));
         if (_session.ExitCode.HasValue)
         {
-            _inspector.Children.Add(Chrome.Stat("Exit status", $"{_session.ExitCode}"));
+            _inspector.Children.Add(Chrome.InspectorField("Exit status", $"{_session.ExitCode}"));
         }
-        _inspector.Children.Add(Chrome.Stat("Size", $"{_session.Cols}×{_session.Rows}"));
+        _inspector.Children.Add(Chrome.InspectorField("Size", $"{_session.Cols}×{_session.Rows}"));
         if (_session.Paused)
         {
             _inspector.Children.Add(new TextBlock
@@ -250,7 +250,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         }
         if (_session.Dropped > 0)
         {
-            _inspector.Children.Add(Chrome.Stat("Dropped", $"{_session.Dropped:N0}"));
+            _inspector.Children.Add(Chrome.InspectorField("Dropped", $"{_session.Dropped:N0}"));
         }
     }
 

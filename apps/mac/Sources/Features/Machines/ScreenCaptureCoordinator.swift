@@ -694,6 +694,9 @@ private enum ScreenInput {
             cg = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
         default: cg = nil
         }
+        if event.type == "mouse", let count = event.clickCount {
+            cg?.setIntegerValueField(.mouseEventClickState, value: Int64(max(1, min(3, count))))
+        }
         if let flags = event.flags { cg?.flags = CGEventFlags(rawValue: flags) }
         cg?.post(tap: .cghidEventTap)
     }

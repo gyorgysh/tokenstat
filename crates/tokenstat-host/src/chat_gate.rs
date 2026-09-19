@@ -116,7 +116,7 @@ fn stable_hook_path(helper: &Path) -> PathBuf {
     }
     #[cfg(not(unix))]
     {
-        return helper.to_path_buf();
+        helper.to_path_buf()
     }
     #[cfg(unix)]
     link

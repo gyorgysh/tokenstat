@@ -23,7 +23,8 @@ internal sealed record RemoteFolder(
     string Name,
     string Path,
     string PeerKey,
-    string MachineLabel)
+    string MachineLabel,
+    JsonNode? Git = null)
 {
     /// <summary>How the row reads, matching the desktop Mac sidebar.</summary>
     public string DisplayName =>
@@ -115,7 +116,7 @@ internal static class RemoteWorkspaces
     /// Ask a peer a question, through this machine's daemon. The result is
     /// the peer's own, unwrapped: a failure over there is a failure here.
     /// </summary>
-    public static Task<JsonNode> CallOnPeerAsync(string peer, string method, JsonNode? parameters = null) =>
+    public static Task<JsonNode> CallOnPeerAsync(string peer, string method, JsonNode? parameters = null, TimeSpan? patience = null) =>
         AppServices.Host.CallAsync(
             "remote.call",
             new JsonObject
@@ -123,7 +124,7 @@ internal static class RemoteWorkspaces
                 ["peer"] = peer,
                 ["method"] = method,
                 ["params"] = parameters ?? new JsonObject(),
-            });
+            }, patience);
 
     /// <summary>
     /// One workspace method against a local or remote folder id. A remote id
@@ -490,7 +491,8 @@ internal static class RemoteWorkspaces
                 name,
                 Format.Text(folder, "path"),
                 peerKey,
-                peerLabel));
+                peerLabel,
+                folder["git"]?.DeepClone()));
         }
         return folders;
     }

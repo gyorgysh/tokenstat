@@ -223,6 +223,15 @@ pub(crate) fn create(
                 dropped: 0,
             })),
         );
+    #[cfg(windows)]
+    if !cfg!(test)
+        && let Err(error) = crate::windows_screen::start(id.clone())
+    {
+        if let Ok(mut held) = sessions().lock() {
+            held.remove(&id);
+        }
+        return Err(error);
+    }
     Ok(CaptureReceiver { id, receiver: rx })
 }
 

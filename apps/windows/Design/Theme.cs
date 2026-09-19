@@ -41,6 +41,32 @@ internal enum SyntaxKind
 /// </summary>
 internal static class Theme
 {
+    private static bool _controlsInstalled;
+
+    public static void InstallControlResources()
+    {
+        if (_controlsInstalled || Application.Current is null) return;
+        _controlsInstalled = true;
+        var resources = Application.Current.Resources;
+        foreach (var key in new[] { "ButtonBackground", "TextControlBackground", "TextControlBackgroundFocused",
+            "TabViewItemHeaderBackgroundSelected", "TabViewItemHeaderDragBackground",
+            "ComboBoxBackground", "ComboBoxBackgroundUnfocused", "ComboBoxDropDownBackground" })
+            resources[key] = PanelBrush;
+        foreach (var key in new[] { "ButtonBackgroundPointerOver", "TextControlBackgroundPointerOver",
+            "ListViewItemBackgroundPointerOver", "TabViewItemHeaderBackgroundPointerOver",
+            "ComboBoxBackgroundPointerOver", "ComboBoxItemBackgroundPointerOver" })
+            resources[key] = Brush(static () => RowHighlight);
+        foreach (var key in new[] { "ButtonBackgroundPressed", "ListViewItemBackgroundSelected",
+            "ListViewItemBackgroundSelectedPointerOver", "ListViewItemBackgroundSelectedPressed",
+            "ComboBoxBackgroundPressed", "ComboBoxItemBackgroundSelected", "TabViewItemHeaderBackgroundPressed" })
+            resources[key] = Brush(static () => RowSelected);
+        foreach (var key in new[] { "ButtonBorderBrush", "ButtonBorderBrushPointerOver", "TextControlBorderBrush",
+            "TextControlBorderBrushPointerOver", "TabViewItemHeaderBorderBrush" })
+            resources[key] = BorderBrush;
+        resources["TextControlBorderBrushFocused"] = AccentBrush;
+        resources["TabViewBackground"] = TabStripBrush;
+    }
+
     // RequestedTheme is the app preference; ActualTheme follows system
     // changes while the window is alive. The shell supplies its current root.
     private static ElementTheme? _windowTheme;

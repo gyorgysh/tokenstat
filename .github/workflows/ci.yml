@@ -214,6 +214,8 @@ jobs:
 
   test:
     name: test ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.os == 'windows-latest' && '-D warnings -C target-feature=+crt-static' || '-D warnings' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -232,12 +234,25 @@ jobs:
         run: cargo build --workspace --all-features --locked
 
       - name: Test
+        env:
+          TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
         run: cargo test --workspace --all-features --locked
 
       - uses: actions/setup-dotnet@v6
         if: runner.os == 'Windows'
         with:
           dotnet-version: '8.0.x'
+
+      - name: Compile the native Windows UI
+        if: runner.os == 'Windows'
+        run: dotnet build apps/windows/Tokenstat.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64
+
+      - name: Native Windows editor and H.264 playback regressions
+        if: runner.os == 'Windows'
+        env:
+          TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
+        timeout-minutes: 5
+        run: dotnet run --project scripts/tests/windows-ui/WindowsUiTests.csproj -c Release
 
       - name: Windows client and daemon lifetime regressions
         if: runner.os == 'Windows'

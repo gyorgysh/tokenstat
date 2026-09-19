@@ -188,7 +188,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
             });
-            _inspector.Children.Add(Chrome.Stat("Matches", $"{_hitCount:N0}"));
+            _inspector.Children.Add(Chrome.InspectorField("Matches", $"{_hitCount:N0}"));
             if (_unreadable > 0)
             {
                 _inspector.Children.Add(new TextBlock

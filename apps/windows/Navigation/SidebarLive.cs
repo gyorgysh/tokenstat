@@ -46,27 +46,11 @@ internal static class SidebarLive
             || tag.StartsWith(ChatAllPrefix, StringComparison.Ordinal));
 
     /// <summary>
-    /// Split a live row tag into its folder id and leaf id. Folder ids may
-    /// carry colons, so the split is at the last one.
+    /// Split a live row tag into its folder id and leaf id. Both ids may
+    /// carry a remote namespace, so each component is escaped separately.
     /// </summary>
-    public static bool TrySplit(string tag, string prefix, out string folderId, out string leaf)
-    {
-        folderId = "";
-        leaf = "";
-        if (!tag.StartsWith(prefix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-        var rest = tag[prefix.Length..];
-        var i = rest.LastIndexOf(':');
-        if (i <= 0 || i + 1 >= rest.Length)
-        {
-            return false;
-        }
-        folderId = rest[..i];
-        leaf = rest[(i + 1)..];
-        return true;
-    }
+    public static bool TrySplit(string tag, string prefix, out string folderId, out string leaf) =>
+        LiveRoute.TrySplit(tag, prefix, out folderId, out leaf);
 
     /// <summary>
     /// The fast poll: live sessions and recent chats. Null on a failed call,
@@ -233,7 +217,7 @@ internal static class SidebarLive
         var row = new NavigationViewItem
         {
             Content = panel,
-            Tag = SessionPrefix + folderId + ":" + id,
+            Tag = LiveRoute.Join(SessionPrefix, folderId, id),
         };
         AutomationProperties.SetName(row, title + ". " + stats + ". " + state);
         var cwd = Format.Text(item, "cwd");
@@ -306,7 +290,7 @@ internal static class SidebarLive
         var row = new NavigationViewItem
         {
             Content = panel,
-            Tag = ChatPrefix + folderId + ":" + id,
+            Tag = LiveRoute.Join(ChatPrefix, folderId, id),
         };
         AutomationProperties.SetName(row, title + ". " + detail);
         ToolTipService.SetToolTip(row, title + " · " + backend);

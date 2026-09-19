@@ -127,3 +127,7 @@ xcuserdata/
 # Temporary continuity render QA (depends on generated files in target/)
 /apps/mac/ContinuityQA.xcodeproj/
 /apps/mac/ContinuityQA.yml
+
+# Standalone Windows UI regression executable.
+/scripts/tests/windows-ui/bin/
+/scripts/tests/windows-ui/obj/

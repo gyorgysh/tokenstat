@@ -1,3 +1,8 @@
 [alias]
 # `cargo xtask <task>` runs the development helper in xtask/.
 xtask = "run --quiet --package xtask --"
+
+# hostd includes the native Windows screen encoder. Keep its C++ runtime in
+# the binary so a clean PC does not need a Visual C++ redistributable first.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

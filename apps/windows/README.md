@@ -111,7 +111,7 @@ from `Design/ActionIcon.cs`, the same vocabulary as
 `apps/mac/Sources/Design/ActionIcon.swift`.
 
 Terminals, SSH password and key connect, Notes, Workflows, Automations,
-Browser, and Legend screen share (JPEG stills) are in this cut. The canvas
+Browser, and Legend screen sharing are in this cut. The canvas
 editor is not. The boards and reports are.
 
 ## Icon
@@ -121,3 +121,40 @@ editor is not. The boards and reports are.
 ```
 python3 scripts/generate-windows-icon.py
 ```
+
+## Remote work and screen sharing
+
+Devices puts Remote access beside Always-on host, before the machine list.
+Connected machines group their folders in the sidebar. Folder rows include the
+branch and working-tree additions/removals. Sessions offers the target machine's
+shells and agents, including explicit Install and Sign in actions.
+
+Files and Browser retain their tabs while changing workspace sections. Remote
+files use the same editor as local files. Remote loopback addresses in the
+browser use encrypted forwarding; tabs share a listener until the last user
+closes it. SSH connections explicitly choose a saved key, a password, or pasted
+private-key material.
+
+Windows screen viewing uses Media Foundation with Annex-B H.264 samples. The
+Windows host also captures an unlocked desktop and encodes H.264 for Apple,
+Android, and Windows viewers. Capture lives in hostd, so it survives quitting the
+app when Always-on host is enabled. Mouse, drag, wheel, physical keys, and text
+input require the existing per-device Control grant. Closing or revoking a
+session releases held keys/buttons. Secure desktops (including the lock screen)
+are not captured or controlled. Encoder/capture failures appear in `hostd.log`
+and are sent to the viewer.
+
+The Windows CI job runs the encoder with synthetic pixels, then opens its frames
+through the production Windows player pipeline. It also tests actual RichEdit
+text round trips, including trailing newlines. To run those checks on Windows:
+
+```powershell
+$env:TOKENSTAT_SCREEN_FIXTURE = Join-Path $env:TEMP 'tokenstat-screen-fixture'
+cargo test -p tokenstat-host native_encoder_produces_an_independent_annex_b_frame
+dotnet run --project scripts/tests/windows-ui/WindowsUiTests.csproj -c Release
+```
+
+Real-machine acceptance still includes Mac → Windows and Windows → Mac screen
+view/control, display selection, revocation while dragging, Always-on mode after
+quitting the Windows app, and LAN versus relay connections. The synthetic test
+does not replace these checks.

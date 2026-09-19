@@ -100,7 +100,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
         if (!string.IsNullOrEmpty(_branch))
         {
-            _inspector.Children.Add(Chrome.Stat("Branch", WorkspaceGit.ShortBranch(_branch)));
+            _inspector.Children.Add(Chrome.InspectorField("Branch", WorkspaceGit.ShortBranch(_branch)));
         }
         if (!string.IsNullOrEmpty(_summary))
         {
@@ -626,29 +626,125 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
     private async Task LoadSessionsAsync()
     {
-        var chrome = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = Theme.SpaceS,
-        };
-        chrome.Children.Add(ActionIconGlyph.Button("New shell", ActionIcon.Create, (_, _) =>
-        {
-            var open = AppServices.OpenTerminal;
-            if (open is null)
-            {
-                _root.Children.Insert(1, Chrome.Banner(
-                    "Terminals are not wired in this window.",
-                    Theme.Danger,
-                    Symbol.Important));
-                return;
-            }
-            open(_id, null);
-        }));
-        _root.Children.Add(chrome);
+        var launchers = new StackPanel { Spacing = Theme.SpaceS };
+        _root.Children.Add(Chrome.Card("Start a session", launchers));
+        await LoadLaunchersAsync(launchers);
         _sessionsHost.Children.Clear();
         _root.Children.Add(_sessionsHost);
         await RefreshSessionsAsync();
         StartSessionsPoll();
+    }
+
+    private Task<JsonNode> CallTargetAsync(string method, JsonNode? parameters = null, TimeSpan? patience = null) =>
+        RemoteWorkspaces.TrySplit(_id, out var peer, out _)
+            ? RemoteWorkspaces.CallOnPeerAsync(peer, method, parameters, patience)
+            : AppServices.Host.CallAsync(method, parameters, patience);
+
+    private async Task LoadLaunchersAsync(StackPanel host)
+    {
+        host.Children.Clear();
+        try
+        {
+            var catalog = await CallTargetAsync("launcher.catalog");
+            host.Children.Add(new TextBlock
+            {
+                Text = RemoteWorkspaces.IsRemote(_id)
+                    ? "Agents and shells run on the remote machine in this folder."
+                    : "Agents and shells run on this PC in this folder.",
+                Opacity = 0.7, FontSize = 12, TextWrapping = TextWrapping.Wrap,
+            });
+            var tiles = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceS };
+            foreach (var profile in Format.Items(catalog) ?? new JsonArray())
+            {
+                if (profile is null || Format.Flag(profile, "hidden")) continue;
+                var id = Format.Text(profile, "id");
+                var installed = Format.Flag(profile, "installed");
+                var body = new StackPanel { Spacing = Theme.SpaceS };
+                body.Children.Add(new TextBlock
+                {
+                    Text = Format.Text(profile, "name", id),
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                });
+                body.Children.Add(new TextBlock
+                {
+                    Text = !installed ? "Not installed" : Format.Text(profile, "readiness") switch
+                    {
+                        "signedIn" => "Signed in", "needsSignIn" => "Sign in required", "expired" => "Sign-in expired",
+                        _ => id == "shell" ? "Ready" : "Installed",
+                    },
+                    Opacity = 0.65, FontSize = 12,
+                });
+                var actions = new FlowPanel { Spacing = Theme.SpaceS };
+                async Task RunAsync(Button button, string operation)
+                {
+                    button.IsEnabled = false;
+                    try
+                    {
+                        if (operation == "install")
+                        {
+                            var result = await CallTargetAsync("launcher.install", new JsonObject { ["id"] = id }, TimeSpan.FromMinutes(5));
+                            if (!Format.Flag(result, "ok")) throw new InvalidOperationException(Format.Text(result, "output", "Installation failed."));
+                            await LoadLaunchersAsync(host);
+                            return;
+                        }
+                        JsonNode session;
+                        if (operation == "signIn")
+                        {
+                            session = await CallTargetAsync("launcher.signIn", new JsonObject
+                            {
+                                ["id"] = id, ["rows"] = 30, ["cols"] = 100, ["dark"] = Theme.IsDark,
+                            });
+                        }
+                        else
+                        {
+                            session = await AppServices.Host.CallAsync("pty.spawn", new JsonObject
+                            {
+                                ["workspaceId"] = _id, ["command"] = Format.Text(profile, "command"),
+                                ["args"] = profile["args"]?.DeepClone() ?? new JsonArray(),
+                                ["rows"] = 30, ["cols"] = 100, ["dark"] = Theme.IsDark,
+                            });
+                        }
+                        var sessionId = Format.Text(session, "id");
+                        if (string.IsNullOrEmpty(sessionId)) throw new InvalidOperationException("The host did not return a session.");
+                        if (operation == "signIn" && RemoteWorkspaces.TrySplit(_id, out var peer, out _))
+                            sessionId = RemoteWorkspaces.Join(peer, sessionId);
+                        AppServices.OpenTerminal?.Invoke(_id, sessionId);
+                    }
+                    catch (Exception ex)
+                    {
+                        host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+                    }
+                    finally { button.IsEnabled = true; }
+                }
+                if (installed)
+                {
+                    var launch = ActionIconGlyph.Button(id == "shell" ? "New shell" : "Launch", ActionIcon.Run, (_, _) => { });
+                    launch.Click += async (_, _) => await RunAsync(launch, "launch");
+                    actions.Children.Add(launch);
+                    if (Format.Flag(profile["signIn"], "supported"))
+                    {
+                        var signIn = ActionIconGlyph.Button("Sign in", ActionIcon.SignIn, (_, _) => { });
+                        signIn.Click += async (_, _) => await RunAsync(signIn, "signIn");
+                        actions.Children.Add(signIn);
+                    }
+                }
+                else if (!string.IsNullOrEmpty(Format.Text(profile, "installCommand")))
+                {
+                    var install = ActionIconGlyph.Button("Install", ActionIcon.Download, (_, _) => { });
+                    install.Click += async (_, _) => await RunAsync(install, "install");
+                    actions.Children.Add(install);
+                }
+                body.Children.Add(actions);
+                tiles.Children.Add(new Border
+                {
+                    Child = body, Padding = new Thickness(Theme.SpaceM),
+                    BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(Theme.CardRadius),
+                });
+            }
+            host.Children.Add(tiles);
+        }
+        catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
     }
 
     /// <summary>
