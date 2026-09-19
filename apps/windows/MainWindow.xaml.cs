@@ -28,6 +28,21 @@ public sealed partial class MainWindow : Window
     /// NavigationView content grid never shows its default grey through.
     /// </summary>
     private readonly Border _contentHost = new();
+    /// <summary>
+    /// The content body: the global toolbar above, the inspector host below.
+    /// One toolbar for the window rather than one per page, mirroring the Mac
+    /// detail chrome, which carries the same search and inspector marks.
+    /// </summary>
+    private readonly Grid _bodyGrid = new();
+    /// <summary>The slot the toolbar rebuilds into on navigation and theme change.</summary>
+    private readonly Border _toolbarSlot = new();
+    private readonly InspectorHost _inspectorHost = new();
+    /// <summary>
+    /// What the toolbar scope picker asks reports to count. Every device by
+    /// default, like the Mac and the Home page: a person with two machines
+    /// wants their year, not one PC's share of it.
+    /// </summary>
+    private DeviceScope _scope = DeviceScope.AllDevices;
     // One brush instance per flat surface, shared by every element showing
     // that tone. A theme change mutates the color in place, which reaches the
     // NavigationView template too: a StaticResource lookup would keep a
@@ -57,7 +72,15 @@ public sealed partial class MainWindow : Window
         TitlePaneSide.Background = _chromeSidebar;
         TitleContentSide.Background = _chromeBackground;
         _contentHost.Background = _chromeBackground;
-        _contentHost.Child = _frame;
+        _bodyGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _bodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(_toolbarSlot, 0);
+        _bodyGrid.Children.Add(_toolbarSlot);
+        Grid.SetRow(_inspectorHost, 1);
+        _bodyGrid.Children.Add(_inspectorHost);
+        _inspectorHost.SetContent(_frame);
+        _contentHost.Child = _bodyGrid;
+        RebuildToolbar();
 
         _nav.IsSettingsVisible = false;
         _nav.OpenPaneLength = 240;
@@ -88,9 +111,8 @@ public sealed partial class MainWindow : Window
             Icon = new SymbolIcon { Symbol = Symbol.Folder },
         });
 
-        // Search has no row in the main list, like the Mac, where it is a
-        // toolbar icon. It sits in the footer until this window grows one.
-        _nav.FooterMenuItems.Add(Item(GlobalSection.Search));
+        // Search is a toolbar icon, like the Mac: it opens the search page from
+        // anywhere without taking a row. Account and About keep the footer.
         _nav.FooterMenuItems.Add(Item(GlobalSection.Account));
         _nav.FooterMenuItems.Add(Item(GlobalSection.About));
 
@@ -100,6 +122,7 @@ public sealed partial class MainWindow : Window
         RootGrid.Children.Add(_nav);
         ApplyChromeColors();
         RootGrid.ActualThemeChanged += (_, _) => ApplyChromeColors();
+        RootGrid.SizeChanged += (_, _) => SyncInspectorFit();
         // Keep the titlebar split on the pane edge when the pane collapses to
         // its compact width. The display mode itself is fixed at Left.
         _nav.RegisterPropertyChangedCallback(
@@ -306,6 +329,9 @@ public sealed partial class MainWindow : Window
         var splash = HostSplash.View(state, error, () => { _hostWake?.TrySetResult(); });
         _hostSplash = splash;
         _frame.Content = splash;
+        _inspectorHost.RouteAllowsInspector = false;
+        _inspectorHost.SetInspector(null);
+        RebuildToolbar();
         Motion.PlayDoor(splash);
     }
 
@@ -344,7 +370,116 @@ public sealed partial class MainWindow : Window
             page.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         }
         _frame.Content = page;
+        _inspectorHost.RouteAllowsInspector = page is not AccountPage;
+        _inspectorHost.SetInspector((page as IInspectorContent)?.Inspector);
+        if (page is IScopeAware aware)
+        {
+            aware.ApplyScope(_scope);
+        }
+        RebuildToolbar();
         Motion.PlayArrival(page);
+    }
+
+    /// <summary>
+    /// Rebuild the global toolbar for what is on screen: the scope picker only
+    /// on Home and Insights, the inspector toggle on every page that may show
+    /// one. Account never shows an inspector, so it gets no toggle either.
+    /// </summary>
+    private void RebuildToolbar()
+    {
+        var content = _frame.Content;
+        List<UIElement>? leading = null;
+        if (content is HomePage or InsightsPage)
+        {
+            leading = new List<UIElement> { ScopePicker() };
+        }
+        var trailing = new List<UIElement>
+        {
+            Buttons.ToolbarIcon(ActionIcon.Search, "Search work", (_, _) => OpenSearch()),
+        };
+        if (content is Page and not AccountPage)
+        {
+            // Last, nearest the edge it opens, like the Mac: the toggle is the
+            // control beside the column it controls.
+            bool open = _inspectorHost.IsInspectorVisible;
+            trailing.Add(Buttons.ToolbarIcon(
+                ActionIcon.Collapse,
+                open ? "Hide inspector" : "Show inspector",
+                (_, _) => ToggleInspector(),
+                open));
+        }
+        _toolbarSlot.Child = DetailBar.View(leading, null, null, trailing);
+    }
+
+    /// <summary>
+    /// The This device / All devices switch. Text-only segments like the Home
+    /// page's own chips, fixed at the Mac picker's width so the bar never
+    /// jitters between selections.
+    /// </summary>
+    private UIElement ScopePicker()
+    {
+        var options = new List<(string Value, string Label, ActionIcon? Glyph)>
+        {
+            ("local", "This device", null),
+            ("account", "All devices", null),
+        };
+        var picker = SegmentedCapsule.View(options, _scope.Wire(), value =>
+        {
+            SetScope(value);
+            return Task.CompletedTask;
+        });
+        picker.Width = 280;
+        return picker;
+    }
+
+    private void SetScope(string value)
+    {
+        var next = DeviceScopeNames.FromWire(value);
+        if (next == _scope)
+        {
+            return;
+        }
+        _scope = next;
+        if (_frame.Content is IScopeAware aware)
+        {
+            aware.ApplyScope(_scope);
+        }
+        RebuildToolbar();
+    }
+
+    /// <summary>
+    /// Open the search page from the toolbar. No row carries it any more, so
+    /// the selection clears: leaving the old row lit would claim the sidebar
+    /// and the content agree when they do not, and the lit row would not
+    /// navigate back.
+    /// </summary>
+    private void OpenSearch()
+    {
+        Show("global:Search");
+        _nav.SelectedItem = null;
+    }
+
+    private void ToggleInspector()
+    {
+        _inspectorHost.IsOpen = !_inspectorHost.IsOpen;
+        _inspectorHost.Refresh();
+        RebuildToolbar();
+    }
+
+    /// <summary>
+    /// Hide the inspector on narrow windows without spending the user's choice:
+    /// the toggle preference stands, so widening brings the column back.
+    /// </summary>
+    private void SyncInspectorFit()
+    {
+        bool fits = RootGrid.ActualWidth <= 0 || RootGrid.ActualWidth >= InspectorHost.FitEdge;
+        if (fits == _inspectorHost.FitsWidth)
+        {
+            return;
+        }
+        _inspectorHost.FitsWidth = fits;
+        _inspectorHost.Refresh();
+        RebuildToolbar();
     }
 
     private void NavOnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -662,6 +797,10 @@ public sealed partial class MainWindow : Window
         _chromeBackground.Color = Theme.Background;
         _chromeSidebar.Color = Theme.Sidebar;
         _chromeBorder.Color = Theme.Border;
+        _inspectorHost.ApplyTheme();
+        // The toolbar bakes its brushes at build time, like the pages do at
+        // navigation: rebuild it so a theme change repaints it too.
+        RebuildToolbar();
         SyncTitleBarSplit();
         TryTitleBarColors();
     }
