@@ -755,18 +755,24 @@ internal static class Chrome
             double circumference = Math.PI * diameter;
             var arc = new Ellipse
             {
-                Width = diameter,
-                Height = diameter,
+                Width = size,
+                Height = size,
                 Stroke = Theme.AccentBrush,
                 StrokeThickness = lineWidth,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
-                StrokeDashArray = new DoubleCollection { fraction * circumference, circumference },
+                // XAML dash lengths are multiples of the stroke thickness,
+                // not pixels. Both rings share the same centerline diameter.
+                StrokeDashArray = new DoubleCollection
+                {
+                    fraction * circumference / lineWidth,
+                    circumference / lineWidth,
+                },
                 RenderTransform = new RotateTransform
                 {
                     Angle = -90,
-                    CenterX = diameter / 2,
-                    CenterY = diameter / 2,
+                    CenterX = size / 2,
+                    CenterY = size / 2,
                 },
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,

@@ -7,6 +7,7 @@
 
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using System.Runtime.InteropServices;
 using Tokenstat.Install;
 
 namespace Tokenstat;
@@ -40,9 +41,26 @@ internal static class Program
             {
                 // Logging must not become a second crash.
             }
+            try
+            {
+                // XAML may not have initialized yet. A native dialog still
+                // gives a double-click launch failure somewhere to go.
+                MessageBoxW(IntPtr.Zero,
+                    "tokenstat couldn't start. Try opening it again.\n\n" +
+                    "If the problem continues, details are in " +
+                    "%LOCALAPPDATA%\\tokenstat\\logs\\startup.log.\n\n" + ex.Message,
+                    "tokenstat", 0x10);
+            }
+            catch
+            {
+                // Keep the original nonzero exit if Windows cannot show UI.
+            }
             return 1;
         }
     }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int MessageBoxW(IntPtr owner, string text, string caption, uint type);
 
     private static int Run(string[] args)
     {
