@@ -1129,7 +1129,10 @@ fn session_command(command: &str, args: &[String]) -> CommandBuilder {
     {
         use base64::Engine;
         let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
-        let mut script = format!("& {}", quote(windows_shell_path(command)));
+        let mut script = format!(
+            "$ErrorActionPreference = 'Stop'; & {}",
+            quote(windows_shell_path(command))
+        );
         for arg in args {
             script.push(' ');
             script.push_str(&quote(arg));
@@ -2512,7 +2515,7 @@ mod tests {
         let script = directory.join("agent.cmd");
         std::fs::write(
             &script,
-            "@echo off\r\necho shim-arg:%~1\r\necho shim-cwd:%CD%\r\n",
+            "@echo off\r\necho shim-arg:%~1\r\necho shim-cwd:%CD%\r\nexit /b 7\r\n",
         )
         .unwrap();
         let m = Manager::new();
@@ -2530,14 +2533,32 @@ mod tests {
                 environment: vec![],
             })
             .expect("batch shim through an interpreter");
+        let canonical = std::fs::canonicalize(&directory).unwrap();
+        let expected_cwd = format!(
+            "shim-cwd:{}",
+            windows_shell_path(&canonical.to_string_lossy())
+        )
+        .to_lowercase();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut output = String::new();
+        while std::time::Instant::now() < deadline {
+            output = String::from_utf8_lossy(&m.read(&session.id, 0).unwrap().bytes).into_owned();
+            if output.contains("shim-arg:hello world")
+                && output.to_lowercase().contains(&expected_cwd)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(
+            output.contains("shim-arg:hello world")
+                && output.to_lowercase().contains(&expected_cwd),
+            "expected {expected_cwd:?}; PTY output {output:?}; session {:?}",
+            m.info(&session.id)
+        );
         assert!(wait_for(|| m
-            .read(&session.id, 0)
-            .map(|chunk| {
-                let text = String::from_utf8_lossy(&chunk.bytes);
-                text.contains("shim-arg:hello world")
-                    && text.contains(&format!("shim-cwd:{}", directory.display()))
-            })
-            .unwrap_or(false)));
+            .info(&session.id)
+            .is_ok_and(|info| info.exit_code == Some(7))));
         let _ = m.close(&session.id);
         let _ = std::fs::remove_dir_all(directory);
     }

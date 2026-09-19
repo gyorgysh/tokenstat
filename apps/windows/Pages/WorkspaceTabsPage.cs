@@ -85,7 +85,20 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
     private void OpenSurface(string key, string label, Func<Page> create, bool closable = true)
     {
         var tab = _tabs.Open(key, label, () => create(), closable);
-        tab.IconSource ??= new FontIconSource { Glyph = key.StartsWith("terminal:") ? "\uE756" : "\uE80A" };
+        if (tab.IconSource is null)
+        {
+            if (key.StartsWith("terminal:")) tab.IconSource = new FontIconSource { Glyph = "\uE756" };
+            else if (key == "section:Launcher") tab.IconSource = new SymbolIconSource { Symbol = Symbol.AllApps };
+            else if (key.StartsWith("section:") && Enum.TryParse<WorkspaceSection>(key[8..], out var section))
+            {
+                tab.IconSource = section.Action().Icon() switch
+                {
+                    FontIcon font => new FontIconSource { Glyph = font.Glyph, FontFamily = font.FontFamily },
+                    SymbolIcon symbol => new SymbolIconSource { Symbol = symbol.Symbol },
+                    _ => null,
+                };
+            }
+        }
         RefreshChrome();
     }
 
