@@ -53,13 +53,31 @@ internal static class TabStrip
                 Width = new GridLength(1, GridUnitType.Star),
             });
         }
+        // The strip owns its selection. A tap repaints first and then runs
+        // the handler, so the highlight and the content cannot disagree while
+        // a load is in flight, and tapping the lit tab stays a no-op. Callers
+        // that rebuild the strip in their handler get the same end state.
+        string current = selected;
+        var paints = new List<(string Value, Action<bool> Paint)>();
         int column = 0;
         foreach (var tab in tabs)
         {
             var value = tab.Value;
-            bool active = value == selected;
-            var cell = TabCell(tab.Label, tab.Glyph, active, () =>
-                value == selected ? Task.CompletedTask : onSelect(value));
+            var (cell, paint) = TabCell(tab.Label, tab.Glyph, value == current);
+            paints.Add((value, paint));
+            cell.Click += async (_, _) =>
+            {
+                if (value == current)
+                {
+                    return;
+                }
+                current = value;
+                foreach (var (other, repaint) in paints)
+                {
+                    repaint(other == current);
+                }
+                await onSelect(value);
+            };
             Grid.SetColumn(cell, column);
             row.Children.Add(cell);
             column++;
@@ -78,7 +96,7 @@ internal static class TabStrip
         return strip;
     }
 
-    private static Button TabCell(string label, ActionIcon? glyph, bool active, Func<Task> onTap)
+    private static (Button Cell, Action<bool> Paint) TabCell(string label, ActionIcon? glyph, bool active)
     {
         var content = new StackPanel
         {
@@ -87,10 +105,10 @@ internal static class TabStrip
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        IconElement? mark = null;
         if (glyph.HasValue)
         {
-            var mark = glyph.Value.Icon();
-            mark.Foreground = active ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
+            mark = glyph.Value.Icon();
             content.Children.Add(new Viewbox
             {
                 Width = 11,
@@ -99,42 +117,34 @@ internal static class TabStrip
                 Child = mark,
             });
         }
-        content.Children.Add(new TextBlock
+        var text = new TextBlock
         {
             Text = label,
             FontFamily = Fonts.Interface,
             FontSize = 13,
-            FontWeight = active
-                ? Microsoft.UI.Text.FontWeights.SemiBold
-                : Microsoft.UI.Text.FontWeights.Normal,
-            Foreground = active ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph),
             VerticalAlignment = VerticalAlignment.Center,
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
-        });
+        };
+        content.Children.Add(text);
         var face = new Grid
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
         };
         face.Children.Add(content);
-        face.Children.Add(new Border
+        var marker = new Border
         {
             Height = 2.5,
             CornerRadius = new CornerRadius(1.25),
             Margin = new Thickness(Theme.SpaceS, 0, Theme.SpaceS, 0),
             VerticalAlignment = VerticalAlignment.Top,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Background = active
-                ? Theme.AccentBrush
-                : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-        });
+        };
+        face.Children.Add(marker);
         var tab = new Button
         {
             Content = face,
-            Background = active
-                ? Theme.AccentSoftBrush
-                : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
             BorderThickness = new Thickness(0),
             Padding = new Thickness(Theme.SpaceXs, 0, Theme.SpaceXs, 0),
             CornerRadius = new CornerRadius(0),
@@ -146,18 +156,35 @@ internal static class TabStrip
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
         };
-        // The native hover and pressed fills are grey, which on a dark strip
-        // is the same colour as everything around it. Pin them to the resting
-        // fills so the selected tab stays the only accent on the row.
-        Brush resting = tab.Background;
-        tab.Resources["ButtonBackgroundPointerOver"] = resting;
-        tab.Resources["ButtonBackgroundPressed"] = resting;
         tab.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         tab.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        tab.Click += async (_, _) => await onTap();
+        void Paint(bool now)
+        {
+            if (mark is not null)
+            {
+                mark.Foreground = now ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
+            }
+            text.FontWeight = now
+                ? Microsoft.UI.Text.FontWeights.SemiBold
+                : Microsoft.UI.Text.FontWeights.Normal;
+            text.Foreground = now ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
+            marker.Background = now
+                ? Theme.AccentBrush
+                : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            // The native hover and pressed fills are grey, which on a dark strip
+            // is the same colour as everything around it. Pin them to the resting
+            // fills so the selected tab stays the only accent on the row.
+            Brush resting = now
+                ? Theme.AccentSoftBrush
+                : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            tab.Background = resting;
+            tab.Resources["ButtonBackgroundPointerOver"] = resting;
+            tab.Resources["ButtonBackgroundPressed"] = resting;
+            AutomationProperties.SetItemStatus(tab, now ? "Selected" : "Not selected");
+        }
+        Paint(active);
         ToolTipService.SetToolTip(tab, label);
         AutomationProperties.SetName(tab, label);
-        AutomationProperties.SetItemStatus(tab, active ? "Selected" : "Not selected");
-        return tab;
+        return (tab, Paint);
     }
 }

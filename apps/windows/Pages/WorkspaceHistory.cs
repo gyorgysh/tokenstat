@@ -237,8 +237,17 @@ internal static class WorkspaceHistory
             Opacity = 0.7,
         });
         stack.Children.Add(counts);
+        var diffs = detail?["diffs"] as JsonArray;
         ContentDialog? dialog = null;
         string? selectedPath = null;
+        bool reviewAll = false;
+        if (diffs is not null && diffs.Count > 0)
+        {
+            // The whole commit on one screen, like the Mac commit view. The
+            // diffs arrived with the detail call, so this reads nothing new.
+            stack.Children.Add(ActionIconGlyph.Button(
+                "Review all", ActionIcon.Compare, (_, _) => { reviewAll = true; dialog?.Hide(); }));
+        }
         if (files is not null)
         {
             foreach (var file in files)
@@ -296,11 +305,38 @@ internal static class WorkspaceHistory
             CloseButtonText = "Close",
         };
         await Chrome.ShowDialog(owner, dialog);
+        if (reviewAll && diffs is not null)
+        {
+            // Every file from the fetched diffs, with the counts the file
+            // list already showed. A file the host sent no diff for stays in
+            // the dialog list rather than opening an error card here.
+            var reviewFiles = new List<(string Path, string Kind, long? Added, long? Removed)>();
+            foreach (var item in diffs)
+            {
+                var diffPath = Format.Text(item, "path");
+                if (string.IsNullOrEmpty(diffPath))
+                {
+                    continue;
+                }
+                var fileMeta = files?.FirstOrDefault(
+                    file => Format.Text(file, "path") == diffPath);
+                reviewFiles.Add((
+                    diffPath,
+                    Format.Text(fileMeta, "kind"),
+                    fileMeta?["added"] is null ? null : Format.Long(fileMeta, "added"),
+                    fileMeta?["removed"] is null ? null : Format.Long(fileMeta, "removed")));
+            }
+            await WorkspaceDiff.ShowReviewAllAsync(
+                owner,
+                reviewFiles,
+                path => Task.FromResult(diffs.FirstOrDefault(
+                    item => Format.Text(item, "path") == path)));
+        }
         if (selectedPath is not null)
         {
             // The commit owns this diff. Do not read the current working tree,
             // and wait for the detail dialog to close before showing another.
-            var diff = (detail?["diffs"] as JsonArray)?.FirstOrDefault(
+            var diff = diffs?.FirstOrDefault(
                 item => Format.Text(item, "path") == selectedPath);
             await WorkspaceDiff.ShowFileDiffAsync(owner,
                 WorkspaceGit.ShortId(commitId) + " · " + selectedPath, diff);

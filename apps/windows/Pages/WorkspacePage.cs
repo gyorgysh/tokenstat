@@ -573,13 +573,9 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             label += $" ↓{behind}";
         }
+        // No leading icon: the switch button already carries the branch
+        // glyph, and a second identical mark beside it reads as a dead button.
         var row = new FlowPanel { Spacing = Theme.SpaceS };
-        row.Children.Add(new SymbolIcon
-        {
-            Symbol = ActionIcon.Merge.Symbol(),
-            Foreground = Theme.AccentBrush,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
         var switchButton = ActionIconGlyph.Button(label, ActionIcon.Merge, async (_, _) =>
         {
             await WorkspaceBranches.ShowAsync(this, _id, current);

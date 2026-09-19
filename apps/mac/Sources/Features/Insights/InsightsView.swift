@@ -708,6 +708,9 @@ private struct AccountInsightsContent: View {
                         ForEach(rows.filter { search.isEmpty || $0.key.localizedCaseInsensitiveContains(search) }
                             .sorted { $0.valueMicros > $1.valueMicros }) { row in
                             HStack {
+                                if model.cut == .source {
+                                    HarnessMark(id: row.key, size: 26)
+                                }
                                 Text(model.cut.title(for: row.key)).lineLimit(1)
                                 Spacer()
                                 VStack(alignment: .trailing) {

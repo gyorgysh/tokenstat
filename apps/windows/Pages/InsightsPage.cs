@@ -42,6 +42,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     private DeviceScope _scope = DeviceScopeNames.Restore();
     private readonly Dictionary<string, JsonNode?> _accountReports = new();
     private string _accountCut = "model";
+    private string _accountFilter = "";
+    private TextBox? _accountFilterBox;
     private string? _accountIdentity;
     private int _scopeGeneration;
     private void AccountChanged()
@@ -64,6 +66,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         _scope = scope;
         _scopeGeneration++;
         _hasContent = false;
+        _visible = FirstPage;
         RebuildTabs();
         RaiseToolbarChanged();
         _ = LoadAsync();
@@ -268,7 +271,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             _tabSlot.Content = TabStrip.View(new List<(string Value, string Label, ActionIcon? Glyph)>
             {
                 ("model", "Models", null), ("source", "Harnesses", null), ("day", "Days", null),
-            }, _accountCut, async value => { _accountCut = value; await LoadAsync(); });
+            }, _accountCut, async value => { _accountCut = value; _visible = FirstPage; await LoadAsync(); });
             return;
         }
         _tabSlot.Content = TabStrip.View(LocalTabs, _tab, value =>
@@ -612,29 +615,208 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             _root.Children.Add(new TextBlock { Text = $"Refresh unavailable. Showing usage fetched {fetched.LocalDateTime:g}.", TextWrapping = TextWrapping.Wrap });
         }
         var rows = Format.Items(report, "rows") ?? new JsonArray();
-        var list = new StackPanel { Spacing = Theme.SpaceS };
-        foreach (var row in rows.OrderByDescending(row => Format.Long(row, "valueMicros")).Take(_visible))
+        if (_accountCut == "day" && rows.Count > 0)
         {
-            var grid = new Grid { ColumnSpacing = Theme.SpaceM };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var key = Format.Text(row, "key");
-            grid.Children.Add(new TextBlock { Text = key, TextTrimming = TextTrimming.CharacterEllipsis });
-            var figures = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right };
-            figures.Children.Add(new TextBlock { Text = Money(row), Foreground = Theme.AccentBrush, HorizontalAlignment = HorizontalAlignment.Right });
-            figures.Children.Add(new TextBlock { Text = $"{Format.Long(row?["counters"], "total"):N0} tokens", Opacity = .65, FontSize = 12 });
-            Grid.SetColumn(figures, 1);
-            grid.Children.Add(figures);
-            list.Children.Add(grid);
+            // The daily shape first, like the phone: bars are read at a
+            // glance, the cards below are the audit trail. Cloned: a node
+            // keeps its parent and the cached report must keep its rows.
+            var ascending = new JsonArray();
+            foreach (var row in rows.OrderBy(row => Format.Text(row, "key")))
+            {
+                ascending.Add(row?.DeepClone());
+            }
+            _root.Children.Add(Chrome.Card(
+                "Daily activity",
+                DailyChart(ascending, showsValue: false, showsToggle: false),
+                "Tokens per day · cache included"));
         }
-        if (rows.Count == 0) list.Children.Add(new TextBlock { Text = "No synced usage in this period." });
-        _root.Children.Add(Chrome.Card(_accountCut switch { "source" => "Harnesses", "day" => "Days", _ => "Models" }, list));
-        if (rows.Count > _visible)
+        var plural = _accountCut switch { "source" => "harnesses", "day" => "days", _ => "models" };
+        var box = new TextBox
+        {
+            PlaceholderText = "Filter " + plural,
+            Text = _accountFilter,
+        };
+        box.TextChanged += (_, _) =>
+        {
+            _accountFilter = box.Text;
+            _visible = FirstPage;
+            Render();
+            // The render rebuilt this box. Hand focus back so the next
+            // keystroke has somewhere to land.
+            if (_accountFilterBox is not null)
+            {
+                _accountFilterBox.Focus(FocusState.Programmatic);
+                _accountFilterBox.SelectionStart = _accountFilterBox.Text.Length;
+            }
+        };
+        _accountFilterBox = box;
+        _root.Children.Add(box);
+        var term = _accountFilter.Trim();
+        var filtered = rows
+            .Where(row => term.Length == 0
+                || Format.Text(row, "key").Contains(term, StringComparison.OrdinalIgnoreCase)
+                || AccountTitle(Format.Text(row, "key")).Contains(term, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(row => Format.Long(row, "valueMicros"))
+            .ToList();
+        if (rows.Count == 0)
+        {
+            _root.Children.Add(new TextBlock { Text = "No synced usage in this period." });
+            return;
+        }
+        if (filtered.Count == 0)
+        {
+            _root.Children.Add(new TextBlock
+            {
+                Text = "Nothing matches \"" + term + "\".",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return;
+        }
+        // A share bar needs something to be a share of, and the largest shown
+        // row is a steadier reference than the total.
+        long peak = 1;
+        foreach (var row in filtered)
+        {
+            peak = Math.Max(peak, Format.Long(row, "valueMicros"));
+        }
+        _root.Children.Add(new TextBlock
+        {
+            Text = _accountCut switch { "source" => "Harnesses", "day" => "Days", _ => "Models" },
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontSize = 13,
+        });
+        var list = new StackPanel { Spacing = Theme.SpaceS };
+        foreach (var row in filtered.Take(_visible))
+        {
+            list.Children.Add(AccountRowCard(row, peak));
+        }
+        _root.Children.Add(list);
+        if (filtered.Count > _visible)
         {
             var more = new Button { Content = "Show more" };
             more.Click += (_, _) => { _visible += PageStep; Render(); };
             _root.Children.Add(more);
         }
+    }
+
+    /// <summary>
+    /// One synced row as its own card: the name, compact tokens and events,
+    /// the list-rate value, and the share of the largest shown row. Harness
+    /// rows carry the tool's mark, like the phone.
+    /// </summary>
+    private UIElement AccountRowCard(JsonNode? row, long peak)
+    {
+        var key = Format.Text(row, "key");
+        var head = new Grid { ColumnSpacing = Theme.SpaceM };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var lead = new Grid { ColumnSpacing = Theme.SpaceS, VerticalAlignment = VerticalAlignment.Center };
+        int nameCol = 0;
+        if (_accountCut == "source")
+        {
+            lead.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var mark = AgentMark.View(key, 26);
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            lead.Children.Add(mark);
+            nameCol = 1;
+        }
+        lead.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var names = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+        var title = _accountCut == "model"
+            ? Fonts.Code(AccountTitle(key), Fonts.Callout)
+            : Fonts.Text(AccountTitle(key), Fonts.Callout);
+        title.TextTrimming = TextTrimming.CharacterEllipsis;
+        title.MaxLines = 1;
+        names.Children.Add(title);
+        long tokens = Format.Long(row?["counters"], "total");
+        var caption = Format.Tokens(tokens) + " tokens";
+        if (SessionsCount(row) is string sessions)
+        {
+            caption += ", " + sessions + " events";
+        }
+        names.Children.Add(new TextBlock
+        {
+            Text = caption,
+            FontSize = Fonts.Caption,
+            Opacity = 0.7,
+        });
+        Grid.SetColumn(names, nameCol);
+        lead.Children.Add(names);
+        head.Children.Add(lead);
+        var value = Fonts.Numeric(Money(row), 16);
+        value.Foreground = Theme.AccentBrush;
+        value.HorizontalAlignment = HorizontalAlignment.Right;
+        value.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(value, 1);
+        head.Children.Add(value);
+        var track = new Grid { Height = 4 };
+        track.Children.Add(new Rectangle
+        {
+            Fill = Theme.AccentSoftBrush,
+            RadiusX = 2,
+            RadiusY = 2,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        });
+        var fill = new Rectangle
+        {
+            Fill = Theme.AccentBrush,
+            Opacity = 0.55,
+            RadiusX = 2,
+            RadiusY = 2,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Width = 0,
+        };
+        track.Children.Add(fill);
+        double fraction = peak > 0
+            ? Math.Min(1, (double)Format.Long(row, "valueMicros") / peak)
+            : 0;
+        track.SizeChanged += (_, e) =>
+        {
+            if (e.NewSize.Width > 0)
+            {
+                fill.Width = Math.Max(2, e.NewSize.Width * fraction);
+            }
+        };
+        var body = new StackPanel { Spacing = 6 };
+        body.Children.Add(head);
+        body.Children.Add(track);
+        return new Border
+        {
+            Background = Theme.PanelBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(Theme.CardRadius),
+            Padding = new Thickness(Theme.SpaceS),
+            Child = body,
+        };
+    }
+
+    /// <summary>
+    /// A synced row's key as a person reads it. A harness id is a slug, and a
+    /// day is an ISO date nobody says out loud. Same rule as the phone.
+    /// </summary>
+    private string AccountTitle(string key)
+    {
+        if (_accountCut == "source")
+        {
+            return HarnessName(key);
+        }
+        if (_accountCut == "day")
+        {
+            return FormatDay(key);
+        }
+        return string.IsNullOrEmpty(key) ? "unknown" : key;
+    }
+
+    private static string FormatDay(string key)
+    {
+        if (DateTime.TryParseExact(
+            key, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            return date.ToString("MMM d, yyyy", CultureInfo.CurrentCulture);
+        }
+        return key;
     }
 
     private JsonArray TabRows(string tab)
@@ -1059,6 +1241,16 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             var key = Format.Text(row, "key");
             var cell = new StackPanel { Spacing = 7 };
             var head = new Grid();
+            int nameCol = 0;
+            if (isHarness)
+            {
+                head.ColumnSpacing = Theme.SpaceS;
+                head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var mark = AgentMark.View(key, 16);
+                mark.VerticalAlignment = VerticalAlignment.Center;
+                head.Children.Add(mark);
+                nameCol = 1;
+            }
             head.ColumnDefinitions.Add(new ColumnDefinition
             {
                 Width = new GridLength(1, GridUnitType.Star),
@@ -1070,9 +1262,12 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 : Fonts.Code(string.IsNullOrEmpty(key) ? "unknown" : key, Fonts.Callout);
             name.TextTrimming = TextTrimming.CharacterEllipsis;
             name.MaxLines = 1;
+            name.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(name, nameCol);
             head.Children.Add(name);
             var count = Fonts.Numeric(Format.Tokens(tokens), Fonts.Callout);
-            Grid.SetColumn(count, 1);
+            count.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(count, nameCol + 1);
             head.Children.Add(count);
             var pct = new TextBlock
             {
@@ -1080,8 +1275,9 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 FontSize = Fonts.Subheadline,
                 Opacity = 0.7,
                 TextAlignment = TextAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
             };
-            Grid.SetColumn(pct, 2);
+            Grid.SetColumn(pct, nameCol + 2);
             head.Children.Add(pct);
             cell.Children.Add(head);
             var track = new Grid { Height = 5 };
@@ -1191,7 +1387,13 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 EmptyArtKind.FirstBars);
         }
         var stack = new StackPanel { Spacing = 0 };
+        int nameCol = isHarness ? 1 : 0;
         var header = new Grid { Padding = new Thickness(Theme.SpaceM, Theme.SpaceS, Theme.SpaceM, Theme.SpaceS) };
+        if (isHarness)
+        {
+            header.ColumnSpacing = Theme.SpaceS;
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        }
         header.ColumnDefinitions.Add(new ColumnDefinition
         {
             Width = new GridLength(1, GridUnitType.Star),
@@ -1202,17 +1404,22 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
         }
-        header.Children.Add(HeaderCell("NAME", TextAlignment.Left));
+        var nameHead = HeaderCell("NAME", TextAlignment.Left);
+        if (isHarness)
+        {
+            Grid.SetColumnSpan(nameHead, 2);
+        }
+        header.Children.Add(nameHead);
         var sessions = HeaderCell("SESSIONS", TextAlignment.Right);
-        Grid.SetColumn(sessions, 1);
+        Grid.SetColumn(sessions, 1 + nameCol);
         header.Children.Add(sessions);
         var tokens = HeaderCell("TOKENS", TextAlignment.Right);
-        Grid.SetColumn(tokens, 2);
+        Grid.SetColumn(tokens, 2 + nameCol);
         header.Children.Add(tokens);
         if (showsValue)
         {
             var value = HeaderCell("VALUE", TextAlignment.Right);
-            Grid.SetColumn(value, 3);
+            Grid.SetColumn(value, 3 + nameCol);
             header.Children.Add(value);
         }
         stack.Children.Add(header);
@@ -1238,6 +1445,14 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             {
                 Padding = new Thickness(Theme.SpaceM, Theme.SpaceS, Theme.SpaceM, Theme.SpaceS),
             };
+            if (isHarness)
+            {
+                line.ColumnSpacing = Theme.SpaceS;
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var mark = AgentMark.View(key, 16);
+                mark.VerticalAlignment = VerticalAlignment.Center;
+                line.Children.Add(mark);
+            }
             line.ColumnDefinitions.Add(new ColumnDefinition
             {
                 Width = new GridLength(1, GridUnitType.Star),
@@ -1253,6 +1468,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 : Fonts.Text(DisplayName(key, isHarness), Fonts.Headline);
             name.TextTrimming = TextTrimming.CharacterEllipsis;
             name.MaxLines = 1;
+            name.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(name, nameCol);
             line.Children.Add(name);
             var sessionCount = Fonts.Tabular(new TextBlock
             {
@@ -1261,7 +1478,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Opacity = 0.7,
                 TextAlignment = TextAlignment.Right,
             });
-            Grid.SetColumn(sessionCount, 1);
+            Grid.SetColumn(sessionCount, 1 + nameCol);
             line.Children.Add(sessionCount);
             var tokenCount = Fonts.Tabular(new TextBlock
             {
@@ -1270,7 +1487,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Opacity = 0.7,
                 TextAlignment = TextAlignment.Right,
             });
-            Grid.SetColumn(tokenCount, 2);
+            Grid.SetColumn(tokenCount, 2 + nameCol);
             line.Children.Add(tokenCount);
             if (showsValue)
             {
@@ -1282,7 +1499,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                     MaxLines = 1,
                 });
                 ToolTipService.SetToolTip(value, "Value at list rates, not billed");
-                Grid.SetColumn(value, 3);
+                Grid.SetColumn(value, 3 + nameCol);
                 line.Children.Add(value);
             }
             var hit = new Border

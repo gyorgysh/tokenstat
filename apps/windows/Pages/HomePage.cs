@@ -349,16 +349,6 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             _delivered = "local";
         }
 
-        JsonNode? totals = null;
-        try
-        {
-            totals = await AppServices.Host.CallAsync("totals");
-        }
-        catch
-        {
-            // The archive totals are a footnote. The grid is the screen.
-        }
-
         _planError = null;
         JsonArray limits = new();
         JsonNode? limitsSync = null;
@@ -478,10 +468,6 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             && !(limitsSync?["enabled"]?.GetValue<bool>() ?? false))
         {
             _root.Children.Add(LimitsSyncHint());
-        }
-        if (totals is not null)
-        {
-            _root.Children.Add(ArchiveFootnote(totals));
         }
         EnsureSelection();
         RefreshInspector();
@@ -1395,16 +1381,6 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             TextWrapping = TextWrapping.Wrap,
         });
         return Chrome.Card("Share plan usage", body);
-    }
-
-    private static UIElement ArchiveFootnote(JsonNode totals)
-    {
-        var counters = totals["counters"];
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceL };
-        row.Children.Add(Chrome.Stat("Events", Format.Tokens(Format.Long(totals, "events"))));
-        row.Children.Add(Chrome.Stat("Tokens", Format.Tokens(Format.Long(counters, "total"))));
-        row.Children.Add(Chrome.Stat("Days", Format.Long(totals, "days").ToString()));
-        return Chrome.Card("This archive", row);
     }
 
     /// <summary>
