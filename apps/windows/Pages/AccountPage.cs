@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
@@ -16,22 +17,56 @@ using Tokenstat.Notifications;
 
 namespace Tokenstat.Pages;
 
+/// <summary>
+/// Account is three jobs, not one scrolling pile: who you are, vendor quota
+/// windows, and what this PC itself does. Mirrors the Mac AccountView panes.
+/// </summary>
 internal sealed class AccountPage : Page
 {
+    private readonly ContentControl _barSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
+    private readonly ContentControl _tabSlot = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _signSlot = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _content = new() { Spacing = Theme.SpaceL };
     private CancellationTokenSource? _pullPoll;
 
+    private string _pane = "account";
+    private JsonNode? _account;
+    private string? _accountError;
+    private bool _signedIn;
+
     public AccountPage()
     {
         _root.Children.Add(_signSlot);
         _root.Children.Add(_content);
-        Content = new ScrollViewer
+        var scroller = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
             Content = _root,
         };
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition
+        {
+            Height = new GridLength(1, GridUnitType.Star),
+        });
+        layout.Children.Add(_barSlot);
+        Grid.SetRow(_tabSlot, 1);
+        layout.Children.Add(_tabSlot);
+        Grid.SetRow(scroller, 2);
+        layout.Children.Add(scroller);
+        Content = layout;
+        RebuildChrome();
+        RebuildTabs();
         Loaded += async (_, _) => await LoadAsync();
         Unloaded += (_, _) =>
         {
@@ -43,43 +78,149 @@ internal sealed class AccountPage : Page
         };
     }
 
+    private void RebuildChrome()
+    {
+        var trailing = new List<UIElement>();
+        if (_signedIn)
+        {
+            trailing.Add(Buttons.ToolbarIcon(
+                ActionIcon.Refresh,
+                "Sync now",
+                async (_, _) => await SyncNowAsync()));
+        }
+        _barSlot.Content = DetailBar.View(trailing: trailing);
+    }
+
+    private void RebuildTabs()
+    {
+        var tabs = new List<(string Value, string Label, ActionIcon? Glyph)>
+        {
+            ("account", "Account", ActionIcon.Account),
+            ("limits", "Plan limits", ActionIcon.Plan),
+            ("pc", "This PC", ActionIcon.Device),
+        };
+        _tabSlot.Content = TabStrip.View(
+            tabs,
+            _pane,
+            async value =>
+            {
+                _pane = value;
+                RebuildTabs();
+                await RenderPaneAsync();
+            });
+    }
+
     private async Task LoadAsync()
     {
-        _content.Children.Clear();
-        JsonNode account;
         try
         {
-            account = await AppServices.Host.CallAsync("account.status");
+            _account = await AppServices.Host.CallAsync("account.status");
+            _accountError = null;
         }
         catch (Exception ex)
         {
-            _content.Children.Add(Chrome.Banner(
-                FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
-            _content.Children.Add(NotificationsCard());
-            _content.Children.Add(UpdateCard());
+            _account = null;
+            _accountError = FriendlyError.Display(ex.Message);
+        }
+        _signedIn = _account?["signedIn"]?.GetValue<bool>() ?? false;
+        RebuildChrome();
+        RebuildTabs();
+        await RenderPaneAsync();
+    }
+
+    private async Task RenderPaneAsync()
+    {
+        _content.Children.Clear();
+        switch (_pane)
+        {
+            case "limits":
+                await RenderLimitsPaneAsync();
+                break;
+            case "pc":
+                await RenderThisPcPaneAsync();
+                break;
+            default:
+                await RenderAccountPaneAsync();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Who you are, who can reach you, and the legal end of the account.
+    /// </summary>
+    private async Task RenderAccountPaneAsync()
+    {
+        var account = _account;
+        if (account is null)
+        {
+            if (!string.IsNullOrEmpty(_accountError))
+            {
+                _content.Children.Add(Chrome.Banner(
+                    _accountError, Theme.Danger, Symbol.Important));
+            }
+            _content.Children.Add(await PullConnectionCardAsync());
+            _content.Children.Add(PrivacyNote());
+            _content.Children.Add(AboutBlurb());
             return;
         }
-
-        var signedIn = account["signedIn"]?.GetValue<bool>() ?? false;
-        if (!signedIn)
+        if (!_signedIn)
         {
             _content.Children.Add(SignedOutCard());
         }
         else
         {
             _content.Children.Add(IdentityCard(account));
-            _content.Children.Add(SyncCard(account));
-            _content.Children.Add(DevicesSummaryCard(account));
-            _content.Children.Add(await PlanLimitsCardAsync());
             _content.Children.Add(RelayUsageCard(account));
+            _content.Children.Add(SyncCard(account));
+            _content.Children.Add(DevicesCard(account));
         }
-
-        _content.Children.Add(await LocalTrafficCardAsync());
         _content.Children.Add(await PullConnectionCardAsync());
+        _content.Children.Add(PrivacyNote());
+        if (_signedIn)
+        {
+            _content.Children.Add(DeleteAccountCard(account));
+        }
+        _content.Children.Add(AboutBlurb());
+    }
+
+    private async Task RenderLimitsPaneAsync()
+    {
+        var account = _account;
+        if (account is null)
+        {
+            if (!string.IsNullOrEmpty(_accountError))
+            {
+                _content.Children.Add(Chrome.Banner(
+                    _accountError, Theme.Danger, Symbol.Important));
+            }
+            else
+            {
+                _content.Children.Add(new ProgressRing
+                {
+                    IsActive = true,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                });
+            }
+            return;
+        }
+        if (!_signedIn)
+        {
+            _content.Children.Add(LimitsSignedOutCard());
+            return;
+        }
+        _content.Children.Add(await PlanLimitsCardAsync());
+    }
+
+    /// <summary>
+    /// Settings that live on this computer, signed in or not.
+    /// </summary>
+    private async Task RenderThisPcPaneAsync()
+    {
+        _content.Children.Add(await HostCardAsync());
+        _content.Children.Add(await LocalTrafficCardAsync());
+        _content.Children.Add(await LocalModelsCardAsync());
         _content.Children.Add(NotificationsCard());
         _content.Children.Add(UpdateCard());
-        _content.Children.Add(PrivacyNote());
-        _content.Children.Add(AboutBlurb());
     }
 
     /// <summary>
@@ -104,6 +245,18 @@ internal sealed class AccountPage : Page
             "Not signed in",
             body,
             "Everything works without an account. Signing in only adds the option to publish.");
+    }
+
+    private UIElement LimitsSignedOutCard()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        body.Children.Add(ActionIconGlyph.PrimaryButton(
+            "Sign in to tokenstat.ai", ActionIcon.SignIn,
+            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, LoadAsync)));
+        return Chrome.Card(
+            "Plan limits",
+            body,
+            "Sign in to track vendor quota windows on this PC and share them with your other devices.");
     }
 
     /// <summary>Who you are, at the size a profile deserves.</summary>
@@ -143,6 +296,14 @@ internal sealed class AccountPage : Page
         {
             body.Children.Add(new TextBlock { Text = host, Opacity = 0.55, FontSize = 12 });
         }
+        if (!string.IsNullOrEmpty(handle) && !string.IsNullOrEmpty(host))
+        {
+            // The profile is a public page and this is the only place in the
+            // app that knows its address.
+            var url = host.TrimEnd('/') + "/" + handle;
+            body.Children.Add(ActionIconGlyph.Button(
+                "View profile", ActionIcon.External, (_, _) => Open(url)));
+        }
         return Chrome.Card("Account", body);
     }
 
@@ -164,20 +325,7 @@ internal sealed class AccountPage : Page
         });
         row.Children.Add(ActionIconGlyph.Button("Sync now", ActionIcon.Refresh, async (_, _) =>
         {
-            try
-            {
-                await AppServices.Host.CallAsync(
-                    "sync.run",
-                    new JsonObject(),
-                    TimeSpan.FromMinutes(5));
-            }
-            catch (Exception ex)
-            {
-                _content.Children.Insert(0, Chrome.Banner(
-                    FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
-                return;
-            }
-            await LoadAsync();
+            await SyncNowAsync();
         }));
         body.Children.Add(row);
         body.Children.Add(ActionIconGlyph.Button("Sign out", ActionIcon.SignOut, async (_, _) =>
@@ -189,7 +337,30 @@ internal sealed class AccountPage : Page
         return Chrome.Card("Sync", body, "Only aggregate counters are eligible");
     }
 
-    private static UIElement DevicesSummaryCard(JsonNode account)
+    private async Task SyncNowAsync()
+    {
+        try
+        {
+            await AppServices.Host.CallAsync(
+                "sync.run",
+                new JsonObject(),
+                TimeSpan.FromMinutes(5));
+        }
+        catch (Exception ex)
+        {
+            _content.Children.Insert(0, Chrome.Banner(
+                FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
+            return;
+        }
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Every device that has synced to this account. The one you are sitting
+    /// at is marked, or the list is a set of opaque ids and the only machine
+    /// anyone can act on is the one they cannot pick out.
+    /// </summary>
+    private static UIElement DevicesCard(JsonNode account)
     {
         var machines = account["machines"] as JsonArray;
         var used = machines?.Count ?? 0;
@@ -211,50 +382,172 @@ internal sealed class AccountPage : Page
                 subtitle = $"{used} linked";
             }
         }
+        if (used == 0)
+        {
+            return Chrome.Card(
+                "Devices",
+                EmptyState.View(
+                    "Nothing linked yet",
+                    "Free includes two devices. Sync now to put this PC on the account.",
+                    EmptyArtKind.Devices),
+                subtitle);
+        }
         var body = new StackPanel { Spacing = Theme.SpaceS };
+        var thisId = Format.Text(account, "thisMachineId");
+        foreach (var machine in machines!.OfType<JsonNode>())
+        {
+            var id = Format.Text(machine, "id");
+            if (string.IsNullOrEmpty(id))
+            {
+                id = Format.Text(machine, "machineID");
+            }
+            body.Children.Add(MachineRow(machine, id, id == thisId));
+        }
         body.Children.Add(new TextBlock
         {
-            Text = used == 0
-                ? "Nothing linked yet. Sync now to put this PC on the account."
-                : "Rename, reach, or remove a device on the Devices page.",
+            Text = "Rename, reach, or remove a device on the Devices page.",
             Opacity = 0.7,
+            FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
         return Chrome.Card("Devices", body, subtitle);
     }
 
+    private static UIElement MachineRow(JsonNode machine, string id, bool isThis)
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var left = new StackPanel { Spacing = 1 };
+        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        var label = Format.Text(machine, "label");
+        if (!string.IsNullOrEmpty(label))
+        {
+            head.Children.Add(new TextBlock
+            {
+                Text = label,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+        }
+        else if (!string.IsNullOrEmpty(id))
+        {
+            // A machine the user has never named shows its id. The id is a
+            // public machine key, so it is shown plain and selectable rather
+            // than blurred.
+            head.Children.Add(new TextBlock
+            {
+                Text = id,
+                FontFamily = Fonts.Mono,
+                FontSize = 12,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                IsTextSelectionEnabled = true,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+        }
+        else
+        {
+            head.Children.Add(new TextBlock
+            {
+                Text = "Unnamed device",
+                Opacity = 0.7,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+        }
+        if (isThis)
+        {
+            head.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(9),
+                Background = Theme.AccentSoftBrush,
+                Padding = new Thickness(5, 2, 5, 2),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = "THIS PC",
+                    FontSize = 9,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = Theme.AccentBrush,
+                },
+            });
+        }
+        left.Children.Add(head);
+        // Only when the machine has a name, so the id is not printed twice on
+        // a row that is already showing it as its title.
+        if (!string.IsNullOrEmpty(label) && !string.IsNullOrEmpty(id))
+        {
+            left.Children.Add(new TextBlock
+            {
+                Text = id,
+                FontFamily = Fonts.Mono,
+                FontSize = 10,
+                Opacity = 0.55,
+                IsTextSelectionEnabled = true,
+            });
+        }
+        row.Children.Add(left);
+        var seen = Format.Text(machine, "lastSyncAt");
+        var stamp = string.IsNullOrEmpty(seen)
+            ? ""
+            : Format.Relative(seen);
+        if (string.IsNullOrEmpty(stamp))
+        {
+            seen = Format.Text(machine, "lastSeenAt");
+            stamp = string.IsNullOrEmpty(seen) ? "never synced" : "last used " + Format.Relative(seen);
+        }
+        var right = new TextBlock
+        {
+            Text = stamp,
+            FontSize = 12,
+            Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(right, 1);
+        row.Children.Add(right);
+        return row;
+    }
+
     /// <summary>
-    /// Opt-in posting of vendor quota windows. The master switch is the
-    /// privacy gate, off by default: percentages and reset times only, never
-    /// a credential.
+    /// Opt-in posting of vendor quota windows, one switch per reading we have.
+    /// The master switch is still the privacy gate, off by default: percentages
+    /// and reset times only, never a credential. Each row is a source the user
+    /// can leave on this PC, for an expired subscription or a tool they do not
+    /// want on the phone.
     /// </summary>
     private async Task<UIElement> PlanLimitsCardAsync()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
-        var enabled = false;
-        var providers = new List<(string Source, string Detail)>();
+        JsonNode state;
         try
         {
-            var state = await AppServices.Host.CallAsync(
+            state = await AppServices.Host.CallAsync(
                 "config.limitsSync", new JsonObject());
-            enabled = state["enabled"]?.GetValue<bool>() ?? false;
-            if (state["providers"] is JsonArray list)
-            {
-                foreach (var provider in list)
-                {
-                    var source = Format.Text(provider, "source", "Plan");
-                    var plan = Format.Text(provider, "plan");
-                    var note = Format.Text(provider, "note");
-                    var detail = string.IsNullOrEmpty(plan) ? note : plan;
-                    providers.Add((source, detail));
-                }
-            }
         }
         catch (Exception ex)
         {
             body.Children.Add(Chrome.Banner(
                 FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
             return Chrome.Card("Plan limits", body);
+        }
+        var enabled = state["enabled"]?.GetValue<bool>() ?? false;
+        var skip = new HashSet<string>(StringComparer.Ordinal);
+        if (state["skip"] is JsonArray skipped)
+        {
+            foreach (var item in skipped)
+            {
+                try
+                {
+                    var source = item?.GetValue<string>();
+                    if (!string.IsNullOrEmpty(source))
+                    {
+                        skip.Add(source);
+                    }
+                }
+                catch
+                {
+                    // A non-string entry is not a source.
+                }
+            }
         }
         body.Children.Add(new TextBlock
         {
@@ -266,8 +559,7 @@ internal sealed class AccountPage : Page
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
-        var isOn = enabled;
-        body.Children.Add(Chrome.ToggleChip("Share with my devices", isOn, async on =>
+        body.Children.Add(Chrome.ToggleChip("Share with my devices", enabled, async on =>
         {
             try
             {
@@ -283,7 +575,8 @@ internal sealed class AccountPage : Page
             }
             await LoadAsync();
         }));
-        if (providers.Count == 0)
+        var providers = state["providers"] as JsonArray;
+        if (providers is null || providers.Count == 0)
         {
             body.Children.Add(new TextBlock
             {
@@ -295,27 +588,466 @@ internal sealed class AccountPage : Page
         }
         else
         {
-            foreach (var (source, detail) in providers)
+            foreach (var provider in providers.OfType<JsonNode>())
             {
-                var row = new StackPanel { Spacing = 2 };
-                row.Children.Add(new TextBlock { Text = source });
-                if (!string.IsNullOrEmpty(detail))
-                {
-                    row.Children.Add(new TextBlock
-                    {
-                        Text = detail,
-                        Opacity = 0.7,
-                        FontSize = 12,
-                        TextWrapping = TextWrapping.Wrap,
-                    });
-                }
-                body.Children.Add(row);
+                var source = Format.Text(provider, "source", "Plan");
+                body.Children.Add(PlanLimitRow(provider, source, !skip.Contains(source)));
             }
         }
         return Chrome.Card(
             "Plan limits",
             body,
             "Track vendor quota windows. Off means this PC does not read that vendor and does not show it on Home.");
+    }
+
+    private UIElement PlanLimitRow(JsonNode provider, string source, bool shared)
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var left = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        left.Children.Add(new TextBlock { Text = HarnessName(source), TextWrapping = TextWrapping.Wrap });
+        var detail = PlanLimitDetail(provider);
+        if (!string.IsNullOrEmpty(detail))
+        {
+            left.Children.Add(new TextBlock
+            {
+                Text = detail,
+                Opacity = 0.7,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        row.Children.Add(left);
+        var toggle = new ToggleSwitch
+        {
+            IsOn = shared,
+            OnContent = "",
+            OffContent = "",
+            MinWidth = 0,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        toggle.Toggled += async (_, _) =>
+        {
+            try
+            {
+                await AppServices.Host.CallAsync(
+                    "config.limitsSync",
+                    new JsonObject { ["source"] = source, ["shared"] = toggle.IsOn });
+            }
+            catch (Exception ex)
+            {
+                _content.Children.Insert(0, Chrome.Banner(
+                    FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
+                return;
+            }
+            await LoadAsync();
+        };
+        ToolTipService.SetToolTip(toggle, "Track " + HarnessName(source));
+        Grid.SetColumn(toggle, 1);
+        row.Children.Add(toggle);
+        return row;
+    }
+
+    private static string PlanLimitDetail(JsonNode provider)
+    {
+        var parts = new List<string>();
+        var plan = Format.Text(provider, "plan");
+        if (!string.IsNullOrEmpty(plan))
+        {
+            parts.Add(plan);
+        }
+        var windows = new List<string>();
+        if (provider["windows"] is JsonArray list)
+        {
+            foreach (var window in list.OfType<JsonNode>())
+            {
+                var label = Format.Text(window, "label");
+                if (string.IsNullOrEmpty(label))
+                {
+                    continue;
+                }
+                windows.Add($"{label} {(int)Math.Round(WindowPercent(window))}%");
+            }
+        }
+        if (windows.Count > 0)
+        {
+            parts.Add(string.Join(", ", windows));
+        }
+        else
+        {
+            var note = Format.Text(provider, "note");
+            if (!string.IsNullOrEmpty(note))
+            {
+                parts.Add(note);
+            }
+        }
+        try
+        {
+            if (provider["stale"]?.GetValue<bool>() == true)
+            {
+                parts.Add("last reading is old");
+            }
+        }
+        catch
+        {
+            // A missing flag is not stale.
+        }
+        return parts.Count == 0 ? "No windows reported" : string.Join(" · ", parts);
+    }
+
+    private static double WindowPercent(JsonNode window)
+    {
+        try
+        {
+            return window["percent"]?.GetValue<double>() ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Whether this PC stays a host after the app quits. The stored policy the
+    /// host helper honours.
+    /// </summary>
+    private async Task<UIElement> HostCardAsync()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        JsonNode? policy = null;
+        try
+        {
+            policy = await AppServices.Host.CallAsync("host.policy");
+        }
+        catch
+        {
+            // The card below says the helper has not answered.
+        }
+        if (policy is null)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "The host helper has not answered yet.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return Chrome.Card(
+                "This PC",
+                body,
+                "Whether the host helper stays up after you quit");
+        }
+        var alwaysOn = policy["alwaysOn"]?.GetValue<bool>() ?? false;
+        var hasBattery = policy["hasInternalBattery"]?.GetValue<bool>() ?? false;
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var left = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        left.Children.Add(new TextBlock { Text = "Always-on host" });
+        left.Children.Add(new TextBlock
+        {
+            Text = alwaysOn
+                ? "The host helper keeps running after you quit tokenstat, so other devices can reach this PC. This PC will not idle-sleep. A laptop still sleeps when you close the lid."
+                : "The host helper stops when you quit tokenstat, so this PC can sleep. Other devices cannot open folders or terminals here until you open the app again.",
+            Opacity = 0.7,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        row.Children.Add(left);
+        var toggle = new ToggleSwitch
+        {
+            IsOn = alwaysOn,
+            OnContent = "",
+            OffContent = "",
+            MinWidth = 0,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        toggle.Toggled += async (_, _) =>
+        {
+            toggle.IsEnabled = false;
+            try
+            {
+                await AppServices.Host.CallAsync(
+                    "host.setPolicy",
+                    new JsonObject { ["alwaysOn"] = toggle.IsOn });
+            }
+            catch (Exception ex)
+            {
+                _content.Children.Insert(0, Chrome.Banner(
+                    FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
+            }
+            await LoadAsync();
+        };
+        Grid.SetColumn(toggle, 1);
+        row.Children.Add(toggle);
+        body.Children.Add(row);
+        if (alwaysOn && hasBattery)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "Uses more power.",
+                Opacity = 0.7,
+                FontSize = 12,
+            });
+        }
+        if (!alwaysOn)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "Automations run only while tokenstat is open.",
+                Opacity = 0.7,
+                FontSize = 12,
+            });
+        }
+        return Chrome.Card(
+            "This PC",
+            body,
+            "Whether the host helper stays up after you quit");
+    }
+
+    /// <summary>
+    /// Local model servers on this PC, found over loopback by the host. A
+    /// missing provider is a normal state, not an error. Per-provider switches
+    /// stay on this machine, beside other launch settings.
+    /// </summary>
+    private async Task<UIElement> LocalModelsCardAsync()
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        var head = new Grid();
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.Children.Add(new TextBlock
+        {
+            Text = "Nothing is sent to tokenstat. These checks use loopback only. Start the app, load a model, then refresh.",
+            Opacity = 0.7,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var refresh = ActionIconGlyph.Button("Refresh", ActionIcon.Refresh, async (_, _) =>
+        {
+            await RenderPaneAsync();
+        });
+        Grid.SetColumn(refresh, 1);
+        head.Children.Add(refresh);
+        body.Children.Add(head);
+
+        JsonArray providers;
+        try
+        {
+            providers = await AppServices.Host.CallAsync("local.models") as JsonArray ?? new();
+        }
+        catch (Exception ex)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = FriendlyError.Display(ex.Message),
+                Foreground = Theme.Brush(Theme.Danger),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return Chrome.Card(
+                "Local models",
+                body,
+                "LM Studio on port 1234, Ollama on port 11434");
+        }
+        if (providers.Count == 0)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "LM Studio (port 1234) and Ollama (port 11434) could not be checked. Start one and tap refresh.",
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            return Chrome.Card(
+                "Local models",
+                body,
+                "LM Studio on port 1234, Ollama on port 11434");
+        }
+        foreach (var provider in providers.OfType<JsonNode>())
+        {
+            body.Children.Add(LocalProviderRow(provider));
+        }
+        return Chrome.Card(
+            "Local models",
+            body,
+            "LM Studio on port 1234, Ollama on port 11434");
+    }
+
+    private UIElement LocalProviderRow(JsonNode provider)
+    {
+        var id = Format.Text(provider, "id");
+        var available = provider["available"]?.GetValue<bool>() ?? false;
+        var enabled = LocalProviderEnabled(id);
+        var stack = new StackPanel { Spacing = Theme.SpaceS };
+        var head = new Grid();
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var left = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceS,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        left.Children.Add(new Border
+        {
+            Width = 8,
+            Height = 8,
+            CornerRadius = new CornerRadius(4),
+            Background = available && enabled ? Theme.AccentBrush : Theme.BorderBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        left.Children.Add(new TextBlock
+        {
+            Text = Format.Text(provider, "name", id),
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        head.Children.Add(left);
+        var toggle = new ToggleSwitch
+        {
+            IsOn = enabled,
+            OnContent = "",
+            OffContent = "",
+            MinWidth = 0,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        toggle.Toggled += async (_, _) =>
+        {
+            SetLocalProviderEnabled(id, toggle.IsOn);
+            await RenderPaneAsync();
+        };
+        Grid.SetColumn(toggle, 1);
+        head.Children.Add(toggle);
+        stack.Children.Add(head);
+        if (!enabled)
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = "Disabled for local model selection",
+                Opacity = 0.7,
+                FontSize = 12,
+            });
+        }
+        else if (available)
+        {
+            var models = provider["models"] as JsonArray;
+            if (models is null || models.Count == 0)
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = id == "lmstudio"
+                        ? "Server is up. Load a model in LM Studio to use it here."
+                        : "Server is up. Pull or run a model in Ollama to use it here.",
+                    Opacity = 0.7,
+                    FontSize = 12,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
+            else
+            {
+                foreach (var model in models.OfType<JsonNode>())
+                {
+                    var size = Format.Long(model, "sizeBytes");
+                    var line = new Grid();
+                    line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    line.Children.Add(new TextBlock
+                    {
+                        Text = Format.Text(model, "name"),
+                        FontFamily = Fonts.Mono,
+                        FontSize = 11,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    });
+                    if (size > 0)
+                    {
+                        var sizeBlock = new TextBlock
+                        {
+                            Text = Format.DataSize(size),
+                            FontSize = 12,
+                            Opacity = 0.6,
+                        };
+                        Grid.SetColumn(sizeBlock, 1);
+                        line.Children.Add(sizeBlock);
+                    }
+                    stack.Children.Add(line);
+                }
+            }
+        }
+        else
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = LocalProviderHint(provider, id),
+                Opacity = 0.6,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                MaxLines = 3,
+            });
+        }
+        return stack;
+    }
+
+    private static string LocalProviderHint(JsonNode provider, string id)
+    {
+        var raw = Format.Text(provider, "error", "not running");
+        if (raw == "not running" || raw.StartsWith("not running", StringComparison.Ordinal))
+        {
+            return id == "lmstudio"
+                ? "Not running. Open LM Studio and turn on the local server (port 1234)."
+                : "Not running. Start Ollama (port 11434).";
+        }
+        return raw;
+    }
+
+    /// <summary>
+    /// Local provider switches on disk. A plain file, not LocalSettings: this
+    /// app is unpackaged and has no package identity, so
+    /// <c>ApplicationData.Current</c> throws. Never read settings through a
+    /// packaged-identity API from this app.
+    /// </summary>
+    private static string LocalModelsSettingsPath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "tokenstat",
+            "localmodels.json");
+
+    private static bool LocalProviderEnabled(string id)
+    {
+        try
+        {
+            var doc = JsonNode.Parse(File.ReadAllText(LocalModelsSettingsPath)) as JsonObject;
+            return doc?["enabled"]?[id]?.GetValue<bool>() ?? true;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static void SetLocalProviderEnabled(string id, bool enabled)
+    {
+        try
+        {
+            JsonObject doc;
+            try
+            {
+                doc = JsonNode.Parse(File.ReadAllText(LocalModelsSettingsPath)) as JsonObject ?? new();
+            }
+            catch
+            {
+                doc = new();
+            }
+            var map = doc["enabled"] as JsonObject ?? new();
+            map[id] = enabled;
+            doc["enabled"] = map;
+            Directory.CreateDirectory(Path.GetDirectoryName(LocalModelsSettingsPath)!);
+            File.WriteAllText(LocalModelsSettingsPath, doc.ToJsonString());
+        }
+        catch
+        {
+            // A switch that cannot persist still works for this run.
+        }
     }
 
     /// <summary>
@@ -333,6 +1065,32 @@ internal sealed class AccountPage : Page
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
+    }
+
+    /// <summary>
+    /// Where deletion happens: `{host}/settings/data#delete` on the website.
+    /// The fragment jumps to the delete section once the page loads, so the
+    /// button lands on the section instead of the top of the page.
+    /// </summary>
+    private static UIElement DeleteAccountCard(JsonNode account)
+    {
+        var host = Format.Text(account, "host", "https://tokenstat.ai");
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        body.Children.Add(new TextBlock
+        {
+            Text = "Deletion happens on the website, where you confirm it. This removes "
+                + "the account and its uploaded history.",
+            Opacity = 0.7,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        body.Children.Add(ActionIconGlyph.Button(
+            "Open data settings", ActionIcon.External,
+            (_, _) => Open(host.TrimEnd('/') + "/settings/data#delete")));
+        return Chrome.Card(
+            "Delete this account",
+            body,
+            "Permanent. Confirmed on the website's data settings.");
     }
 
     private UIElement RelayUsageCard(JsonNode? account)
@@ -801,6 +1559,65 @@ internal sealed class AccountPage : Page
         body.Children.Add(new TextBlock { Text = AppInfo.Copyright, Opacity = 0.8 });
         body.Children.Add(ActionIconGlyph.Button(AppInfo.WebsiteLabel, ActionIcon.External, (_, _) => Open(AppInfo.Website)));
         return Chrome.Card("tokenstat", body, AppInfo.Company);
+    }
+
+    /// <summary>
+    /// Display name for a harness, the agent CLI that produced the events.
+    /// The archive stores source ids like `claude_code`. These are shown to
+    /// people, so they get the same spelling tokenstat.ai uses.
+    /// </summary>
+    private static string HarnessName(string id)
+    {
+        if (id == "opencode2")
+        {
+            return "OpenCode 2";
+        }
+        return HarnessCanonicalId(id) switch
+        {
+            "claude_code" => "Claude Code",
+            "claude_code_rollup" or "claude_code_estimate" => "Claude Code (recovered)",
+            "codex" => "Codex",
+            "grok" => "Grok Build",
+            "opencode" => "OpenCode",
+            "cline" => "Cline",
+            "openclaw" => "OpenClaw",
+            "muse" => "Muse",
+            "devin" => "Devin CLI",
+            "pi" => "Pi",
+            "dsh" => "DeepSeek Harness",
+            "zed" => "Zed",
+            "copilot" => "Copilot CLI",
+            "antigravity" => "Antigravity",
+            "cursor" => "Cursor",
+            "gemini" => "Gemini",
+            "hermes" => "Hermes Agent",
+            "kilo" => "Kilo Code",
+            "kimi" => "Kimi Code",
+            "qwen" => "Qwen Code",
+            "" => "unknown",
+            var canonical => canonical,
+        };
+    }
+
+    private static string HarnessCanonicalId(string id)
+    {
+        if (id == "agy")
+        {
+            return "antigravity";
+        }
+        if (id.StartsWith("antigravity", StringComparison.Ordinal))
+        {
+            return "antigravity";
+        }
+        if (id == "claude")
+        {
+            return "claude_code";
+        }
+        if (id == "opencode2")
+        {
+            return "opencode";
+        }
+        return id;
     }
 
     private static void Open(string url)
