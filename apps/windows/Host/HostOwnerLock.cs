@@ -13,7 +13,7 @@ namespace Tokenstat.Host;
 /// <summary>
 /// Shared lock hostd watches when Always-on is off. Same file as
 /// tokenstat-paths data_dir / host-owner.lock:
-/// %APPDATA%\tokenstat\tokenstat\host-owner.lock
+/// %APPDATA%\tokenstat\tokenstat\data\host-owner.lock
 /// </summary>
 internal static class HostOwnerLock
 {
@@ -79,12 +79,19 @@ internal static class HostOwnerLock
         stream.Dispose();
     }
 
-    private static string LockPath =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "tokenstat",
-            "tokenstat",
-            "host-owner.lock");
+    internal static string LockPath
+    {
+        get
+        {
+            // Match tokenstat-paths, including its portable-install override.
+            var data = Environment.GetEnvironmentVariable("TOKENSTAT_DATA_DIR");
+            if (string.IsNullOrEmpty(data) || !Path.IsPathFullyQualified(data))
+                data = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "tokenstat", "tokenstat", "data");
+            return Path.Combine(data, "host-owner.lock");
+        }
+    }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool LockFileEx(

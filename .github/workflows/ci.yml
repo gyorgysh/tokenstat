@@ -234,6 +234,18 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-features --locked
 
+      - uses: actions/setup-dotnet@v6
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Windows client and daemon lifetime regressions
+        if: runner.os == 'Windows'
+        run: |
+          dotnet run --project scripts/tests/windows-install/WindowsInstallTests.csproj
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project scripts/tests/windows-host/WindowsHostTests.csproj -- --hostd "$PWD/target/debug/tokenstat-hostd.exe"
+
   # The Rust half of the client, on the platform it ships to.
   #
   # This is a regression gate, not a milestone gate. Everything below the Swift

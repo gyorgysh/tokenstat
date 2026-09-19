@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 using System.IO.Pipes;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Nodes;
 using Tokenstat.Host;
@@ -23,6 +24,17 @@ static async Task<string?> Read(NamedPipeServerStream pipe)
 
 if (OperatingSystem.IsWindows())
 {
+    var originalData = Environment.GetEnvironmentVariable("TOKENSTAT_DATA_DIR");
+    try
+    {
+        Environment.SetEnvironmentVariable("TOKENSTAT_DATA_DIR", null);
+        var expected = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "tokenstat", "tokenstat", "data", "host-owner.lock");
+        Check(HostOwnerLock.LockPath == expected, "Owner lock must use the Rust data directory, including its data suffix");
+        Environment.SetEnvironmentVariable("TOKENSTAT_DATA_DIR", "relative-data");
+        Check(HostOwnerLock.LockPath == expected, "Relative data overrides must be ignored");
+    }
+    finally { Environment.SetEnvironmentVariable("TOKENSTAT_DATA_DIR", originalData); }
     var lockPath = Path.Combine(Path.GetTempPath(), "tokenstat-owner-" + Guid.NewGuid() + ".lock");
     HostOwnerLock.AcquireAt(lockPath);
     GC.Collect();
@@ -39,6 +51,55 @@ if (OperatingSystem.IsWindows())
     }
     File.Delete(lockPath);
     Console.WriteLine("PASS: Windows owner lock survives GC and releases on quit");
+
+    if (args is ["--hostd", var hostd])
+    {
+        var data = Path.Combine(Path.GetTempPath(), "tokenstat-lifetime-" + Guid.NewGuid());
+        var identity = Path.Combine(data, "identity");
+        Directory.CreateDirectory(identity);
+        File.WriteAllText(Path.Combine(identity, "host.json"), "{\"alwaysOn\":false}");
+        Process? daemon = null;
+        try
+        {
+            Environment.SetEnvironmentVariable("TOKENSTAT_DATA_DIR", data);
+            Check(HostOwnerLock.LockPath == Path.Combine(data, "host-owner.lock"), "Absolute data override was ignored");
+            HostOwnerLock.Acquire();
+            var start = new ProcessStartInfo(Path.GetFullPath(hostd))
+            { UseShellExecute = false, CreateNoWindow = true };
+            start.Environment["TOKENSTAT_IDENTITY_DIR"] = identity;
+            start.Environment["LOCALAPPDATA"] = data;
+            daemon = Process.Start(start)!;
+            var probeClient = new HostClient();
+            JsonNode? policy = null;
+            var deadline = Stopwatch.StartNew();
+            while (deadline.Elapsed < TimeSpan.FromSeconds(30))
+            {
+                Check(!daemon.HasExited, "Daemon exited during startup");
+                try { policy = await probeClient.CallAsync("host.policy", patience: TimeSpan.FromSeconds(2)); break; }
+                catch (HostException) { await Task.Delay(100); }
+            }
+            Check(policy is not null, "Daemon never answered host.policy");
+            Check(!policy!["alwaysOn"]!.GetValue<bool>(), "Lifetime fixture must disable always-on");
+            Check(policy["hostingActive"]!.GetValue<bool>(), "Rust daemon cannot see the C# app owner lock");
+            await Task.Delay(TimeSpan.FromSeconds(8)); // Longer than the daemon's owner grace period.
+            Check(!daemon.HasExited, "Daemon stopped while the app still held its owner lock");
+            HostOwnerLock.Release();
+            await daemon.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            Check(daemon.ExitCode == 0, "Daemon must stop cleanly after the last app closes");
+            Console.WriteLine("PASS: real daemon stays alive with the app and stops after ownership is released");
+        }
+        finally
+        {
+            HostOwnerLock.Release();
+            Environment.SetEnvironmentVariable("TOKENSTAT_DATA_DIR", originalData);
+            if (daemon is not null)
+            {
+                if (!daemon.HasExited) { daemon.Kill(entireProcessTree: true); await daemon.WaitForExitAsync(); }
+                daemon.Dispose();
+            }
+            Directory.Delete(data, recursive: true);
+        }
+    }
 }
 else Console.WriteLine("SKIP: native owner-lock test requires Windows");
 
