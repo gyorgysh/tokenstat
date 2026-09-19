@@ -965,10 +965,16 @@ pub(crate) fn model_arguments(
 
 /// The file name a command runs as, for matching a harness contract.
 fn executable_name(command: &str) -> &str {
-    Path::new(command)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(command)
+    let name = command.rsplit(['/', '\\']).next().unwrap_or(command);
+    for extension in [".exe", ".cmd", ".bat", ".com"] {
+        if name
+            .get(name.len().saturating_sub(extension.len())..)
+            .is_some_and(|suffix| suffix.eq_ignore_ascii_case(extension))
+        {
+            return &name[..name.len() - extension.len()];
+        }
+    }
+    name
 }
 
 fn valid_model_id(model: &str) -> bool {
@@ -1408,6 +1414,26 @@ mod tests {
                 .any(|p| p.ends_with(r"Programs\OpenAI\Codex\bin"))
         );
         let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn windows_launch_paths_keep_the_harness_model_contract() {
+        assert_eq!(
+            model_arguments(
+                r"C:\Users\admin\npm\claude.cmd",
+                Some("ollama"),
+                Some("qwen")
+            ),
+            vec!["--model", "qwen"]
+        );
+        assert_eq!(
+            model_arguments(r"C:\Codex\codex.EXE", Some("ollama"), Some("qwen")),
+            vec!["--oss", "--local-provider", "ollama", "--model", "qwen"]
+        );
+        assert_eq!(
+            super::executable_name("/usr/local/bin/opencode"),
+            "opencode"
+        );
     }
 
     #[test]
