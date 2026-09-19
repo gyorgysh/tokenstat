@@ -144,12 +144,20 @@ public sealed partial class SmokeApp : Application
                 var shortCard = new Border { MinHeight = 40 };
                 var tallCard = new Border { MinHeight = 80 };
                 cards.Children.Add(shortCard); cards.Children.Add(tallCard);
-                cards.Measure(new Windows.Foundation.Size(640, double.PositiveInfinity));
-                cards.Arrange(new Windows.Foundation.Rect(0, 0, 640, cards.DesiredSize.Height));
-                if (shortCard.ActualHeight != 80 || tallCard.ActualHeight != 80)
-                    throw new Exception("Responsive cards did not share their row height");
-                cards.Measure(new Windows.Foundation.Size(300, double.PositiveInfinity));
-                if (cards.DesiredSize.Height != 130) throw new Exception("Responsive cards did not wrap to fit a narrow viewport");
+                // Measure the real mounted surface. Off-tree Arrange can leave
+                // ActualHeight unpublished until the native layout pass runs.
+                cards.Width = 640;
+                body.Children.Add(cards);
+                body.UpdateLayout();
+                await Task.Delay(250);
+                if (Math.Abs(shortCard.ActualHeight - 80) > 0.5 || Math.Abs(tallCard.ActualHeight - 80) > 0.5)
+                    throw new Exception($"Responsive cards have heights {shortCard.ActualHeight} / {tallCard.ActualHeight}, expected 80");
+                cards.Width = 300;
+                body.UpdateLayout();
+                await Task.Delay(250);
+                if (Math.Abs(cards.ActualHeight - 130) > 0.5)
+                    throw new Exception($"Responsive cards did not wrap: height {cards.ActualHeight}, expected 130");
+                body.Children.Remove(cards);
                 Program.Log("PASS: responsive device cards align and wrap");
                 var stable = new NavigationViewItem { Tag = "live:1", Content = new TextBlock { Text = "Before" } };
                 IList<object> liveRows = new List<object> { stable };
