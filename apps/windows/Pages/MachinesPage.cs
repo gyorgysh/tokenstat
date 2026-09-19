@@ -2208,7 +2208,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             state.Children.Add(new TextBlock
             {
                 Text = FriendlyError.Display(ex.Message),
-                Foreground = Theme.Brush(Theme.Danger),
+                Foreground = Theme.Brush(static () => Theme.Danger),
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -2324,7 +2324,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             state.Children.Add(new TextBlock
             {
                 Text = FriendlyError.Display(ex.Message),
-                Foreground = Theme.Brush(Theme.Danger),
+                Foreground = Theme.Brush(static () => Theme.Danger),
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
             });

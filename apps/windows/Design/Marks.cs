@@ -173,7 +173,7 @@ internal static class Marks
             FontFamily = Fonts.Interface,
             FontSize = size * 0.88,
             FontWeight = FontWeights.Bold,
-            Foreground = Theme.Brush(Theme.DefaultText),
+            Foreground = Theme.Brush(static () => Theme.DefaultText),
             VerticalAlignment = VerticalAlignment.Center,
         });
         word.Children.Add(new TextBlock

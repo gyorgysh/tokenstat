@@ -5,6 +5,7 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
+using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
@@ -42,7 +43,40 @@ internal static class Theme
 {
     // RequestedTheme is the app preference; ActualTheme follows system
     // changes while the window is alive. The shell supplies its current root.
-    public static ElementTheme? WindowTheme { get; set; }
+    private static ElementTheme? _windowTheme;
+    private static readonly List<WeakReference<SolidColorBrush>> LiveBrushes = new();
+    private static readonly ConditionalWeakTable<SolidColorBrush, Func<Color>> BrushColors = new();
+    private static int _brushesSincePrune;
+
+    public static ElementTheme? WindowTheme
+    {
+        get => _windowTheme;
+        set
+        {
+            if (_windowTheme == value)
+            {
+                return;
+            }
+            _windowTheme = value;
+            // Called by the window's ActualThemeChanged handler on the UI
+            // thread. Recolor in place so controls retain drafts and focus.
+            for (var index = LiveBrushes.Count - 1; index >= 0; index--)
+            {
+                if (LiveBrushes[index].TryGetTarget(out var brush))
+                {
+                    if (BrushColors.TryGetValue(brush, out var color))
+                    {
+                        brush.Color = color();
+                    }
+                }
+                else
+                {
+                    LiveBrushes.RemoveAt(index);
+                }
+            }
+            _brushesSincePrune = 0;
+        }
+    }
 
     public static bool IsDark => WindowTheme switch
     {
@@ -121,13 +155,11 @@ internal static class Theme
     }
 
     /// <summary>
-    /// Default text colour, for syntax kinds that stay plain. Reads the system
-    /// primary text brush and falls back to black or white when the app
-    /// resources are not available, such as in a test.
+    /// Default text colour for explicitly colored glyphs and syntax ranges.
+    /// Follow the window theme rather than the application resource lookup,
+    /// which can still resolve the launch theme during a system change.
     /// </summary>
-    public static Color DefaultText =>
-        (Application.Current?.Resources["TextFillColorPrimaryBrush"] as SolidColorBrush)?.Color
-        ?? Hex(IsDark ? 0xFFFFFFu : 0x000000u);
+    public static Color DefaultText => Hex(IsDark ? 0xFFFFFFu : 0x000000u);
 
     /// <summary>
     /// Colour for a syntax kind. The whole palette in one place, transcribed
@@ -150,14 +182,32 @@ internal static class Theme
     };
 
     public static SolidColorBrush Brush(Color color) => new(color);
-    public static SolidColorBrush AccentBrush => Brush(Accent);
-    public static SolidColorBrush BackgroundBrush => Brush(Background);
-    public static SolidColorBrush SidebarBrush => Brush(Sidebar);
-    public static SolidColorBrush PanelBrush => Brush(Panel);
-    public static SolidColorBrush TabStripBrush => Brush(TabStrip);
-    public static SolidColorBrush BorderBrush => Brush(Border);
-    public static SolidColorBrush ControlSeatBrush => Brush(ControlSeat);
-    public static SolidColorBrush AccentSoftBrush => Brush(AccentSoft);
+    /// <summary>
+    /// A private brush whose semantic color follows the window theme. Keep
+    /// providers static or capture only value data, never a page or control.
+    /// Weak ownership lets a discarded visual tree and its providers collect.
+    /// </summary>
+    public static SolidColorBrush Brush(Func<Color> color)
+    {
+        var brush = new SolidColorBrush(color());
+        BrushColors.Add(brush, color);
+        if (++_brushesSincePrune >= 128)
+        {
+            LiveBrushes.RemoveAll(reference => !reference.TryGetTarget(out _));
+            _brushesSincePrune = 0;
+        }
+        LiveBrushes.Add(new WeakReference<SolidColorBrush>(brush));
+        return brush;
+    }
+
+    public static SolidColorBrush AccentBrush => Brush(static () => Accent);
+    public static SolidColorBrush BackgroundBrush => Brush(static () => Background);
+    public static SolidColorBrush SidebarBrush => Brush(static () => Sidebar);
+    public static SolidColorBrush PanelBrush => Brush(static () => Panel);
+    public static SolidColorBrush TabStripBrush => Brush(static () => TabStrip);
+    public static SolidColorBrush BorderBrush => Brush(static () => Border);
+    public static SolidColorBrush ControlSeatBrush => Brush(static () => ControlSeat);
+    public static SolidColorBrush AccentSoftBrush => Brush(static () => AccentSoft);
 
     public const double CardRadius = 14;
     public const double CardPadding = 16;

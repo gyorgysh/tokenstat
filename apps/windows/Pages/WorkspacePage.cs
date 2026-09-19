@@ -759,7 +759,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     Width = 8,
                     Height = 8,
                     CornerRadius = new CornerRadius(4),
-                    Background = alive ? Theme.Brush(Theme.Success) : Theme.Brush(Theme.StateIdle),
+                    Background = alive ? Theme.Brush(static () => Theme.Success) : Theme.Brush(static () => Theme.StateIdle),
                     VerticalAlignment = VerticalAlignment.Center,
                 },
                 new TextBlock

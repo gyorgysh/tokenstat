@@ -238,7 +238,7 @@ internal sealed class HeatmapView : StackPanel
                     Height = _cell,
                     RadiusX = CellCorner,
                     RadiusY = CellCorner,
-                    Fill = Theme.Brush(Theme.HeatLevel(day.Level)),
+                    Fill = Theme.Brush(() => Theme.HeatLevel(day.Level)),
                     Opacity = day.Locked ? 0.28 : 1,
                 };
                 Canvas.SetLeft(square, c * _stride);
@@ -259,14 +259,13 @@ internal sealed class HeatmapView : StackPanel
         };
         canvas.Children.Add(_selectedRing);
 
-        var primary = Theme.DefaultText;
         _hoverRing = new Rectangle
         {
             Width = _cell,
             Height = _cell,
             RadiusX = CellCorner,
             RadiusY = CellCorner,
-            Stroke = Theme.Brush(Windows.UI.Color.FromArgb(140, primary.R, primary.G, primary.B)),
+            Stroke = Theme.Brush(static () => WithAlpha(Theme.DefaultText, 140)),
             StrokeThickness = 1,
             Visibility = Visibility.Collapsed,
         };
@@ -329,13 +328,14 @@ internal sealed class HeatmapView : StackPanel
         legend.Children.Add(LegendLabel("Less"));
         for (int level = 0; level < 5; level++)
         {
+            var heatLevel = level;
             legend.Children.Add(new Rectangle
             {
                 Width = 9,
                 Height = 9,
                 RadiusX = 2,
                 RadiusY = 2,
-                Fill = Theme.Brush(Theme.HeatLevel(level)),
+                Fill = Theme.Brush(() => Theme.HeatLevel(heatLevel)),
             });
         }
         legend.Children.Add(LegendLabel("More"));
@@ -372,7 +372,7 @@ internal sealed class HeatmapView : StackPanel
                 var ago = Fonts.Text("· " + freshness, 11);
                 if (_snap.NoticeCode == "stale")
                 {
-                    ago.Foreground = Theme.Brush(Theme.Warning);
+                    ago.Foreground = Theme.Brush(static () => Theme.Warning);
                 }
                 else
                 {
@@ -644,7 +644,6 @@ internal sealed class HeatmapView : StackPanel
 
     private static Border HistoryBanner(int days)
     {
-        var accent = Theme.Accent;
         var lead = new Microsoft.UI.Xaml.Documents.Run
         {
             Text = "Older history is locked. ",
@@ -676,7 +675,7 @@ internal sealed class HeatmapView : StackPanel
         });
         return new Border
         {
-            Background = Theme.Brush(Windows.UI.Color.FromArgb(140, accent.R, accent.G, accent.B)),
+            Background = Theme.Brush(static () => WithAlpha(Theme.Accent, 140)),
             BorderBrush = Theme.BorderBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
@@ -684,6 +683,9 @@ internal sealed class HeatmapView : StackPanel
             Child = stack,
         };
     }
+
+    private static Windows.UI.Color WithAlpha(Windows.UI.Color color, byte alpha) =>
+        Windows.UI.Color.FromArgb(alpha, color.R, color.G, color.B);
 
     private static Snapshot Parse(JsonNode calendar)
     {

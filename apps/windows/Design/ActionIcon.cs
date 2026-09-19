@@ -229,7 +229,7 @@ internal static class ActionIconGlyph
         {
             Background = Theme.AccentSoftBrush,
             Foreground = Theme.AccentBrush,
-            BorderBrush = Theme.Brush(Theme.Accent),
+            BorderBrush = Theme.Brush(static () => Theme.Accent),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Content = new StackPanel

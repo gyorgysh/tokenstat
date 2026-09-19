@@ -206,7 +206,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         _inspector.Children.Add(new TextBlock
         {
             Text = Format.Flag(chat, "running") ? "Running" : "Idle",
-            Foreground = Format.Flag(chat, "running") ? Theme.AccentBrush : Theme.Brush(Theme.StateIdle),
+            Foreground = Format.Flag(chat, "running") ? Theme.AccentBrush : Theme.Brush(static () => Theme.StateIdle),
         });
         _inspector.Children.Add(Chrome.Stat(
             "Agent", Format.Text(backend, "label", Format.Text(chat, "backend", "Agent"))));
@@ -1032,7 +1032,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         var text = new TextBlock
         {
             Text = item.Text,
-            Foreground = Theme.Brush(Theme.Danger),
+            Foreground = Theme.Brush(static () => Theme.Danger),
             TextWrapping = TextWrapping.Wrap,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -1219,7 +1219,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             Text = title,
             FontWeight = FontWeights.SemiBold,
-            Foreground = item.Failed ? Theme.Brush(Theme.Danger) : Theme.AccentBrush,
+            Foreground = item.Failed ? Theme.Brush(static () => Theme.Danger) : Theme.AccentBrush,
             TextWrapping = TextWrapping.Wrap,
         });
         if (!string.IsNullOrEmpty(item.Detail))
@@ -1252,14 +1252,14 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         heading.Children.Add(Fonts.Tabular(new TextBlock
         {
             Text = "+" + item.Added,
-            Foreground = Theme.Brush(Theme.DiffAdded),
+            Foreground = Theme.Brush(static () => Theme.DiffAdded),
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
         }));
         heading.Children.Add(Fonts.Tabular(new TextBlock
         {
             Text = "−" + item.Removed,
-            Foreground = Theme.Brush(Theme.DiffRemoved),
+            Foreground = Theme.Brush(static () => Theme.DiffRemoved),
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
         }));
@@ -1326,7 +1326,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
             body.Children.Add(Muted("This request is no longer waiting."));
         }
         var border = (Border)Card("Permission", body);
-        border.BorderBrush = pending ? Theme.Brush(Theme.Accent) : Theme.BorderBrush;
+        border.BorderBrush = pending ? Theme.Brush(static () => Theme.Accent) : Theme.BorderBrush;
         return border;
     }
 
@@ -1427,7 +1427,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(input, GridUnitType.Star) });
         split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(output, GridUnitType.Star) });
         var inn = new Border { Background = Theme.AccentBrush, CornerRadius = new CornerRadius(3, 0, 0, 3) };
-        var outn = new Border { Background = Theme.Brush(Theme.Secondary), CornerRadius = new CornerRadius(0, 3, 3, 0) };
+        var outn = new Border { Background = Theme.Brush(static () => Theme.Secondary), CornerRadius = new CornerRadius(0, 3, 3, 0) };
         Grid.SetColumn(outn, 1);
         split.Children.Add(inn);
         if (output > 0) split.Children.Add(outn);
@@ -1651,7 +1651,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
             Content = label,
             IsEnabled = enabled,
             Background = selected ? Theme.AccentSoftBrush : Theme.PanelBrush,
-            Foreground = selected ? Theme.AccentBrush : Theme.Brush(Theme.Secondary),
+            Foreground = selected ? Theme.AccentBrush : Theme.Brush(static () => Theme.Secondary),
             BorderBrush = Theme.BorderBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),

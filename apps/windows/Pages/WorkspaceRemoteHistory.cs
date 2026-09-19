@@ -206,13 +206,13 @@ internal static class WorkspaceRemoteHistory
         counts.Children.Add(new TextBlock
         {
             Text = "+" + added,
-            Foreground = Theme.Brush(Theme.DiffAdded),
+            Foreground = Theme.Brush(static () => Theme.DiffAdded),
             FontSize = 12,
         });
         counts.Children.Add(new TextBlock
         {
             Text = "−" + removed,
-            Foreground = Theme.Brush(Theme.DiffRemoved),
+            Foreground = Theme.Brush(static () => Theme.DiffRemoved),
             FontSize = 12,
         });
         var fileCount = files?.Count ?? 0;

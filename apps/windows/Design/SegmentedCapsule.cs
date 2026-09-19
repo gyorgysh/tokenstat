@@ -81,7 +81,7 @@ internal static class SegmentedCapsule
         if (glyph.HasValue)
         {
             var mark = glyph.Value.Icon();
-            mark.Foreground = active ? Theme.AccentBrush : Theme.Brush(Theme.ControlGlyph);
+            mark.Foreground = active ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
             content.Children.Add(new Viewbox
             {
                 Width = 11,
@@ -96,7 +96,7 @@ internal static class SegmentedCapsule
             FontFamily = Fonts.Interface,
             FontSize = 12,
             FontWeight = Microsoft.UI.Text.FontWeights.Medium,
-            Foreground = active ? Theme.AccentBrush : Theme.Brush(Theme.ControlGlyph),
+            Foreground = active ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph),
             VerticalAlignment = VerticalAlignment.Center,
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
@@ -122,7 +122,7 @@ internal static class SegmentedCapsule
         // The native grey hover would be a second grey beside the row one.
         segment.Resources["ButtonBackgroundPointerOver"] = active
             ? Theme.AccentSoftBrush
-            : Theme.Brush(WithAlpha(Theme.RowHighlight, 0.7));
+            : Theme.Brush(static () => WithAlpha(Theme.RowHighlight, 0.7));
         segment.Resources["ButtonBackgroundPressed"] = segment.Background;
         segment.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         segment.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);

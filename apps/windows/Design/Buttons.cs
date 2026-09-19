@@ -46,9 +46,9 @@ internal static class Buttons
     public static Button Destructive(string title, ActionIcon icon, RoutedEventHandler click, bool small = false) =>
         Capsule(
             title, icon, click, small,
-            Theme.Brush(WithAlpha(Theme.Danger, 0.08)),
-            Theme.Brush(Theme.Danger),
-            Theme.Brush(WithAlpha(Theme.Danger, 0.35)));
+            Theme.Brush(static () => WithAlpha(Theme.Danger, 0.08)),
+            Theme.Brush(static () => Theme.Danger),
+            Theme.Brush(static () => WithAlpha(Theme.Danger, 0.35)));
 
     /// <summary>
     /// The secondary action: panel fill, hairline border, default text. For
@@ -82,9 +82,9 @@ internal static class Buttons
             Padding = new Thickness(0),
             CornerRadius = new CornerRadius(18),
             BorderThickness = new Thickness(1),
-            Background = Theme.Brush(Theme.ControlSeat),
-            BorderBrush = Theme.Brush(WithAlpha(Theme.Border, 0.55)),
-            Foreground = Theme.Brush(isAccent ? Theme.Accent : Theme.ControlGlyph),
+            Background = Theme.Brush(static () => Theme.ControlSeat),
+            BorderBrush = Theme.Brush(static () => WithAlpha(Theme.Border, 0.55)),
+            Foreground = isAccent ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph),
             Content = icon.Icon(),
         };
         button.Click += click;
@@ -92,20 +92,20 @@ internal static class Buttons
         AutomationProperties.SetName(button, tooltip);
         button.PointerEntered += (_, _) =>
         {
-            button.Background = Theme.Brush(Theme.RowHighlight);
-            button.BorderBrush = Theme.Brush(WithAlpha(Theme.Border, 0.9));
+            button.Background = Theme.Brush(static () => Theme.RowHighlight);
+            button.BorderBrush = Theme.Brush(static () => WithAlpha(Theme.Border, 0.9));
             if (!isAccent)
             {
-                button.Foreground = Theme.Brush(Theme.ControlGlyphHover);
+                button.Foreground = Theme.Brush(static () => Theme.ControlGlyphHover);
             }
         };
         button.PointerExited += (_, _) =>
         {
-            button.Background = Theme.Brush(Theme.ControlSeat);
-            button.BorderBrush = Theme.Brush(WithAlpha(Theme.Border, 0.55));
+            button.Background = Theme.Brush(static () => Theme.ControlSeat);
+            button.BorderBrush = Theme.Brush(static () => WithAlpha(Theme.Border, 0.55));
             if (!isAccent)
             {
-                button.Foreground = Theme.Brush(Theme.ControlGlyph);
+                button.Foreground = Theme.Brush(static () => Theme.ControlGlyph);
             }
         };
         DimWhenDisabled(button);

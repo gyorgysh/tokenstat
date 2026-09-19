@@ -1067,7 +1067,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             Maximum = 100,
             Height = 6,
             Foreground = Theme.Brush(tint),
-            Background = Theme.Brush(Theme.RowHighlight),
+            Background = Theme.Brush(static () => Theme.RowHighlight),
         };
         var stack = new StackPanel { Spacing = 3 };
         stack.Children.Add(head);

@@ -435,6 +435,8 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         private int _indent = 4;
         private bool _applying;
         private CancellationTokenSource? _highlightTimer;
+        private JsonArray? _highlightSpans;
+        private string? _highlightedText;
         private int _matchIndex;
 
         public Action? HeaderChanged { get; set; }
@@ -504,6 +506,8 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _box.Document.SetText(TextSetOptions.None, content);
             _applying = false;
             _box.TextChanged += (_, _) => OnEdited();
+            _box.ActualThemeChanged += (_, _) =>
+                _box.DispatcherQueue.TryEnqueue(ApplyHighlightColors);
             _box.SelectionChanged += (_, _) => RefreshStatus();
             _findQuery.TextChanged += (_, _) => RefreshMatches();
             _box.KeyDown += BoxOnKeyDown;
@@ -763,7 +767,15 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             var syntax = answer["syntax"];
             var indent = (int)Format.Long(syntax, "indent");
             _indent = indent > 0 ? indent : 4;
-            var spans = answer["spans"] as JsonArray;
+            _highlightSpans = answer["spans"] as JsonArray;
+            _highlightedText = source;
+            ApplyHighlightColors();
+            RefreshStatus();
+        }
+
+        private void ApplyHighlightColors()
+        {
+            var spans = _highlightedText == _text ? _highlightSpans : null;
             try
             {
                 _applying = true;
@@ -801,7 +813,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             {
                 _applying = false;
             }
-            RefreshStatus();
         }
 
         /// <summary>

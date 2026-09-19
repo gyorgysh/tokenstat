@@ -228,7 +228,7 @@ internal static class WorkspaceDiff
                 {
                     Text = "+" + file.Added,
                     FontSize = 12,
-                    Foreground = Theme.Brush(Theme.DiffAdded),
+                    Foreground = Theme.Brush(static () => Theme.DiffAdded),
                 });
             }
             if (file.Removed > 0)
@@ -237,7 +237,7 @@ internal static class WorkspaceDiff
                 {
                     Text = "−" + file.Removed,
                     FontSize = 12,
-                    Foreground = Theme.Brush(Theme.DiffRemoved),
+                    Foreground = Theme.Brush(static () => Theme.DiffRemoved),
                 });
             }
             card.Children.Add(counts);
@@ -299,7 +299,7 @@ internal static class WorkspaceDiff
                     Text = hunk.Header,
                     FontFamily = Fonts.Mono,
                     FontSize = 11,
-                    Foreground = Theme.Brush(Theme.ControlGlyph),
+                    Foreground = Theme.Brush(static () => Theme.ControlGlyph),
                 },
             });
             foreach (var line in hunk.Lines)
@@ -328,7 +328,8 @@ internal static class WorkspaceDiff
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var tint = line.Kind switch
+        var lineKind = line.Kind;
+        Windows.UI.Color Tint() => lineKind switch
         {
             LineKind.Added => Theme.DiffAdded,
             LineKind.Removed => Theme.DiffRemoved,
@@ -348,7 +349,7 @@ internal static class WorkspaceDiff
             },
             FontFamily = Fonts.Mono,
             FontSize = 12,
-            Foreground = Theme.Brush(tint),
+            Foreground = Theme.Brush(Tint),
             TextAlignment = TextAlignment.Center,
             VerticalAlignment = VerticalAlignment.Top,
         };
@@ -359,16 +360,18 @@ internal static class WorkspaceDiff
             Text = line.Text.Length == 0 ? " " : line.Text,
             FontFamily = Fonts.Mono,
             FontSize = 12,
-            Foreground = Theme.Brush(tint),
+            Foreground = Theme.Brush(Tint),
             IsTextSelectionEnabled = true,
         };
         Grid.SetColumn(text, 3);
         row.Children.Add(text);
         if (line.Kind == LineKind.Added || line.Kind == LineKind.Removed)
         {
-            var wash = line.Kind == LineKind.Added ? Theme.DiffAdded : Theme.DiffRemoved;
-            row.Background = new SolidColorBrush(
-                Windows.UI.Color.FromArgb(31, wash.R, wash.G, wash.B));
+            row.Background = Theme.Brush(() =>
+            {
+                var wash = lineKind == LineKind.Added ? Theme.DiffAdded : Theme.DiffRemoved;
+                return Windows.UI.Color.FromArgb(31, wash.R, wash.G, wash.B);
+            });
         }
         return row;
     }
@@ -378,7 +381,7 @@ internal static class WorkspaceDiff
         Text = number?.ToString() ?? "·",
         FontFamily = Fonts.Mono,
         FontSize = 11,
-        Foreground = Theme.Brush(Theme.ControlGlyph),
+        Foreground = Theme.Brush(static () => Theme.ControlGlyph),
         TextAlignment = TextAlignment.Right,
         VerticalAlignment = VerticalAlignment.Top,
         Margin = new Thickness(0, 0, Theme.SpaceS, 0),

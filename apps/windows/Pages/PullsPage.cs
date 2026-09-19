@@ -320,7 +320,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                 new Border
                 {
                     Width = 8, Height = 8, CornerRadius = new CornerRadius(4),
-                    Background = Theme.Brush(Theme.Success),
+                    Background = Theme.Brush(static () => Theme.Success),
                     VerticalAlignment = VerticalAlignment.Center,
                 },
                 new TextBlock
@@ -644,7 +644,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         return new Border
         {
             Background = Theme.AccentSoftBrush,
-            BorderBrush = Theme.Brush(Theme.Accent),
+            BorderBrush = Theme.Brush(static () => Theme.Accent),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(Theme.CardRadius),
             Padding = new Thickness(Theme.CardPadding),

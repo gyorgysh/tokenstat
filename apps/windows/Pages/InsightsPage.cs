@@ -1015,7 +1015,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
             };
             var captured = key;
             hit.Tapped += (_, _) => SelectAndOpen(tab, captured);
-            hit.PointerEntered += (_, _) => hit.Background = Theme.Brush(Theme.RowHighlight);
+            hit.PointerEntered += (_, _) => hit.Background = Theme.Brush(static () => Theme.RowHighlight);
             hit.PointerExited += (_, _) => hit.Background =
                 new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             stack.Children.Add(hit);
@@ -1159,7 +1159,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
             {
                 Child = line,
                 Background = key == _selectedKey
-                    ? Theme.Brush(Theme.RowSelected)
+                    ? Theme.Brush(static () => Theme.RowSelected)
                     : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
             };
             var captured = key;
@@ -1171,7 +1171,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
             };
             if (captured != _selectedKey)
             {
-                hit.PointerEntered += (_, _) => hit.Background = Theme.Brush(Theme.RowHighlight);
+                hit.PointerEntered += (_, _) => hit.Background = Theme.Brush(static () => Theme.RowHighlight);
                 hit.PointerExited += (_, _) => hit.Background =
                     new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             }
@@ -1305,7 +1305,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
             var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceXs };
             head.Children.Add(new Ellipse
             {
-                Fill = Theme.Brush(Theme.Secondary),
+                Fill = Theme.Brush(static () => Theme.Secondary),
                 Width = 6,
                 Height = 6,
                 VerticalAlignment = VerticalAlignment.Center,

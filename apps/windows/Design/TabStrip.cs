@@ -90,7 +90,7 @@ internal static class TabStrip
         if (glyph.HasValue)
         {
             var mark = glyph.Value.Icon();
-            mark.Foreground = active ? Theme.AccentBrush : Theme.Brush(Theme.ControlGlyph);
+            mark.Foreground = active ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
             content.Children.Add(new Viewbox
             {
                 Width = 11,
@@ -107,7 +107,7 @@ internal static class TabStrip
             FontWeight = active
                 ? Microsoft.UI.Text.FontWeights.SemiBold
                 : Microsoft.UI.Text.FontWeights.Normal,
-            Foreground = active ? Theme.AccentBrush : Theme.Brush(Theme.ControlGlyph),
+            Foreground = active ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph),
             VerticalAlignment = VerticalAlignment.Center,
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,

@@ -138,7 +138,7 @@ internal static class Chrome
             Padding = new Thickness(Theme.SpaceL, Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl),
         };
         var mark = icon.Icon();
-        mark.Foreground = Theme.Brush(WithAlpha(Theme.Accent, 0.7));
+        mark.Foreground = Theme.Brush(static () => WithAlpha(Theme.Accent, 0.7));
         stack.Children.Add(new Viewbox
         {
             Width = EmptyState.EmptyMark,
@@ -183,7 +183,7 @@ internal static class Chrome
             Height = size,
             RadiusX = 2,
             RadiusY = 2,
-            Fill = Theme.Brush(Theme.HeatLevel(level)),
+            Fill = Theme.Brush(() => Theme.HeatLevel(level)),
             Margin = new Thickness(1),
         };
     }
@@ -302,7 +302,7 @@ internal static class Chrome
         return new Border
         {
             Background = Theme.AccentSoftBrush,
-            BorderBrush = Theme.Brush(WithAlpha(Theme.Accent, 0.28)),
+            BorderBrush = Theme.Brush(static () => WithAlpha(Theme.Accent, 0.28)),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(999),
             Padding = new Thickness(7, 3, 7, 3),
@@ -390,7 +390,7 @@ internal static class Chrome
         {
             chip.Background = Theme.AccentSoftBrush;
             chip.Foreground = Theme.AccentBrush;
-            chip.BorderBrush = Theme.Brush(Theme.Accent);
+            chip.BorderBrush = Theme.Brush(static () => Theme.Accent);
         }
         else
         {
@@ -608,7 +608,7 @@ internal static class Chrome
         row.Children.Add(new SymbolIcon
         {
             Symbol = Symbol.Accept,
-            Foreground = Theme.Brush(Theme.Success),
+            Foreground = Theme.Brush(static () => Theme.Success),
             VerticalAlignment = VerticalAlignment.Center,
         });
         row.Children.Add(SaveText("Saved", Theme.Success));
