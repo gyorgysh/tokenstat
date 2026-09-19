@@ -187,7 +187,7 @@ internal static class PersonaDraw
         }
         if (clip is not null)
         {
-            path.Clip = clip;
+            path.Clip = (RectangleGeometry)clip;
         }
         return path;
     }

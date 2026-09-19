@@ -125,9 +125,9 @@ internal sealed class InspectorHost : Grid
     /// shell; a second call replaces the old child rather than stacking a
     /// new one over it.
     /// </summary>
-    public void SetContent(UIElement content)
+    public void SetContent(FrameworkElement content)
     {
-        if (content is FrameworkElement already && already.Parent == this)
+        if (content.Parent == this)
         {
             return;
         }

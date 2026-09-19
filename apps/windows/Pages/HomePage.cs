@@ -445,7 +445,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
         row.Children.Add(ActionIconGlyph.Button(
             signedIn ? "Reconnect" : "Sign in",
             ActionIcon.SignIn,
-            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, LoadAsync)));
+            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync())));
         var banner = new Border
         {
             Background = Theme.AccentSoftBrush,
@@ -851,7 +851,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
         {
             signRow.Children.Add(ActionIconGlyph.Button(
                 "Sign in", ActionIcon.SignIn,
-                async (_, _) => await SignInFlow.RunAsync(this, _signSlot, LoadAsync)));
+                async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync())));
         }
         body.Children.Add(signRow);
         return Chrome.Card("Get tokenstat counting", body);
@@ -1635,7 +1635,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
         var figure = Fonts.Numeric(
             value is null ? "n/a" : Format.Tokens(value.Value),
             11,
-            Microsoft.UI.Text.FontWeights.Regular);
+            Microsoft.UI.Text.FontWeights.Normal);
         if (value is null)
         {
             figure.Opacity = 0.6;
@@ -1739,7 +1739,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
                 name.VerticalAlignment = VerticalAlignment.Center;
                 line.Children.Add(name);
                 var tokens = Fonts.Numeric(
-                    Format.Tokens(row.Tokens), 11, Microsoft.UI.Text.FontWeights.Regular);
+                    Format.Tokens(row.Tokens), 11, Microsoft.UI.Text.FontWeights.Normal);
                 tokens.Opacity = 0.7;
                 tokens.Margin = new Thickness(Theme.SpaceS, 0, 0, 0);
                 Grid.SetColumn(tokens, 1);
@@ -1747,7 +1747,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent
                 if (showsValue && row.Value is not null)
                 {
                     var money = Fonts.Numeric(
-                        row.Value, 11, Microsoft.UI.Text.FontWeights.Regular);
+                        row.Value, 11, Microsoft.UI.Text.FontWeights.Normal);
                     money.Opacity = 0.7;
                     money.Margin = new Thickness(Theme.SpaceS, 0, 0, 0);
                     Grid.SetColumn(money, 2);

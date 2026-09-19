@@ -41,7 +41,7 @@ internal sealed class PersonaMark : Canvas
         _engine = new PersonaEngine(seed, state);
         Width = size;
         Height = size;
-        AutomationProperties.SetAccessibilityView(this, AccessibilityView.Raw);
+        AutomationProperties.SetAccessibilityView(this, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
         _timer.Tick += (_, _) => Tick();
         PointerPressed += OnPointerPressed;
         Loaded += (_, _) => Start();

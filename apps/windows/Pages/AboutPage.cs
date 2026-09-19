@@ -26,7 +26,7 @@ internal sealed class AboutPage : Page
 {
     public AboutPage()
     {
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "tokenstat.png");
+        var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "tokenstat.png");
         UIElement mark;
         if (File.Exists(iconPath))
         {

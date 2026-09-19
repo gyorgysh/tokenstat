@@ -345,7 +345,7 @@ internal sealed class HeatmapView : StackPanel
         if (_hovered is not null)
         {
             _footerLeft.Children.Add(Fonts.Numeric(
-                _hovered.Day.Date, 11, Microsoft.UI.Text.FontWeights.Regular));
+                _hovered.Day.Date, 11, Microsoft.UI.Text.FontWeights.Normal));
             _footerLeft.Children.Add(Fonts.Numeric(
                 ListRate(_hovered.Day.Value), 11, Microsoft.UI.Text.FontWeights.Medium));
             _footerLeft.Children[0].Opacity = 0.8;
@@ -353,7 +353,7 @@ internal sealed class HeatmapView : StackPanel
         else
         {
             var range = Fonts.Numeric(
-                $"{_snap.First} to {_snap.Last}", 11, Microsoft.UI.Text.FontWeights.Regular);
+                $"{_snap.First} to {_snap.Last}", 11, Microsoft.UI.Text.FontWeights.Normal);
             range.Opacity = 0.55;
             _footerLeft.Children.Add(range);
             string? freshness = Freshness();

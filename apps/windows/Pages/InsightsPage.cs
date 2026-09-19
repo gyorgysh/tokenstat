@@ -1003,7 +1003,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
     /// A ranked top six with progress bars, plus a View all button that opens
     /// the full breakdown. Tapping a row opens the tab with that row selected.
     /// </summary>
-    private UIElement RankingCard(
+    private FrameworkElement RankingCard(
         string title, JsonArray rows, bool isHarness, bool showsValue, string tab)
     {
         var stack = new StackPanel { Spacing = 14 };
@@ -1476,7 +1476,7 @@ internal sealed class InsightsPage : Page, IScopeAware, IInspectorContent
         row.Children.Add(ActionIconGlyph.Button(
             _signedIn ? "Reconnect" : "Sign in",
             ActionIcon.SignIn,
-            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, LoadAsync)));
+            async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync())));
         return new Border
         {
             Background = Theme.AccentSoftBrush,

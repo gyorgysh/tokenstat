@@ -329,7 +329,7 @@ internal static class EmptyState
                 break;
             }
         }
-        AutomationProperties.SetAccessibilityView(canvas, AccessibilityView.Raw);
+        AutomationProperties.SetAccessibilityView(canvas, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
         return canvas;
     }
 
