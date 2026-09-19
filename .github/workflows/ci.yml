@@ -264,6 +264,11 @@ jobs:
           }
           exit $result
 
+      - name: Production Windows application startup
+        if: runner.os == 'Windows'
+        timeout-minutes: 2
+        run: ./scripts/tests/windows-ui/startup.ps1
+
       - name: Windows client and daemon lifetime regressions
         if: runner.os == 'Windows'
         run: |

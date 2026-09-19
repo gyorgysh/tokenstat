@@ -17,6 +17,9 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        LogStartup($"Starting GUI; build={typeof(Program).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion}");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => LogStartup($"Unhandled exception; terminating={e.IsTerminating}: {e.ExceptionObject}");
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => LogStartup($"Process exit; code={Environment.ExitCode}");
         try
         {
             return Run(args);
@@ -58,6 +61,25 @@ internal static class Program
             return 1;
         }
     }
+
+    internal static void LogStartup(string message)
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "logs");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "startup.log");
+            lock (StartupLogGate)
+            {
+                if (File.Exists(path) && new FileInfo(path).Length > 1024 * 1024)
+                    File.Move(path, Path.Combine(dir, "startup.previous.log"), overwrite: true);
+                File.AppendAllText(path, $"{DateTime.UtcNow:o} pid={Environment.ProcessId} {message}{Environment.NewLine}");
+            }
+        }
+        catch { /* Preserve the original failure if diagnostics cannot be written. */ }
+    }
+
+    private static readonly object StartupLogGate = new();
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int MessageBoxW(IntPtr owner, string text, string caption, uint type);

@@ -25,9 +25,9 @@ public partial class App : Application
 
     public App()
     {
-        InitializeComponent();
         UnhandledException += (_, e) =>
         {
+            Program.LogStartup($"XAML unhandled exception: {e.Message}");
             Debug.WriteLine(e.Exception);
             try
             {
@@ -45,20 +45,28 @@ public partial class App : Application
             }
             e.Handled = true;
         };
+        InitializeComponent();
+        Program.LogStartup("Application resources initialized");
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         RunNotifications.Shared.EnsureRegistered();
         HostOwnerLock.Acquire();
+        Program.LogStartup("Creating main window");
         _window = new MainWindow();
+        Program.LogStartup("Main window created");
+        if (_window.Content is FrameworkElement root)
+            root.Loaded += (_, _) => Program.LogStartup("Main window content loaded");
         CurrentWindow = _window;
         _window.Closed += (_, _) =>
         {
+            Program.LogStartup("Main window closed");
             CurrentWindow = null;
             HostOwnerLock.Release();
         };
         _window.Activate();
+        Program.LogStartup("Main window activated");
         _ = Task.Run(async () =>
         {
             HostProcess.EnsureRunning();
