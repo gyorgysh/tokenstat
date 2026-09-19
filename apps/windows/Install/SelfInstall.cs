@@ -325,7 +325,7 @@ internal static class SelfInstall
         // degraded next to the script; it only runs when the script is gone.
         var quoted = hostdExe.Replace("'", "''");
         var work = (Path.GetDirectoryName(hostdExe) ?? InstallDirectory).Replace("'", "''");
-        var launch = $"powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command \\\"$child = Start-Process -FilePath '{quoted}' -WorkingDirectory '{work}' -WindowStyle Hidden -PassThru -Wait; exit $child.ExitCode\\\"";
+        var launch = $"powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command \\\"$child = Start-Process -FilePath '{quoted}' -WorkingDirectory '{work}' -WindowStyle Hidden -PassThru; $null = $child.Handle; $child.WaitForExit(); exit $child.ExitCode\\\"";
         RunSchTasks($"/Create /TN \"{HostTaskName}\" /TR \"{launch}\" /SC ONLOGON /RL LIMITED /F");
         RunSchTasks($"/Run /TN \"{HostTaskName}\"");
     }

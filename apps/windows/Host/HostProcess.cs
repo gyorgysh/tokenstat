@@ -79,9 +79,9 @@ internal static class HostProcess
     }
 
     /// <summary>
-    /// Re-register a task that still runs hostd directly. Older installs
-    /// registered the helper as the task action, which opens a visible
-    /// console window; the current shape wraps it hidden. The task itself is
+    /// Re-register legacy task actions. Direct actions show a console;
+    /// detached wrappers lose failure status, and tree waits can block
+    /// recovery on surviving terminals. The current wrapper tracks hostd. The task itself is
     /// the source of truth, so this heals exactly once: after re-registering,
     /// the action reads back hidden and this becomes a quiet query per
     /// launch. It never touches the running helper, only the registration.
@@ -91,7 +91,7 @@ internal static class HostProcess
         try
         {
             var hostd = FindHostd();
-            if (hostd is null || !TaskRunsHostdDirectly())
+            if (hostd is null || !TaskNeedsRepair())
             {
                 return;
             }
@@ -103,7 +103,7 @@ internal static class HostProcess
         }
     }
 
-    private static bool TaskRunsHostdDirectly()
+    private static bool TaskNeedsRepair()
     {
         try
         {
@@ -138,10 +138,11 @@ internal static class HostProcess
             }
             var command = xml.Substring(open + "<Command>".Length, close - open - "<Command>".Length);
             // Repair both old direct actions and hidden wrappers that exit
-            // before hostd, which prevents restart-on-failure from working.
+            // before hostd or wait for its surviving descendants. Both can
+            // prevent restart-on-failure from working.
             return command.Trim().EndsWith("tokenstat-hostd.exe", StringComparison.OrdinalIgnoreCase)
                 || (command.Trim().EndsWith("powershell.exe", StringComparison.OrdinalIgnoreCase)
-                    && !xml.Contains("-PassThru -Wait", StringComparison.OrdinalIgnoreCase));
+                    && !xml.Contains("$child.WaitForExit()", StringComparison.OrdinalIgnoreCase));
         }
         catch
         {
