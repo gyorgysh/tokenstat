@@ -283,8 +283,13 @@ internal static class RemoteWorkspaces
     {
         lock (Gate)
         {
+            // Registering a folder is an explicit return to this computer,
+            // even if it was disconnected earlier in the session.
+            Suppressed.Remove(peerKey);
+            Failures.Remove(peerKey);
             NextDial.Remove(peerKey);
         }
+        SetAutoConnect(true, peerKey);
         _ = SweepAsync();
     }
 

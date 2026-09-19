@@ -858,15 +858,7 @@ public sealed partial class MainWindow : Window
         _foldersLoaded = false;
         await TryLoadFoldersAsync();
         var tag = "ws:" + added + ":Files";
-        if (FindNavItem(tag) is NavigationViewItem row)
-        {
-            _nav.SelectedItem = row;
-        }
-        else
-        {
-            Show(tag);
-        }
-        _lastNavTag = tag;
+        NavigateTo(tag);
     }
 
     private void RestoreSelection(string? tag)

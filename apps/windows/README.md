@@ -26,13 +26,13 @@ Programs row all use those strings.
 
 The published folder is the installer. Double-click `Tokenstat.exe`:
 
-1. Copies the folder to `%LOCALAPPDATA%\Programs\tokenstat`
+1. Stages the complete folder, then swaps it into `%LOCALAPPDATA%\Programs\tokenstat`
 2. Writes a Start Menu shortcut
 3. Writes `HKCU\...\Uninstall\ai.tokenstat.tokenstat`
 4. Registers the per-user host task `ai.tokenstat.hostd`
 5. Relaunches from the install directory
 
-`--install` does that without opening a window. `--uninstall` reverses it.
+`--install` explicitly installs and opens the installed copy. `--uninstall` reverses it.
 A development build (`apps\windows\bin\...`, or `TOKENSTAT_DEV=1`) does not
 copy itself.
 
@@ -51,17 +51,37 @@ binary, not written down in source.
 
 ## Build
 
-Needs the Windows App SDK targeting pack, .NET 8, and a Rust MSVC toolchain.
+Build on Windows with the .NET 8 SDK and a Rust MSVC toolchain, including
+the Visual Studio C++ build tools and Windows SDK. NuGet restores the
+Windows App SDK dependencies declared in `Tokenstat.csproj`.
 
 ```powershell
-scripts/build-windows-app.ps1 -Version 0.6.8 -Rid win-x64 -Out dist
+./scripts/build-windows-app.ps1 -Rid win-x64 -Out dist
 ```
 
 Produces `dist/tokenstat-<version>-windows-x64/` with `Tokenstat.exe` and
 `tokenstat-hostd.exe`. Zip that folder for GitHub Actions.
+The version defaults to the Cargo workspace version. Use `-Rid win-arm64`
+for ARM64. A failed native build, publish, or notice generation stops the
+script before staging an artifact; fix the first reported failure.
 
 Do not put the CLI in the same folder as `Tokenstat.exe`. Windows paths are
 case-insensitive, and `tokenstat.exe` would overwrite the app.
+
+Portable installer regression checks run without changing an installed app:
+
+```powershell
+dotnet run --project scripts/tests/windows-install/WindowsInstallTests.csproj
+```
+
+Native acceptance still requires Windows: publish, launch from an extracted
+zip, relaunch the installed copy, test update/rollback and uninstall, and
+check light/dark themes, keyboard navigation, window resizing, and 100%/150%/200%
+display scaling. A managed C# compilation on another OS does not run the
+Windows XAML compiler or validate rendered layout.
+
+Startup failures are recorded in `%LOCALAPPDATA%\tokenstat\logs\startup.log`;
+UI exceptions are recorded in `app.log` in the same folder.
 
 ## Design
 
