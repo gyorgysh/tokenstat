@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
+using Tokenstat.Design.Persona;
 using Windows.Storage.Pickers;
 using Windows.System;
 using Windows.UI.Core;
@@ -708,6 +709,12 @@ internal sealed class ChatPage : Page, IInspectorContent
 
     private UIElement PersonaPicker(string current, bool disabled)
     {
+        // A live likeness beside the picker, seeded by the persona id like the
+        // Mac mark. It wanders through its leisure repertoire while the person
+        // reads the setup card.
+        var face = new PersonaPastime(
+            string.IsNullOrEmpty(current) ? 0 : PersonaSeed.For(current), 40);
+        face.VerticalAlignment = VerticalAlignment.Center;
         var box = new ComboBox { MinWidth = 220, IsEnabled = !disabled };
         box.Items.Add(new ComboBoxItem { Content = "No preset", Tag = "" });
         box.SelectedIndex = 0;
@@ -728,6 +735,7 @@ internal sealed class ChatPage : Page, IInspectorContent
         {
             if (_suppress || box.SelectedItem is not ComboBoxItem item) return;
             var id = item.Tag as string ?? "";
+            face.Seed = string.IsNullOrEmpty(id) ? 0 : PersonaSeed.For(id);
             if (string.IsNullOrEmpty(id))
             {
                 await UpdateAsync(new JsonObject { ["personaId"] = "", ["systemPrompt"] = "" });
@@ -747,7 +755,15 @@ internal sealed class ChatPage : Page, IInspectorContent
             });
             PaintConversation();
         };
-        return box;
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceS,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(face);
+        row.Children.Add(box);
+        return row;
     }
 
     private UIElement OptionPicker(
