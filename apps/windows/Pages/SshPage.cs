@@ -50,6 +50,8 @@ internal sealed class SshPage : Page, IToolbarItems
     private long _offset;
     private CancellationTokenSource? _poll;
     private SSHSection _section;
+    private bool _loading;
+    private bool _reloadRequested;
     private readonly Border _stripHost = new();
     private readonly Border _bodyHost = new();
 
@@ -107,7 +109,7 @@ internal sealed class SshPage : Page, IToolbarItems
         Unloaded += (_, _) => _ = CloseSessionAsync();
     }
 
-    public event Action? ToolbarChanged;
+    public event Action? ToolbarChanged { add { } remove { } }
 
     /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;
@@ -169,6 +171,29 @@ internal sealed class SshPage : Page, IToolbarItems
     }
 
     private async Task LoadAsync()
+    {
+        if (_loading)
+        {
+            _reloadRequested = true;
+            return;
+        }
+        _loading = true;
+        try
+        {
+            do
+            {
+                _reloadRequested = false;
+                await LoadOnceAsync();
+            }
+            while (_reloadRequested);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadOnceAsync()
     {
         _listRoot.Children.Clear();
         _listRoot.Children.Add(new TextBlock

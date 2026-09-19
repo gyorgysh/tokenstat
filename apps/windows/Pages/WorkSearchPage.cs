@@ -60,7 +60,9 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
     {
         _query.TextChanged += (_, _) =>
         {
+            _search?.Cancel();
             _debounce?.Cancel();
+            _debounce?.Dispose();
             _debounce = new CancellationTokenSource();
             var token = _debounce.Token;
             _ = Task.Run(async () =>
@@ -73,7 +75,13 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
                 {
                     return;
                 }
-                DispatcherQueue.TryEnqueue(() => _ = SearchAsync(false));
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!token.IsCancellationRequested)
+                    {
+                        _ = SearchAsync(false);
+                    }
+                });
             });
         };
 
@@ -120,10 +128,15 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         };
         Content = _scroll;
         RenderInspector();
-        Loaded += (_, _) => ShowRecent();
+        Loaded += (_, _) => _ = SearchAsync(false);
+        Unloaded += (_, _) =>
+        {
+            _debounce?.Cancel();
+            _search?.Cancel();
+        };
     }
 
-    public event Action? ToolbarChanged;
+    public event Action? ToolbarChanged { add { } remove { } }
 
     /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;
@@ -223,13 +236,20 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
 
     private async Task SearchAsync(bool more)
     {
+        _debounce?.Cancel();
+        _search?.Cancel();
+        _search?.Dispose();
+        _search = null;
         var query = (_query.Text ?? "").Trim();
         if (query.Length == 0)
         {
+            _cursor = null;
+            _busy.IsActive = false;
+            _busy.Visibility = Visibility.Collapsed;
             ShowRecent();
             return;
         }
-        _search?.Cancel();
+        more = more && query == _lastQuery;
         _search = new CancellationTokenSource();
         var token = _search.Token;
         if (!more)
@@ -240,6 +260,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
             _results.Children.Clear();
             _results.Children.Add(Motion.SkeletonCard());
         }
+        _busy.IsActive = true;
         _busy.Visibility = Visibility.Visible;
         try
         {
@@ -289,6 +310,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
                     "No matches in your work",
                     "Nothing here matches. Try fewer words, or another machine.",
                     ActionIcon.Search));
+                RenderInspector();
                 return;
             }
             if (hits is not null)
@@ -320,13 +342,20 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         {
             if (!token.IsCancellationRequested)
             {
-                _results.Children.Clear();
+                if (!more)
+                {
+                    _results.Children.Clear();
+                }
                 _results.Children.Add(Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
             }
         }
         finally
         {
-            _busy.Visibility = Visibility.Collapsed;
+            if (!token.IsCancellationRequested)
+            {
+                _busy.IsActive = false;
+                _busy.Visibility = Visibility.Collapsed;
+            }
         }
     }
 

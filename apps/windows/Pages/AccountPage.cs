@@ -58,16 +58,25 @@ internal sealed class AccountPage : Page, IToolbarItems
         layout.Children.Add(scroller);
         Content = layout;
         RebuildTabs();
-        Loaded += async (_, _) => await LoadAsync();
+        Loaded += async (_, _) =>
+        {
+            AppServices.Update.Changed += OnUpdateChanged;
+            await LoadAsync();
+        };
         Unloaded += (_, _) =>
         {
             _pullPoll?.Cancel();
-        };
-        AppServices.Update.Changed += () =>
-        {
-            DispatcherQueue.TryEnqueue(() => _ = LoadAsync());
+            AppServices.Update.Changed -= OnUpdateChanged;
         };
     }
+
+    private void OnUpdateChanged() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (IsLoaded)
+        {
+            _ = LoadAsync();
+        }
+    });
 
     public event Action? ToolbarChanged;
 
@@ -136,80 +145,84 @@ internal sealed class AccountPage : Page, IToolbarItems
     private async Task RenderPaneAsync()
     {
         _content.Children.Clear();
+        // Each render owns its panel. A slower previous tab can finish
+        // loading without appending its cards into the newly selected tab.
+        var content = new StackPanel { Spacing = Theme.SpaceL };
+        _content.Children.Add(content);
         var skeleton = Motion.SkeletonCard();
-        _content.Children.Add(skeleton);
+        content.Children.Add(skeleton);
         try
         {
             switch (_pane)
             {
                 case "limits":
-                    await RenderLimitsPaneAsync();
+                    await RenderLimitsPaneAsync(content);
                     break;
                 case "pc":
-                    await RenderThisPcPaneAsync();
+                    await RenderThisPcPaneAsync(content);
                     break;
                 default:
-                    await RenderAccountPaneAsync();
+                    await RenderAccountPaneAsync(content);
                     break;
             }
         }
         finally
         {
-            _content.Children.Remove(skeleton);
+            content.Children.Remove(skeleton);
         }
     }
 
     /// <summary>
     /// Who you are, who can reach you, and the legal end of the account.
     /// </summary>
-    private async Task RenderAccountPaneAsync()
+    private async Task RenderAccountPaneAsync(StackPanel content)
     {
         var account = _account;
         if (account is null)
         {
             if (!string.IsNullOrEmpty(_accountError))
             {
-                _content.Children.Add(Chrome.Banner(
+                content.Children.Add(Chrome.Banner(
                     _accountError, Theme.Danger, Symbol.Important));
             }
-            _content.Children.Add(await PullConnectionCardAsync());
-            _content.Children.Add(PrivacyNote());
-            _content.Children.Add(AboutBlurb());
+            content.Children.Add(await PullConnectionCardAsync());
+            content.Children.Add(PrivacyNote());
+            content.Children.Add(AboutBlurb());
             return;
         }
         if (!_signedIn)
         {
-            _content.Children.Add(SignedOutCard());
+            content.Children.Add(SignedOutCard());
         }
         else
         {
-            _content.Children.Add(IdentityCard(account));
-            _content.Children.Add(RelayUsageCard(account));
-            _content.Children.Add(SyncCard(account));
-            _content.Children.Add(DevicesCard(account));
+            content.Children.Add(IdentityCard(account));
+            content.Children.Add(RelayUsageCard(account));
+            content.Children.Add(SyncCard(account));
+            content.Children.Add(DevicesCard(account));
         }
-        _content.Children.Add(await PullConnectionCardAsync());
-        _content.Children.Add(PrivacyNote());
+        content.Children.Add(await PullConnectionCardAsync());
+        content.Children.Add(PrivacyNote());
         if (_signedIn)
         {
-            _content.Children.Add(DeleteAccountCard(account));
+            content.Children.Add(DeleteAccountCard(account));
         }
-        _content.Children.Add(AboutBlurb());
+        content.Children.Add(AboutBlurb());
     }
 
-    private async Task RenderLimitsPaneAsync()
+    private async Task RenderLimitsPaneAsync(StackPanel content)
     {
         var account = _account;
         if (account is null)
         {
             if (!string.IsNullOrEmpty(_accountError))
             {
-                _content.Children.Add(Chrome.Banner(
+                content.Children.Add(Chrome.Banner(
                     _accountError, Theme.Danger, Symbol.Important));
             }
             else
             {
-                _content.Children.Add(new ProgressRing
+                content.Children.Add(new ProgressRing
                 {
                     IsActive = true,
                     HorizontalAlignment = HorizontalAlignment.Center,
@@ -219,22 +232,22 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         if (!_signedIn)
         {
-            _content.Children.Add(LimitsSignedOutCard());
+            content.Children.Add(LimitsSignedOutCard());
             return;
         }
-        _content.Children.Add(await PlanLimitsCardAsync());
+        content.Children.Add(await PlanLimitsCardAsync());
     }
 
     /// <summary>
     /// Settings that live on this computer, signed in or not.
     /// </summary>
-    private async Task RenderThisPcPaneAsync()
+    private async Task RenderThisPcPaneAsync(StackPanel content)
     {
-        _content.Children.Add(await HostCardAsync());
-        _content.Children.Add(await LocalTrafficCardAsync());
-        _content.Children.Add(await LocalModelsCardAsync());
-        _content.Children.Add(NotificationsCard());
-        _content.Children.Add(UpdateCard());
+        content.Children.Add(await HostCardAsync());
+        content.Children.Add(await LocalTrafficCardAsync());
+        content.Children.Add(await LocalModelsCardAsync());
+        content.Children.Add(NotificationsCard());
+        content.Children.Add(UpdateCard());
     }
 
     /// <summary>

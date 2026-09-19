@@ -366,7 +366,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             var cardsTask = CallTodoAsync(
                 "todo.list", new JsonObject { ["includeArchived"] = true });
             var runsTask = CallTodoAsync("automation.runs", new JsonObject());
-            var foldersTask = AppServices.Host.CallAsync("workspace.list", new JsonObject());
+            var foldersTask = CallTodoAsync("workspace.list", new JsonObject());
             var backendsTask = CallTodoAsync("automation.backends", new JsonObject());
             var queueTask = CallTodoAsync("automation.queue", new JsonObject());
             await Task.WhenAll(cardsTask, runsTask, foldersTask, backendsTask, queueTask);
@@ -374,7 +374,10 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 ?? cardsTask.Result["cards"] as JsonArray
                 ?? new JsonArray();
             _runs = Format.Items(runsTask.Result) ?? new JsonArray();
-            RunNotifications.Shared.SettleAutomations(_runs);
+            if (_scopeWorkspaceId is null || !RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out _))
+            {
+                RunNotifications.Shared.SettleAutomations(_runs);
+            }
             _folders = ReadFolders(foldersTask.Result);
             if (_scopeWorkspaceId is not null
                 && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner))
@@ -389,6 +392,11 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                         obj["workspaceId"] = _scopeWorkspaceId;
                     }
                 }
+                // Folder choices must belong to the same host as the cards.
+                // Keep this page's selected folder in the shell namespace;
+                // other choices already carry the owning peer's native ids.
+                _folders = _folders.Select(folder =>
+                    (Id: folder.Id == inner ? _scopeWorkspaceId : folder.Id, Name: folder.Name)).ToList();
                 if (RemoteWorkspaces.CachedFolder(_scopeWorkspaceId) is RemoteFolder cached
                     && _folders.All(f => f.Id != _scopeWorkspaceId))
                 {

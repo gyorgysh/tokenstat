@@ -180,7 +180,6 @@ internal sealed class AboutPage : Page
         var link = new HyperlinkButton
         {
             Content = label,
-            NavigateUri = new Uri(url),
             Foreground = Theme.AccentBrush,
             Padding = new Thickness(0),
             FontSize = 12,

@@ -204,7 +204,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         Unloaded += (_, _) => _ = CloseAsync();
     }
 
-    public event Action? ToolbarChanged;
+    public event Action? ToolbarChanged { add { } remove { } }
 
     /// <summary>
     /// The machine on the other end of the viewer.

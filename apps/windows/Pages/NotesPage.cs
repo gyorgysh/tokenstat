@@ -183,7 +183,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         {
             var cardsTask = CallTodoAsync(
                 "todo.list", new JsonObject { ["includeArchived"] = true });
-            var foldersTask = AppServices.Host.CallAsync("workspace.list", new JsonObject());
+            var foldersTask = CallTodoAsync("workspace.list", new JsonObject());
             await Task.WhenAll(cardsTask, foldersTask);
             _cards = cardsTask.Result as JsonArray
                 ?? cardsTask.Result["cards"] as JsonArray
@@ -202,6 +202,11 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                         obj["workspaceId"] = _workspaceId;
                     }
                 }
+                // Folder choices must belong to the same host as the cards.
+                // Keep this page's selected folder in the shell namespace;
+                // other choices already carry the owning peer's native ids.
+                _folders = _folders.Select(folder =>
+                    (Id: folder.Id == inner ? _workspaceId : folder.Id, Name: folder.Name)).ToList();
                 if (RemoteWorkspaces.CachedFolder(_workspaceId) is RemoteFolder cached
                     && _folders.All(f => f.Id != _workspaceId))
                 {

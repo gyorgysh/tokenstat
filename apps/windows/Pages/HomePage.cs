@@ -85,7 +85,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         };
     }
 
-    public event Action? ToolbarChanged;
+    public event Action? ToolbarChanged { add { } remove { } }
 
     /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;

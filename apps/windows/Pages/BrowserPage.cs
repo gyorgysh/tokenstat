@@ -78,7 +78,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     public UIElement? Inspector => _inspector;
 
-    public event Action? ToolbarChanged;
+    public event Action? ToolbarChanged { add { } remove { } }
 
     /// <summary>
     /// The tab strip names its own pages; the scope says this is the browser.
