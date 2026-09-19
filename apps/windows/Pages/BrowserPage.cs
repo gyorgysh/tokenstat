@@ -231,6 +231,12 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 
         public void Reload()
         {
+            if (_closed) return;
+            if (_web.CoreWebView2 is null)
+            {
+                _ = NavigateAsync(_loadedUrl);
+                return;
+            }
             try
             {
                 _web.Reload();
@@ -300,17 +306,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     Banner(ex.Message);
                 }
             });
-            _reload = ActionIconGlyph.Button("Reload", ActionIcon.Refresh, (_, _) =>
-            {
-                try
-                {
-                    _web.Reload();
-                }
-                catch (Exception ex)
-                {
-                    Banner(ex.Message);
-                }
-            });
+            _reload = ActionIconGlyph.Button("Reload", ActionIcon.Refresh, (_, _) => Reload());
 
             var go = ActionIconGlyph.Button("Go", ActionIcon.Next, async (_, _) => await CommitAsync(_address.Text));
             var external = ActionIconGlyph.Button("Open in default browser", ActionIcon.External, (_, _) =>
@@ -437,15 +433,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             {
                 return;
             }
-            try
-            {
-                await _web.EnsureCoreWebView2Async();
-                _web.Source = new Uri(_loadedUrl);
-            }
-            catch (Exception ex)
-            {
-                Banner(ex.Message);
-            }
+            await NavigateAsync(_loadedUrl);
         }
 
         /// <summary>
@@ -511,24 +499,64 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     return;
                 }
             }
-            Navigate(url.AbsoluteUri);
+            await NavigateAsync(url.AbsoluteUri);
         }
 
-        private void Navigate(string url)
+        private async Task NavigateAsync(string url)
         {
+            if (_closed || string.IsNullOrWhiteSpace(url)) return;
             _loadedUrl = url;
             _address.Text = url;
             _status.Children.Clear();
             _empty.Visibility = Visibility.Collapsed;
             HeaderChanged?.Invoke(this);
+            SetLoading(true);
             try
             {
+                await _web.EnsureCoreWebView2Async();
+                if (_closed || _loadedUrl != url) return;
                 _web.Source = new Uri(url);
             }
             catch (Exception ex)
             {
-                Banner(ex.Message);
+                if (_closed || _loadedUrl != url) return;
+                SetLoading(false);
+                if (_web.CoreWebView2 is null)
+                {
+                    BrowserUnavailable(ex);
+                }
+                else
+                {
+                    Banner(FriendlyError.Display(ex.Message));
+                }
             }
+        }
+
+        private void BrowserUnavailable(Exception error)
+        {
+            _status.Children.Clear();
+            _status.Children.Add(Chrome.Banner(
+                "The built-in browser could not start. Install or repair Microsoft Edge WebView2 Runtime, then retry.",
+                Theme.Warning, Symbol.Important));
+            _status.Children.Add(new TextBlock
+            {
+                Text = FriendlyError.Display(error.Message),
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+            });
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+            void OpenExternal(string address)
+            {
+                try { Process.Start(new ProcessStartInfo { FileName = address, UseShellExecute = true }); }
+                catch (Exception ex) { Banner(FriendlyError.Display(ex.Message)); }
+            }
+            actions.Children.Add(ActionIconGlyph.Button("Get WebView2", ActionIcon.Download,
+                (_, _) => OpenExternal("https://developer.microsoft.com/microsoft-edge/webview2/#download-section")));
+            actions.Children.Add(ActionIconGlyph.Button("Retry", ActionIcon.Refresh,
+                async (_, _) => await NavigateAsync(_loadedUrl)));
+            actions.Children.Add(ActionIconGlyph.Button("Open in browser", ActionIcon.External,
+                (_, _) => OpenExternal(_loadedUrl)));
+            _status.Children.Add(actions);
         }
 
         /// <summary>

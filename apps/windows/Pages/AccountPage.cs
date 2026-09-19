@@ -37,6 +37,7 @@ internal sealed class AccountPage : Page, IToolbarItems
     private JsonNode? _account;
     private string? _accountError;
     private bool _signedIn;
+    private int _loadGeneration;
 
     public AccountPage()
     {
@@ -66,6 +67,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         Unloaded += (_, _) =>
         {
             _pullPoll?.Cancel();
+            ++_loadGeneration;
             AppServices.Update.Changed -= OnUpdateChanged;
         };
     }
@@ -126,13 +128,17 @@ internal sealed class AccountPage : Page, IToolbarItems
 
     private async Task LoadAsync()
     {
+        var generation = ++_loadGeneration;
         try
         {
-            _account = await AppServices.Host.CallAsync("account.status");
+            var account = await AppServices.Host.CallAsync("account.status");
+            if (generation != _loadGeneration) return;
+            _account = account;
             _accountError = null;
         }
         catch (Exception ex)
         {
+            if (generation != _loadGeneration) return;
             _account = null;
             _accountError = FriendlyError.Display(ex.Message);
         }
@@ -867,7 +873,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             body.Children.Add(new TextBlock
             {
                 Text = FriendlyError.Display(ex.Message),
-                Foreground = Theme.Brush(Theme.Danger),
+                Foreground = Theme.Brush(static () => Theme.Danger),
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -1554,7 +1560,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             {
                 Text = update.Failure ?? "The update could not install itself.",
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = Theme.Brush(Theme.Danger),
+                Foreground = Theme.Brush(static () => Theme.Danger),
             });
             body.Children.Add(ActionIconGlyph.Button("Retry", ActionIcon.Refresh, async (_, _) => await update.RetryAsync()));
             if (!string.IsNullOrEmpty(update.HtmlUrl))

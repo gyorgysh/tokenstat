@@ -81,7 +81,7 @@ internal static class WorkspaceAddDialog
             "Adding a workspace does not send the folder anywhere. Only usage counters are eligible for sync."));
         var error = new TextBlock
         {
-            Foreground = Theme.Brush(Theme.Danger),
+            Foreground = Theme.Brush(static () => Theme.Danger),
             TextWrapping = TextWrapping.Wrap,
             Visibility = Visibility.Collapsed,
         };
@@ -92,13 +92,19 @@ internal static class WorkspaceAddDialog
             Title = "Add a workspace",
             Content = form,
             PrimaryButtonText = "Add workspace",
+            SecondaryButtonText = "On another machine…",
             CloseButtonText = "Not now",
             DefaultButton = ContentDialogButton.Primary,
         };
         JsonNode? added = null;
         while (added is null)
         {
-            if (await Chrome.ShowDialog(owner, dialog) != ContentDialogResult.Primary)
+            var result = await Chrome.ShowDialog(owner, dialog);
+            if (result == ContentDialogResult.Secondary)
+            {
+                return await RemoteWorkspaceAddDialog.ShowAsync(owner);
+            }
+            if (result != ContentDialogResult.Primary)
             {
                 return null;
             }
