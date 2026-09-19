@@ -923,20 +923,21 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 }
                 var draft = Norm(_text);
                 var saved = Norm(_savedText);
-                if (host != draft && host != saved)
+                var hostNormalized = Norm(host);
+                if (hostNormalized != draft && hostNormalized != saved)
                 {
                     ConflictHost = host;
                     ShowConflict();
                     return;
                 }
-                if (host == draft)
+                if (hostNormalized == draft)
                 {
                     // Already there: a lost acknowledgement or a matching
                     // remote edit. Mark it saved without writing again.
-                    MarkSaved(draft);
+                    MarkSaved(host);
                     return;
                 }
-                var sent = draft;
+                var sent = EditorText.ForFile(draft, _savedText);
                 try
                 {
                     await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId,
@@ -977,12 +978,12 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             ConflictHost = null;
             ShowConflict();
             StatusError(null);
-            var sent = Norm(_text);
+            var sent = EditorText.ForFile(_text, host);
             IsSaving = true;
             try
             {
                 await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId,
-                "workspace.write",
+                    "workspace.write",
                     new JsonObject { ["id"] = _workspaceId, ["path"] = Path, ["content"] = sent });
                 MarkSaved(sent);
             }
@@ -1008,7 +1009,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         private void Adopt(string content)
         {
             _text = content;
-            _savedText = Norm(content);
+            _savedText = content;
             StatusError(null);
             _applying = true;
             try

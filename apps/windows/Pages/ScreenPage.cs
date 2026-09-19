@@ -173,7 +173,12 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             _pressedKeys.Clear();
         };
         _stage.PointerPressed += StageOnPointerPressed;
-        _stage.PointerReleased += (_, e) => { ReleasePointer(); _stage.ReleasePointerCapture(e.Pointer); };
+        _stage.PointerReleased += (_, e) =>
+        {
+            if (Normalize(e) is { } point) { _cursorX = point.x; _cursorY = point.y; }
+            ReleasePointer();
+            _stage.ReleasePointerCapture(e.Pointer);
+        };
         _stage.PointerCaptureLost += (_, _) => ReleasePointer();
         _stage.PointerMoved += StageOnPointerMoved;
         _stage.PointerWheelChanged += StageOnPointerWheel;
@@ -878,29 +883,26 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             return;
         }
         e.Handled = true;
+        if (Normalize(e) is not { } point) return;
         var properties = e.GetCurrentPoint(_stage).Properties;
         _ = SendEventAsync(new JsonObject
         {
             ["type"] = "scroll",
-            ["x"] = _cursorX,
-            ["y"] = _cursorY,
-            ["dx"] = 0,
-            ["dy"] = properties.MouseWheelDelta,
+            ["x"] = point.x,
+            ["y"] = point.y,
+            ["dx"] = properties.IsHorizontalMouseWheel ? properties.MouseWheelDelta : 0,
+            ["dy"] = properties.IsHorizontalMouseWheel ? 0 : properties.MouseWheelDelta,
         });
     }
 
     private (double x, double y)? Normalize(PointerRoutedEventArgs e)
     {
-        var width = _stage.ActualWidth;
-        var height = _stage.ActualHeight;
-        if (width <= 0 || height <= 0)
-        {
-            return null;
-        }
         var position = e.GetCurrentPoint(_stage).Position;
-        return (
-            Math.Clamp(position.X / width, 0, 1),
-            Math.Clamp(position.Y / height, 0, 1));
+        var bitmap = _picture.Source as BitmapSource;
+        var width = _streamer?.Width ?? (uint)(bitmap?.PixelWidth ?? 0);
+        var height = _streamer?.Height ?? (uint)(bitmap?.PixelHeight ?? 0);
+        return ScreenViewport.Normalize(position.X, position.Y, _stage.ActualWidth, _stage.ActualHeight,
+            width, height, _pressedButton is not null);
     }
 
     private async Task SendTextAsync(string text)

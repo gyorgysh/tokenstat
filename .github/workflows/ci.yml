@@ -252,7 +252,11 @@ jobs:
         env:
           TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
         timeout-minutes: 5
-        run: dotnet run --project scripts/tests/windows-ui/WindowsUiTests.csproj -c Release
+        run: |
+          dotnet run --project scripts/tests/windows-ui/WindowsUiTests.csproj -c Release
+          $result = $LASTEXITCODE
+          Get-Content "$env:TOKENSTAT_SCREEN_FIXTURE/ui-tests.log" -ErrorAction Continue
+          exit $result
 
       - name: Windows client and daemon lifetime regressions
         if: runner.os == 'Windows'

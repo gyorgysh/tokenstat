@@ -19,6 +19,12 @@ foreach (var (folder, session) in new[] {
         && actualFolder == folder && actualSession == session, "Sidebar selection lost the remote namespace");
 }
 Console.WriteLine("PASS: local and remote sidebar routes preserve both resource ids");
+Check(ScreenViewport.Normalize(0, 50, 200, 200, 200, 100, false) == (0.0, 0.0), "Letterboxed image top-left must map to the remote top-left");
+Check(ScreenViewport.Normalize(100, 100, 200, 200, 200, 100, false) == (0.5, 0.5), "Image center must stay centered");
+Check(ScreenViewport.Normalize(100, 20, 200, 200, 200, 100, false) is null, "Letterbox clicks must not reach the host");
+Check(ScreenViewport.Normalize(100, 20, 200, 200, 200, 100, true) == (0.5, 0.0), "Dragging outside the picture must clamp to its edge");
+Check(ScreenViewport.Normalize(50, 0, 200, 200, 100, 200, false) == (0.0, 0.0), "Portrait image pillarbox must be excluded too");
+Console.WriteLine("PASS: remote pointer follows the displayed image bounds");
 // A TSCR sample from the shared wire, including a three-byte Annex-B NAL.
 var encoded = new byte[40];
 Encoding.ASCII.GetBytes("TSCR").CopyTo(encoded, 0);

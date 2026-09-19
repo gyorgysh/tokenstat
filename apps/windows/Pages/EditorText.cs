@@ -5,6 +5,15 @@ namespace Tokenstat.Pages;
 
 internal static class EditorText
 {
+    public static string ForFile(string text, string original)
+    {
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var first = original.IndexOfAny(['\r', '\n']);
+        if (first < 0 || original[first] == '\n') return normalized;
+        var ending = first + 1 < original.Length && original[first + 1] == '\n' ? "\r\n" : "\r";
+        return normalized.Replace("\n", ending);
+    }
+
     // The final RichEdit paragraph marker belongs to the control, not the file.
     public static string Read(RichEditTextDocument document)
     {
