@@ -16,7 +16,7 @@ namespace Tokenstat.Design;
 
 internal static class Chrome
 {
-    public static Border Card(string title, UIElement body, string? subtitle = null, UIElement? accessory = null)
+    public static Border Card(string title, UIElement body, string? subtitle = null, FrameworkElement? accessory = null)
     {
         var header = new StackPanel { Spacing = 2 };
         header.Children.Add(new TextBlock
@@ -51,10 +51,7 @@ internal static class Chrome
             });
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             head.Children.Add(header);
-            if (accessory is FrameworkElement framed)
-            {
-                framed.VerticalAlignment = VerticalAlignment.Center;
-            }
+            accessory.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(accessory, 1);
             head.Children.Add(accessory);
             stack.Children.Add(head);

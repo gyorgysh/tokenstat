@@ -34,8 +34,10 @@ $RustTarget = if ($Rid -eq "win-arm64") { "aarch64-pc-windows-msvc" } else { "x8
 Write-Host "hostd $RustTarget"
 if ($Rid -eq "win-arm64") {
     rustup target add $RustTarget | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "rustup target add $RustTarget failed (exit $LASTEXITCODE)" }
 }
 cargo build --release --locked --target $RustTarget -p tokenstat-host --bin tokenstat-hostd
+if ($LASTEXITCODE -ne 0) { throw "hostd build failed for $RustTarget (exit $LASTEXITCODE)" }
 
 $Csproj = Join-Path $Root "apps\windows\Tokenstat.csproj"
 $PublishDir = Join-Path $Root "apps\windows\bin\publish\$Rid"
@@ -56,13 +58,14 @@ dotnet publish $Csproj `
     -p:WindowsAppSDKSelfContained=true `
     -p:DebugType=none `
     -p:DebugSymbols=false
+if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $Rid (exit $LASTEXITCODE)" }
+if (-not (Test-Path -LiteralPath (Join-Path $PublishDir "Tokenstat.exe") -PathType Leaf)) {
+    throw "dotnet publish did not produce Tokenstat.exe in $PublishDir"
+}
 
 $hostd = Join-Path $Root "target\$RustTarget\release\tokenstat-hostd.exe"
-if (-not (Test-Path $hostd)) {
-    $hostd = Join-Path $Root "target\release\tokenstat-hostd.exe"
-}
-if (-not (Test-Path $hostd)) {
-    throw "tokenstat-hostd.exe was not built"
+if (-not (Test-Path -LiteralPath $hostd -PathType Leaf)) {
+    throw "tokenstat-hostd.exe was not built for $RustTarget"
 }
 Copy-Item $hostd (Join-Path $PublishDir "tokenstat-hostd.exe") -Force
 Copy-Item (Join-Path $Root "scripts\install-host-task.ps1") (Join-Path $PublishDir "install-host-task.ps1") -Force
@@ -76,7 +79,8 @@ Copy-Item (Join-Path $Root "README.md") (Join-Path $PublishDir "README.md") -For
 ) | Set-Content -Path (Join-Path $PublishDir "INSTALL.txt") -Encoding utf8
 
 $notices = Join-Path $PublishDir "THIRD-PARTY-NOTICES.md"
-cargo run --release --locked -p xtask -- notices $notices tokenstat-cli
+cargo run --release --locked -p xtask -- notices $notices tokenstat-host
+if ($LASTEXITCODE -ne 0) { throw "Third-party notice generation failed (exit $LASTEXITCODE)" }
 Add-Content -Path $notices -Value @"
 
 ## Windows App SDK and .NET
