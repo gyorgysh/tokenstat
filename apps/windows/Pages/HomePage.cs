@@ -31,6 +31,8 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
 
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _signSlot = new() { Spacing = Theme.SpaceL };
+    private readonly Grid _inspectorLayout = new();
+    private readonly Border _inspectorFooter = new() { Padding = new Thickness(Theme.SpaceS) };
     private readonly StackPanel _inspectorRoot = new()
     {
         Spacing = Theme.SpaceM,
@@ -73,6 +75,11 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
 
     public HomePage()
     {
+        _inspectorLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        _inspectorLayout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _inspectorLayout.Children.Add(new ScrollViewer { Content = _inspectorRoot, HorizontalScrollMode = ScrollMode.Disabled });
+        Grid.SetRow(_inspectorFooter, 1);
+        _inspectorLayout.Children.Add(_inspectorFooter);
         try
         {
             if (JsonNode.Parse(File.ReadAllText(LayoutPath)) is JsonObject layout)
@@ -187,7 +194,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
     /// changes replace its children, so the column stays live without the
     /// shell ever asking again.
     /// </summary>
-    public UIElement? Inspector => _inspectorRoot;
+    public UIElement? Inspector => _inspectorLayout;
 
     /// <summary>
     /// The toolbar scope picker pushes here, on navigation and on every
@@ -592,16 +599,29 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             who.Children.Add(new TextBlock { Text = "Working locally", Opacity = 0.7 });
         }
         head.Children.Add(who);
+        var profile = new Grid { ColumnSpacing = Theme.SpaceL, RowSpacing = Theme.SpaceM };
+        profile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        profile.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        profile.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        profile.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        profile.Children.Add(head);
         if (calendar is not null)
         {
-            var spacer = new Border { Width = Theme.SpaceL };
-            head.Children.Add(spacer);
-            head.Children.Add(Chrome.Stat(
-                "Streak", Format.Long(calendar, "streakCurrent").ToString(), "days"));
-            head.Children.Add(Chrome.Stat(
-                "Best", Format.Long(calendar, "streakBest").ToString(), "days"));
-            head.Children.Add(Chrome.Stat(
-                "Active", Format.Long(calendar, "activeDays").ToString(), "days"));
+            var stats = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceL };
+            stats.Children.Add(Chrome.Stat("Streak", Format.Long(calendar, "streakCurrent").ToString(), "days", accent: true));
+            stats.Children.Add(Chrome.Stat("Best", Format.Long(calendar, "streakBest").ToString(), "days"));
+            stats.Children.Add(Chrome.Stat("Active", Format.Long(calendar, "activeDays").ToString(), "days"));
+            Grid.SetColumn(stats, 1);
+            profile.Children.Add(stats);
+            profile.SizeChanged += (_, e) =>
+            {
+                var narrow = e.NewSize.Width < 640;
+                Grid.SetColumnSpan(head, narrow ? 2 : 1);
+                Grid.SetColumn(stats, narrow ? 0 : 1);
+                Grid.SetRow(stats, narrow ? 1 : 0);
+                Grid.SetColumnSpan(stats, narrow ? 2 : 1);
+                stats.HorizontalAlignment = narrow ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+            };
         }
         return new Border
         {
@@ -610,7 +630,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(Theme.CardRadius),
             Padding = new Thickness(Theme.CardPadding),
-            Child = head,
+            Child = profile,
         };
     }
 
@@ -1525,6 +1545,8 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
     private void RefreshInspector()
     {
         _inspectorRoot.Children.Clear();
+        _inspectorFooter.Child = null;
+        _inspectorFooter.Visibility = Visibility.Collapsed;
         _inspectorRoot.Children.Add(Fonts.Text(
             "Day", 15, Microsoft.UI.Text.FontWeights.SemiBold));
         var date = _hoverDate ?? _selectedDate;
@@ -1585,13 +1607,14 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         }
         // The footer action, like the Mac: the pinned day opened as a full
         // report in Insights.
-        var open = ActionIconGlyph.PrimaryButton(
+        var open = ActionIconGlyph.Button(
             "Open in Insights",
             ActionIcon.Next,
             (_, _) => AppServices.OpenInsightsDay?.Invoke(date));
         open.HorizontalAlignment = HorizontalAlignment.Stretch;
         open.HorizontalContentAlignment = HorizontalAlignment.Center;
-        _inspectorRoot.Children.Add(open);
+        _inspectorFooter.Child = open;
+        _inspectorFooter.Visibility = Visibility.Visible;
     }
 
     private List<UIElement> DayBody(JsonNode detail, DayOverview? extra, string date)
@@ -1608,7 +1631,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         children.Add(Chrome.Stat(
             "Value at list rates",
             value,
-            Format.Flag(detail, "estimated") ? "estimated" : "not billed"));
+            Format.Flag(detail, "estimated") ? "estimated" : "not billed", accent: true));
         var sessions = OptLong(extra?.Totals, "sessions");
         var headline = $"{Format.Tokens(Format.Long(detail, "tokens"))} tokens · "
             + $"{Format.Long(detail, "events").ToString("N0")} requests";

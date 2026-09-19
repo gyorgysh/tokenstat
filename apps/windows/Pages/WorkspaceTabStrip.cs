@@ -12,6 +12,7 @@ internal sealed class WorkspaceTabStrip
     // A managed subclass is projected as Control and fails style validation.
     public TabView View { get; } = new();
     private readonly Dictionary<string, TabViewItem> _surfaces = new();
+    public Action<TabViewItem>? CloseRequested { get; set; }
     public WorkspaceTabStrip()
     {
         // WinUI's DefaultTabViewStyle sets VerticalAlignment=Top. Content
@@ -57,6 +58,8 @@ internal sealed class WorkspaceTabStrip
         {
             tab = new TabViewItem { Header = label, Content = create(), IsClosable = closable,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+            var menu = ContextMenus.Menu(tab);
+            ContextMenus.Add(menu, "Close", () => CloseRequested?.Invoke(tab), () => tab.IsClosable);
             _surfaces.Add(key, tab);
             View.TabItems.Add(tab);
         }

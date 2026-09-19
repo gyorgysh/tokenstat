@@ -24,6 +24,24 @@ internal enum DeviceScope
 
 internal static class DeviceScopeNames
 {
+    private static string PreferencePath => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "activity-scope");
+    public static DeviceScope Restore()
+    {
+        try { return FromWire(System.IO.File.ReadAllText(PreferencePath).Trim()); }
+        catch { return DeviceScope.AllDevices; }
+    }
+    public static void Remember(this DeviceScope scope)
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(PreferencePath)!);
+            System.IO.File.WriteAllText(PreferencePath, scope.Wire());
+        }
+        catch (System.IO.IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     public static string Label(this DeviceScope scope) => scope switch
     {
         DeviceScope.ThisDevice => "This device",
@@ -114,7 +132,7 @@ internal sealed class InspectorHost : Grid
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
-        _pane = new Border { Background = Theme.SidebarBrush, Child = _scroller };
+        _pane = new Border { Background = Theme.BackgroundBrush, Child = _scroller };
         Grid.SetColumn(_pane, 2);
         Children.Add(_pane);
         Refresh();
@@ -172,6 +190,6 @@ internal sealed class InspectorHost : Grid
     public void ApplyTheme()
     {
         _rule.Background = Theme.BorderBrush;
-        _pane.Background = Theme.SidebarBrush;
+        _pane.Background = Theme.BackgroundBrush;
     }
 }

@@ -53,10 +53,12 @@ internal static class WorkspaceHistory
             hasUpstream = !string.IsNullOrEmpty(Format.Text(status["git"], "upstream", Format.Text(status, "upstream")));
         }
         catch { /* Do not claim that a commit was pushed without an upstream. */ }
+        JsonNode? ownAccount = null;
         string? ownAvatar = null;
         string ownHandle = "", ownName = "";
-        try { var status = await AppServices.Host.CallAsync("account.status"); var account = status["account"] ?? status; ownAvatar = Format.Text(account, "avatar"); ownHandle = Format.Text(account, "handle"); ownName = Format.Text(account, "displayName"); }
+        try { var status = await AppServices.Host.CallAsync("account.status"); var account = status["account"] ?? status; ownAccount = account; ownAvatar = Format.Text(account, "avatar"); ownHandle = Format.Text(account, "handle"); ownName = Format.Text(account, "displayName"); }
         catch { /* History remains usable while account status is unavailable. */ }
+        var ownEmails = await HistoryAvatars.OwnEmailsAsync(ownAccount, array);
         var list = new StackPanel { Spacing = 4 };
         foreach (var commit in array)
         {
@@ -116,7 +118,7 @@ internal static class WorkspaceHistory
             var content = new Grid { ColumnSpacing = Theme.SpaceS };
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var avatar = Marks.Avatar(url: Format.Flag(commit, "mine") || (ownHandle.Length > 0 && author.Equals(ownHandle, StringComparison.OrdinalIgnoreCase)) || (ownName.Length > 0 && author.Equals(ownName, StringComparison.OrdinalIgnoreCase)) ? ownAvatar : null, name: author, size: 30);
+            var avatar = Marks.Avatar(url: ownEmails.Contains(Format.Text(commit, "email")) || Format.Flag(commit, "mine") || (ownHandle.Length > 0 && author.Equals(ownHandle, StringComparison.OrdinalIgnoreCase)) || (ownName.Length > 0 && author.Equals(ownName, StringComparison.OrdinalIgnoreCase)) ? ownAvatar : null, name: author, size: 30);
             avatar.VerticalAlignment = VerticalAlignment.Top;
             content.Children.Add(avatar);
             Grid.SetColumn(body, 1);
@@ -336,5 +338,50 @@ internal static class WorkspaceHistory
         {
             return "";
         }
+    }
+}
+
+/// Git identities are device-local. A commit recognised as ours on another
+/// linked computer can identify the same author here without changing Git config.
+internal static class HistoryAvatars
+{
+    private static readonly Dictionary<string, (DateTime At, Task<HashSet<string>> Task)> Cache = new();
+    internal static async Task<HashSet<string>> OwnEmailsAsync(JsonNode? account, JsonArray commits)
+    {
+        var own = commits.Where(c => Format.Flag(c, "mine"))
+            .Select(c => Format.Text(c, "email")).Where(e => e.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (account is null || string.IsNullOrEmpty(Format.Text(account, "avatar"))) return own;
+        var accountId = Format.Text(account, "accountId", Format.Text(account, "handle"));
+        var peers = (Format.Items(account, "machines") ?? new JsonArray())
+            .Select(m => Format.Text(m, "publicIdentity")).Where(p => p.Length > 0).ToHashSet();
+        var ids = commits.Select(c => Format.Text(c, "id")).ToHashSet();
+        var folders = Tokenstat.Navigation.RemoteWorkspaces.CachedFolders()
+            .Where(f => peers.Contains(f.PeerKey)).Take(8).ToList();
+        var loads = folders.Select(async folder =>
+        {
+            var key = accountId + ":" + folder.Id + ":" + Format.Text(commits.FirstOrDefault(), "id");
+            if (!Cache.TryGetValue(key, out var cached) || DateTime.UtcNow - cached.At > TimeSpan.FromMinutes(5))
+            {
+                async Task<HashSet<string>> Fetch()
+                {
+                    var emails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    try
+                    {
+                        var log = await Tokenstat.Navigation.RemoteWorkspaces.CallOnPeerAsync(folder.PeerKey,
+                            "workspace.log", new JsonObject { ["id"] = folder.InnerId, ["limit"] = 100 }, TimeSpan.FromSeconds(3));
+                        foreach (var c in Format.Items(log, "commits", "history", "log") ?? new JsonArray())
+                            if (Format.Flag(c, "mine") && ids.Contains(Format.Text(c, "id")) && Format.Text(c, "email") is { Length: > 0 } email)
+                                emails.Add(email);
+                    }
+                    catch { /* Offline computers do not delay or erase local history. */ }
+                    return emails;
+                }
+                cached = (DateTime.UtcNow, Fetch());
+                Cache[key] = cached;
+            }
+            return await cached.Task;
+        });
+        foreach (var emails in await Task.WhenAll(loads)) own.UnionWith(emails);
+        return own;
     }
 }

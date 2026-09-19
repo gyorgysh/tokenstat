@@ -104,7 +104,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             Grid.SetRow(treeList, 3);
             files.Children.Add(_pageStatus);
             FileTree = files;
-            Content = new TextBlock { Text = "Choose a file in the file browser.", Margin = new Thickness(Theme.SpaceM) };
+            // The workbench mounts FileTree here when the Files tab is selected.
         }
         RenderInspector();
         _tabs.TabCloseRequested += async (_, args) =>
@@ -286,7 +286,19 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 Grid.SetColumn(name, 1);
                 label.Children.Add(name);
                 ToolTipService.SetToolTip(label, Format.Text(entry, "path"));
-                nodes.Add(new TreeViewNode { Content = label, HasUnrealizedChildren = isDirectory });
+                var node = new TreeViewNode { Content = label, HasUnrealizedChildren = isDirectory };
+                var entryPath = Format.Text(entry, "path");
+                var menu = ContextMenus.Menu(label);
+                if (isDirectory)
+                    ContextMenus.AddAsync(menu, "Expand / collapse", async () =>
+                    {
+                        if (node.HasUnrealizedChildren) await ExpandAsync(node, entryPath);
+                        node.IsExpanded = !node.IsExpanded;
+                    });
+                else ContextMenus.AddAsync(menu, "Open in tab", async () => await OpenAsync(entryPath));
+                ContextMenus.Copy(menu, "Copy relative path", () => entryPath);
+                ContextMenus.AddAsync(menu, "Refresh", async () => await ExpandAsync(parent, path));
+                nodes.Add(node);
             }
             if (parent is not null) parent.HasUnrealizedChildren = false;
         }
@@ -334,6 +346,10 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             item.Header = tab.Title;
             RenderInspector();
         };
+        var tabMenu = ContextMenus.Menu(item);
+        ContextMenus.AddAsync(tabMenu, "Save", async () => await tab.SaveAsync());
+        ContextMenus.Copy(tabMenu, "Copy path", () => path);
+        ContextMenus.AddAsync(tabMenu, "Close", async () => await CloseTabAsync(tab));
         item.Tag = tab;
         _tabs.TabItems.Add(item);
         _tabs.SelectedItem = item;
@@ -499,6 +515,17 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _status.TextTrimming = TextTrimming.CharacterEllipsis;
             _status.Margin = new Thickness(8, 4, 8, 4);
 
+            var editorMenu = ContextMenus.Menu(_box);
+            ContextMenus.Add(editorMenu, "Undo", () => _box.Document.Undo(), () => _box.Document.CanUndo());
+            ContextMenus.Add(editorMenu, "Redo", () => _box.Document.Redo(), () => _box.Document.CanRedo());
+            editorMenu.Items.Add(new MenuFlyoutSeparator());
+            ContextMenus.Add(editorMenu, "Cut", () => _box.Document.Selection.Cut());
+            ContextMenus.Add(editorMenu, "Copy", () => _box.Document.Selection.Copy());
+            ContextMenus.Add(editorMenu, "Paste", () => _box.Document.Selection.Paste(0));
+            ContextMenus.Add(editorMenu, "Select all", () => _box.Document.Selection.SetRange(0, int.MaxValue));
+            editorMenu.Items.Add(new MenuFlyoutSeparator());
+            ContextMenus.Add(editorMenu, "Find in file…", ToggleFind);
+            ContextMenus.AddAsync(editorMenu, "Save", async () => await SaveAsync());
             BuildFindBar();
             BuildConflictCard();
 

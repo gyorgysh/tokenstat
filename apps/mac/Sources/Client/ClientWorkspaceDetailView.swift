@@ -35,7 +35,7 @@ struct ClientWorkspaceSessionsView: View {
     @State private var forwardedPort: Int?
     @State private var pendingClose: PtySessionInfo?
     @State private var showPort = false
-    @State private var portText = "5173"
+    @AppStorage("browser.lastPort") private var portText = "5173"
     @State private var isOpeningPort = false
     /// Read-only launcher state for the Chat tile's count and character.
     @State private var chatPreview = ChatModel()

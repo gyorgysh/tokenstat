@@ -67,6 +67,29 @@ internal sealed class TerminalSurface : Grid
                         try { if (!_closed && rows == Rows && cols == Cols && Resized is not null) await Resized(rows, cols); }
                         finally { _resizeGate.Release(); }
                     }
+                    else if (type == "contextMenu")
+                    {
+                        var selection = message.GetProperty("selection").GetString() ?? "";
+                        var menu = new MenuFlyout();
+                        ContextMenus.Add(menu, "Copy", () =>
+                        {
+                            var data = new DataPackage(); data.SetText(selection); Clipboard.SetContent(data);
+                        }, () => selection.Length > 0);
+                        ContextMenus.AddAsync(menu, "Paste", async () =>
+                        {
+                            try
+                            {
+                                var data = Clipboard.GetContent();
+                                if (data.Contains(StandardDataFormats.Text)) Paste(await data.GetTextAsync());
+                            }
+                            catch (Exception ex) { Failed?.Invoke(ex.Message); }
+                        });
+                        ContextMenus.Add(menu, "Select all", () => Send(new { type = "selectAll" }));
+                        menu.ShowAt(_web, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
+                        {
+                            Position = new Windows.Foundation.Point(message.GetProperty("x").GetDouble(), message.GetProperty("y").GetDouble()),
+                        });
+                    }
                     else if (type == "copy")
                     {
                         var content = new DataPackage();

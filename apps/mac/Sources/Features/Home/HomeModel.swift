@@ -58,7 +58,9 @@ final class HomeModel {
 
     /// What the user asked the grid to count. Every machine by default: a
     /// person with two Macs wants their year, not one laptop's share of it.
-    var scope: ActivityScope = .allMachines
+    var scope: ActivityScope = ActivityScope(rawValue: UserDefaults.standard.string(forKey: "activity.scope") ?? "") ?? .allMachines {
+        didSet { UserDefaults.standard.set(scope.rawValue, forKey: "activity.scope") }
+    }
 
     /// What the host actually built.
     ///

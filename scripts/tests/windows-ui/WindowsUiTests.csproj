@@ -31,6 +31,7 @@
     <Compile Include="../../../apps/windows/Pages/TerminalSurface.cs" Link="TerminalSurface.cs" />
     <Compile Include="../../../apps/windows/Pages/TerminalPalette.cs" Link="TerminalPalette.cs" />
     <Compile Include="../../../apps/windows/Design/NativeContentLayout.cs" Link="NativeContentLayout.cs" />
+    <Compile Include="../../../apps/windows/Design/ContextMenus.cs" Link="ContextMenus.cs" />
     <Compile Include="../../../apps/windows/Design/InspectorHost.cs" Link="InspectorHost.cs" />
     <Compile Include="../../../apps/windows/Design/FlowPanel.cs" Link="FlowPanel.cs" />
     <Compile Include="../../../apps/windows/Design/Theme.cs" Link="Theme.cs" />

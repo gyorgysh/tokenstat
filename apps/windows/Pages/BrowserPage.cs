@@ -162,6 +162,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             item.Header = tab.Title;
             RenderInspector();
         };
+        ContextMenus.AddAsync(ContextMenus.Menu(item), "Close", async () => await CloseTabAsync(tab));
         item.Tag = tab;
         _tabs.TabItems.Add(item);
         _tabs.SelectedItem = item;

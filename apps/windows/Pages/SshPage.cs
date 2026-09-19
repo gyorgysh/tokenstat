@@ -289,10 +289,14 @@ internal sealed class SshPage : Page, IToolbarItems
                         Children =
                         {
                             new TextBlock { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
-                            new TextBlock { Text = subtitle, Opacity = 0.7 },
+                            new TextBlock { Text = string.IsNullOrEmpty(keyHint) ? "SSH server" : "SSH server · key", Opacity = 0.7 },
                         },
                     },
                 };
+                var hostContent = (FrameworkElement)open.Content;
+                open.Content = null;
+                open.Content = SshHostPlatform.Row(SshHostPlatform.Label(host), hostContent);
+                ToolTipService.SetToolTip(open, subtitle);
                 var record = host;
                 open.Click += async (_, _) => await ConnectAsync(record);
                 var row = new Grid();
@@ -312,6 +316,12 @@ internal sealed class SshPage : Page, IToolbarItems
                     "Delete", ActionIcon.Delete, async (_, _) => await DeleteHostAsync(record)));
                 Grid.SetColumn(tools, 1);
                 row.Children.Add(tools);
+                var menu = ContextMenus.Menu(row);
+                ContextMenus.AddButton(menu, open, "Connect");
+                ContextMenus.AddButtons(menu, tools);
+                ContextMenus.AddAsync(menu, Format.Flag(record, "favorite") ? "Remove from favourites" : "Add to favourites", async () =>
+                    await SaveLibraryFlagAsync("ssh.host.save", record, "favorite", !Format.Flag(record, "favorite")));
+                ContextMenus.Copy(menu, "Copy connection address", () => subtitle);
                 list.Children.Add(row);
             }
             _listRoot.Children.Add(Chrome.Card("Hosts", list));
@@ -387,6 +397,10 @@ internal sealed class SshPage : Page, IToolbarItems
                         "Remove", ActionIcon.Delete, async (_, _) => await RemoveKeyAsync(record));
                     Grid.SetColumn(remove, 1);
                     row.Children.Add(remove);
+                    var menu = ContextMenus.Menu(row);
+                    ContextMenus.AddButton(menu, remove);
+                    ContextMenus.Copy(menu, "Copy public key", () => Format.Text(record, "publicKey"));
+                    ContextMenus.Copy(menu, "Copy fingerprint", () => Format.Text(record, "fingerprint"));
                 }
                 body.Children.Add(row);
             }
@@ -701,22 +715,25 @@ internal sealed class SshPage : Page, IToolbarItems
             };
         }
 
-        JsonNode opened;
-        try
-        {
-            opened = await AppServices.Host.CallAsync(
-                "ssh.session.open",
-                new JsonObject
+        var connection = new JsonObject
                 {
                     ["hostname"] = hostname,
                     ["port"] = port,
                     ["username"] = username,
+                    ["hostId"] = Format.Text(record, "id"),
+                    ["label"] = string.IsNullOrWhiteSpace(Format.Text(record, "label")) ? "SSH session" : Format.Text(record, "label"),
                     ["initialDirectory"] = Format.Text(record, "initialDirectory", "~"),
                     ["hostKeys"] = hostKeys,
                     ["rows"] = 24,
                     ["cols"] = 80,
                     ["auth"] = auth,
-                },
+                };
+        JsonNode opened;
+        try
+        {
+            opened = await AppServices.Host.CallAsync(
+                "ssh.session.open",
+                connection,
                 TimeSpan.FromSeconds(30));
         }
         catch (Exception ex)
@@ -742,6 +759,15 @@ internal sealed class SshPage : Page, IToolbarItems
         _poll?.Cancel();
         _poll = new CancellationTokenSource();
         _ = PollAsync(_poll.Token);
+        var platformHost = (JsonObject)record.DeepClone();
+        platformHost["hostKeys"] = hostKeys.DeepClone();
+        _ = RememberPlatformAsync(platformHost, connection);
+
+    }
+
+    private async Task RememberPlatformAsync(JsonObject host, JsonObject connection)
+    {
+        if (await SshHostPlatform.RememberAsync(host, connection) && IsLoaded) await LoadAsync();
     }
 
     /// <summary>
@@ -749,7 +775,7 @@ internal sealed class SshPage : Page, IToolbarItems
     /// of a saved one. Keys, secrets, and fingerprints stay where they are:
     /// this form never shows private material.
     /// </summary>
-    private async Task EditHostAsync(JsonNode? host)
+    private async Task EditHostAsync(JsonNode? host, string? folderId = null)
     {
         var editing = host is JsonObject;
         var savedPort = Format.Long(host, "port");
@@ -815,6 +841,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 ["port"] = port,
                 ["username"] = usernameBox.Text.Trim(),
                 ["initialDirectory"] = directoryBox.Text.Trim(),
+                ["folderId"] = folderId ?? Format.Text(host, "folderId"),
             };
             if (host is JsonObject existing)
             {
@@ -834,6 +861,14 @@ internal sealed class SshPage : Page, IToolbarItems
             return;
         }
         await LoadAsync();
+    }
+
+    private async Task SaveLibraryFlagAsync(string method, JsonNode? record, string key, bool value)
+    {
+        if (record?.DeepClone() is not JsonObject payload) return;
+        payload[key] = value;
+        try { await SshVaultSync.WriteAsync(method, payload); await LoadAsync(); }
+        catch (Exception ex) { LibraryBanner(ex.Message); }
     }
 
     private async Task DeleteHostAsync(JsonNode? host)
@@ -957,7 +992,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 continue;
             }
             var id = Format.Text(session, "id");
-            var label = Format.Text(session, "label", "Shell");
+            var label = SshHostPlatform.SessionLabel(session);
             var alive = Format.Flag(session, "alive");
             var row = new Grid();
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1202,6 +1237,11 @@ internal sealed class SshPage : Page, IToolbarItems
                 "Delete", ActionIcon.Delete, async (_, _) => await DeleteSnippetAsync(record)));
             Grid.SetColumn(tools, 1);
             row.Children.Add(tools);
+            var menu = ContextMenus.Menu(row);
+            ContextMenus.AddButtons(menu, tools);
+            ContextMenus.Copy(menu, "Copy command", () => command);
+            ContextMenus.AddAsync(menu, Format.Flag(record, "runOnConnect") ? "Do not run on connect" : "Run on connect", async () =>
+                await SaveLibraryFlagAsync("ssh.snippet.save", record, "runOnConnect", !Format.Flag(record, "runOnConnect")));
             body.Children.Add(row);
         }
         if (body.Children.Count == 1)
@@ -1478,6 +1518,11 @@ internal sealed class SshPage : Page, IToolbarItems
                         "Delete", ActionIcon.Delete, async (_, _) => await DeleteFolderAsync(id));
                     Grid.SetColumn(remove, 1);
                     row.Children.Add(remove);
+                    var menu = ContextMenus.Menu(row);
+                    ContextMenus.AddAsync(menu, "Rename folder", async () => await AddFolderAsync(folder));
+                    ContextMenus.AddAsync(menu, "Add server here", async () => await EditHostAsync(null, id));
+                    ContextMenus.AddAsync(menu, "Add sub-folder", async () => await AddFolderAsync(parentId: id));
+                    ContextMenus.AddButton(menu, remove);
                 }
                 body.Children.Add(row);
             }
@@ -1485,12 +1530,12 @@ internal sealed class SshPage : Page, IToolbarItems
         _listRoot.Children.Add(Chrome.Card("Folders", body));
     }
 
-    private async Task AddFolderAsync()
+    private async Task AddFolderAsync(JsonNode? folder = null, string? parentId = null)
     {
-        var nameBox = new TextBox { PlaceholderText = "Folder name", MinWidth = 320 };
+        var nameBox = new TextBox { PlaceholderText = "Folder name", Text = Format.Text(folder, "name"), MinWidth = 320 };
         var dialog = new ContentDialog
         {
-            Title = "Add folder",
+            Title = folder is null ? "Add folder" : "Rename folder",
             Content = nameBox,
             PrimaryButtonText = "Add",
             CloseButtonText = "Cancel",
@@ -1502,9 +1547,10 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         try
         {
-            await SshVaultSync.WriteAsync(
-                "ssh.folder.save",
-                new JsonObject { ["name"] = nameBox.Text.Trim() });
+            var payload = folder?.DeepClone() as JsonObject ?? new JsonObject();
+            payload["name"] = nameBox.Text.Trim();
+            if (parentId is not null) payload["parentId"] = parentId;
+            await SshVaultSync.WriteAsync("ssh.folder.save", payload);
         }
         catch (Exception ex)
         {
@@ -1604,6 +1650,7 @@ internal sealed class SshPage : Page, IToolbarItems
                     "Forget", ActionIcon.Delete, async (_, _) => await ForgetKnownHostAsync(hostId));
                 Grid.SetColumn(forget, 1);
                 line.Children.Add(forget);
+                ContextMenus.AddButton(ContextMenus.Menu(line), forget);
             }
             body.Children.Add(line);
         }

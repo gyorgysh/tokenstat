@@ -1070,7 +1070,7 @@ struct RootView: View {
                 EmptyView()
                 #endif
             case .global(.insights):
-                InspectorView(model: model) { closeInspector() }
+                ScopedInsightsInspector(model: model) { closeInspector() }
             case .global(.account):
                 EmptyView()
             case .workspacesOverview:

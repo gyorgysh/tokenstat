@@ -106,7 +106,9 @@ internal sealed partial class ChatPage
                     try { ChatOutbox.Shared.Update(key, rows => rows.RemoveAll(row => row.Id == item.Id)); _authorizedQueue.Remove(item.Id); PaintConversation(); }
                     catch (Exception ex) { Banner(ex.Message); }
                 }));
-                row.Children.Add(actions); body.Children.Add(row);
+                row.Children.Add(actions);
+                ContextMenus.AddButtons(ContextMenus.Menu(row), actions);
+                body.Children.Add(row);
             }
         }
         catch (Exception ex) { body.Children.Add(Muted(ex.Message)); }

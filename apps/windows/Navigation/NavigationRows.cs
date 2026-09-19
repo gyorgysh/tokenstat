@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 
 namespace Tokenstat.Navigation;
@@ -19,9 +21,17 @@ internal static class NavigationRows
             if (existing is not null)
             {
                 // Keep the navigation container and its scroll anchor alive.
-                var content = fresh.Content;
-                fresh.Content = null;
-                existing.Content = content;
+                var unchanged = existing.Content is FrameworkElement { Tag: not null } oldView
+                    && fresh.Content is FrameworkElement newView && Equals(oldView.Tag, newView.Tag);
+                if (!unchanged)
+                {
+                    var content = fresh.Content;
+                    fresh.Content = null;
+                    existing.Content = content;
+                }
+                AutomationProperties.SetName(existing, AutomationProperties.GetName(fresh));
+                existing.ContextFlyout = fresh.ContextFlyout;
+                fresh.ContextFlyout = null;
                 var index = items.IndexOf(existing);
                 if (index == at) { at++; continue; }
                 items.RemoveAt(index);

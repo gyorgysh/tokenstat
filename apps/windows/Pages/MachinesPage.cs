@@ -122,6 +122,10 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             return;
         }
         _refreshing = true;
+        var previousStatus = _status;
+        var previousPeers = _peers;
+        var previousAccount = _account;
+        var previousRequests = _requests;
         try
         {
             try
@@ -150,10 +154,19 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             {
             }
             await LoadRequestsAsync();
-            Render();
-            _pairAllowed = RemoteReachAllowed(_account);
-            RaiseToolbarChanged();
-            RefreshInspector();
+            var changed = !JsonNode.DeepEquals(previousStatus, _status)
+                || !JsonNode.DeepEquals(previousPeers, _peers)
+                || !JsonNode.DeepEquals(previousAccount, _account)
+                || previousRequests.Count != _requests.Count
+                || previousRequests.Where((row, index) => index < _requests.Count
+                    && (row.Screen != _requests[index].Screen || !JsonNode.DeepEquals(row.Row, _requests[index].Row))).Any();
+            if (changed)
+            {
+                Render();
+                _pairAllowed = RemoteReachAllowed(_account);
+                RaiseToolbarChanged();
+                RefreshInspector();
+            }
         }
         finally
         {

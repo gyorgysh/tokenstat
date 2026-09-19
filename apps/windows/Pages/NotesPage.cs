@@ -734,6 +734,18 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             RenderList();
             RenderDetail();
         };
+        var menu = ContextMenus.Menu(button);
+        ContextMenus.AddButton(menu, button, "Edit note");
+        ContextMenus.Copy(menu, "Copy note", () => Format.Text(note, "title") + "\n" + Format.Text(note, "notes"));
+        ContextMenus.AddButtons(menu, foot);
+        if (!_showingArchive) ContextMenus.AddAsync(menu, "Archive", async () => await SetArchivedAsync(id, true));
+        ContextMenus.Add(menu, "Delete note…", () =>
+        {
+            _selectedId = id;
+            _confirmDelete = true;
+            RenderList();
+            RenderDetail();
+        });
         return button;
     }
 

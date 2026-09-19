@@ -57,6 +57,12 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
         _inspector.Children.Add(_details);
         Loaded += async (_, _) => await _editor.InitializeAsync();
         _tabs.SelectionChanged += (_, _) => RefreshChrome();
+        _tabStrip.CloseRequested = item =>
+        {
+            if (!item.IsClosable) return;
+            if (item.Content is TerminalPage terminal) terminal.Release();
+            _tabStrip.Forget(item);
+        };
         _tabs.TabCloseRequested += (_, e) =>
         {
             if (e.Item is not TabViewItem item || _editor.Owns(item) || _browser.Owns(item)) return;
@@ -157,6 +163,19 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
     }
     private void RefreshChrome()
     {
+        // One tree keeps expansion, selection and its loaded directory cache
+        // while moving between the Files page and the workspace inspector.
+        var filesPage = ReferenceEquals(ActivePage, _editor);
+        if (filesPage && !ReferenceEquals(_editor.Content, _editor.FileTree))
+        {
+            _inspector.Children.Remove(_editor.FileTree);
+            _editor.Content = _editor.FileTree;
+        }
+        else if (!filesPage && ReferenceEquals(_editor.Content, _editor.FileTree))
+        {
+            _editor.Content = null;
+            _inspector.Children.Add(_editor.FileTree);
+        }
         if (_toolbar is not null) _toolbar.ToolbarChanged -= Changed;
         _toolbar = ActiveSource as IToolbarItems;
         if (_toolbar is not null) _toolbar.ToolbarChanged += Changed;
@@ -172,11 +191,11 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
         }
         else
         {
-            _details.Content = _inspectorTab == "Details"
+            _details.Content = _inspectorTab == "Details" || (filesPage && _inspectorTab == "Files")
                 ? new ScrollViewer { Content = (ActiveSource as IInspectorContent)?.Inspector } : null;
         }
-        _details.Visibility = _inspectorTab == "Files" ? Visibility.Collapsed : Visibility.Visible;
-        _editor.FileTree.Visibility = _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
+        _details.Visibility = _inspectorTab == "Files" && !filesPage ? Visibility.Collapsed : Visibility.Visible;
+        _editor.FileTree.Visibility = filesPage || _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
         foreach (var (label, button) in _inspectorButtons)
         {
             button.Background = label == _inspectorTab ? Theme.Brush(static () => Theme.RowSelected) : Theme.PanelBrush;

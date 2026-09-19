@@ -25,6 +25,10 @@ terminal.attachCustomKeyEventHandler(event => {
   }
   return true;
 });
+document.getElementById('terminal').addEventListener('contextmenu', event => {
+  event.preventDefault();
+  send({type:'contextMenu',x:event.clientX,y:event.clientY,selection:terminal.getSelection()});
+});
 terminal.onData(data => send({type:'input',data}));
 terminal.onBinary(data => send({type:'binary',data}));
 // Fit reports viewport capacity; host geometry can be smaller for another viewer.
@@ -32,6 +36,7 @@ window.chrome.webview.addEventListener('message', event => {
   const m=event.data;
   if(m.type==='output') terminal.write(Uint8Array.from(atob(m.data),c=>c.charCodeAt(0)));
   if(m.type==='paste') { terminal.paste(m.data); terminal.focus(); }
+  if(m.type==='selectAll') terminal.selectAll();
   if(m.type==='reset') terminal.reset();
   if(m.type==='geometry') terminal.resize(m.cols,m.rows);
   if(m.type==='focus') terminal.focus();

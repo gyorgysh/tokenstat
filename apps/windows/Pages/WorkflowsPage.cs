@@ -559,6 +559,15 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             RefreshGraphFromHost();
             RenderDetail();
         };
+        var menu = ContextMenus.Menu(button);
+        ContextMenus.AddButton(menu, button, "Edit");
+        ContextMenus.AddButtons(menu, actions);
+        ContextMenus.Add(menu, "Delete…", () =>
+        {
+            ContextMenus.Invoke(button);
+            _confirmDelete = true;
+            RenderDetail();
+        });
         return button;
     }
 
@@ -1263,6 +1272,14 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 _confirmStep = false;
                 RenderDetail();
             };
+            var menu = ContextMenus.Menu(button);
+            ContextMenus.AddButton(menu, button, "Edit step");
+            ContextMenus.Add(menu, "Delete step…", () =>
+            {
+                _stepId = stepId;
+                _confirmStep = true;
+                RenderDetail();
+            });
             body.Children.Add(button);
         }
         var addRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };

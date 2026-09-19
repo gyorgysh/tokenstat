@@ -24,7 +24,7 @@ namespace Tokenstat.Pages;
 /// inspector beside it with the period figures, the selected row, and the
 /// archive. Local only, like the Mac: there is no account scope here.
 /// </summary>
-internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
+internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, IScopeAware
 {
     private readonly ContentControl _tabSlot = new()
     {
@@ -39,6 +39,18 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
     };
     private readonly TextBlock _status = new() { Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
 
+    private DeviceScope _scope = DeviceScopeNames.Restore();
+    private readonly Dictionary<string, JsonNode?> _accountReports = new();
+    private string _accountCut = "model";
+    public void ApplyScope(DeviceScope scope)
+    {
+        if (_scope == scope) return;
+        _scope = scope;
+        _hasContent = false;
+        RebuildTabs();
+        RaiseToolbarChanged();
+        _ = LoadAsync();
+    }
     private string _period = "all";
     /// <summary>
     /// A single day, pinned from Home's heatmap. Overrides the period rather
@@ -188,6 +200,14 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     public IList<UIElement> ToolbarActions()
     {
+        if (_scope == DeviceScope.AllDevices)
+        {
+            return new List<UIElement> { Buttons.ToolbarIcon(ActionIcon.Refresh, "Refresh account usage", async (_, _) =>
+            {
+                _accountReports.Clear();
+                await LoadAsync();
+            }) };
+        }
         var picker = SegmentedCapsule.View(Periods, _period, value =>
         {
             _period = value;
@@ -216,6 +236,14 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
 
     private void RebuildTabs()
     {
+        if (_scope == DeviceScope.AllDevices)
+        {
+            _tabSlot.Content = TabStrip.View(new List<(string Value, string Label, ActionIcon? Glyph)>
+            {
+                ("model", "Models", null), ("source", "Harnesses", null), ("day", "Days", null),
+            }, _accountCut, async value => { _accountCut = value; await LoadAsync(); });
+            return;
+        }
         _tabSlot.Content = TabStrip.View(LocalTabs, _tab, value =>
         {
             _tab = value;
@@ -331,7 +359,19 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
         _status.Text = "Loading…";
         _root.Children.Add(Motion.SkeletonCard());
 
-        await LoadLocalAsync();
+        if (_scope == DeviceScope.AllDevices)
+        {
+            var cut = _accountCut;
+            _error = null;
+            try
+            {
+                if (!_accountReports.ContainsKey(cut))
+                    _accountReports[cut] = await AppServices.Host.CallAsync("account.report",
+                        new JsonObject { ["group"] = cut, ["weeks"] = 53 });
+            }
+            catch (Exception ex) { _error = ex.Message; }
+        }
+        else await LoadLocalAsync();
 
         while (_root.Children.Count > 1)
         {
@@ -504,7 +544,44 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
         {
             _root.Children.RemoveAt(1);
         }
-        RenderLocal();
+        if (_scope == DeviceScope.AllDevices) RenderAccount();
+        else RenderLocal();
+    }
+
+    private void RenderAccount()
+    {
+        _status.Text = _error ?? "Synced usage across all devices · Last 53 weeks · Value at list rates, not billed";
+        _accountReports.TryGetValue(_accountCut, out var report);
+        if (report is null) return;
+        if (Format.Flag(report, "stale"))
+        {
+            var fetched = DateTimeOffset.FromUnixTimeMilliseconds(Format.Long(report, "fetchedAtMs"));
+            _root.Children.Add(new TextBlock { Text = $"Refresh unavailable. Showing usage fetched {fetched.LocalDateTime:g}.", TextWrapping = TextWrapping.Wrap });
+        }
+        var rows = Format.Items(report, "rows") ?? new JsonArray();
+        var list = new StackPanel { Spacing = Theme.SpaceS };
+        foreach (var row in rows.OrderByDescending(row => Format.Long(row, "valueMicros")).Take(_visible))
+        {
+            var grid = new Grid { ColumnSpacing = Theme.SpaceM };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var key = Format.Text(row, "key");
+            grid.Children.Add(new TextBlock { Text = key, TextTrimming = TextTrimming.CharacterEllipsis });
+            var figures = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right };
+            figures.Children.Add(new TextBlock { Text = Money(row), Foreground = Theme.AccentBrush, HorizontalAlignment = HorizontalAlignment.Right });
+            figures.Children.Add(new TextBlock { Text = $"{Format.Long(row?["counters"], "total"):N0} tokens", Opacity = .65, FontSize = 12 });
+            Grid.SetColumn(figures, 1);
+            grid.Children.Add(figures);
+            list.Children.Add(grid);
+        }
+        if (rows.Count == 0) list.Children.Add(new TextBlock { Text = "No synced usage in this period." });
+        _root.Children.Add(Chrome.Card(_accountCut switch { "source" => "Harnesses", "day" => "Days", _ => "Models" }, list));
+        if (rows.Count > _visible)
+        {
+            var more = new Button { Content = "Show more" };
+            more.Click += (_, _) => { _visible += PageStep; Render(); };
+            _root.Children.Add(more);
+        }
     }
 
     private JsonArray TabRows(string tab)
@@ -1266,6 +1343,15 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems
     private void RefreshInspector()
     {
         _inspectorRoot.Children.Clear();
+        if (_scope == DeviceScope.AllDevices)
+        {
+            _inspectorRoot.Children.Add(Chrome.Card("All devices", new TextBlock
+            {
+                Text = "Aggregated model, harness and daily usage synced to your account. Choose This device for local projects, sessions and archive details.",
+                TextWrapping = TextWrapping.Wrap,
+            }));
+            return;
+        }
         _inspectorRoot.Children.Add(PeriodCard());
         _inspectorRoot.Children.Add(SelectionCard());
         _inspectorRoot.Children.Add(ArchiveCard());

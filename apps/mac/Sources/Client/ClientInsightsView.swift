@@ -256,6 +256,8 @@ private struct InsightRow: View {
     }
 }
 
+#endif
+
 /// The three breakdowns, their rows, and how old the numbers are.
 ///
 /// One model rather than one per cut: they all come from the same cached series
@@ -295,7 +297,12 @@ final class ClientInsightsModel {
             switch self {
             case .model: return key
             case .source: return harnessName(key)
-            case .day: return shortDate(key)
+            case .day:
+                let parser = DateFormatter()
+                parser.locale = Locale(identifier: "en_US_POSIX")
+                parser.dateFormat = "yyyy-MM-dd"
+                guard let date = parser.date(from: key) else { return key }
+                return date.formatted(date: .abbreviated, time: .omitted)
             }
         }
     }
@@ -370,5 +377,3 @@ final class ClientInsightsModel {
     }
 
 }
-
-#endif

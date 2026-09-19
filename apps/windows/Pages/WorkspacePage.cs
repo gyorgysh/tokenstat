@@ -754,9 +754,34 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     actions.Children.Add(install);
                 }
                 if (actions.Children.Count > 0) tile.Children.Add(setup);
+                var menu = ContextMenus.Menu(tile);
+                ContextMenus.AddButton(menu, launch, installed ? "Launch" : "Install");
+                ContextMenus.AddButtons(menu, actions);
+                ContextMenus.AddAsync(menu, "Remove from launcher", async () =>
+                {
+                    try { await CallTargetAsync("launcher.hide", new JsonObject { ["id"] = id }); await LoadLaunchersAsync(host); }
+                    catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
+                });
                 tiles.Children.Add(tile);
             }
             host.Children.Add(tiles);
+            var hidden = (Format.Items(catalog) ?? new JsonArray()).Where(profile => Format.Flag(profile, "hidden")).ToList();
+            if (hidden.Count > 0)
+            {
+                var restore = ActionIconGlyph.Button("Restore hidden launchers", ActionIcon.Restore, (_, _) => { });
+                var menu = new MenuFlyout();
+                foreach (var profile in hidden)
+                {
+                    var hiddenId = Format.Text(profile, "id");
+                    ContextMenus.AddAsync(menu, Format.Text(profile, "name", hiddenId), async () =>
+                    {
+                        try { await CallTargetAsync("launcher.show", new JsonObject { ["id"] = hiddenId }); await LoadLaunchersAsync(host); }
+                        catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
+                    });
+                }
+                restore.Flyout = menu;
+                host.Children.Add(restore);
+            }
         }
         catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
     }

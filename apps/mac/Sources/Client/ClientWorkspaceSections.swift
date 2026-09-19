@@ -37,7 +37,7 @@ struct ClientWorkspaceDetailView: View {
     @State private var pullCounts = PullCountStore.shared
     @State private var errorMessage: String?
     @State private var showPort = false
-    @State private var portText = "5173"
+    @AppStorage("browser.lastPort") private var portText = "5173"
     @State private var forwardedPort: Int?
     @State private var browserURL: String?
     @State private var isOpeningPort = false

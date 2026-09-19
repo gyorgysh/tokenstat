@@ -155,46 +155,48 @@ internal static class WorkspaceDiff
             pending = Task.CompletedTask;
         }
         else pending = Chrome.ShowDialog(owner, dialog);
-        var failures = 0;
-        var cards = new List<UIElement>();
+        stack.Children.Clear();
+        var slots = new SemaphoreSlim(4);
+        var loads = new List<Task>();
         foreach (var file in shown)
         {
-            if (closed)
+            var slot = new ContentControl
             {
-                break;
-            }
-            JsonNode? diffNode;
-            try
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Content = Note($"Reading {file.Path}…"),
+            };
+            stack.Children.Add(slot);
+            async Task Load()
             {
-                diffNode = await loadDiff(file.Path);
+                await slots.WaitAsync();
+                try
+                {
+                    if (closed) return;
+                    var diff = await loadDiff(file.Path).WaitAsync(TimeSpan.FromSeconds(30));
+                    if (closed) return;
+                    if (diff is null) throw new InvalidOperationException("No diff was returned.");
+                    slot.Content = FileCard(owner, file, diff);
+                }
+                catch (Exception error)
+                {
+                    if (closed) return;
+                    var failed = new StackPanel { Spacing = Theme.SpaceS };
+                    failed.Children.Add(Note($"{file.Path}: " + (error is TimeoutException
+                        ? "The computer did not respond in time." : error.Message)));
+                    var retry = new Button { Content = "Retry" };
+                    retry.Click += async (_, _) =>
+                    {
+                        retry.IsEnabled = false;
+                        await Load();
+                    };
+                    failed.Children.Add(retry);
+                    slot.Content = failed;
+                }
+                finally { slots.Release(); }
             }
-            catch
-            {
-                diffNode = null;
-            }
-            if (diffNode is null)
-            {
-                failures++;
-                continue;
-            }
-            cards.Add(FileCard(owner, file, diffNode));
+            loads.Add(Load());
         }
-        stack.Children.Clear();
-        if (failures > 0)
-        {
-            stack.Children.Add(new TextBlock
-            {
-                Text = $"{failures} {(failures == 1 ? "file" : "files")} did not load. "
-                    + $"Open {(failures == 1 ? "it" : "them")} individually for the diff.",
-                FontSize = 12,
-                Opacity = 0.7,
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
-        foreach (var card in cards)
-        {
-            stack.Children.Add(card);
-        }
+        if (shown.Count == 0) stack.Children.Add(Note("No changes to review."));
         if (leftover > 0)
         {
             stack.Children.Add(new TextBlock
@@ -206,6 +208,7 @@ internal static class WorkspaceDiff
                 TextWrapping = TextWrapping.Wrap,
             });
         }
+        await Task.WhenAll(loads);
         await pending;
     }
 

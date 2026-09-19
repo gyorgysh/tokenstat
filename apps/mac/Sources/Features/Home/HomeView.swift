@@ -15,6 +15,7 @@ import SwiftUI
 /// month. This screen answers the first, Insights answers the second.
 struct HomeView: View {
     @Bindable var model: HomeModel
+    @AppStorage("activity.scope") private var savedScope: ActivityScope = .allMachines
     @Bindable var account: AccountModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -101,6 +102,7 @@ struct HomeView: View {
         // Leaving the screen while a cell is under the pointer: the popover
         // must not stay pinned to a grid that is no longer there.
         .onDisappear { model.hover(day: nil) }
+        .onChange(of: savedScope) { _, scope in Task { await model.setScope(scope) } }
         .task {
             // Wait until the host splash has finished (or the host already
             // answers). Loading during splash races ensureHosted and can open
@@ -108,6 +110,7 @@ struct HomeView: View {
             await Self.waitForHost()
             guard !Task.isCancelled else { return }
             // Archive first: heatmap and streaks. Vendor limits load after.
+            await model.setScope(savedScope)
             await model.refreshIfStale()
         }
         .onChange(of: layout.hidden.contains(.limits)) { _, hidden in

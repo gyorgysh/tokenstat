@@ -19,9 +19,10 @@ internal static class AgentMark
         return Known.FirstOrDefault(brand => id == brand || id.StartsWith(brand + "_") || id == brand + "2") ?? "shell";
     }
 
-    public static FrameworkElement View(string id, double size = 36)
+    public static FrameworkElement View(string id, double size = 36) => AssetView(Canonical(id), size);
+
+    internal static FrameworkElement AssetView(string key, double size = 36)
     {
-        var key = Canonical(id);
         var icon = key == "shell" ? ActionIcon.Run.Icon() : ActionIcon.Persona.Icon();
         icon.Foreground = Theme.AccentBrush;
         var body = new Grid { Children = { icon } };

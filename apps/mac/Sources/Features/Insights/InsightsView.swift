@@ -10,6 +10,7 @@ import SwiftUI
 
 struct InsightsView: View {
     @Bindable var model: InsightsModel
+    @AppStorage("activity.scope") private var scope: ActivityScope = .allMachines
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Leave a day-focused view and return to Home, which is where it came
     /// from. Nil when Insights was opened directly, so there is no back arrow
@@ -26,7 +27,11 @@ struct InsightsView: View {
             // right. Tabs are a full-width strip under that row.
             DetailChromeBar(
                 leading: {
-                    if model.focusedDay != nil {
+                    SegmentedCapsulePicker(
+                        options: ActivityScope.allCases.map { (value: $0, label: $0.label, symbol: $0.symbol) },
+                        selection: $scope
+                    ).frame(width: 280)
+                    if model.focusedDay != nil && scope == .thisMachine {
                         ToolbarIconButton(
                             systemImage: "chevron.left",
                             help: "Back to Home"
@@ -36,6 +41,7 @@ struct InsightsView: View {
                     }
                 },
                 trailing: {
+                    if scope == .thisMachine {
                     SegmentedCapsulePicker(
                         options: InsightsModel.Period.allCases.map {
                             (value: $0, label: $0.rawValue, symbol: "")
@@ -66,10 +72,15 @@ struct InsightsView: View {
                             await model.fetchRemotes()
                         }
                     }
+                    }
                 }
             )
-            TabStrip(tabs: tabs, selection: $model.tab)
-            content
+            if scope == .allMachines {
+                AccountInsightsContent()
+            } else {
+                TabStrip(tabs: tabs, selection: $model.tab)
+                content
+            }
         }
         .background(Theme.background)
         .overlay(alignment: .bottomTrailing) {
@@ -666,5 +677,66 @@ struct EmptyHint: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Space.l)
+    }
+}
+
+/// Account aggregates share the same data contract and cache as the mobile client.
+private struct AccountInsightsContent: View {
+    @State private var model = ClientInsightsModel()
+    @State private var search = ""
+    var body: some View {
+        VStack(spacing: Theme.Space.m) {
+            HStack {
+                Picker("Breakdown", selection: $model.cut) {
+                    ForEach(ClientInsightsModel.Cut.allCases) { cut in Text(cut.label).tag(cut) }
+                }.pickerStyle(.segmented).frame(maxWidth: 360)
+                TextField("Filter", text: $search).textFieldStyle(.roundedBorder)
+                ToolbarIconButton(systemImage: "arrow.clockwise", help: "Refresh account usage", isBusy: model.isLoading) {
+                    Task { await model.refresh() }
+                }
+            }
+            Text("Synced usage across all devices · Last 53 weeks · Value at list rates, not billed")
+                .font(Theme.caption).foregroundStyle(.secondary)
+            if let error = model.errorMessage { ErrorBanner(message: error) }
+            if let age = model.ageDescription { Text(age).font(Theme.caption).foregroundStyle(.secondary) }
+            ScrollView {
+                LazyVStack(spacing: Theme.Space.s) {
+                    if model.isLoading { ProgressView() }
+                    if let rows = model.rows(for: model.cut) {
+                        ForEach(rows.filter { search.isEmpty || $0.key.localizedCaseInsensitiveContains(search) }
+                            .sorted { $0.valueMicros > $1.valueMicros }) { row in
+                            HStack {
+                                Text(model.cut.title(for: row.key)).lineLimit(1)
+                                Spacer()
+                                VStack(alignment: .trailing) {
+                                    Text(row.value.formatted).foregroundStyle(Theme.accent)
+                                    Text("\(row.counters.total.formatted()) tokens").font(Theme.caption).foregroundStyle(.secondary)
+                                }
+                            }.padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        }
+                        if rows.isEmpty { Text("No synced usage in this period.").foregroundStyle(.secondary) }
+                    }
+                }
+            }
+        }.padding(Theme.Space.m)
+            .task(id: model.cut) { await model.load() }
+    }
+}
+
+struct ScopedInsightsInspector: View {
+    @Bindable var model: InsightsModel
+    var onClose: () -> Void
+    @AppStorage("activity.scope") private var scope: ActivityScope = .allMachines
+    var body: some View {
+        if scope == .thisMachine {
+            InspectorView(model: model, onClose: onClose)
+        } else {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                HStack { Text("All devices").font(Theme.headline); Spacer(); Button("Close", .dismiss, action: onClose) }
+                Text("Aggregated model, harness and daily usage synced to your account. Choose This device for local projects, sessions and archive details.")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }.padding(Theme.Space.m)
+        }
     }
 }

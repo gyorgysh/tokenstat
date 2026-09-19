@@ -479,6 +479,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             Content = card,
         };
         button.Click += async (_, _) => await OpenAsync(id);
+        var menu = ContextMenus.Menu(button);
+        ContextMenus.AddAsync(menu, "Open chat", async () => await OpenAsync(id));
+        ContextMenus.AddAsync(menu, "Remove chat…", async () => await ConfirmDeleteAsync(id));
         return button;
     }
 
@@ -1015,8 +1018,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (_followEnd) _scroll?.ChangeView(null, _scroll.ScrollableHeight, null, true);
     }
 
-    private UIElement Render(DisplayItem item) => item.Kind switch
+    private UIElement Render(DisplayItem item)
     {
+        UIElement view = item.Kind switch
+        {
         ItemKind.User => UserBubble(item.Text),
         ItemKind.Assistant => AssistantBody(item.Text),
         ItemKind.Thinking => Muted(item.Text),
@@ -1027,7 +1032,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Usage => UsageLine(item),
         ItemKind.Failed => FailedRow(item),
         _ => new Border(),
-    };
+        };
+        if (view is FrameworkElement element && !string.IsNullOrEmpty(item.Text))
+        {
+            var title = item.Kind == ItemKind.Assistant ? "Copy response" : item.Kind == ItemKind.Thinking ? "Copy reasoning" : "Copy";
+            ContextMenus.Copy(ContextMenus.Menu(element), title, () => item.Text);
+        }
+        return view;
+    }
 
     /// <summary>
     /// A failed turn: the same character that was thinking is the one that
@@ -1201,7 +1213,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private static UIElement CodeBlock(string code)
     {
-        return new Border
+        var block = new Border
         {
             Background = Theme.PanelBrush,
             BorderBrush = Theme.BorderBrush,
@@ -1221,6 +1233,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 },
             },
         };
+        ContextMenus.Copy(ContextMenus.Menu(block), "Copy code", () => code);
+        return block;
     }
 
     private static UIElement ToolRow(DisplayItem item)
@@ -1695,7 +1709,19 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _composerActions.Children.Clear();
         if (Busy())
         {
-            _composerActions.Children.Add(ActionIconGlyph.PrimaryButton("Queue", ActionIcon.Send, async (_, _) => await SendAsync()));
+            var queue = ActionIconGlyph.PrimaryButton("Queue", ActionIcon.Send, async (_, _) => await SendAsync());
+            ContextMenus.AddAsync(ContextMenus.Menu(queue), "Stop and send now", async () =>
+            {
+                if (_openId is null) return;
+                try
+                {
+                    await CallChatAsync("chat.stop", new JsonObject { ["id"] = _openId });
+                    await SendAsync(sendNext: true);
+                    StartPoll();
+                }
+                catch (Exception ex) { Banner(ex.Message); }
+            });
+            _composerActions.Children.Add(queue);
             _composerActions.Children.Add(ActionIconGlyph.Button("Stop", ActionIcon.Stop, async (_, _) => await StopAsync()));
         }
         else
@@ -1758,7 +1784,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private bool _sending;
     private bool _queueing;
 
-    private async Task SendAsync()
+    private async Task SendAsync(bool sendNext = false)
     {
         if (_openId is not string chat || _sending || _queueing) return;
         var text = _draft.Text.Trim();
@@ -1771,7 +1797,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (_openId != chat || !IsLoaded) return;
             if (_openChat?["sendRevision"] is null) throw new InvalidOperationException("Update the host to use reliable message delivery.");
             var item = new QueuedChatMessage(Guid.NewGuid().ToString("N"), text, attachmentIds, Format.Long(_openChat, "sendRevision"));
-            ChatOutbox.Shared.Update(key, rows => rows.Add(item));
+            ChatOutbox.Shared.Update(key, rows =>
+            {
+                if (sendNext)
+                {
+                    if (rows.Any(row => row.AttemptedAt.HasValue))
+                        throw new InvalidOperationException("Check delivery of the pending message before sending another message first.");
+                    rows.Insert(0, item);
+                }
+                else rows.Add(item);
+            });
             _outboxKey = key; _authorizedQueue.Add(item.Id);
             if (_draft.Text.Trim() == text) _draft.Text = "";
             _attachments.RemoveAll(file => attachmentIds.Contains(file.Id));
@@ -1815,9 +1850,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    private async Task ConfirmDeleteAsync()
+    private async Task ConfirmDeleteAsync(string? chatId = null)
     {
-        if (_openId is null) return;
+        var id = chatId ?? _openId;
+        if (id is null) return;
         var dialog = new ContentDialog
         {
             Title = "Delete this chat?",
@@ -1829,7 +1865,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
         try
         {
-            await CallChatAsync("chat.remove", new JsonObject { ["id"] = _openId });
+            await CallChatAsync("chat.remove", new JsonObject { ["id"] = id });
             await ShowListAsync();
         }
         catch (Exception ex)

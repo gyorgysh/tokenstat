@@ -256,12 +256,23 @@ internal static class SidebarLive
             Content = AgentMark.Row(command, panel),
             Tag = LiveRoute.Join(SessionPrefix, folderId, id),
         };
+        if (row.Content is FrameworkElement view)
+            view.Tag = (title, stats, state, command, Format.Number(item, "contextUsed"), Format.Number(item, "contextWindow"));
         AutomationProperties.SetName(row, title + ". " + stats + ". " + state);
         var cwd = Format.Text(item, "cwd");
         if (!string.IsNullOrEmpty(cwd))
         {
             ToolTipService.SetToolTip(row, cwd);
         }
+        var menu = ContextMenus.Menu(row);
+        ContextMenus.AddAsync(menu, "Stop and close…", async () =>
+        {
+            var owner = menu.Target ?? row;
+            var confirm = new ContentDialog { Title = "Stop this session?", Content = "The running process will stop.", PrimaryButtonText = "Stop and close", CloseButtonText = "Keep running", DefaultButton = ContentDialogButton.Close };
+            if (await Chrome.ShowDialog(owner, confirm) != ContentDialogResult.Primary) return;
+            try { await AppServices.Host.CallAsync("pty.close", new JsonObject { ["id"] = id }); }
+            catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = "Could not close session", Content = ex.Message, CloseButtonText = "Close" }); }
+        });
         return row;
     }
 
@@ -329,8 +340,23 @@ internal static class SidebarLive
             Content = AgentMark.Row(Format.Text(chat, "backend"), panel),
             Tag = LiveRoute.Join(ChatPrefix, folderId, id),
         };
+        if (row.Content is FrameworkElement view) view.Tag = (title, detail, backend);
         AutomationProperties.SetName(row, title + ". " + detail);
         ToolTipService.SetToolTip(row, title + " · " + backend);
+        var menu = ContextMenus.Menu(row);
+        ContextMenus.AddAsync(menu, "Remove chat…", async () =>
+        {
+            var owner = menu.Target ?? row;
+            var confirm = new ContentDialog { Title = "Remove this chat?", Content = "This permanently deletes the transcript.", PrimaryButtonText = "Remove chat", CloseButtonText = "Keep it", DefaultButton = ContentDialogButton.Close };
+            if (await Chrome.ShowDialog(owner, confirm) != ContentDialogResult.Primary) return;
+            try
+            {
+                var parameters = new JsonObject { ["id"] = id };
+                if (RemoteWorkspaces.TrySplit(folderId, out var peer, out _)) await RemoteWorkspaces.CallOnPeerAsync(peer, "chat.remove", parameters);
+                else await AppServices.Host.CallAsync("chat.remove", parameters);
+            }
+            catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = "Could not remove chat", Content = ex.Message, CloseButtonText = "Close" }); }
+        });
         return row;
     }
 
@@ -350,6 +376,7 @@ internal static class SidebarLive
             },
             Tag = tag,
         };
+        if (row.Content is FrameworkElement view) view.Tag = label;
         AutomationProperties.SetName(row, label);
         return row;
     }

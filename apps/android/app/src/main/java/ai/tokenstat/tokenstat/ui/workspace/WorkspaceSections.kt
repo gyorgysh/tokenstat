@@ -1224,7 +1224,9 @@ private fun BrowserSection(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    var portText by remember { mutableStateOf("3000") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val preferences = remember(context) { context.getSharedPreferences("browser", android.content.Context.MODE_PRIVATE) }
+    var portText by remember { mutableStateOf(preferences.getString("lastPort", "3000") ?: "3000") }
     var error by remember { mutableStateOf<String?>(null) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Text("Open a port on that computer in this device's browser.", color = LocalTsColors.current.textSecondary)
@@ -1240,7 +1242,8 @@ private fun BrowserSection(
         TsAccentButton(
             label = "Open",
             onClick = {
-                val port = portText.toIntOrNull() ?: return@TsAccentButton
+                val port = portText.toIntOrNull()?.takeIf { it in 1..65535 } ?: return@TsAccentButton
+                preferences.edit().putString("lastPort", port.toString()).apply()
                 scope.launch {
                     runCatching {
                         val opened = model.core(

@@ -45,7 +45,7 @@ public sealed partial class MainWindow : Window
     /// default, like the Mac and the Home page: a person with two machines
     /// wants their year, not one PC's share of it.
     /// </summary>
-    private DeviceScope _scope = DeviceScope.AllDevices;
+    private DeviceScope _scope = DeviceScopeNames.Restore();
     // One brush instance per flat surface, shared by every element showing
     // that tone. A theme change mutates the color in place, which reaches the
     // NavigationView template too: a StaticResource lookup would keep a
@@ -372,6 +372,14 @@ public sealed partial class MainWindow : Window
             parent.MenuItems.Add(new NavigationViewItem
             {
                 Content = section.Label(),
+                Icon = new FontIcon { Glyph = section switch
+                {
+                    SSHSection.Hosts => "\uE968",
+                    SSHSection.Keys => "\uE8D7",
+                    SSHSection.Snippets => "\uE8A9",
+                    SSHSection.KnownHosts => "\uEA18",
+                    _ => "\uE72E",
+                } },
                 Tag = "ssh:" + section,
             });
         }
@@ -527,7 +535,7 @@ public sealed partial class MainWindow : Window
             };
             ToolTipService.SetToolTip(machine, peer.First().MachineLabel);
             foreach (var folder in peer)
-                machine.MenuItems.Add(FolderParent(folder.Id, folder.Name, remote: false, folder.Path, folder.Git));
+                machine.MenuItems.Add(FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git));
             _nav.MenuItems.Add(machine);
         }
         _nav.MenuItems.Add(new NavigationViewItem
@@ -553,7 +561,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static NavigationViewItem FolderParent(string id, string name, bool remote, string path, JsonNode? git = null)
+    private NavigationViewItem FolderParent(string id, string name, bool remote, string path, JsonNode? git = null)
     {
         var parent = new NavigationViewItem
         {
@@ -574,6 +582,29 @@ public sealed partial class MainWindow : Window
                 Tag = "ws:" + id + ":" + section,
             });
         }
+        var menu = ContextMenus.Menu(parent);
+        ContextMenus.Add(menu, "Open folder", () => NavigateTo("ws:" + id + ":Launcher"));
+        ContextMenus.Copy(menu, "Copy path", () => path);
+        if (!remote && !string.IsNullOrEmpty(path))
+            ContextMenus.AddAsync(menu, "Reveal in File Explorer", async () =>
+            {
+                try { await Windows.System.Launcher.LaunchFolderAsync(await Windows.Storage.StorageFolder.GetFolderFromPathAsync(path)); }
+                catch (Exception ex) { await Chrome.ShowDialog(parent, new ContentDialog { Title = "Could not open folder", Content = ex.Message, CloseButtonText = "Close" }); }
+            });
+        if (RemoteWorkspaces.TrySplit(id, out var peer, out _))
+            ContextMenus.Add(menu, "Disconnect from this computer", () => RemoteWorkspaces.Disconnect(peer));
+        ContextMenus.Add(menu, "Expand / collapse", () => parent.IsExpanded = !parent.IsExpanded);
+        ContextMenus.AddAsync(menu, "Remove from tokenstat…", async () =>
+        {
+            var confirm = new ContentDialog { Title = "Remove this folder?", Content = "The folder and its files stay on disk.", PrimaryButtonText = "Remove", CloseButtonText = "Keep it", DefaultButton = ContentDialogButton.Close };
+            if (await Chrome.ShowDialog(parent, confirm) != ContentDialogResult.Primary) return;
+            try
+            {
+                await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.remove", new JsonObject { ["id"] = id });
+                await TryLoadFoldersAsync(refresh: true);
+            }
+            catch (Exception ex) { await Chrome.ShowDialog(parent, new ContentDialog { Title = "Could not remove folder", Content = ex.Message, CloseButtonText = "Close" }); }
+        });
         return parent;
     }
 
@@ -670,7 +701,7 @@ public sealed partial class MainWindow : Window
         }
         _frame.Content = page;
         _inspectorHost.RouteAllowsInspector = page is not AccountPage;
-        _inspectorHost.SetInspector((page as IInspectorContent)?.Inspector, page is WorkspaceTabsPage);
+        _inspectorHost.SetInspector((page as IInspectorContent)?.Inspector, page is WorkspaceTabsPage or HomePage);
         if (page is IScopeAware aware)
         {
             aware.ApplyScope(_scope);
@@ -685,7 +716,7 @@ public sealed partial class MainWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector, _frame.Content is WorkspaceTabsPage);
+            _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector, _frame.Content is WorkspaceTabsPage or HomePage);
             RebuildToolbar();
         });
     }
@@ -702,7 +733,7 @@ public sealed partial class MainWindow : Window
     {
         var content = _frame.Content;
         List<UIElement>? leading = null;
-        if (content is HomePage)
+        if (content is HomePage or InsightsPage)
         {
             leading = new List<UIElement> { ScopePicker() };
         }
@@ -764,6 +795,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         _scope = next;
+        _scope.Remember();
         if (_frame.Content is IScopeAware aware)
         {
             aware.ApplyScope(_scope);
@@ -1324,6 +1356,10 @@ public sealed partial class MainWindow : Window
         _sidebarRefreshing = true;
         try
         {
+            var previousSessions = _liveSessions;
+            var previousChats = _liveChats;
+            var previousSummaries = _liveSummaries;
+            var previousAccount = _liveAccount;
             var (sessions, chats) = await SidebarLive.FetchFastAsync();
             try
             {
@@ -1333,9 +1369,21 @@ public sealed partial class MainWindow : Window
                 {
                     var wanted = sshSessions.Where(item => Format.Flag(item, "alive")).Select(item => new NavigationViewItem
                     {
-                        Tag = "sshterm:" + Format.Text(item, "id"), Content = Format.Text(item, "label", "SSH session"),
-                        Icon = new SymbolIcon { Symbol = Symbol.Link },
+                        Tag = "sshterm:" + Format.Text(item, "id"), Content = SshHostPlatform.SessionRow(item),
                     }).ToList();
+                    foreach (var row in wanted)
+                    {
+                        var sessionId = ((string)row.Tag)["sshterm:".Length..];
+                        var menu = ContextMenus.Menu(row);
+                        ContextMenus.AddAsync(menu, "Close session…", async () =>
+                        {
+                            var owner = menu.Target ?? row;
+                            var confirm = new ContentDialog { Title = "Close this SSH session?", Content = "The shell will stop.", PrimaryButtonText = "Close session", CloseButtonText = "Keep running", DefaultButton = ContentDialogButton.Close };
+                            if (await Chrome.ShowDialog(owner, confirm) != ContentDialogResult.Primary) return;
+                            try { await AppServices.Host.CallAsync("ssh.session.close", new JsonObject { ["id"] = sessionId }); await RefreshSidebarLiveAsync(); }
+                            catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = "Could not close session", Content = ex.Message, CloseButtonText = "Close" }); }
+                        });
+                    }
                     NavigationRows.Reconcile(sshGroup.MenuItems, wanted, "sshterm:");
                 }
             }
@@ -1362,10 +1410,14 @@ public sealed partial class MainWindow : Window
             {
                 _liveChats = chats;
             }
-            DispatcherQueue.TryEnqueue(() =>
+            var rowsChanged = !JsonNode.DeepEquals(previousSessions, _liveSessions)
+                || !JsonNode.DeepEquals(previousChats, _liveChats)
+                || (previousSummaries.Count != _liveSummaries.Count || previousSummaries.Any(pair => !_liveSummaries.TryGetValue(pair.Key, out var value) || !JsonNode.DeepEquals(pair.Value, value)));
+            var accountChanged = !JsonNode.DeepEquals(previousAccount, _liveAccount);
+            if (rowsChanged || accountChanged) DispatcherQueue.TryEnqueue(() =>
             {
-                RebuildSidebarLive();
-                RefreshAccountFooter();
+                if (rowsChanged) RebuildSidebarLive();
+                if (accountChanged) RefreshAccountFooter();
             });
         }
         finally

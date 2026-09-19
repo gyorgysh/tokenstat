@@ -1117,9 +1117,114 @@ fn windows_shell_path(path: &str) -> &str {
         .unwrap_or(path)
 }
 
+/// npm's Windows launchers are forwarding shims. Run their native executable
+/// or Node entry point directly: PowerShell 5.1 and cmd both reinterpret the
+/// JSON quotes, metacharacters and newlines in chat arguments.
+#[cfg(any(windows, test))]
+fn npm_shim_target(source: &str) -> Option<(String, bool)> {
+    let lines = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if !lines
+        .iter()
+        .any(|line| line.eq_ignore_ascii_case("SET dp0=%~dp0"))
+    {
+        return None;
+    }
+    let candidates = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| {
+            line.starts_with(r#""%dp0%\"#)
+                || line.starts_with(r#""%_prog%""#)
+                || line.starts_with("endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & ")
+        })
+        .collect::<Vec<_>>();
+    if candidates.len() != 1 {
+        return None;
+    }
+    let (invocation_index, invocation) = candidates[0];
+    // Only npm's generated preamble is safe to bypass. A custom wrapper that
+    // sets environment variables, runs setup, or changes cwd must still run.
+    const PREAMBLE: &[&str] = &[
+        "@ECHO off",
+        "GOTO start",
+        ":find_dp0",
+        "SET dp0=%~dp0",
+        "EXIT /b",
+        ":start",
+        "SETLOCAL",
+        "CALL :find_dp0",
+        "ENDLOCAL",
+        "EXIT /b %errorlevel%",
+        r#"IF EXIST "%dp0%\node.exe" ("#,
+        r#"SET "_prog=%dp0%\node.exe""#,
+        ") ELSE (",
+        r#"SET "_prog=node""#,
+        "SET PATHEXT=%PATHEXT:;.JS;=;%",
+        ")",
+    ];
+    if !lines.iter().enumerate().all(|(index, line)| {
+        index == invocation_index
+            || PREAMBLE
+                .iter()
+                .any(|known| line.eq_ignore_ascii_case(known))
+    }) {
+        return None;
+    }
+    let invocation = invocation
+        .strip_prefix("endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & ")
+        .unwrap_or(invocation);
+    let (invocation, node) = if let Some(rest) = invocation.strip_prefix(r#""%_prog%""#) {
+        (rest.trim_start(), true)
+    } else {
+        (invocation, false)
+    };
+    let rest = invocation.strip_prefix(r#""%dp0%\"#)?;
+    let (relative, suffix) = rest.split_once('"')?;
+    if suffix.trim() != "%*" || relative.contains(['%', '\r', '\n']) {
+        return None;
+    }
+    if !node && !relative.to_ascii_lowercase().ends_with(".exe") {
+        return None;
+    }
+    if !relative.starts_with("node_modules\\") {
+        return None;
+    }
+    Some((relative.to_owned(), node))
+}
+
+#[cfg(windows)]
+fn npm_shim_command(command: &str, args: &[String]) -> Option<CommandBuilder> {
+    let shim = std::path::Path::new(windows_shell_path(command));
+    let source = std::fs::read_to_string(shim).ok()?;
+    let (relative, node) = npm_shim_target(&source)?;
+    let directory = shim.parent()?;
+    let target = directory.join(relative);
+    if !target.is_file() {
+        return None;
+    }
+    let mut builder = if node {
+        let bundled_node = directory.join("node.exe");
+        let mut builder = CommandBuilder::new(if bundled_node.is_file() {
+            bundled_node.into_os_string()
+        } else {
+            "node.exe".into()
+        });
+        builder.arg(target);
+        builder
+    } else {
+        CommandBuilder::new(target)
+    };
+    builder.args(args);
+    Some(builder)
+}
+
 /// Batch shims require an interpreter, including when launched by a remote
-/// client. Encode the PowerShell invocation so paths and arguments are data,
-/// never interpolated into the Windows command line as shell syntax.
+/// client. Known npm shims bypass the shell to preserve the original argv.
+/// Custom batch scripts retain their interpreter semantics.
 fn session_command(command: &str, args: &[String]) -> CommandBuilder {
     #[cfg(windows)]
     if std::path::Path::new(command)
@@ -1127,6 +1232,9 @@ fn session_command(command: &str, args: &[String]) -> CommandBuilder {
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
     {
+        if let Some(builder) = npm_shim_command(command, args) {
+            return builder;
+        }
         use base64::Engine;
         let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
         let mut script = format!(
@@ -2504,6 +2612,118 @@ mod tests {
         );
         let _ = m.kill(&visible.id);
         let _ = m.kill(&hidden.id);
+    }
+
+    #[test]
+    fn only_generated_npm_forwarders_bypass_the_shell() {
+        let native = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\"   %*\r\n";
+        assert_eq!(
+            npm_shim_target(native),
+            Some((
+                r"node_modules\@anthropic-ai\claude-code\bin\claude.exe".into(),
+                false
+            ))
+        );
+        let node = native.replace(
+            "\"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\"   %*",
+            "IF EXIST \"%dp0%\\node.exe\" (\nSET \"_prog=%dp0%\\node.exe\"\n) ELSE (\nSET \"_prog=node\"\nSET PATHEXT=%PATHEXT:;.JS;=;%\n)\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\" \"%dp0%\\node_modules\\agent\\bin.js\" %*");
+        assert_eq!(
+            npm_shim_target(&node),
+            Some((r"node_modules\agent\bin.js".into(), true))
+        );
+        let legacy_node = "@ECHO off\nSETLOCAL\nCALL :find_dp0\nIF EXIST \"%dp0%\\node.exe\" (\nSET \"_prog=%dp0%\\node.exe\"\n) ELSE (\nSET \"_prog=node\"\nSET PATHEXT=%PATHEXT:;.JS;=;%\n)\n\"%_prog%\"  \"%dp0%\\node_modules\\agent\\cli.js\" %*\nENDLOCAL\nEXIT /b %errorlevel%\n:find_dp0\nSET dp0=%~dp0\nEXIT /b\n";
+        assert_eq!(
+            npm_shim_target(legacy_node),
+            Some((r"node_modules\agent\cli.js".into(), true))
+        );
+        assert!(
+            npm_shim_target(&native.replace("SETLOCAL", "SETLOCAL\nSET CUSTOM=important"))
+                .is_none()
+        );
+        assert!(npm_shim_target(&native.replace("SETLOCAL", "SETLOCAL\ncall setup.cmd")).is_none());
+        assert!(npm_shim_target(&(native.to_owned() + "echo after\n")).is_none());
+        assert!(npm_shim_target("@echo off\necho %*\n").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn npm_native_shim_preserves_json_empty_multiline_and_metacharacter_arguments() {
+        let directory =
+            std::env::temp_dir().join(format!("tokenstat argv & shim {}", std::process::id()));
+        let bin = directory.join("node_modules").join("probe");
+        std::fs::create_dir_all(&bin).unwrap();
+        let source = directory.join("probe.rs");
+        std::fs::write(
+            &source,
+            r#"fn main() {
+            for (index, arg) in std::env::args().skip(1).enumerate() {
+                print!("ARG{}:", index);
+                for byte in arg.as_bytes() { print!("{:02x}", byte); }
+                println!(":END");
+            }
+        }"#,
+        )
+        .unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .arg(&source)
+            .arg("-o")
+            .arg(bin.join("probe.exe"))
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "argv fixture: {}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        let shim = directory.join("probe.cmd");
+        std::fs::write(
+            &shim,
+            "@ECHO off\r\nSET dp0=%~dp0\r\n\"%dp0%\\node_modules\\probe\\probe.exe\" %*\r\n",
+        )
+        .unwrap();
+        let args: Vec<String> = vec![
+            r#"{"permissions":{"mode":"ask"},"hook":"C:\\space here\\hook.exe"}"#.into(),
+            "".into(),
+            "first line\nsecond line\r\n😀 café".into(),
+            r#"spaces & | < > ^ ( ) %USERPROFILE% !PATH! "quoted" trailing\"#.into(),
+        ];
+        let manager = Manager::new();
+        let session = manager
+            .spawn(&Spawn {
+                command: shim.display().to_string(),
+                args: args.clone(),
+                cwd: directory.clone(),
+                workspace_id: None,
+                hidden: true,
+                rows: 30,
+                cols: 400,
+                no_color: false,
+                dark: None,
+                environment: vec![],
+            })
+            .unwrap();
+        assert!(wait_for(|| manager
+            .info(&session.id)
+            .is_ok_and(|info| !info.alive)));
+        assert!(wait_for(|| String::from_utf8_lossy(
+            &manager.read(&session.id, 0).unwrap().bytes
+        )
+        .contains("ARG3:")));
+        let output =
+            String::from_utf8_lossy(&manager.read(&session.id, 0).unwrap().bytes).into_owned();
+        for (index, arg) in args.iter().enumerate() {
+            let hex = arg
+                .as_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+            assert!(
+                output.contains(&format!("ARG{index}:{hex}:END")),
+                "argument {index} changed: {output:?}"
+            );
+        }
+        let _ = manager.close(&session.id);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[cfg(windows)]

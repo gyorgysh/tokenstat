@@ -70,7 +70,7 @@ internal static class Chrome
         };
     }
 
-    public static StackPanel Stat(string label, string value, string? note = null)
+    public static StackPanel Stat(string label, string value, string? note = null, bool accent = false)
     {
         var row = new StackPanel { Spacing = Theme.SpaceXs };
         row.Children.Add(new TextBlock
@@ -83,7 +83,9 @@ internal static class Chrome
         var figures = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceXs };
         // A headline number in Manrope with tabular figures, matching the Mac
         // stat tile (26 semibold). Not the terminal face: this is a headline.
-        figures.Children.Add(Fonts.Numeric(value));
+        var number = Fonts.Numeric(value);
+        if (accent) number.Foreground = Theme.AccentBrush;
+        figures.Children.Add(number);
         if (!string.IsNullOrEmpty(note))
         {
             figures.Children.Add(new TextBlock

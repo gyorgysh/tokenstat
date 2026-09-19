@@ -55,10 +55,12 @@ internal static class WorkspaceRemoteHistory
             hasUpstream = !string.IsNullOrEmpty(Format.Text(status["git"], "upstream", Format.Text(status, "upstream")));
         }
         catch { /* Do not claim that a commit was pushed without an upstream. */ }
+        JsonNode? ownAccount = null;
         string? ownAvatar = null;
         string ownHandle = "", ownName = "";
-        try { var status = await AppServices.Host.CallAsync("account.status"); var account = status["account"] ?? status; ownAvatar = Format.Text(account, "avatar"); ownHandle = Format.Text(account, "handle"); ownName = Format.Text(account, "displayName"); }
+        try { var status = await AppServices.Host.CallAsync("account.status"); var account = status["account"] ?? status; ownAccount = account; ownAvatar = Format.Text(account, "avatar"); ownHandle = Format.Text(account, "handle"); ownName = Format.Text(account, "displayName"); }
         catch { /* History remains usable while account status is unavailable. */ }
+        var ownEmails = await HistoryAvatars.OwnEmailsAsync(ownAccount, array);
         var list = new StackPanel { Spacing = 4 };
         foreach (var commit in array)
         {
@@ -119,7 +121,7 @@ internal static class WorkspaceRemoteHistory
             var content = new Grid { ColumnSpacing = Theme.SpaceS };
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var avatar = Marks.Avatar(url: Format.Flag(commit, "mine") || (ownHandle.Length > 0 && author.Equals(ownHandle, StringComparison.OrdinalIgnoreCase)) || (ownName.Length > 0 && author.Equals(ownName, StringComparison.OrdinalIgnoreCase)) ? ownAvatar : null, name: author, size: 30);
+            var avatar = Marks.Avatar(url: ownEmails.Contains(Format.Text(commit, "email")) || Format.Flag(commit, "mine") || (ownHandle.Length > 0 && author.Equals(ownHandle, StringComparison.OrdinalIgnoreCase)) || (ownName.Length > 0 && author.Equals(ownName, StringComparison.OrdinalIgnoreCase)) ? ownAvatar : null, name: author, size: 30);
             avatar.VerticalAlignment = VerticalAlignment.Top;
             content.Children.Add(avatar);
             Grid.SetColumn(body, 1);

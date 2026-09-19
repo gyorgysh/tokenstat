@@ -630,6 +630,15 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
             _historyShown = WorkbenchOps.RunPreviewCount;
             RenderDetail();
         };
+        var menu = ContextMenus.Menu(button);
+        ContextMenus.AddButton(menu, button, "Edit");
+        ContextMenus.AddButtons(menu, actions);
+        ContextMenus.Add(menu, "Delete…", () =>
+        {
+            ContextMenus.Invoke(button);
+            _confirmDelete = true;
+            RenderDetail();
+        });
         return button;
     }
 
