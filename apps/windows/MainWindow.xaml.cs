@@ -57,6 +57,21 @@ public sealed partial class MainWindow : Window
         IsEnabled = false,
     };
     private UIElement? _hostSplash;
+    /// <summary>
+    /// Folders whose sidebar chat list is showing ten instead of five, like
+    /// the Mac expanded chat histories.
+    /// </summary>
+    private readonly HashSet<string> _liveChatExpanded = new(StringComparer.Ordinal);
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _sidebarPoll;
+    private int _sidebarTick;
+    private bool _sidebarRefreshing;
+    private bool _suppressNav;
+    private string? _lastNavTag;
+    private JsonArray _liveSessions = new();
+    private JsonArray _liveChats = new();
+    private Dictionary<string, JsonNode> _liveSummaries = new(StringComparer.Ordinal);
+    private JsonNode? _liveAccount;
+    private string _liveFooterKey = "";
 
     public MainWindow()
     {
@@ -228,6 +243,16 @@ public sealed partial class MainWindow : Window
         // First frame is the brand on paper, before the helper has answered.
         ShowHostSplash(null);
         _ = LoadWorkspacesAsync();
+        // Live sidebar rows, like the Mac watcher: sessions and chats every
+        // ten seconds, counts and the account footer every minute.
+        _sidebarPoll = DispatcherQueue.CreateTimer();
+        _sidebarPoll.Interval = TimeSpan.FromSeconds(10);
+        _sidebarPoll.Tick += (_, _) =>
+        {
+            _sidebarTick++;
+            _ = RefreshSidebarLiveAsync(slow: _sidebarTick % 6 == 0);
+        };
+        _sidebarPoll.Start();
         AppServices.Update.Changed += () => DispatcherQueue.TryEnqueue(RefreshUpdateBadge);
     }
 
@@ -340,6 +365,7 @@ public sealed partial class MainWindow : Window
                     _nav.MenuItems.Add(parent);
                 }
             }
+            _ = RefreshSidebarLiveAsync(slow: true);
             if (_frame.Content == _hostSplash
                 && _nav.SelectedItem is NavigationViewItem selected
                 && selected.Tag is string tag)
@@ -533,10 +559,69 @@ public sealed partial class MainWindow : Window
 
     private void NavOnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        if (_suppressNav)
+        {
+            return;
+        }
         if (args.SelectedItem is not NavigationViewItem item || item.Tag is not string tag)
         {
             return;
         }
+        // Live rows under the folder parents, like the Mac sidebar.
+        if (tag.StartsWith(SidebarLive.SessionPrefix, StringComparison.Ordinal)
+            && SidebarLive.TrySplit(tag, SidebarLive.SessionPrefix, out var termFolder, out var sessionId))
+        {
+            _lastNavTag = tag;
+            AppServices.OpenTerminal?.Invoke(termFolder, sessionId);
+            RefreshUpdateBadge();
+            return;
+        }
+        if (tag.StartsWith(SidebarLive.ChatPrefix, StringComparison.Ordinal)
+            && SidebarLive.TrySplit(tag, SidebarLive.ChatPrefix, out var chatFolder, out var chatId))
+        {
+            // Through the conversation opener, which selects the Chat row and
+            // reveals the thread once its list loads.
+            AppServices.OpenConversation?.Invoke(chatFolder, chatId);
+            return;
+        }
+        if (tag.StartsWith(SidebarLive.ChatMorePrefix, StringComparison.Ordinal))
+        {
+            var folder = tag[SidebarLive.ChatMorePrefix.Length..];
+            if (!_liveChatExpanded.Remove(folder))
+            {
+                _liveChatExpanded.Add(folder);
+            }
+            RebuildSidebarLive();
+            // An expander changes the list, not the screen: the selection goes
+            // back where it was and the content stays put.
+            _suppressNav = true;
+            if (_lastNavTag is not null && FindNavItem(_lastNavTag) is NavigationViewItem back)
+            {
+                _nav.SelectedItem = back;
+            }
+            else if (FindNavItem("ws:" + folder + ":Chat") is NavigationViewItem chatRow)
+            {
+                _nav.SelectedItem = chatRow;
+            }
+            _suppressNav = false;
+            return;
+        }
+        if (tag.StartsWith(SidebarLive.ChatAllPrefix, StringComparison.Ordinal))
+        {
+            var folder = tag[SidebarLive.ChatAllPrefix.Length..];
+            var chatTag = "ws:" + folder + ":Chat";
+            if (FindNavItem(chatTag) is NavigationViewItem chatRow)
+            {
+                _suppressNav = true;
+                _nav.SelectedItem = chatRow;
+                _suppressNav = false;
+            }
+            _lastNavTag = chatTag;
+            Show(chatTag);
+            RefreshUpdateBadge();
+            return;
+        }
+        _lastNavTag = tag;
         Show(tag);
         RefreshUpdateBadge();
     }
@@ -814,6 +899,262 @@ public sealed partial class MainWindow : Window
                     : null;
             }
         }
+    }
+
+    /// <summary>
+    /// Quiet sidebar refresh, like the Mac terminals watcher. Sessions and
+    /// chats every tick, counts and the account footer on slow ticks. A
+    /// failed call keeps the last rows: a missed poll is not an empty sidebar.
+    /// </summary>
+    private async Task RefreshSidebarLiveAsync(bool slow = false)
+    {
+        if (_sidebarRefreshing)
+        {
+            return;
+        }
+        _sidebarRefreshing = true;
+        try
+        {
+            var (sessions, chats) = await SidebarLive.FetchFastAsync();
+            if (slow)
+            {
+                var (summaries, account) = await SidebarLive.FetchSlowAsync();
+                if (summaries is not null)
+                {
+                    _liveSummaries = summaries;
+                }
+                if (account is not null)
+                {
+                    _liveAccount = account;
+                }
+            }
+            if (sessions is not null)
+            {
+                _liveSessions = sessions;
+            }
+            if (chats is not null)
+            {
+                _liveChats = chats;
+            }
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                RebuildSidebarLive();
+                RefreshAccountFooter();
+            });
+        }
+        finally
+        {
+            _sidebarRefreshing = false;
+        }
+    }
+
+    /// <summary>
+    /// Rebuild the live rows under every folder parent from the cached poll:
+    /// alive sessions after the Sessions row, recent chats after the Chat row,
+    /// and count badges on the section rows. Section rows keep their tags and
+    /// order; only the live rows come and go.
+    /// </summary>
+    private void RebuildSidebarLive()
+    {
+        var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
+        var sessionsByFolder = new Dictionary<string, List<JsonNode>>(StringComparer.Ordinal);
+        foreach (var session in _liveSessions)
+        {
+            if (session is null || Format.Flag(session, "hidden") || !Format.Flag(session, "alive"))
+            {
+                continue;
+            }
+            var folder = Format.Text(session, "workspaceId");
+            var id = Format.Text(session, "id");
+            if (string.IsNullOrEmpty(folder) || string.IsNullOrEmpty(id))
+            {
+                continue;
+            }
+            if (!sessionsByFolder.TryGetValue(folder, out var list))
+            {
+                list = new List<JsonNode>();
+                sessionsByFolder[folder] = list;
+            }
+            list.Add(session);
+        }
+        var chatsByFolder = new Dictionary<string, List<JsonNode>>(StringComparer.Ordinal);
+        foreach (var chat in _liveChats)
+        {
+            if (chat is null)
+            {
+                continue;
+            }
+            var folder = Format.Text(chat, "workspaceId");
+            var id = Format.Text(chat, "id");
+            if (string.IsNullOrEmpty(folder) || string.IsNullOrEmpty(id))
+            {
+                continue;
+            }
+            if (!chatsByFolder.TryGetValue(folder, out var list))
+            {
+                list = new List<JsonNode>();
+                chatsByFolder[folder] = list;
+            }
+            list.Add(chat);
+        }
+
+        foreach (var item in _nav.MenuItems)
+        {
+            if (item is not NavigationViewItem parent)
+            {
+                continue;
+            }
+            var parentTag = parent.Tag as string;
+            if (parentTag is null || !parentTag.StartsWith("ws:", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            var rest = parentTag["ws:".Length..];
+            var cut = rest.LastIndexOf(':');
+            if (cut <= 0)
+            {
+                continue;
+            }
+            var folderId = rest[..cut];
+            for (var i = parent.MenuItems.Count - 1; i >= 0; i--)
+            {
+                if (parent.MenuItems[i] is NavigationViewItem child
+                    && SidebarLive.IsLiveTag(child.Tag as string))
+                {
+                    parent.MenuItems.RemoveAt(i);
+                }
+            }
+            _liveSummaries.TryGetValue(folderId, out var summary);
+            foreach (var child in parent.MenuItems)
+            {
+                if (child is not NavigationViewItem section || section.Tag is not string sectionTag)
+                {
+                    continue;
+                }
+                var sectionRest = sectionTag.StartsWith("ws:", StringComparison.Ordinal)
+                    ? sectionTag["ws:".Length..]
+                    : null;
+                var sectionCut = sectionRest?.LastIndexOf(':') ?? -1;
+                if (sectionCut <= 0
+                    || !Enum.TryParse<WorkspaceSection>(sectionRest?[(sectionCut + 1)..], out var sectionKind))
+                {
+                    continue;
+                }
+                SidebarLive.ApplyCount(section, SidebarLive.SectionCount(sectionKind, summary));
+            }
+            if (sessionsByFolder.TryGetValue(folderId, out var sessions) && sessions.Count > 0)
+            {
+                var at = ChildIndex(parent, "ws:" + folderId + ":Sessions");
+                foreach (var session in sessions)
+                {
+                    parent.MenuItems.Insert(++at, SidebarLive.SessionItem(folderId, session));
+                }
+            }
+            if (chatsByFolder.TryGetValue(folderId, out var chats) && chats.Count > 0)
+            {
+                var expanded = _liveChatExpanded.Contains(folderId);
+                var chatPrefix = SidebarLive.ChatPrefix + folderId + ":";
+                if (!expanded
+                    && selectedTag is not null
+                    && selectedTag.StartsWith(chatPrefix, StringComparison.Ordinal))
+                {
+                    // The lit row must stay drawn: a selection past the first
+                    // five opens the list, like the Mac auto-expansion.
+                    var selectedId = selectedTag[chatPrefix.Length..];
+                    var selectedIndex = chats.FindIndex(c => Format.Text(c, "id") == selectedId);
+                    if (selectedIndex >= SidebarLive.CollapsedChats)
+                    {
+                        expanded = true;
+                        _liveChatExpanded.Add(folderId);
+                    }
+                }
+                var shown = expanded
+                    ? Math.Min(chats.Count, SidebarLive.InlineChats)
+                    : Math.Min(chats.Count, SidebarLive.CollapsedChats);
+                var at = ChildIndex(parent, "ws:" + folderId + ":Chat");
+                for (var i = 0; i < shown; i++)
+                {
+                    parent.MenuItems.Insert(++at, SidebarLive.ChatItem(folderId, chats[i]));
+                }
+                if (chats.Count > SidebarLive.CollapsedChats)
+                {
+                    var label = expanded
+                        ? "Show less"
+                        : "Show " + (Math.Min(chats.Count, SidebarLive.InlineChats) - shown) + " more";
+                    parent.MenuItems.Insert(++at, SidebarLive.ActionItem(
+                        SidebarLive.ChatMorePrefix + folderId, label));
+                }
+                if (chats.Count > SidebarLive.InlineChats)
+                {
+                    parent.MenuItems.Insert(++at, SidebarLive.ActionItem(
+                        SidebarLive.ChatAllPrefix + folderId, "See all chats"));
+                }
+            }
+        }
+
+        if (selectedTag is not null
+            && ((_nav.SelectedItem as NavigationViewItem)?.Tag as string) != selectedTag
+            && FindNavItem(selectedTag) is NavigationViewItem back)
+        {
+            _suppressNav = true;
+            _nav.SelectedItem = back;
+            _suppressNav = false;
+        }
+    }
+
+    /// <summary>Index of a section child, or the end when it is missing.</summary>
+    private static int ChildIndex(NavigationViewItem parent, string tag)
+    {
+        for (var i = 0; i < parent.MenuItems.Count; i++)
+        {
+            if (parent.MenuItems[i] is NavigationViewItem child && (child.Tag as string) == tag)
+            {
+                return i;
+            }
+        }
+        return parent.MenuItems.Count - 1;
+    }
+
+    /// <summary>
+    /// Who is signed in, above the Account footer row. Signed out, or before
+    /// the first answer, the plain Account row stands alone.
+    /// </summary>
+    private void RefreshAccountFooter()
+    {
+        var account = _liveAccount;
+        bool signedIn = false;
+        try
+        {
+            signedIn = account?["signedIn"]?.GetValue<bool>() ?? false;
+        }
+        catch
+        {
+            signedIn = false;
+        }
+        var key = !signedIn || account is null
+            ? "out"
+            : "in|" + Format.Text(account, "displayName")
+                + "|" + Format.Text(account, "handle")
+                + "|" + Format.Text(account, "tier")
+                + "|" + Format.Text(account, "avatar");
+        if (key == _liveFooterKey)
+        {
+            return;
+        }
+        _liveFooterKey = key;
+        if (!signedIn || account is null)
+        {
+            _nav.PaneFooter = null;
+            return;
+        }
+        var captured = account;
+        _nav.PaneFooter = SidebarLive.AccountFooter(captured, () =>
+        {
+            if (FindNavItem("global:Account") is NavigationViewItem row)
+            {
+                _nav.SelectedItem = row;
+            }
+        });
     }
 
     private void TrySize()
