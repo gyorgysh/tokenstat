@@ -138,7 +138,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent
         _selectedId = null;
         _graph = BlankGraph("Untitled");
         _detailRevision = null;
-        _DetailDirty = false;
+        _detailDirty = false;
         _conflictId = null;
         _confirmDelete = false;
         _stepId = null;
