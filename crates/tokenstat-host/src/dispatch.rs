@@ -3505,7 +3505,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
             // has been told their computer is not on their account and wants to do
             // something about it.
             "account.registerMachine" => {
-                if let Err(e) = tokenstat_sync::profile::publish_machine_profile(None) {
+                if let Err(e) = tokenstat_sync::profile::publish_machine_identity(None) {
                     return Some(Err(e.to_string().into()));
                 }
                 crate::account_activity::invalidate();

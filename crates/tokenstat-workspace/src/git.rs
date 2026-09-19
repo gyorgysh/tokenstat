@@ -845,7 +845,13 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 /// failure. `diff --no-index` exits 1 to say "these differ", which is exactly
 /// what it was asked.
 fn git_allowing(dir: &Path, args: &[&str], codes: &[i32]) -> Option<String> {
-    let out = Command::new("git")
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = command
         .arg("-C")
         .arg(dir)
         // A repository with a pager or an alias configured must not change what

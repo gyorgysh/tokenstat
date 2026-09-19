@@ -290,7 +290,13 @@ pub fn machine_label() -> String {
     }
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        std::process::Command::new("hostname")
+        let mut command = std::process::Command::new("hostname");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        command
             .output()
             .ok()
             .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
@@ -457,7 +463,13 @@ fn os_version() -> String {
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn command_output(program: &str, args: &[&str]) -> String {
-    std::process::Command::new(program)
+    let mut command = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    command
         .args(args)
         .output()
         .ok()

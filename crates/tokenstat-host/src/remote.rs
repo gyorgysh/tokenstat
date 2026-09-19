@@ -2029,7 +2029,13 @@ fn local_hostname() -> Option<String> {
     }
     #[cfg(not(unix))]
     {
-        let output = std::process::Command::new("hostname").output().ok()?;
+        let mut command = std::process::Command::new("hostname");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let output = command.output().ok()?;
         let host = String::from_utf8(output.stdout).ok()?;
         mdns_hostname(&host)
     }

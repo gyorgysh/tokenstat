@@ -825,6 +825,21 @@ pub fn publish_machine_profile(host_flag: Option<&str>) -> Result<(), ProfileErr
     )
 }
 
+/// Publish the identity needed for SSH vault enrollment without enabling
+/// remote reach or starting a tunnel.
+pub fn publish_machine_identity(host_flag: Option<&str>) -> Result<(), ProfileError> {
+    let identity = tokenstat_identity::MachineIdentity::load_or_create()
+        .map_err(|e| ProfileError::Message(e.to_string()))?;
+    let machine_id = crate::config::ensure_machine_id()?;
+    register_machine_identity_kind(
+        host_flag,
+        &machine_id,
+        &identity.public_key_hex(),
+        &tokenstat_identity::machine_label(),
+        default_machine_kind(),
+    )
+}
+
 /// What kind of device this build runs on.
 ///
 /// A phone reaches hosts and never uploads an archive. The server pins the

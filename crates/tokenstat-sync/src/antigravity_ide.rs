@@ -348,9 +348,13 @@ fn detect_unix_process_candidates() -> anyhow::Result<Vec<ProcessCandidate>> {
 #[cfg(target_os = "windows")]
 fn detect_windows_process_candidates() -> anyhow::Result<Vec<ProcessCandidate>> {
     let script = "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress";
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-Command", script])
-        .output()?;
+    let mut command = Command::new("powershell");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let output = command.args(["-NoProfile", "-Command", script]).output()?;
     if !output.status.success() {
         anyhow::bail!("Windows process discovery failed");
     }
@@ -1014,7 +1018,13 @@ fn read_chunked_body(reader: &mut BufReader<TcpStream>) -> anyhow::Result<String
 }
 
 fn run_command(program: &str, args: &[&str]) -> anyhow::Result<String> {
-    let output = Command::new(program).args(args).output()?;
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let output = command.args(args).output()?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 

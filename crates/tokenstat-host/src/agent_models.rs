@@ -249,6 +249,11 @@ fn list(command: &str, args: &[&str], parse: fn(&str) -> Vec<String>) -> Option<
 
 fn run_list(bin: &str, args: &[&str]) -> Option<String> {
     let mut cmd = Command::new(bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -316,6 +321,11 @@ fn codex_models() -> Option<Vec<String>> {
     let bin = crate::launcher::resolve_command("codex")?;
     let path_var = crate::launcher::search_path_var();
     let mut command = Command::new(bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     command
         .arg("app-server")
         .stdin(Stdio::piped())

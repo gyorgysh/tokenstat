@@ -172,7 +172,13 @@ fn mark_ignored(root: &Path, entries: &mut [TreeEntry]) {
         return;
     }
 
-    let mut child = match Command::new("git")
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = match command
         .arg("-C")
         .arg(root)
         .env("GIT_OPTIONAL_LOCKS", "0")

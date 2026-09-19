@@ -58,6 +58,11 @@ impl GitOutcome {
 /// off for the same reason it is in the read-only module.
 fn git_command(dir: &Path) -> Command {
     let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     command
         .arg("-C")
         .arg(dir)

@@ -585,7 +585,13 @@ fn reregister_windows_task() {
     }
     let script_path = script.to_string_lossy().into_owned();
     let exe_path = exe.to_string_lossy().into_owned();
-    let _ = std::process::Command::new("powershell.exe")
+    let mut command = std::process::Command::new("powershell.exe");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let _ = command
         .args([
             "-NoProfile",
             "-ExecutionPolicy",

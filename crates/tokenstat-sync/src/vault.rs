@@ -170,9 +170,8 @@ pub enum VaultError {
     /// reached from here. Recoverable without the user doing anything: the
     /// machine record is published at login and can be published again.
     ///
-    /// Carries the server sentence, because two causes share one code: a
-    /// login with no machine id, and a machine id the account has no row
-    /// for. The screen has to tell them apart.
+    /// Also covers a registered profile whose public identity is missing.
+    /// Republish the identity, not only the display name, before retrying.
     #[error("{0}")]
     MachineNotRegistered(String),
     #[error("a vault already exists")]
@@ -209,7 +208,7 @@ fn read_error(status: reqwest::StatusCode, bytes: &[u8]) -> VaultError {
         "not_enrolled" => VaultError::NotEnrolled,
         // Typed rather than left as a server sentence, because the host acts
         // on this one: it republishes the machine record and tries again.
-        "machine_required" | "machine_not_registered" => {
+        "machine_required" | "machine_not_registered" | "identity_required" => {
             VaultError::MachineNotRegistered(if error.message.is_empty() {
                 "this machine is not registered on the account".into()
             } else {
@@ -358,4 +357,25 @@ pub fn list_enrollments() -> Result<Vec<EnrollmentRequest>, VaultError> {
             .bearer_auth(token),
     )?
     .requests)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_public_identity_requests_registration_retry() {
+        let error = read_error(reqwest::StatusCode::BAD_REQUEST,
+            br#"{"error":"identity_required","message":"Register the device public identity first."}"#);
+        assert!(matches!(error, VaultError::MachineNotRegistered(_)));
+    }
+
+    #[test]
+    fn unrelated_refusals_do_not_request_registration() {
+        let error = read_error(
+            reqwest::StatusCode::FORBIDDEN,
+            br#"{"error":"not_enrolled","message":"Not enrolled."}"#,
+        );
+        assert!(matches!(error, VaultError::NotEnrolled));
+    }
 }

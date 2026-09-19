@@ -81,7 +81,27 @@ display scaling. A managed C# compilation on another OS does not run the
 Windows XAML compiler or validate rendered layout.
 
 Startup failures are recorded in `%LOCALAPPDATA%\tokenstat\logs\startup.log`;
-UI exceptions are recorded in `app.log` in the same folder.
+UI exceptions are recorded in `app.log` in the same folder. The helper writes
+startup, stderr and panic diagnostics to `hostd.log`, independently of whether
+it was launched by the app or Task Scheduler. A log over 5 MiB rotates to
+`hostd.previous.log` at the next start. App-side helper launch failures go to
+`app-host.log` (with a 1 MiB rotation at the next write).
+
+In PowerShell, follow the host log with:
+
+```powershell
+Get-Content "$env:LOCALAPPDATA\tokenstat\logs\hostd.log" -Tail 100 -Wait
+```
+
+To distinguish a restarting daemon from a background command opening a console:
+
+```powershell
+Get-Process tokenstat-hostd -ErrorAction SilentlyContinue | Select-Object Id,StartTime,Path
+Get-ScheduledTaskInfo -TaskName ai.tokenstat.hostd | Format-List LastRunTime,LastTaskResult,NextRunTime
+```
+
+The host log is available in builds containing the persistent-logging fix;
+older builds created the logs directory without capturing daemon stderr.
 
 ## Design
 

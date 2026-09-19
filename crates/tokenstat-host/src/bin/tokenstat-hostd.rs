@@ -27,10 +27,33 @@ use serde_json::{Value, json};
 
 use tokenstat_host::{Session, ownership, server};
 
+#[cfg(any(windows, test))]
+#[path = "../windows_log.rs"]
+mod windows_log;
+
 fn main() -> ExitCode {
+    #[cfg(windows)]
+    let daemon_mode = !matches!(
+        std::env::args().nth(1).as_deref(),
+        Some("hook" | "--help" | "-h" | "--version" | "-V")
+    );
+    #[cfg(windows)]
+    if daemon_mode {
+        windows_log::initialize();
+    }
     adopt_home();
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => {
+            #[cfg(windows)]
+            if daemon_mode {
+                eprintln!(
+                    "{} hostd stopped normally pid={}",
+                    jiff::Timestamp::now(),
+                    std::process::id()
+                );
+            }
+            ExitCode::SUCCESS
+        }
         Err(e) => {
             eprintln!("tokenstat-hostd: {e}");
             ExitCode::FAILURE

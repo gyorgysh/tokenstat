@@ -18,7 +18,7 @@ internal static class HostProcess
     /// same change, or this app will restart a helper that already speaks the
     /// methods it was built for, or leave one that does not.
     /// </summary>
-    private const string ExpectedProtocolVersion = "22";
+    private const string ExpectedProtocolVersion = "23";
 
     public static void EnsureRunning() => EnsureRunning(replaceOld: true);
 
@@ -42,6 +42,7 @@ internal static class HostProcess
         var hostd = FindHostd();
         if (hostd is null)
         {
+            Log("Host executable not found beside the app or in the install directories.");
             // Nothing to replace it with. An old helper still answering is
             // better than no helper at all.
             return;
@@ -58,6 +59,7 @@ internal static class HostProcess
             StopOldHelper();
         }
 
+        Log($"Starting host: {hostd}; pipe={HostClient.PipeName}");
         TryInstallTask(hostd);
         try
         {
@@ -69,8 +71,9 @@ internal static class HostProcess
                 WorkingDirectory = Path.GetDirectoryName(hostd) ?? SelfInstall.InstallDirectory,
             });
         }
-        catch
+        catch (Exception ex)
         {
+            Log("Direct host launch failed: " + ex.Message);
             // The scheduled task may already have started it.
         }
 
@@ -83,6 +86,21 @@ internal static class HostProcess
             }
             Thread.Sleep(150);
         }
+        Log("Host startup deadline expired without a compatible pipe response. See hostd.log.");
+    }
+
+    private static void Log(string message)
+    {
+        try
+        {
+            var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "logs");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, "app-host.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 1024 * 1024)
+                File.Move(path, Path.Combine(directory, "app-host.previous.log"), overwrite: true);
+            File.AppendAllText(path, DateTimeOffset.Now.ToString("O") + " " + message + Environment.NewLine);
+        }
+        catch { /* Logging must not prevent recovery. */ }
     }
 
     /// <summary>

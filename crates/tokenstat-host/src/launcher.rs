@@ -647,7 +647,9 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
     // one can answer.
     #[cfg(windows)]
     let mut cmd = {
+        use std::os::windows::process::CommandExt;
         let mut cmd = std::process::Command::new("powershell.exe");
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         cmd.args([
             "-NoProfile",
             "-NonInteractive",

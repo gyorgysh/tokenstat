@@ -676,7 +676,8 @@ fn enroll_self() -> Result<(), String> {
     let identity =
         tokenstat_identity::MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     let nonce = hex(&random32());
-    let request = tokenstat_sync::vault::request_enrollment(&nonce).map_err(|e| e.to_string())?;
+    let request = with_machine_record(|| tokenstat_sync::vault::request_enrollment(&nonce))
+        .map_err(|e| e.to_string())?;
     if request.nonce != nonce || request.public_identity != identity.public_key_hex() {
         return Err("enrollment response does not match this device identity".into());
     }
@@ -706,12 +707,21 @@ fn enroll_self() -> Result<(), String> {
 /// One retry, because if the republish did not fix it the cause is the token
 /// rather than the record, and only signing in again replaces that.
 fn with_machine_record<T>(
+    call: impl FnMut() -> Result<T, tokenstat_sync::vault::VaultError>,
+) -> Result<T, tokenstat_sync::vault::VaultError> {
+    with_registration_retry(call, || {
+        tokenstat_sync::profile::publish_machine_identity(None)
+            .map_err(tokenstat_sync::vault::VaultError::Profile)
+    })
+}
+
+fn with_registration_retry<T>(
     mut call: impl FnMut() -> Result<T, tokenstat_sync::vault::VaultError>,
+    register: impl FnOnce() -> Result<(), tokenstat_sync::vault::VaultError>,
 ) -> Result<T, tokenstat_sync::vault::VaultError> {
     match call() {
         Err(tokenstat_sync::vault::VaultError::MachineNotRegistered(_)) => {
-            tokenstat_sync::profile::publish_machine_profile(None)
-                .map_err(tokenstat_sync::vault::VaultError::Profile)?;
+            register()?;
             call()
         }
         other => other,
@@ -1280,6 +1290,47 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn registration_retry_is_bounded_and_preserves_failures() {
+        use std::cell::Cell;
+        use tokenstat_sync::vault::VaultError;
+        let attempts = Cell::new(0);
+        let registrations = Cell::new(0);
+        let result = super::with_registration_retry(
+            || {
+                attempts.set(attempts.get() + 1);
+                if attempts.get() == 1 {
+                    Err(VaultError::MachineNotRegistered("identity required".into()))
+                } else {
+                    Ok("enrolled")
+                }
+            },
+            || {
+                registrations.set(registrations.get() + 1);
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap(), "enrolled");
+        assert_eq!(attempts.get(), 2);
+        assert_eq!(registrations.get(), 1);
+
+        attempts.set(0);
+        let result = super::with_registration_retry::<()>(
+            || {
+                attempts.set(attempts.get() + 1);
+                Err(VaultError::MachineNotRegistered("still missing".into()))
+            },
+            || Ok(()),
+        );
+        assert!(matches!(result, Err(VaultError::MachineNotRegistered(_))));
+        assert_eq!(attempts.get(), 2);
+        let result = super::with_registration_retry::<()>(
+            || Err(VaultError::NotEnrolled),
+            || panic!("unrelated failures must not republish"),
+        );
+        assert!(matches!(result, Err(VaultError::NotEnrolled)));
+    }
+
     use super::*;
 
     #[test]

@@ -23,14 +23,6 @@
             </Grid.ColumnDefinitions>
             <Border x:Name="TitlePaneSide" Grid.Column="0" />
             <Border x:Name="TitleContentSide" Grid.Column="1" />
-            <TextBlock
-                Grid.Column="0"
-                Grid.ColumnSpan="2"
-                Margin="16,0,0,0"
-                VerticalAlignment="Center"
-                FontSize="12"
-                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                Text="tokenstat" />
         </Grid>
     </Grid>
 </Window>
